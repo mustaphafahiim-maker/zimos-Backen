@@ -41,6 +41,9 @@ const mediaRoutes = require('./modules/media/mediaRoutes');
 const reviewRoutes = require('./modules/reviews/reviewRoutes');
 const templateRoutes = require('./modules/templates/templateRoutes');
 const analyticsRoutes = require('./modules/analytics/analyticsRoutes');
+const merchantBillingRoutes = require('./modules/billing/merchantBillingRoutes');
+const auditRoutes = require('./modules/audit/auditRoutes');
+const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
 
 const app = express();
 
@@ -122,6 +125,9 @@ v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
 v1.use('/workspaces/:workspaceId/analytics', analyticsRoutes);
+v1.use('/workspaces/:workspaceId/billing', merchantBillingRoutes);
+v1.use('/workspaces/:workspaceId/audit-logs', auditRoutes);
+v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 
