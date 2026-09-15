@@ -49,6 +49,7 @@ const fraudRoutes = require('./modules/orders/fraudRoutes');
 const adminPlatformRoutes = require('./modules/admin/adminPlatformRoutes');
 const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
 const automationRoutes = require('./modules/automations/automationRoutes');
+const settlementRoutes = require('./modules/settlements/settlementRoutes');
 
 const app = express();
 
@@ -146,6 +147,7 @@ v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
 v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
+v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 v1.use('/admin', adminPlatformRoutes);
