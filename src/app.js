@@ -40,6 +40,7 @@ const domainsRoutes = require('./modules/domains/domainsRoutes');
 const mediaRoutes = require('./modules/media/mediaRoutes');
 const reviewRoutes = require('./modules/reviews/reviewRoutes');
 const templateRoutes = require('./modules/templates/templateRoutes');
+const analyticsRoutes = require('./modules/analytics/analyticsRoutes');
 
 const app = express();
 
@@ -120,6 +121,7 @@ v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
+v1.use('/workspaces/:workspaceId/analytics', analyticsRoutes);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 

@@ -20,6 +20,8 @@ router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getPr
 router.post('/products/:productId/reviews', validate(reviewSchemas.submit), reviewController.submit);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 router.get('/collections/:collectionId', validate(schemas.getCollection), controller.getCollection);
+router.post('/orders/lookup', validate(schemas.lookupOrder), controller.lookupOrder);
+router.get('/shipping/quote', validate(schemas.quoteShipping), controller.quoteShipping);
 
 router.post(
   '/checkout',
