@@ -46,6 +46,7 @@ const auditRoutes = require('./modules/audit/auditRoutes');
 const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
 const { staff: checkoutSessionRoutes } = require('./modules/checkout/checkoutSessionRoutes');
 const fraudRoutes = require('./modules/orders/fraudRoutes');
+const adminPlatformRoutes = require('./modules/admin/adminPlatformRoutes');
 
 const app = express();
 
@@ -134,6 +135,7 @@ v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
+v1.use('/admin', adminPlatformRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
