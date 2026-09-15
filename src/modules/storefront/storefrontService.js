@@ -93,9 +93,16 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
 async function getStorefront(workspaceId) {
   const w = await db.Workspace.findOne({
     where: { id: workspaceId },
-    attributes: ['id', 'name', 'slug', 'logoUrl', 'tagline', 'themeSettings', 'defaultCurrency'],
+    attributes: ['id', 'name', 'slug', 'logoUrl', 'tagline', 'themeSettings', 'defaultCurrency', 'settings'],
   });
   if (!w) throw new NotFoundError('Workspace');
+  // Only the public pixel IDs leave the server; the rest of settings stays private.
+  const pixels = (w.settings && w.settings.tracking_pixels) || {};
+  const tracking = {};
+  if (pixels.meta) tracking.meta = pixels.meta;
+  if (pixels.tiktok) tracking.tiktok = pixels.tiktok;
+  if (pixels.snapchat) tracking.snapchat = pixels.snapchat;
+  if (pixels.google_tag) tracking.googleTag = pixels.google_tag;
   return {
     id: w.id,
     name: w.name,
@@ -104,6 +111,7 @@ async function getStorefront(workspaceId) {
     tagline: w.tagline,
     themeSettings: w.themeSettings || {},
     currency: w.defaultCurrency,
+    tracking,
   };
 }
 

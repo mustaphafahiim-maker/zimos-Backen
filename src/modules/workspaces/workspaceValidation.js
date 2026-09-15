@@ -35,6 +35,13 @@ module.exports = {
         free_shipping_threshold_amount: Joi.number().integer().min(0).allow(null).optional(),
         default_shipping_rate_amount: Joi.number().integer().min(0).allow(null).optional(),
         tax_enabled: Joi.boolean().optional(),
+        // Browser ad pixels loaded on the public store. IDs only (no secrets).
+        tracking_pixels: Joi.object({
+          meta: Joi.string().pattern(/^\d{5,20}$/).allow(null, '').optional(),
+          tiktok: Joi.string().pattern(/^[A-Z0-9]{10,30}$/).allow(null, '').optional(),
+          snapchat: Joi.string().pattern(/^[a-f0-9-]{20,40}$/i).allow(null, '').optional(),
+          google_tag: Joi.string().pattern(/^(G|AW|GT)-[A-Z0-9]{4,20}$/).allow(null, '').optional(),
+        }).allow(null).optional(),
       }).optional(),
     }).min(1),
   },
