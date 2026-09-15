@@ -2,6 +2,7 @@
 const asyncHandler = require('express-async-handler');
 const cartService = require('../cart/cartService');
 const orderService = require('../orders/orderService');
+const checkoutSessionService = require('./checkoutSessionService');
 const { AppError } = require('../../core/errors/AppError');
 
 /**
@@ -12,7 +13,7 @@ const { AppError } = require('../../core/errors/AppError');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, ...orderBody } = req.body;
+  const { item, checkoutSessionId, ...orderBody } = req.body;
 
   let items;
   let cart = null;
@@ -40,6 +41,11 @@ const checkout = asyncHandler(async (req, res) => {
   );
 
   if (cart) await cartService.markConverted(cart.id, order.id);
+
+  // Close the shopper's abandoned-checkout sessions; never fail the order over it.
+  await checkoutSessionService
+    .markConvertedForOrder(req.tenant.workspaceId, { sessionId: checkoutSessionId, phone: orderBody.contact && orderBody.contact.phone, orderId: order.id })
+    .catch(() => undefined);
 
   res.status(201).json({ order: { ...order.toJSON(), items: orderItems } });
 });

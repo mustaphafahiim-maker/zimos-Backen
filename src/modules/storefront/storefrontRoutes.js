@@ -10,6 +10,7 @@ const reviewController = require('../reviews/reviewController');
 const reviewSchemas = require('../reviews/reviewValidation');
 const schemas = require('./storefrontValidation');
 const checkoutSchemas = require('../checkout/checkoutValidation');
+const checkoutSessions = require('../checkout/checkoutSessionRoutes');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
@@ -21,6 +22,7 @@ router.post('/products/:productId/reviews', validate(reviewSchemas.submit), revi
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 router.get('/collections/:collectionId', validate(schemas.getCollection), controller.getCollection);
 router.post('/orders/lookup', validate(schemas.lookupOrder), controller.lookupOrder);
+router.post('/checkout-sessions', validate(checkoutSessions.schemas.upsert), checkoutSessions.upsert);
 router.get('/shipping/quote', validate(schemas.quoteShipping), controller.quoteShipping);
 
 router.post(
