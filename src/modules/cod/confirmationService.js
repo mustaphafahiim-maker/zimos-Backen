@@ -3,6 +3,7 @@
 const db = require('../../db/models');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { setConfirmationState } = require('../orders/orderStateService');
+const automationEngine = require('../automations/automationEngine');
 const inventoryService = require('../inventory/inventoryService');
 
 /**
@@ -63,6 +64,9 @@ async function recordOutcome(workspaceId, taskId, { outcome, notes, rejectionRea
     );
 
     await setConfirmationState(workspaceId, task.orderId, outcome, req, transaction);
+    if (outcome === 'confirmed' || outcome === 'rejected') {
+      transaction.afterCommit(() => automationEngine.emit(workspaceId, `order.${outcome}`, task.orderId));
+    }
 
     if (outcome === 'rejected') {
       // Release (not commit) the reservation — stock returns to available,

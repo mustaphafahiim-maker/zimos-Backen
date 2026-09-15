@@ -48,6 +48,7 @@ const { staff: checkoutSessionRoutes } = require('./modules/checkout/checkoutSes
 const fraudRoutes = require('./modules/orders/fraudRoutes');
 const adminPlatformRoutes = require('./modules/admin/adminPlatformRoutes');
 const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
+const automationRoutes = require('./modules/automations/automationRoutes');
 
 const app = express();
 
@@ -144,6 +145,7 @@ v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
 v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
+v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 v1.use('/admin', adminPlatformRoutes);
