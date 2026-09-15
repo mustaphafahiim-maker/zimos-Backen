@@ -47,6 +47,7 @@ const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
 const { staff: checkoutSessionRoutes } = require('./modules/checkout/checkoutSessionRoutes');
 const fraudRoutes = require('./modules/orders/fraudRoutes');
 const adminPlatformRoutes = require('./modules/admin/adminPlatformRoutes');
+const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
 
 const app = express();
 
@@ -65,7 +66,15 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '2mb' }));
+// rawBody is kept for webhook signature checks (WhatsApp X-Hub-Signature-256).
+app.use(
+  express.json({
+    limit: '2mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
@@ -133,6 +142,8 @@ v1.use('/workspaces/:workspaceId/audit-logs', auditRoutes);
 v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
 v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
+v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
+v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 v1.use('/admin', adminPlatformRoutes);
