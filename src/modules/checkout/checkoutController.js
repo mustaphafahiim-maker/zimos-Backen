@@ -15,6 +15,16 @@ const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   const { item, checkoutSessionId, ...orderBody } = req.body;
 
+  // The merchant's checkout form settings are enforced here, not only in the UI.
+  const workspace = await require('../../db/models').Workspace.findByPk(req.tenant.workspaceId, { attributes: ['settings'] });
+  const form = (workspace && workspace.settings && workspace.settings.checkout_settings) || {};
+  if (form.allow_discount_codes === false) delete orderBody.discountCode;
+  const missing = [];
+  if (form.email === 'required' && !(orderBody.contact && orderBody.contact.email)) missing.push({ field: 'contact.email', message: 'Email is required' });
+  if (form.alternate_phone === 'required' && !(orderBody.contact && orderBody.contact.alternatePhone)) missing.push({ field: 'contact.alternatePhone', message: 'Alternative phone is required' });
+  if (form.notes === 'required' && !orderBody.notes) missing.push({ field: 'notes', message: 'Notes are required' });
+  if (missing.length > 0) throw new AppError('VALIDATION_ERROR', missing[0].message, 422, missing);
+
   let items;
   let cart = null;
 

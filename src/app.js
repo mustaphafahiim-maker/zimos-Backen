@@ -45,6 +45,7 @@ const merchantBillingRoutes = require('./modules/billing/merchantBillingRoutes')
 const auditRoutes = require('./modules/audit/auditRoutes');
 const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
 const { staff: checkoutSessionRoutes } = require('./modules/checkout/checkoutSessionRoutes');
+const fraudRoutes = require('./modules/orders/fraudRoutes');
 
 const app = express();
 
@@ -130,6 +131,7 @@ v1.use('/workspaces/:workspaceId/billing', merchantBillingRoutes);
 v1.use('/workspaces/:workspaceId/audit-logs', auditRoutes);
 v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
 v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
+v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 

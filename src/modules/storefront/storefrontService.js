@@ -112,6 +112,17 @@ async function getStorefront(workspaceId) {
     themeSettings: w.themeSettings || {},
     currency: w.defaultCurrency,
     tracking,
+    // Public checkout form behaviour (defaults when the merchant never set it).
+    checkout: (() => {
+      const c = (w.settings && w.settings.checkout_settings) || {};
+      return {
+        email: c.email || 'optional',
+        alternatePhone: c.alternate_phone || 'optional',
+        notes: c.notes || 'optional',
+        allowDiscountCodes: c.allow_discount_codes !== false,
+        thankYouMessage: c.thank_you_message || null,
+      };
+    })(),
   };
 }
 

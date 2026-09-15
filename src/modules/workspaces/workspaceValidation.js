@@ -42,6 +42,22 @@ module.exports = {
           snapchat: Joi.string().pattern(/^[a-f0-9-]{20,40}$/i).allow(null, '').optional(),
           google_tag: Joi.string().pattern(/^(G|AW|GT)-[A-Z0-9]{4,20}$/).allow(null, '').optional(),
         }).allow(null).optional(),
+        // Fraud rules enforced on public storefront orders (orderService).
+        fraud_rules: Joi.object({
+          action: Joi.string().valid('flag', 'block').default('flag'),
+          block_blacklisted: Joi.boolean().default(false),
+          duplicate_window_minutes: Joi.number().integer().min(1).max(10080).allow(null).optional(),
+          max_orders_per_phone_per_day: Joi.number().integer().min(1).max(100).allow(null).optional(),
+          high_rejection_threshold: Joi.number().integer().min(1).max(100).allow(null).optional(),
+        }).allow(null).optional(),
+        // Public checkout form behaviour (storefront + checkout controller).
+        checkout_settings: Joi.object({
+          email: Joi.string().valid('hidden', 'optional', 'required').default('optional'),
+          alternate_phone: Joi.string().valid('hidden', 'optional', 'required').default('optional'),
+          notes: Joi.string().valid('hidden', 'optional', 'required').default('optional'),
+          allow_discount_codes: Joi.boolean().default(true),
+          thank_you_message: Joi.string().max(300).allow('', null).optional(),
+        }).allow(null).optional(),
       }).optional(),
     }).min(1),
   },

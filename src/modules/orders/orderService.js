@@ -12,6 +12,7 @@ const { calculateTax } = require('../tax/taxService');
 const { createInvoiceForOrder } = require('../invoices/invoiceService');
 const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState, setFulfillmentState } = require('./orderStateService');
+const { evaluateFraudRules } = require('./fraudRules');
 
 // A shipment past this point means the parcel has left the merchant's hands.
 const SHIPMENT_IN_MOTION = ['picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'returned'];
@@ -112,6 +113,16 @@ async function createOrder(workspaceId, payload, req) {
 
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
+    // Merchant fraud rules apply to shopper (storefront) orders only.
+    if (!req || !req.user) {
+      const extra = await evaluateFraudRules({
+        workspaceId,
+        customer,
+        variantIds: items.map((i) => i.variantId).filter(Boolean),
+        transaction,
+      });
+      riskFlags.push(...extra);
+    }
 
     // Price every line and consume/reserve inventory for it. Consuming
     // inventory inside the same transaction as pricing/order-row creation
