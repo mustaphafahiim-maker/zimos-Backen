@@ -41,6 +41,16 @@ const domainsRoutes = require('./modules/domains/domainsRoutes');
 const mediaRoutes = require('./modules/media/mediaRoutes');
 const reviewRoutes = require('./modules/reviews/reviewRoutes');
 const templateRoutes = require('./modules/templates/templateRoutes');
+const platformOpsRoutes = require('./modules/platformAdmin/platformOpsRoutes');
+const analyticsRoutes = require('./modules/analytics/analyticsRoutes');
+const merchantBillingRoutes = require('./modules/billing/merchantBillingRoutes');
+const auditRoutes = require('./modules/audit/auditRoutes');
+const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
+const { staff: checkoutSessionRoutes } = require('./modules/checkout/checkoutSessionRoutes');
+const fraudRoutes = require('./modules/orders/fraudRoutes');
+const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
+const automationRoutes = require('./modules/automations/automationRoutes');
+const settlementRoutes = require('./modules/settlements/settlementRoutes');
 
 const app = express();
 
@@ -59,7 +69,15 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '2mb' }));
+// rawBody is kept for webhook signature checks (WhatsApp X-Hub-Signature-256).
+app.use(
+  express.json({
+    limit: '2mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
@@ -121,11 +139,24 @@ v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
+v1.use('/workspaces/:workspaceId/analytics', analyticsRoutes);
+v1.use('/workspaces/:workspaceId/billing', merchantBillingRoutes);
+v1.use('/workspaces/:workspaceId/audit-logs', auditRoutes);
+v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
+v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
+v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
+v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
+v1.use('/workspaces/:workspaceId/automations', automationRoutes);
+v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
+v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.
 v1.use('/admin', platformAdminRoutes);
+// Overview, workspace detail, staff users, audit log, templates and system
+// health. Same /admin mount and the same platform-admin guard.
+v1.use('/admin', platformOpsRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);

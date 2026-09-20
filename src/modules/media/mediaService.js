@@ -1,7 +1,9 @@
 'use strict';
 
 const crypto = require('crypto');
-const { AppError } = require('../../core/errors/AppError');
+const { Op } = require('sequelize');
+const db = require('../../db/models');
+const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { getStorage, UPLOAD_ROOT } = require('./storage');
 
@@ -41,7 +43,15 @@ async function storeImage(workspaceId, file, req) {
     contentType: sig.mime,
   });
 
-  const result = { url, path, mimeType: sig.mime, size: file.size };
+  const asset = await db.MediaAsset.create({
+    workspaceId,
+    uploadedByUserId: req.user ? req.user.id : null,
+    url,
+    path,
+    mimeType: sig.mime,
+    sizeBytes: file.size,
+  });
+  const result = { id: asset.id, url, path, mimeType: sig.mime, size: file.size };
 
   await recordAudit({
     workspaceId,
@@ -56,4 +66,33 @@ async function storeImage(workspaceId, file, req) {
   return result;
 }
 
-module.exports = { storeImage, detectImage, UPLOAD_ROOT, MAX_BYTES };
+/** Newest first; `before` is the createdAt of the last item of the previous page. */
+async function listMedia(workspaceId, { limit = 60, before } = {}) {
+  const where = { workspaceId };
+  if (before) where.createdAt = { [Op.lt]: new Date(before) };
+  const rows = await db.MediaAsset.findAll({ where, order: [['createdAt', 'DESC']], limit: Math.min(200, Number(limit) || 60) });
+  const media = rows.map((m) => ({ id: m.id, url: m.url, mimeType: m.mimeType, size: m.sizeBytes, createdAt: m.createdAt }));
+  return { media, nextCursor: rows.length === Math.min(200, Number(limit) || 60) ? rows[rows.length - 1].createdAt.toISOString() : null };
+}
+
+/**
+ * Removes the image from the library. The stored file is kept: storage
+ * backends have no delete yet, and a page or product may still reference it.
+ */
+async function deleteMedia(workspaceId, mediaId, req) {
+  const asset = await db.MediaAsset.findOne({ where: { id: mediaId, workspaceId } });
+  if (!asset) throw new NotFoundError('Media');
+  await asset.destroy();
+  await recordAudit({
+    workspaceId,
+    actorUserId: req.user.id,
+    action: 'media.delete',
+    entityType: 'Media',
+    entityId: asset.id,
+    before: { url: asset.url },
+    req,
+  });
+  return { deleted: true, id: asset.id };
+}
+
+module.exports = { storeImage, detectImage, listMedia, deleteMedia, UPLOAD_ROOT, MAX_BYTES };

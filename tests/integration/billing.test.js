@@ -24,6 +24,12 @@ async function setup() {
 
 const subOf = (wid) => db.Subscription.findOne({ where: { workspaceId: wid } });
 
+
+const crypto = require('crypto');
+process.env.BILLING_WEBHOOK_SECRET = process.env.BILLING_WEBHOOK_SECRET || 'test-billing-secret';
+const signWebhook = (body) => crypto.createHmac('sha256', process.env.BILLING_WEBHOOK_SECRET).update(JSON.stringify(body)).digest('hex');
+const webhook = (body) => request(app).post('/api/v1/billing/webhook').set('X-Zimos-Signature', signWebhook(body)).send(body);
+
 describe('subscription scaffolding (no gateway)', () => {
   it('a new workspace starts on a trialing subscription with a ~14-day trial end and no gateway id', async () => {
     const before = Date.now();
@@ -41,28 +47,34 @@ describe('subscription scaffolding (no gateway)', () => {
     expect(days).toBeLessThan(14.5);
   });
 
-  it('the webhook flips subscription status on mapped events (with the stubbed signature check)', async () => {
+  it('the webhook flips subscription status on mapped events (signed with BILLING_WEBHOOK_SECRET)', async () => {
     const { wid } = await setup();
 
-    const activated = await request(app)
-      .post('/api/v1/billing/webhook')
-      .send({ type: 'subscription.activated', data: { workspaceId: wid } });
+    const activated = await webhook({ type: 'subscription.activated', data: { workspaceId: wid } });
     expect(activated.status).toBe(200);
     expect(activated.body.handled).toBe(true);
     expect((await subOf(wid)).status).toBe('active');
 
-    await request(app).post('/api/v1/billing/webhook').send({ type: 'payment.failed', data: { workspaceId: wid } });
+    await webhook({ type: 'payment.failed', data: { workspaceId: wid } });
     expect((await subOf(wid)).status).toBe('past_due');
 
-    await request(app).post('/api/v1/billing/webhook').send({ type: 'subscription.canceled', data: { workspaceId: wid } });
+    await webhook({ type: 'subscription.canceled', data: { workspaceId: wid } });
     expect((await subOf(wid)).status).toBe('cancelled');
+  });
+
+  it('refuses unsigned or wrongly signed webhooks', async () => {
+    const { wid } = await setup();
+    const body = { type: 'subscription.activated', data: { workspaceId: wid } };
+    const unsigned = await request(app).post('/api/v1/billing/webhook').send(body);
+    expect(unsigned.status).toBe(400);
+    const wrong = await request(app).post('/api/v1/billing/webhook').set('X-Zimos-Signature', 'deadbeef').send(body);
+    expect(wrong.status).toBe(400);
+    expect((await subOf(wid)).status).toBe('trialing');
   });
 
   it('the webhook is a safe no-op for an unmapped event type', async () => {
     const { wid } = await setup();
-    const res = await request(app)
-      .post('/api/v1/billing/webhook')
-      .send({ type: 'invoice.paid', data: { workspaceId: wid } });
+    const res = await webhook({ type: 'invoice.paid', data: { workspaceId: wid } });
     expect(res.status).toBe(200);
     expect(res.body.handled).toBe(false);
   });
@@ -79,7 +91,7 @@ describe('subscription scaffolding (no gateway)', () => {
     expect(provisioned.status).toBe(200);
 
     // Lapse it.
-    await request(app).post('/api/v1/billing/webhook').send({ type: 'subscription.canceled', data: { workspaceId: wid } });
+    await webhook({ type: 'subscription.canceled', data: { workspaceId: wid } });
 
     // Mutating actions are blocked with a clear error.
     const blockedSite = await request(app)

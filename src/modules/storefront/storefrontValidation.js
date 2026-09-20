@@ -31,4 +31,14 @@ module.exports = {
   },
   workspaceParam: { params: Joi.object({ workspaceId: workspaceIdParam }) },
   getCollection: { params: Joi.object({ workspaceId: workspaceIdParam, collectionId: uuid.required() }) },
+  quoteShipping: {
+    params: Joi.object({ workspaceId: workspaceIdParam }),
+    query: Joi.object({
+      country: Joi.string().length(2).uppercase().default('EG'),
+      region: Joi.string().max(100).allow('').optional(),
+      subtotal: Joi.number().integer().min(0).default(0),
+      quantity: Joi.number().integer().min(1).max(1000).default(1),
+      weightGrams: Joi.number().integer().min(0).default(0),
+    }),
+  },
 };

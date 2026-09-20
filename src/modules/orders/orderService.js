@@ -12,6 +12,8 @@ const { calculateTax } = require('../tax/taxService');
 const { createInvoiceForOrder } = require('../invoices/invoiceService');
 const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState, setFulfillmentState } = require('./orderStateService');
+const { evaluateFraudRules } = require('./fraudRules');
+const automationEngine = require('../automations/automationEngine');
 
 // A shipment past this point means the parcel has left the merchant's hands.
 const SHIPMENT_IN_MOTION = ['picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'returned'];
@@ -112,6 +114,16 @@ async function createOrder(workspaceId, payload, req) {
 
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
+    // Merchant fraud rules apply to shopper (storefront) orders only.
+    if (!req || !req.user) {
+      const extra = await evaluateFraudRules({
+        workspaceId,
+        customer,
+        variantIds: items.map((i) => i.variantId).filter(Boolean),
+        transaction,
+      });
+      riskFlags.push(...extra);
+    }
 
     // Price every line and consume/reserve inventory for it. Consuming
     // inventory inside the same transaction as pricing/order-row creation
@@ -253,6 +265,7 @@ async function createOrder(workspaceId, payload, req) {
       transaction,
     });
 
+    transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
     return { order, items: orderItems };
   });
 }
@@ -301,6 +314,7 @@ async function cancelOrder(workspaceId, orderId, { reason }, req) {
       throw new AppError('ORDER_ALREADY_CANCELLED', 'This order is already cancelled', 409);
     }
     await assertNotShipped(order, transaction);
+    transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.cancelled', order.id));
 
     const items = await db.OrderItem.findAll({ where: { orderId: order.id }, transaction });
     for (const item of items) {
@@ -469,6 +483,20 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
     const nextFulfillment = data.status ? SHIPMENT_FULFILLMENT[data.status] : null;
     if (nextFulfillment) {
       await setFulfillmentState(workspaceId, orderId, nextFulfillment, req, transaction);
+    }
+
+    // Customer notifications for shipment milestones (only when the status actually changes).
+    if (data.status && data.status !== before.status) {
+      const wasMoving = SHIPMENT_IN_MOTION.includes(before.status);
+      const trigger =
+        data.status === 'delivered'
+          ? 'order.delivered'
+          : data.status === 'out_for_delivery'
+            ? 'order.out_for_delivery'
+            : SHIPMENT_IN_MOTION.includes(data.status) && !wasMoving
+              ? 'order.shipped'
+              : null;
+      if (trigger) transaction.afterCommit(() => automationEngine.emit(workspaceId, trigger, orderId));
     }
 
     await recordAudit({

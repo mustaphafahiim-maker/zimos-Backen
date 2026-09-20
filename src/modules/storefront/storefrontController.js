@@ -10,4 +10,8 @@ const getCollection = asyncHandler(async (req, res) => res.json({ collection: aw
 // Always 200, with `result: null` when nothing matches — see service.trackOrder.
 const trackOrder = asyncHandler(async (req, res) => res.json({ result: await service.trackOrder(req.tenant.workspaceId, req.query.phone, req.query.number) }));
 
-module.exports = { getStore, listProducts, getProduct, listCollections, getCollection, trackOrder };
+// What checkout would charge to ship to this destination, so the storefront can
+// show shipping before the shopper starts typing their address.
+const quoteShipping = asyncHandler(async (req, res) => res.json({ quote: await service.quoteShipping(req.tenant.workspaceId, req.query) }));
+
+module.exports = { getStore, listProducts, getProduct, listCollections, getCollection, trackOrder, quoteShipping };

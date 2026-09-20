@@ -11,6 +11,7 @@ const reviewController = require('../reviews/reviewController');
 const reviewSchemas = require('../reviews/reviewValidation');
 const schemas = require('./storefrontValidation');
 const checkoutSchemas = require('../checkout/checkoutValidation');
+const checkoutSessions = require('../checkout/checkoutSessionRoutes');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
@@ -26,6 +27,11 @@ router.get('/collections/:collectionId', validate(schemas.getCollection), contro
 // can't pass validation never reaches the database; it keys on the phone and
 // order number, not the IP (see rateLimiters.js).
 router.get('/orders/track', trackingLimiter, validate(schemas.track), controller.trackOrder);
+
+// Shipping price for a destination, and the abandoned-checkout session the
+// storefront keeps while the shopper is still filling the form.
+router.get('/shipping/quote', validate(schemas.quoteShipping), controller.quoteShipping);
+router.post('/checkout-sessions', validate(checkoutSessions.schemas.upsert), checkoutSessions.upsert);
 
 router.post(
   '/checkout',

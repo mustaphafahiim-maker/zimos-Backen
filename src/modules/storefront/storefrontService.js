@@ -4,6 +4,7 @@ const db = require('../../db/models');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const reviewService = require('../reviews/reviewService');
+const { calculateShippingAmount } = require('../shipping/shippingPricing');
 
 /**
  * Public (no-auth) storefront queries: only status='active' rows, and only
@@ -94,9 +95,16 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
 async function getStorefront(workspaceId) {
   const w = await db.Workspace.findOne({
     where: { id: workspaceId },
-    attributes: ['id', 'name', 'slug', 'logoUrl', 'tagline', 'themeSettings', 'defaultCurrency'],
+    attributes: ['id', 'name', 'slug', 'logoUrl', 'tagline', 'themeSettings', 'defaultCurrency', 'settings'],
   });
   if (!w) throw new NotFoundError('Workspace');
+  // Only the public pixel IDs leave the server; the rest of settings stays private.
+  const pixels = (w.settings && w.settings.tracking_pixels) || {};
+  const tracking = {};
+  if (pixels.meta) tracking.meta = pixels.meta;
+  if (pixels.tiktok) tracking.tiktok = pixels.tiktok;
+  if (pixels.snapchat) tracking.snapchat = pixels.snapchat;
+  if (pixels.google_tag) tracking.googleTag = pixels.google_tag;
   return {
     id: w.id,
     name: w.name,
@@ -105,6 +113,18 @@ async function getStorefront(workspaceId) {
     tagline: w.tagline,
     themeSettings: w.themeSettings || {},
     currency: w.defaultCurrency,
+    tracking,
+    // Public checkout form behaviour (defaults when the merchant never set it).
+    checkout: (() => {
+      const c = (w.settings && w.settings.checkout_settings) || {};
+      return {
+        email: c.email || 'optional',
+        alternatePhone: c.alternate_phone || 'optional',
+        notes: c.notes || 'optional',
+        allowDiscountCodes: c.allow_discount_codes !== false,
+        thankYouMessage: c.thank_you_message || null,
+      };
+    })(),
   };
 }
 
@@ -221,6 +241,29 @@ async function trackOrder(workspaceId, phone, orderNumber) {
   };
 }
 
+/**
+ * Shipping price the checkout would charge for this destination and cart shape,
+ * so the storefront can show it before the shopper has typed an address.
+ * Same pricing path checkout uses, so the two can never disagree.
+ */
+async function quoteShipping(workspaceId, { country = 'EG', region, subtotal = 0, quantity = 1, weightGrams = 0 }) {
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['defaultCurrency', 'settings'] });
+  if (!workspace) throw new NotFoundError('Workspace');
+  const amount = await calculateShippingAmount(workspaceId, {
+    country,
+    region: region || null,
+    subtotal: Number(subtotal) || 0,
+    totalQuantity: Number(quantity) || 1,
+    totalWeightGrams: Number(weightGrams) || 0,
+  });
+  const threshold = workspace.settings ? workspace.settings.free_shipping_threshold_amount : null;
+  return {
+    amount: Number(amount),
+    currency: workspace.defaultCurrency || 'EGP',
+    freeShippingThreshold: threshold === undefined || threshold === null ? null : Number(threshold),
+  };
+}
+
 module.exports = {
   getStorefront,
   listProducts,
@@ -228,5 +271,6 @@ module.exports = {
   listCollections,
   getCollection,
   trackOrder,
+  quoteShipping,
   toPublicVariant,
 };

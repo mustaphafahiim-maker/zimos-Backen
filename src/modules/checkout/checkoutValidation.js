@@ -33,6 +33,7 @@ module.exports = {
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
       notes: Joi.string().max(2000).allow('').optional(),
+      checkoutSessionId: uuid.optional(),
       // "Buy Now" — a single item straight to checkout, no cart. Ignored when
       // an X-Cart-Token header is present (the cart wins).
       item: Joi.object({

@@ -2,6 +2,7 @@
 const asyncHandler = require('express-async-handler');
 const cartService = require('../cart/cartService');
 const orderService = require('../orders/orderService');
+const checkoutSessionService = require('./checkoutSessionService');
 const { AppError } = require('../../core/errors/AppError');
 
 /**
@@ -12,7 +13,17 @@ const { AppError } = require('../../core/errors/AppError');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, ...orderBody } = req.body;
+  const { item, checkoutSessionId, ...orderBody } = req.body;
+
+  // The merchant's checkout form settings are enforced here, not only in the UI.
+  const workspace = await require('../../db/models').Workspace.findByPk(req.tenant.workspaceId, { attributes: ['settings'] });
+  const form = (workspace && workspace.settings && workspace.settings.checkout_settings) || {};
+  if (form.allow_discount_codes === false) delete orderBody.discountCode;
+  const missing = [];
+  if (form.email === 'required' && !(orderBody.contact && orderBody.contact.email)) missing.push({ field: 'contact.email', message: 'Email is required' });
+  if (form.alternate_phone === 'required' && !(orderBody.contact && orderBody.contact.alternatePhone)) missing.push({ field: 'contact.alternatePhone', message: 'Alternative phone is required' });
+  if (form.notes === 'required' && !orderBody.notes) missing.push({ field: 'notes', message: 'Notes are required' });
+  if (missing.length > 0) throw new AppError('VALIDATION_ERROR', missing[0].message, 422, missing);
 
   let items;
   let cart = null;
@@ -40,6 +51,11 @@ const checkout = asyncHandler(async (req, res) => {
   );
 
   if (cart) await cartService.markConverted(cart.id, order.id);
+
+  // Close the shopper's abandoned-checkout sessions; never fail the order over it.
+  await checkoutSessionService
+    .markConvertedForOrder(req.tenant.workspaceId, { sessionId: checkoutSessionId, phone: orderBody.contact && orderBody.contact.phone, orderId: order.id })
+    .catch(() => undefined);
 
   res.status(201).json({ order: { ...order.toJSON(), items: orderItems } });
 });

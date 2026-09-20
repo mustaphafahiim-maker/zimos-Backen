@@ -122,6 +122,9 @@ const MERCHANT_SETTINGS_KEYS = [
   'free_shipping_threshold_amount',
   'default_shipping_rate_amount',
   'tax_enabled',
+  'tracking_pixels',
+  'fraud_rules',
+  'checkout_settings',
 ];
 
 // Merge only the known keys of `patch` onto `current`; a null value clears
