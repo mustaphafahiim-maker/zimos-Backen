@@ -8,6 +8,10 @@ const { recordAudit } = require('../audit/auditService');
 const { getStorage, UPLOAD_ROOT } = require('./storage');
 
 const MAX_BYTES = 5 * 1024 * 1024;
+// 3D product models are legitimately larger than an image, so they get their
+// own ceiling; everything else stays on MAX_BYTES.
+const MAX_MODEL_BYTES = 15 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = Math.max(MAX_BYTES, MAX_MODEL_BYTES);
 
 // Type is decided by the actual file bytes, never the filename or the
 // client-declared mimetype.
@@ -20,6 +24,15 @@ const SIGNATURES = [
     ext: 'webp',
     match: (b) => b.length >= 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP',
   },
+  // Binary glTF — the 3D product model a shopper can rotate on the storefront.
+  // Header is 'glTF' + version 2 + total length, so a truncated upload is
+  // rejected here rather than failing in the browser.
+  {
+    mime: 'model/gltf-binary',
+    ext: 'glb',
+    isModel: true,
+    match: (b) => b.length >= 12 && b.toString('latin1', 0, 4) === 'glTF' && b.readUInt32LE(4) === 2,
+  },
 ];
 
 function detectImage(buffer) {
@@ -28,11 +41,14 @@ function detectImage(buffer) {
 
 async function storeImage(workspaceId, file, req) {
   if (!file) throw new AppError('NO_FILE', 'No file was uploaded (field name must be "file")', 422);
-  if (file.size > MAX_BYTES) throw new AppError('FILE_TOO_LARGE', 'The file exceeds the 5MB limit', 413);
 
   const sig = detectImage(file.buffer);
   if (!sig) {
-    throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Only PNG, JPEG, GIF or WEBP images are accepted', 415);
+    throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Only PNG, JPEG, GIF or WEBP images, or GLB 3D models, are accepted', 415);
+  }
+  const limit = sig.isModel ? MAX_MODEL_BYTES : MAX_BYTES;
+  if (file.size > limit) {
+    throw new AppError('FILE_TOO_LARGE', `The file exceeds the ${Math.round(limit / (1024 * 1024))}MB limit`, 413);
   }
 
   const filename = `${crypto.randomUUID()}.${sig.ext}`;
@@ -95,4 +111,4 @@ async function deleteMedia(workspaceId, mediaId, req) {
   return { deleted: true, id: asset.id };
 }
 
-module.exports = { storeImage, detectImage, listMedia, deleteMedia, UPLOAD_ROOT, MAX_BYTES };
+module.exports = { storeImage, detectImage, listMedia, deleteMedia, UPLOAD_ROOT, MAX_BYTES, MAX_MODEL_BYTES, MAX_UPLOAD_BYTES };

@@ -36,6 +36,12 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'product_list',
   'collection_list',
   'cart',
+  // Immersive sections. Same structured-props contract as every type above —
+  // still no raw HTML — rendered by the storefront's immersive components.
+  'shader_hero',
+  'product_3d',
+  'orbit_gallery',
+  'scroll_story',
 ]);
 
 const MAX_NODES = 10000;
