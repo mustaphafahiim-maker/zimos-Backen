@@ -42,6 +42,10 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'product_3d',
   'orbit_gallery',
   'scroll_story',
+  // Storefront sections: a moving strip of short claims, and an "us vs them"
+  // table. Structured props like every other type — still no raw HTML.
+  'marquee',
+  'comparison',
 ]);
 
 const MAX_NODES = 10000;

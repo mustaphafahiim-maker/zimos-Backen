@@ -88,7 +88,7 @@ describe('immersive storefront groundwork', () => {
     expect(site.status).toBe(201);
     const pages = `${base}/${site.body.website.id}/pages`;
 
-    for (const type of ['shader_hero', 'product_3d', 'orbit_gallery', 'scroll_story']) {
+    for (const type of ['shader_hero', 'product_3d', 'orbit_gallery', 'scroll_story', 'marquee', 'comparison']) {
       const page = await request(app)
         .post(pages)
         .set(H)
