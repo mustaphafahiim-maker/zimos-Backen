@@ -51,6 +51,7 @@ const fraudRoutes = require('./modules/orders/fraudRoutes');
 const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
 const automationRoutes = require('./modules/automations/automationRoutes');
 const settlementRoutes = require('./modules/settlements/settlementRoutes');
+const paymobRoutes = require('./modules/payments/paymobRoutes');
 
 const app = express();
 
@@ -149,6 +150,8 @@ v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
+v1.use('/workspaces/:workspaceId/paymob', paymobRoutes.staff);
+v1.use('/webhooks/paymob', paymobRoutes.webhook);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
@@ -161,6 +164,9 @@ v1.use('/admin', platformOpsRoutes);
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
+// Online payment for a placed order; handles only its own two paths and passes
+// everything else through to the storefront router below.
+v1.use('/store/:workspaceId', paymobRoutes.store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 
