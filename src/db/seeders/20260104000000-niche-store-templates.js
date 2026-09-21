@@ -123,7 +123,7 @@ const TEMPLATES = [
     versionId: V.modest,
     name: 'عبايات وأزياء محتشمة',
     category: 'modest_fashion',
-    thumbnailUrl: 'https://media.zimos.co/templates/modest-fashion.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#6D28D9'),
     pages: [
       homePage([
@@ -141,7 +141,7 @@ const TEMPLATES = [
     versionId: V.perfume,
     name: 'عطور وعود',
     category: 'perfume',
-    thumbnailUrl: 'https://media.zimos.co/templates/perfume.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#7C2D12'),
     pages: [
       homePage([
@@ -163,7 +163,7 @@ const TEMPLATES = [
     versionId: V.skincare,
     name: 'العناية بالبشرة',
     category: 'skincare',
-    thumbnailUrl: 'https://media.zimos.co/templates/skincare.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#10B981'),
     pages: [
       homePage([
@@ -189,7 +189,7 @@ const TEMPLATES = [
     versionId: V.watches,
     name: 'ساعات وإكسسوارات',
     category: 'watches',
-    thumbnailUrl: 'https://media.zimos.co/templates/watches.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#334155'),
     pages: [
       homePage([
@@ -206,7 +206,7 @@ const TEMPLATES = [
     versionId: V.decor,
     name: 'بيت وديكور',
     category: 'home_decor',
-    thumbnailUrl: 'https://media.zimos.co/templates/home-decor.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#0F766E'),
     pages: [
       homePage([
@@ -224,7 +224,7 @@ const TEMPLATES = [
     versionId: V.kids,
     name: 'أطفال ولعب',
     category: 'kids_toys',
-    thumbnailUrl: 'https://media.zimos.co/templates/kids-toys.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#F97316'),
     pages: [
       homePage([
@@ -246,7 +246,7 @@ const TEMPLATES = [
     versionId: V.supplements,
     name: 'مكمّلات ولياقة',
     category: 'supplements',
-    thumbnailUrl: 'https://media.zimos.co/templates/supplements.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#DC2626'),
     pages: [
       homePage([
@@ -268,7 +268,7 @@ const TEMPLATES = [
     versionId: V.phoneAccessories,
     name: 'إكسسوارات موبايل',
     category: 'phone_accessories',
-    thumbnailUrl: 'https://media.zimos.co/templates/phone-accessories.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#18181B'),
     pages: [
       homePage([
@@ -286,7 +286,7 @@ const TEMPLATES = [
     versionId: V.coffee,
     name: 'قهوة مختصة',
     category: 'coffee',
-    thumbnailUrl: 'https://media.zimos.co/templates/coffee.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#6F4E37'),
     pages: [
       homePage([
@@ -308,7 +308,7 @@ const TEMPLATES = [
     versionId: V.jewellery,
     name: 'مجوهرات وذهب',
     category: 'jewellery',
-    thumbnailUrl: 'https://media.zimos.co/templates/jewellery.png',
+    thumbnailUrl: null, // rendered live by the template gallery; no hosted image yet
     globalStyles: styles('#B8860B'),
     pages: [
       homePage([
