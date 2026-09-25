@@ -8,7 +8,7 @@ const { app, request, setupWorkspaceWithProduct } = require('../helpers/factorie
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 
-async function deliveredOrder(auth, workspaceId, variantId, carrierCode = 'bosta') {
+async function deliveredOrder(auth, workspaceId, variantId, carrierCode = 'manual') {
   const order = await request(app)
     .post(`/api/v1/workspaces/${workspaceId}/orders`)
     .set(bearer(auth.accessToken))
@@ -32,20 +32,20 @@ async function deliveredOrder(auth, workspaceId, variantId, carrierCode = 'bosta
 describe('COD settlements', () => {
   it('settles delivered COD orders, records payments and never settles an order twice', async () => {
     const { auth, workspace, variant } = await setupWorkspaceWithProduct({ price: 30000, stock: 20 });
-    const a = await deliveredOrder(auth, workspace.id, variant.id, 'bosta');
-    const b = await deliveredOrder(auth, workspace.id, variant.id, 'bosta');
+    const a = await deliveredOrder(auth, workspace.id, variant.id, 'manual');
+    const b = await deliveredOrder(auth, workspace.id, variant.id, 'manual');
     await deliveredOrder(auth, workspace.id, variant.id, 'aramex');
 
     const unsettled = await request(app).get(`/api/v1/workspaces/${workspace.id}/settlements/unsettled`).set(bearer(auth.accessToken));
     expect(unsettled.status).toBe(200);
     expect(unsettled.body.orders).toHaveLength(3);
-    const bosta = unsettled.body.carriers.find((c) => c.carrierCode === 'bosta');
-    expect(bosta.orders).toBe(2);
+    const manual = unsettled.body.carriers.find((c) => c.carrierCode === 'manual');
+    expect(manual.orders).toBe(2);
 
     const created = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/settlements`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'bosta', reference: 'BOSTA-STMT-1', lines: [{ orderId: a.id, feeAmount: 3000 }, { orderId: b.id, feeAmount: 3000 }] });
+      .send({ carrierCode: 'manual', reference: 'BOSTA-STMT-1', lines: [{ orderId: a.id, feeAmount: 3000 }, { orderId: b.id, feeAmount: 3000 }] });
     expect(created.status).toBe(201);
     const s = created.body.settlement;
     expect(s).toMatchObject({ status: 'draft', feesAmount: 6000 });
@@ -54,7 +54,7 @@ describe('COD settlements', () => {
     const twice = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/settlements`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'bosta', lines: [{ orderId: a.id }] });
+      .send({ carrierCode: 'manual', lines: [{ orderId: a.id }] });
     expect(twice.status).toBe(422);
     expect(twice.body.error.code).toBe('ORDER_NOT_SETTLEABLE');
 

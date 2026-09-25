@@ -41,7 +41,7 @@ describe('shipment tracking code', () => {
     const res = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'bosta' });
+      .send({ carrierCode: 'manual' });
     expect(res.status).toBe(201);
     expect(res.body.shipment.trackingCode).toMatch(PATTERN);
     expect(res.body.shipment.trackingCode).not.toBe(res.body.shipment.id);
@@ -65,7 +65,7 @@ describe('shipment tracking code', () => {
         request(app)
           .post(`/api/v1/workspaces/${workspace.id}/orders/${o.id}/shipments`)
           .set(bearer(auth.accessToken))
-          .send({ carrierCode: 'bosta' })
+          .send({ carrierCode: 'manual' })
       )
     );
 
@@ -90,7 +90,7 @@ describe('shipment tracking code', () => {
     const ship = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'bosta' });
+      .send({ carrierCode: 'manual' });
 
     model = await waybillService.computeWaybillModel(workspace.id, order.id);
     expect(model.trackingValue).toBe(ship.body.shipment.trackingCode);

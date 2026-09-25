@@ -58,10 +58,16 @@ module.exports = {
   createShipment: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
     body: Joi.object({
+      // 'manual' (or any other carrier without an API) takes the
+      // hand-typed waybillNumber/trackingUrl below as-is. 'bosta' ignores
+      // both and books a real delivery instead — see orderService#createShipment.
       carrierCode: Joi.string().min(1).max(100).required(),
       waybillNumber: Joi.string().max(100).allow(null, '').optional(),
       trackingUrl: Joi.string().uri().max(500).allow(null, '').optional(),
     }),
+  },
+  refreshShipment: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required(), shipmentId: uuid.required() }),
   },
   updateShipment: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required(), shipmentId: uuid.required() }),

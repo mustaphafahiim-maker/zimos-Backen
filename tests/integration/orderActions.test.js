@@ -80,7 +80,7 @@ describe('cancel order', () => {
     const ship = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'bosta' });
+      .send({ carrierCode: 'manual' });
     expect(ship.status).toBe(201);
 
     await request(app)
@@ -155,7 +155,7 @@ describe('limited PATCH /orders/:orderId', () => {
     const ship = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'bosta' });
+      .send({ carrierCode: 'manual' });
     await request(app)
       .patch(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments/${ship.body.shipment.id}`)
       .set(bearer(auth.accessToken))
@@ -178,10 +178,10 @@ describe('shipments', () => {
     const create = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'bosta', waybillNumber: 'WB-123' });
+      .send({ carrierCode: 'manual', waybillNumber: 'WB-123' });
     expect(create.status).toBe(201);
     expect(create.body.shipment.status).toBe('created');
-    expect(create.body.shipment.carrierCode).toBe('bosta');
+    expect(create.body.shipment.carrierCode).toBe('manual');
 
     const list = await request(app)
       .get(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`)

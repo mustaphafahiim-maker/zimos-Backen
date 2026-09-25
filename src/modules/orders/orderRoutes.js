@@ -55,6 +55,12 @@ router.patch(
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
   controller.updateShipment
 );
+router.post(
+  '/:orderId/shipments/:shipmentId/refresh',
+  validate(schemas.refreshShipment),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.refreshShipment
+);
 
 router.get(
   '/:orderId/returns',

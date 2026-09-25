@@ -47,4 +47,9 @@ const updateShipment = asyncHandler(async (req, res) => {
   res.json({ shipment });
 });
 
-module.exports = { create, get, list, cancel, update, listShipments, createShipment, updateShipment };
+const refreshShipment = asyncHandler(async (req, res) => {
+  const shipment = await service.refreshShipment(req.tenant.workspaceId, req.params.orderId, req.params.shipmentId, req);
+  res.json({ shipment });
+});
+
+module.exports = { create, get, list, cancel, update, listShipments, createShipment, updateShipment, refreshShipment };

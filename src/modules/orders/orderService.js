@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const db = require('../../db/models');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
+const env = require('../../config/env');
 const inventoryService = require('../inventory/inventoryService');
 const customerService = require('../customers/customerService');
 const discountService = require('../discounts/discountService');
@@ -14,9 +15,17 @@ const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState, setFulfillmentState } = require('./orderStateService');
 const { evaluateFraudRules } = require('./fraudRules');
 const automationEngine = require('../automations/automationEngine');
+const bostaService = require('../shipping/bostaService');
 
 // A shipment past this point means the parcel has left the merchant's hands.
 const SHIPMENT_IN_MOTION = ['picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'returned'];
+
+/** Public base URL of this API, for the webhookUrl handed to Bosta on creation. */
+function publicApiBase(req) {
+  const explicit = process.env.PUBLIC_API_URL;
+  if (explicit) return `${explicit.replace(/\/+$/, '')}/api/${env.apiVersion}`;
+  return `${req.protocol}://${req.get('host')}/api/${env.apiVersion}`;
+}
 
 async function assertNotShipped(order, transaction) {
   if (order.fulfillmentState === 'fulfilled' || order.fulfillmentState === 'partially_fulfilled' || order.fulfillmentState === 'returned') {
@@ -407,6 +416,29 @@ async function listShipments(workspaceId, orderId) {
 }
 
 async function createShipment(workspaceId, orderId, data, req) {
+  // Preflight check, and — for Bosta — the real carrier call, happen outside
+  // the transaction: an external HTTP call has no business holding a DB
+  // lock open (same reasoning as payments/paymobService#createCheckout,
+  // which also calls out to its provider before touching the DB).
+  const preflightOrder = await db.Order.findOne({ where: { id: orderId, workspaceId } });
+  if (!preflightOrder) throw new NotFoundError('Order');
+  if (preflightOrder.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
+
+  let waybillNumber = data.waybillNumber || null;
+  let trackingUrl = data.trackingUrl || null;
+  let carrierResponse = null;
+  let initialStatus = 'created';
+
+  if (data.carrierCode === 'bosta') {
+    // Real carrier: book the delivery with Bosta and use what it returns —
+    // never the staff-typed waybillNumber/trackingUrl for this carrier.
+    const booked = await bostaService.createDeliveryForOrder(workspaceId, preflightOrder, publicApiBase(req));
+    waybillNumber = booked.waybillNumber;
+    trackingUrl = booked.trackingUrl;
+    carrierResponse = booked.carrierResponse;
+    initialStatus = booked.status || 'created';
+  }
+
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction });
     if (!order) throw new NotFoundError('Order');
@@ -425,9 +457,10 @@ async function createShipment(workspaceId, orderId, data, req) {
               orderId: order.id,
               trackingCode: generateTrackingCode(),
               carrierCode: data.carrierCode,
-              waybillNumber: data.waybillNumber || null,
-              trackingUrl: data.trackingUrl || null,
-              status: 'created',
+              waybillNumber,
+              trackingUrl,
+              carrierResponse,
+              status: initialStatus,
             },
             { transaction: sp }
           )
@@ -472,6 +505,9 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
     if (data.status !== undefined) updates.status = data.status;
     if (data.waybillNumber !== undefined) updates.waybillNumber = data.waybillNumber;
     if (data.trackingUrl !== undefined) updates.trackingUrl = data.trackingUrl;
+    // Set by the Bosta webhook/refresh path with the carrier's raw response;
+    // not exposed on the staff-facing PATCH validation schema.
+    if (data.carrierResponse !== undefined) updates.carrierResponse = data.carrierResponse;
     if (data.status && SHIPMENT_IN_MOTION.includes(data.status) && !shipment.shippedAt) {
       updates.shippedAt = new Date();
     }
@@ -515,6 +551,21 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
   });
 }
 
+/**
+ * Staff-triggered, on-demand poll of a Bosta shipment's current status
+ * (Bosta also pushes updates via webhook — see shipping/bostaService#handleWebhook
+ * — this is the manual "refresh status" fallback / immediate check).
+ */
+async function refreshShipment(workspaceId, orderId, shipmentId, req) {
+  const shipment = await db.Shipment.findOne({ where: { id: shipmentId, workspaceId, orderId } });
+  if (!shipment) throw new NotFoundError('Shipment');
+  if (shipment.carrierCode !== 'bosta') {
+    throw new AppError('SHIPMENT_NOT_REMOTE', 'Only Bosta shipments can be refreshed from the carrier', 422);
+  }
+  const { status, carrierResponse } = await bostaService.fetchDeliveryStatus(workspaceId, shipment.waybillNumber);
+  return updateShipment(workspaceId, orderId, shipmentId, { ...(status ? { status } : {}), carrierResponse }, req);
+}
+
 module.exports = {
   createOrder,
   getOrder,
@@ -525,6 +576,7 @@ module.exports = {
   cancelOrder,
   updateOrderLimited,
   listShipments,
+  refreshShipment,
   createShipment,
   updateShipment,
 };
