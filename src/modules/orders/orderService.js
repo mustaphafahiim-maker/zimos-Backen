@@ -15,6 +15,7 @@ const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState, setFulfillmentState } = require('./orderStateService');
 const { evaluateFraudRules } = require('./fraudRules');
 const automationEngine = require('../automations/automationEngine');
+const pixelEvents = require('../marketing/pixelEvents');
 const bostaService = require('../shipping/bostaService');
 
 // A shipment past this point means the parcel has left the merchant's hands.
@@ -275,6 +276,11 @@ async function createOrder(workspaceId, payload, req) {
     });
 
     transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
+    // Server-side ad-platform conversions (Meta/TikTok/Snapchat CAPI, GA4 MP)
+    // — not a merchant-configured rule like automations, fires unconditionally
+    // (subject only to which platforms are configured); see marketing/pixelEvents.js
+    // for why 'order.created' is the only trigger this acts on.
+    transaction.afterCommit(() => pixelEvents.emit(workspaceId, 'order.created', order.id));
     return { order, items: orderItems };
   });
 }

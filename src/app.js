@@ -53,6 +53,7 @@ const automationRoutes = require('./modules/automations/automationRoutes');
 const settlementRoutes = require('./modules/settlements/settlementRoutes');
 const paymobRoutes = require('./modules/payments/paymobRoutes');
 const bostaRoutes = require('./modules/shipping/bostaRoutes');
+const serverPixelsRoutes = require('./modules/marketing/serverPixelsRoutes');
 
 const app = express();
 
@@ -155,6 +156,7 @@ v1.use('/workspaces/:workspaceId/paymob', paymobRoutes.staff);
 v1.use('/webhooks/paymob', paymobRoutes.webhook);
 v1.use('/workspaces/:workspaceId/bosta', bostaRoutes.staff);
 v1.use('/webhooks/bosta', bostaRoutes.webhook);
+v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/billing', billingRoutes);
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
