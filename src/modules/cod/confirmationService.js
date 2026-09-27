@@ -92,7 +92,8 @@ async function listQueue(workspaceId, { status = 'queued', limit = 50 } = {}) {
     where: { workspaceId, status },
     order: [['createdAt', 'ASC']],
     limit,
-    include: [{ model: db.Order, as: 'order' }],
+    // The queue card shows the line count next to the total, so carry the items.
+    include: [{ model: db.Order, as: 'order', include: [{ model: db.OrderItem, as: 'items' }] }],
   });
 }
 
