@@ -256,12 +256,60 @@ async function bookingTier(workspaceId, order, tierId, transaction) {
   return { ...tier, flags: [] };
 }
 
-/** The drop-off address as kept on the shipment: the carrier's ids only. */
+/** The drop-off address as kept on the shipment: the carrier's ids only (typed names have none). */
 function storedAddress(adapter, address) {
+  if (address.typed) return { names: address.path.map((node) => node.name) };
   if (isCityDistrict(adapter.capabilities.addressLevels)) {
     return { cityId: address.cityId, districtId: address.districtId, zoneId: address.zoneId };
   }
   return { path: address.path.map((node) => node.id) };
+}
+
+function namesRequired(adapter) {
+  const levels = adapter.capabilities.addressLevels;
+  return new AppError(
+    'CARRIER_ADDRESS_NAMES_REQUIRED',
+    `${adapter.name} does not let this account read its address list. Type the drop-off ${levels.join(' > ')} as ${adapter.name} spells them and send carrierAddress.names.`,
+    422,
+    [{ field: 'carrierAddress.names', message: `Needs ${levels.length} names, one per level (${levels.join(' > ')})`, levels }]
+  );
+}
+
+/**
+ * How the drop-off address will be resolved: { index } from the carrier's
+ * list (today's path), or { typed } from carrierAddress.names.
+ *
+ * Names are taken only from a connection whose list the carrier refuses
+ * (typedAddressNames + verification.locationList 'unavailable'). Without
+ * names, the list is tried: served again, the mark is cleared; refused for
+ * lack of permission, the mark is set and the merchant is asked for names.
+ */
+async function resolveAddressSource(connection, carrierAddress) {
+  const { adapter, account } = connection;
+  const names = carrierAddress && carrierAddress.names;
+  const typedAllowed = Boolean(adapter.capabilities.typedAddressNames);
+  const unavailable = typedAllowed && accounts.locationListUnavailable(account);
+
+  if (names) {
+    if (!unavailable) {
+      throw new AppError('VALIDATION_ERROR', 'Validation failed', 422, [
+        { field: 'carrierAddress.names', message: `Not accepted while ${adapter.name}'s address list is available: send carrierAddress.path` },
+      ]);
+    }
+    return { typed: adapter.typedAddress(names) };
+  }
+
+  try {
+    const { index } = await accounts.loadCities(connection);
+    if (unavailable) await accounts.markLocationList(account, false);
+    return { index };
+  } catch (err) {
+    if (typedAllowed && err instanceof CarrierPermissionError) {
+      await accounts.markLocationList(account, true);
+      throw namesRequired(adapter);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -283,7 +331,7 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
   // Loaded (and cached) before the order row is locked: on a cold cache this
   // is a retried carrier read, and it must not hold the lock while it runs.
   // A failure here fails the request exactly as before, with no lock taken.
-  const { index } = await accounts.loadCities(connection);
+  const { index, typed } = await resolveAddressSource(connection, data.carrierAddress);
 
   let booked = null;
   try {
@@ -297,7 +345,7 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       assertReadyToShip(order);
       await assertNoActiveShipment(order.id, transaction);
 
-      const address = await matchAddress(adapter, index, order.shippingAddressSnapshot, data.carrierAddress);
+      const address = typed || (await matchAddress(adapter, index, order.shippingAddressSnapshot, data.carrierAddress));
 
       // Resolved before the carrier call, so an unmapped tier costs nothing.
       const tier = await bookingTier(workspaceId, order, data.tierId, transaction);

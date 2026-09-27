@@ -4,6 +4,17 @@ const joiEmail = require('../../core/utils/joiEmail');
 const { STAGES } = require('./orderStage');
 const uuid = Joi.string().uuid();
 
+// carrierAddress.cityId / districtId: required together, unless the address
+// is sent as `path` or `names` instead.
+const carrierIdUnlessPathOrNames = () =>
+  Joi.string()
+    .max(100)
+    .when('path', {
+      is: Joi.exist(),
+      then: Joi.forbidden(),
+      otherwise: Joi.when('names', { is: Joi.exist(), then: Joi.forbidden(), otherwise: Joi.required() }),
+    });
+
 // The search box and date range, shared by the list and the tab counts so the
 // two can never disagree about what they are counting. `q` is trimmed before
 // the length check — two spaces are not a two-character search.
@@ -84,11 +95,19 @@ module.exports = {
       // own ids for the drop-off address, sent when the order's free-text
       // address couldn't be matched (422 CARRIER_ADDRESS_UNMATCHED). Either
       // cityId + districtId (city/district carriers) or `path`, one id per
-      // address level, top first (any carrier).
+      // address level, top first (any carrier). Or `names`: the carrier's own
+      // names typed by the merchant, one per level, only while the carrier
+      // refuses this account its address list (422
+      // CARRIER_ADDRESS_NAMES_REQUIRED).
       carrierAddress: Joi.object({
-        path: Joi.array().items(Joi.string().max(100)).min(1).max(6).optional(),
-        cityId: Joi.string().max(100).when('path', { is: Joi.exist(), then: Joi.forbidden(), otherwise: Joi.required() }),
-        districtId: Joi.string().max(100).when('path', { is: Joi.exist(), then: Joi.forbidden(), otherwise: Joi.required() }),
+        names: Joi.array().items(Joi.string().trim().max(100).allow('')).min(1).max(6).optional(),
+        path: Joi.array()
+          .items(Joi.string().max(100))
+          .min(1)
+          .max(6)
+          .when('names', { is: Joi.exist(), then: Joi.forbidden(), otherwise: Joi.optional() }),
+        cityId: carrierIdUnlessPathOrNames(),
+        districtId: carrierIdUnlessPathOrNames(),
       }).optional(),
       notes: Joi.string().max(500).allow(null, '').optional(),
       // Connected couriers only: book as this weight tier instead of the one

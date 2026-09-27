@@ -86,6 +86,15 @@ async function handle({ method = 'GET', url, headers = {}, form }) {
   if (path === 'vip/checkCusPwd') return reply({ code: '1', msg: 'success' });
   if (path === 'order/getOrders') {
     if (fake.refuseGetOrders) return fail(fake.refuseGetOrders.code, fake.refuseGetOrders.msg);
+    // command 3: orders placed between startDate and endDate (at most 7 days).
+    if (Number(biz.command) === 3) {
+      const stamp = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+      if (!stamp.test(biz.startDate || '') || !stamp.test(biz.endDate || '') || biz.startDate > biz.endDate) {
+        return fail('145003097', 'Illegal time range');
+      }
+      if (!Number.isInteger(biz.current) || !Number.isInteger(biz.size)) return fail('145003102', 'Illegal page number');
+      return ok([]);
+    }
     const serials = Array.isArray(biz.serialNumber) ? biz.serialNumber : [];
     return ok(serials.filter((s) => fake.orders.has(s)).map((s) => ({ txlogisticId: s, billCode: fake.orders.get(s).billCode })));
   }

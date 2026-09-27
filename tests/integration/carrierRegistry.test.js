@@ -69,6 +69,7 @@ describe('the adapter contract', () => {
     [{ capabilities: { webhook: 'account', webhookRefetch: false } }, { parseWebhook: () => null }, /verifyWebhook/],
     [{ capabilities: { bulkStatus: true } }, {}, /getShipments/],
     [{ capabilities: { addressLevels: ['a', 'b', 'c'] } }, {}, /listAddressTree/],
+    [{ capabilities: { typedAddressNames: true } }, {}, /typedAddress()/],
     [{ capabilities: { teleport: true } }, {}, /unknown capabilities/],
     [{ code: 'manual' }, {}, /reserved/],
   ])('refuses %j', (extra, overrides, message) => {
@@ -88,6 +89,7 @@ describe('the adapter contract', () => {
       webhook: 'per_shipment',
       polling: false,
       addressLevels: ['city', 'district'],
+      typedAddressNames: false,
     });
     expect(byCode.fakemanual).toMatchObject({ webhookSetup: 'account', capabilities: { cancel: 'manual', addressLevels: ['zone', 'area'] } });
   });

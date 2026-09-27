@@ -58,14 +58,18 @@ function newWebhookToken() {
 }
 
 /**
- * What a connect could not prove about the credentials, e.g. J&T's
- * { customerCredentials: 'unverified' } when this API account may not call
- * any endpoint that checks the customer password. Kept in the settings
- * column under this key (no column of its own): never shown as a setting,
- * never taken from a request, and dropped once a check or a booking proves
- * the credentials.
+ * What a connect could not prove or read, kept in the settings column under
+ * this key (no column of its own): never shown as a setting, never taken
+ * from a request. Each connect sets it afresh from the adapter's answer.
+ *
+ *   customerCredentials: 'unverified'  J&T: no endpoint this API account may
+ *       call checks the customer password. Dropped once a booking proves it.
+ *   locationList: 'unavailable'        the carrier refuses this account its
+ *       address list; bookings take typed names (typedAddressNames). Set or
+ *       dropped by a booking that tries the list again.
  */
 const VERIFICATION_KEY = '_verification';
+const VERIFICATION_MARKS = { customerCredentials: 'unverified', locationList: 'unavailable' };
 
 function verificationOf(account) {
   const value = account && account.settings ? account.settings[VERIFICATION_KEY] : null;
@@ -77,22 +81,61 @@ function merchantSettings(settings) {
   return rest;
 }
 
+/** Only the known marks, with their one value; null when none is set. */
+function cleanVerification(verification) {
+  const marks = {};
+  for (const [key, value] of Object.entries(VERIFICATION_MARKS)) {
+    if (verification && verification[key] === value) marks[key] = value;
+  }
+  return Object.keys(marks).length > 0 ? marks : null;
+}
+
+function withVerification(settings, verification) {
+  const rest = merchantSettings(settings);
+  const marks = cleanVerification(verification);
+  return marks ? { ...rest, [VERIFICATION_KEY]: marks } : rest;
+}
+
 /** The settings to store after a connect whose adapter answered `verification`. */
 function settingsWithVerification(settings, verification) {
-  const rest = merchantSettings(settings);
-  return verification && verification.customerCredentials === 'unverified'
-    ? { ...rest, [VERIFICATION_KEY]: { customerCredentials: 'unverified' } }
-    : rest;
+  return withVerification(settings, verification);
+}
+
+/** Sets (value) or drops (null) one mark on a stored account. */
+async function setVerificationMark(account, key, value, { transaction } = {}) {
+  const current = verificationOf(account) || {};
+  if ((current[key] || null) === value) return;
+  const next = { ...current };
+  if (value == null) delete next[key];
+  else next[key] = value;
+  await account.update({ settings: withVerification(account.settings, next) }, { transaction });
 }
 
 /**
  * After a successful booking: the carrier accepted the stored credentials in
- * full, so an 'unverified' mark no longer holds.
+ * full, so an 'unverified' mark no longer holds (a locationList mark stays).
  */
 async function markCredentialsProven(account, { transaction } = {}) {
-  if (!verificationOf(account)) return;
-  await account.update({ settings: merchantSettings(account.settings) }, { transaction });
+  const verification = verificationOf(account);
+  if (!verification || !verification.customerCredentials) return;
+  await setVerificationMark(account, 'customerCredentials', null, { transaction });
   logger.info('Carrier customer credentials proven by a booking; unverified mark cleared', {
+    workspaceId: account.workspaceId,
+    carrierCode: account.carrierCode,
+  });
+}
+
+/** Whether bookings on this account take typed address names. */
+function locationListUnavailable(account) {
+  const verification = verificationOf(account);
+  return Boolean(verification && verification.locationList === 'unavailable');
+}
+
+/** The carrier refused (true) or served (false) its address list to this account. */
+async function markLocationList(account, unavailable) {
+  if (locationListUnavailable(account) === unavailable) return;
+  await setVerificationMark(account, 'locationList', unavailable ? 'unavailable' : null);
+  logger.info(unavailable ? 'Carrier address list refused; bookings take typed names' : 'Carrier address list served again; mark cleared', {
     workspaceId: account.workspaceId,
     carrierCode: account.carrierCode,
   });
@@ -149,6 +192,7 @@ function describeAdapter(adapter) {
       webhook: adapter.capabilities.webhook,
       polling: adapter.capabilities.polling,
       addressLevels: adapter.capabilities.addressLevels,
+      typedAddressNames: Boolean(adapter.capabilities.typedAddressNames),
     },
   };
 }
@@ -446,6 +490,8 @@ module.exports = {
   getCities,
   withAuthHandling,
   markCredentialsProven,
+  locationListUnavailable,
+  markLocationList,
   webhookUrlFor,
   clearCitiesCache,
   decryptFor,

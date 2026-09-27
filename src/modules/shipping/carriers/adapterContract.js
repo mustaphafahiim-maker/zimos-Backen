@@ -30,6 +30,11 @@
  *   reserveNameWhenUnconnected
  *                   the carrier's name is refused as a manual courier name
  *                   even on a store that has not connected it
+ *   typedAddressNames
+ *                   when the carrier refuses this account its address list
+ *                   (connection.verification.locationList 'unavailable'),
+ *                   a booking may send the carrier's own names as typed
+ *                   (carrierAddress.names) and the carrier checks them
  *
  * Tunables: pollIntervalMinutes (default 60), alreadyCancelledPattern (the
  * carrier's wording for "already cancelled" in a refused cancel), and
@@ -46,6 +51,7 @@ const DEFAULT_CAPABILITIES = Object.freeze({
   bulkStatus: false,
   addressLevels: ['city', 'district'],
   reserveNameWhenUnconnected: false,
+  typedAddressNames: false,
 });
 
 const DEFAULT_ALREADY_CANCELLED = /already\s+(been\s+)?(cancell?ed|terminated)/i;
@@ -88,6 +94,9 @@ function defineAdapter(spec) {
     fail(code, 'trusting the webhook payload (webhookRefetch false) needs verifyWebhook()');
   }
   if (capabilities.bulkStatus && typeof spec.getShipments !== 'function') fail(code, 'bulkStatus needs getShipments()');
+  if (capabilities.typedAddressNames && typeof spec.typedAddress !== 'function') {
+    fail(code, 'typedAddressNames needs typedAddress()');
+  }
 
   const levels = capabilities.addressLevels;
   if (!Array.isArray(levels) || levels.length < 1 || levels.some((l) => typeof l !== 'string' || !l)) {

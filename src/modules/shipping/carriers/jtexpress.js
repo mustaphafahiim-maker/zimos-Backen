@@ -51,6 +51,16 @@ const PASSWORD_SALT = 'jadada236t2';
 const CODE_OK = '1';
 const CODE_HEADER_SIGNATURE = '145003030'; // Headers signature verification failed
 const CODE_BUSINESS_SIGNATURE = '145003031'; // Business parameter signature verification failed
+const CODE_CUSTOMER_NOT_FOUND = '145003080'; // Customer not found (ess/balance's table)
+const CODE_NO_DATA = '145003064'; // No data found (addOrder's table)
+
+// addOrder's address refusals -> the address level they name.
+const ADDRESS_CODES = {
+  145003062: 0, // Province is illegal
+  145003061: 1, // City is illegal
+  145003060: 2, // Area is illegal
+  145003065: null, // Province/city/area address is illegal
+};
 
 // J&T's answer when the platform has not opened an endpoint to this API
 // account ("API account has no interface permissions", seen in production on
@@ -70,9 +80,13 @@ const ACTIONS = {
   'order/printOrder': 'printing labels',
 };
 
-// A customer order number nobody books: order/getOrders is asked for it only
-// to have J&T check the business digest.
-const PROBE_ORDER_ID = 'CONNECTION-CHECK';
+// order/getOrders as a credential check: command 3 (orders placed in a time
+// window, "returns unlimited number") over one minute in the past, one row
+// per page. An empty answer is the documented success, code "1".
+const PROBE_WINDOW_MS = 60 * 1000;
+const PROBE_LAG_MS = 2 * 60 * 1000;
+// Answers that can only follow a passed business digest (UNVERIFIED 15).
+const PROBE_PROVEN_CODES = [CODE_NO_DATA];
 
 // addOrder: "Weight, unit kg, range 0.01-30".
 const MIN_WEIGHT_KG = 0.01;
@@ -80,7 +94,8 @@ const MAX_WEIGHT_KG = 30;
 // logistics/trace: "supports querying up to 30 waybills at one time".
 const TRACE_BATCH = 30;
 // Field lengths from the addOrder table.
-const LIMITS = { name: 50, mobile: 11, street: 200, remark: 200, itemName: 30, email: 150, txlogisticId: 50, amount: 12 };
+const LIMITS = { name: 50, mobile: 11, street: 200, remark: 200, itemName: 30, email: 150, txlogisticId: 50, amount: 12, addressName: 60 };
+const LEVELS = ['governorate', 'city', 'area'];
 
 const SERVICE_TYPES = ['01', '02'];
 const PAY_TYPES = ['PP_PM', 'PP_CASH'];
@@ -180,7 +195,9 @@ function failFrom(res, creds, path) {
   const body = res.json || {};
   const code = body.code != null ? String(body.code) : null;
   if (code === CODE_HEADER_SIGNATURE) return new CarrierAuthError(NAME, 'the API account or private key');
-  if (code === CODE_BUSINESS_SIGNATURE) return new CarrierAuthError(NAME, 'the customer code or password');
+  if (code === CODE_BUSINESS_SIGNATURE || code === CODE_CUSTOMER_NOT_FOUND) {
+    return new CarrierAuthError(NAME, 'the customer code or password');
+  }
   // The credentials are fine: the account is just not allowed this call, so
   // it is not marked invalid.
   if (PERMISSION_CODES.includes(code) || PERMISSION_PATTERN.test(String(body.msg || ''))) {
@@ -193,6 +210,7 @@ function failFrom(res, creds, path) {
   const message = sanitizeCarrierMessage(body.msg, secretsOf(creds));
   return new CarrierError(message ? `${NAME}: ${message}` : `${NAME} returned HTTP ${res.status}`, {
     carrierErrorCode: code,
+    carrierMessage: message || null,
     httpStatus: res.status,
   });
 }
@@ -420,10 +438,12 @@ function senderInTree(tree, settings) {
  *
  *   vip/checkCusPwd   "check whether the e-waybill account exists and its
  *                     information is correct"
- *   order/getOrders   asked for an order number nobody booked (UNVERIFIED 15)
+ *   order/getOrders   command 3 over a past minute: code "1" (with or
+ *                     without rows), or 145003064 "no data found"
+ *                     (UNVERIFIED 15)
  *
- * 'verified' or 'unverified' (neither could be called); a rejected digest
- * throws CarrierAuthError.
+ * 'verified' or 'unverified' (neither could prove it); a rejected digest or
+ * an unknown customer (145003080) throws CarrierAuthError.
  */
 async function checkCustomer(creds) {
   try {
@@ -432,33 +452,51 @@ async function checkCustomer(creds) {
   } catch (err) {
     if (!(err instanceof CarrierPermissionError)) throw err;
   }
+  const end = new Date(Date.now() - PROBE_LAG_MS);
+  const probe = {
+    command: 3,
+    startDate: cairoTime(new Date(end.getTime() - PROBE_WINDOW_MS)),
+    endDate: cairoTime(end),
+    current: 1,
+    size: 1,
+  };
   try {
-    await call(creds, { path: 'order/getOrders', payload: { command: 1, serialNumber: [PROBE_ORDER_ID] }, business: true, retry: true });
+    await call(creds, { path: 'order/getOrders', payload: probe, business: true, retry: true });
     return 'verified';
   } catch (err) {
     if (err instanceof CarrierPermissionError) return 'unverified';
-    // Another refusal from J&T: the digests were not what it objected to,
-    // but nothing says they were checked either (UNVERIFIED 15).
-    if (err instanceof CarrierError && err.details && err.details.carrierErrorCode != null) {
-      logger.warn('J&T order/getOrders refused the connection check; customer credentials left unverified', {
-        carrierErrorCode: err.details.carrierErrorCode,
-      });
-      return 'unverified';
-    }
-    throw err;
+    const details = (err instanceof CarrierError && err.details) || {};
+    if (details.carrierErrorCode == null) throw err;
+    if (PROBE_PROVEN_CODES.includes(details.carrierErrorCode)) return 'verified';
+    // Another refusal (e.g. 145003097, the time range): the digests were not
+    // what J&T objected to, but nothing says they were checked either.
+    logger.warn('J&T order/getOrders refused the connection check; customer credentials left unverified', {
+      carrierErrorCode: details.carrierErrorCode,
+      carrierMessage: details.carrierMessage || null,
+      httpStatus: details.httpStatus != null ? details.httpStatus : null,
+    });
+    return 'unverified';
   }
 }
 
 /**
- * The customer code + password (checkCustomer), then location/getLocation
- * when they could not be checked: it takes the header digest only, so it
- * proves the API account + private key and nothing more. The connection is
- * then saved with { customerCredentials: 'unverified' }; a wrong customer
- * code or password surfaces at the first booking (145003031).
- * A sender address in the settings must be complete and one J&T knows.
+ * The customer code + password (checkCustomer), then location/getLocation:
+ *
+ *   - when checkCustomer could not prove them: it takes the header digest
+ *     only, so it proves the API account + private key and nothing more.
+ *     Refused too, nothing is proven and the refusal fails the connect.
+ *   - when a pickup address needs checking against J&T's names.
+ *
+ * With the credentials proven, a getLocation refused for lack of permission
+ * does not fail the connect: the pickup address is kept unchecked and the
+ * answer carries { locationList: 'unavailable' } (bookings then take typed
+ * names). A wrong customer code or password under 'unverified' surfaces at
+ * the first booking (145003031).
  */
 async function verifyCredentials(creds, settings = {}) {
   const customer = await checkCustomer(creds);
+  const verification = customer === 'unverified' ? { customerCredentials: 'unverified' } : {};
+
   let tree = customer === 'unverified' ? await listAddressTree(creds) : null;
 
   const given = SENDER_KEYS.filter((k) => settings[k]);
@@ -468,12 +506,63 @@ async function verifyCredentials(creds, settings = {}) {
       throw new AppError('VALIDATION_ERROR', 'Validation failed', 422, missing.map((k) => ({ field: `settings.${k}`, message: 'Required with the rest of the pickup address' })));
     }
     localMobile(settings.senderMobile, 'settings.senderMobile');
-    tree = tree || (await listAddressTree(creds));
-    if (!senderInTree(tree, settings)) {
+    if (!tree) {
+      try {
+        tree = await listAddressTree(creds);
+      } catch (err) {
+        if (!(err instanceof CarrierPermissionError)) throw err;
+        logger.warn('J&T refused location/getLocation; pickup address saved unchecked', {
+          carrierErrorCode: err.details ? err.details.carrierErrorCode : null,
+        });
+        verification.locationList = 'unavailable';
+      }
+    }
+    if (tree && !senderInTree(tree, settings)) {
       throw invalid('settings.senderArea', `Not a province > city > area in ${NAME}'s location list`);
     }
   }
-  return customer === 'unverified' ? { customerCredentials: 'unverified' } : {};
+  return verification;
+}
+
+/**
+ * The drop-off address from names the merchant typed (carrierAddress.names),
+ * for a connection without J&T's location list: sent as typed, and addOrder
+ * checks them (145003060-145003065).
+ */
+function typedAddress(names) {
+  const clean = (Array.isArray(names) ? names : []).map((n) => String(n == null ? '' : n).trim());
+  if (clean.length !== LEVELS.length) {
+    throw invalid('carrierAddress.names', `Needs ${LEVELS.length} names, one per level (${LEVELS.join(' > ')})`);
+  }
+  const empty = clean.findIndex((n) => !n);
+  if (empty >= 0) throw invalid(`carrierAddress.names.${empty}`, `The ${LEVELS[empty]} name is empty`);
+  const tooLong = clean.findIndex((n) => n.length > LIMITS.addressName);
+  if (tooLong >= 0) throw invalid(`carrierAddress.names.${tooLong}`, `At most ${LIMITS.addressName} characters`);
+  return { typed: true, path: clean.map((name, i) => ({ id: null, name, level: LEVELS[i] })) };
+}
+
+/**
+ * addOrder's address refusal as a 422 on the level it names: the typed name
+ * when the merchant typed them, else the matched path. With the pickup
+ * address unchecked, J&T may mean that one instead, and the message says so.
+ */
+function addressRejection(err, address, carrierSettings) {
+  const code = err instanceof CarrierError && err.details ? err.details.carrierErrorCode : null;
+  if (code == null || !Object.prototype.hasOwnProperty.call(ADDRESS_CODES, code)) return null;
+  const level = ADDRESS_CODES[code];
+  const base = address.typed ? 'carrierAddress.names' : 'carrierAddress.path';
+  const name = level != null && address.path[level] ? address.path[level].name : null;
+  const what = level != null ? `the ${LEVELS[level]}${name ? ` "${name}"` : ''}` : 'this governorate > city > area';
+  const verification = (carrierSettings && carrierSettings._verification) || {};
+  const pickup = verification.locationList === 'unavailable' ? ' If it is right, check the pickup address in the J&T settings.' : '';
+  return new AppError('CARRIER_ADDRESS_REJECTED', `${NAME} does not recognise ${what}. Use J&T's own spelling.${pickup}`, 422, [
+    {
+      field: level != null ? `${base}.${level}` : base,
+      message: `Not accepted by ${NAME}`,
+      level: level != null ? LEVELS[level] : null,
+      carrierErrorCode: code,
+    },
+  ]);
 }
 
 /** addOrder's receiver address fields from a matched [governorate, city, area] path. */
@@ -583,13 +672,18 @@ async function createShipment(creds, input) {
     ...(notes || address.secondLine ? { remark: cut([notes, address.secondLine].filter(Boolean).join(' — '), LIMITS.remark) } : {}),
   };
 
-  const data = await call(creds, {
-    path: 'order/addOrder',
-    payload,
-    business: true,
-    action: 'create',
-    timeoutMs: carrierHttp.CREATE_TIMEOUT_MS,
-  });
+  let data;
+  try {
+    data = await call(creds, {
+      path: 'order/addOrder',
+      payload,
+      business: true,
+      action: 'create',
+      timeoutMs: carrierHttp.CREATE_TIMEOUT_MS,
+    });
+  } catch (err) {
+    throw addressRejection(err, address, carrierSettings) || err;
+  }
   if (!data || !data.billCode) throw new CarrierError(`${NAME} accepted the order but returned no waybill number`);
   return {
     trackingNumber: String(data.billCode),
@@ -681,6 +775,9 @@ module.exports = defineAdapter({
   name: NAME,
   nameAliases: ['J&T', 'JT Express', 'J and T', 'جي اند تي', 'جي آند تي'],
   capabilities: {
+    // Without location/getLocation the merchant types J&T's names, which
+    // addOrder checks itself (145003060-145003065).
+    typedAddressNames: true,
     cancel: 'api',
     label: true,
     // J&T documents a track push, but it needs the URL handed to J&T outside
@@ -689,7 +786,7 @@ module.exports = defineAdapter({
     webhook: 'none',
     polling: true,
     bulkStatus: true,
-    addressLevels: ['governorate', 'city', 'area'],
+    addressLevels: LEVELS,
     reserveNameWhenUnconnected: false,
   },
   pollIntervalMinutes: 60,
@@ -719,6 +816,7 @@ module.exports = defineAdapter({
   verifyCredentials,
   resolvePackage,
   listAddressTree,
+  typedAddress,
   toCarrierAddress,
   createShipment,
   getShipment,

@@ -46,7 +46,11 @@ The numbers match the `UNVERIFIED (n)` comments in the adapter.
    individual, 2 contract customer"). We default to `2`, and the `orderType`
    setting overrides it for bookings. Cancel always sends `2`.
 2. **Location API access.** Whether every merchant account may call
-   `location/getLocation` is not stated.
+   `location/getLocation` is not stated. Production has shown an account
+   refused it ("no interface permissions"). Our request matches the
+   official Java SDK sample byte for byte in path, headers, body and digest
+   (header digest only, `jtExpressApi.post`). The docs publish no copy of
+   the list, so such an account books with typed names (see below).
 3. **Scan types 7, 8 and 12.** 7 is "Proxy revenue scan" (代理点收入扫描)
    and 8 is "Express take out scanning" (快件取出扫描); both keep the
    current status. 12 is "Warehousing of stored parts" (留仓件入仓), mapped
@@ -86,12 +90,15 @@ The numbers match the `UNVERIFIED (n)` comments in the adapter.
     is not documented.
 15. **`order/getOrders` as a credential check.** The connect check falls
     back to it when `vip/checkCusPwd` is refused for lack of permission. It
-    is sent `{ command: 1, serialNumber: ["CONNECTION-CHECK"] }` (an order
-    number nobody books), and only `code "1"` counts as proof of the
-    customer code and password. Whether J&T answers that with success and
-    an empty list, or with a "not found" code, is not documented; any
-    refusal other than a signature or permission one is logged and leaves
-    the credentials unverified. There is no documented code for the
+    is sent `{ command: 3, startDate, endDate, current: 1, size: 1 }`: the
+    orders placed in one minute ending two minutes ago, Cairo time.
+    `code "1"` (the documented success, rows or none) proves the customer
+    code and password. So does 145003064 "no data found", which is documented
+    only on addOrder: we assume J&T checks the digest before it looks up any
+    data. 145003080 "customer not found" (documented on `ess/balance`) is
+    treated like 145003031: 422 `CARRIER_AUTH_FAILED`. Any other refusal,
+    e.g. 145003097 (time range), is logged with J&T's code, message and
+    HTTP status, and leaves the credentials unverified. There is no documented code for the
     permission refusal either ("API account has no interface permissions"):
     it is matched by that text (`PERMISSION_CODES` in the adapter takes
     the code once one is seen).
@@ -109,7 +116,35 @@ Connecting runs the first of these the API account may call:
    `carrier_accounts.settings._verification` and cleared by a later connect
    that proves everything, or by a successful booking. A wrong customer
    code or password then shows at the first booking: 145003031, 422
-   `CARRIER_AUTH_FAILED`, account marked invalid.
+   `CARRIER_AUTH_FAILED`, account marked invalid. If getLocation is refused
+   too, nothing is proven: 422 `CARRIER_PERMISSION_DENIED`, nothing stored.
+
+With the credentials proven by 1 or 2, getLocation runs only to check a
+pickup address. Refused for lack of permission, it no longer fails the
+connect: the pickup address is saved unchecked and the connection carries
+`verification: { locationList: "unavailable" }`. Every connect sets the
+marks afresh.
+
+## Booking without the location list
+
+Capability `typedAddressNames` (J&T only). While a connection has
+`locationList: "unavailable"`:
+
+- A booking without `carrierAddress.names` tries the list again. Served,
+  the mark is cleared and booking goes on as usual. Refused, it is 422
+  `CARRIER_ADDRESS_NAMES_REQUIRED` (`details[0].levels` names the three
+  levels). A connection that had the list and is refused it at booking gets
+  the mark the same way.
+- `carrierAddress: { names: [governorate, city, area] }` is sent to addOrder
+  as typed (trimmed, at most 60 characters each), with no matching. The
+  shipment keeps `carrierResponse.address = { names }`.
+- `names` on a connection that has the list is 422 `VALIDATION_ERROR`.
+
+addOrder's address refusals are 422 `CARRIER_ADDRESS_REJECTED` on the level
+they name, for typed names and matched paths alike: 145003062 province
+(`.0`), 145003061 city (`.1`), 145003060 area (`.2`), 145003065 the whole
+address. J&T does not say whether it means the receiver or the pickup
+address. With the pickup address unchecked, the message says so.
 
 Any endpoint J&T refuses for lack of permission (booking, cancelling,
 tracking, printing, the location list) is 422 `CARRIER_PERMISSION_DENIED`

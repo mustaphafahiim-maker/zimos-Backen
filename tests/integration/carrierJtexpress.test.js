@@ -179,7 +179,13 @@ describe('a J&T API account without permission for the credential check', () => 
     const res = await connect(ctx);
     expect(res.status).toBe(200);
     const [probe] = fake.callsTo('order/getOrders');
-    expect(probe.biz).toEqual({ customerCode: fake.CUSTOMER_CODE, digest: expect.any(String), command: 1, serialNumber: ['CONNECTION-CHECK'] });
+    const stamp = expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    expect(probe.biz).toEqual({ customerCode: fake.CUSTOMER_CODE, digest: expect.any(String), command: 3, startDate: stamp, endDate: stamp, current: 1, size: 1 });
+    // One minute, in the past (Cairo time).
+    const asDate = (s) => new Date(`${s.replace(' ', 'T')}Z`).getTime();
+    expect(asDate(probe.biz.endDate) - asDate(probe.biz.startDate)).toBe(60 * 1000);
+    const cairoNow = new Date(new Intl.DateTimeFormat('sv-SE', { timeZone: 'Africa/Cairo', dateStyle: 'short', timeStyle: 'medium' }).format(new Date()).replace(' ', 'T') + 'Z');
+    expect(asDate(probe.biz.endDate)).toBeLessThan(cairoNow.getTime());
     expect(res.body.verification).toEqual({});
     expect(res.body.carrier.connection).not.toHaveProperty('verification');
     expect(await listed(ctx)).not.toHaveProperty('verification');
@@ -211,15 +217,83 @@ describe('a J&T API account without permission for the credential check', () => 
     expect(await storedSettings(ctx)).toMatchObject({ _verification: { customerCredentials: 'unverified' } });
   });
 
-  it('getOrders refusing the probe for another reason leaves the credentials unverified, with a warning', async () => {
+  it('getOrders refusing the probe for another reason (145003097) leaves the credentials unverified, warning with J&T\'s code and message', async () => {
     const ctx = await store();
     refuse('vip/checkCusPwd');
-    fake.state().refuseGetOrders = { code: '145003064', msg: 'No data found' };
+    fake.state().refuseGetOrders = { code: '145003097', msg: 'Illegal time range' };
     const warn = jest.spyOn(logger, 'warn');
     const res = await connect(ctx);
     expect(res.status).toBe(200);
     expect(res.body.verification).toEqual({ customerCredentials: 'unverified' });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('getOrders refused the connection check'), { carrierErrorCode: '145003064' });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('getOrders refused the connection check'), {
+      carrierErrorCode: '145003097',
+      carrierMessage: 'Illegal time range',
+      httpStatus: 200,
+    });
+  });
+
+  it('getOrders answering 145003064 "no data found" proves the credentials', async () => {
+    const ctx = await store();
+    refuse('vip/checkCusPwd');
+    fake.state().refuseGetOrders = { code: '145003064', msg: 'No data found' };
+    const res = await connect(ctx);
+    expect(res.status).toBe(200);
+    expect(res.body.verification).toEqual({});
+    expect(res.body.carrier.connection).not.toHaveProperty('verification');
+  });
+
+  it('145003080 "customer not found" is a wrong customer code or password: 422 CARRIER_AUTH_FAILED, nothing stored', async () => {
+    const ctx = await store();
+    refuse('vip/checkCusPwd');
+    fake.state().refuseGetOrders = { code: '145003080', msg: 'Customer not found' };
+    const res = await connect(ctx);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatchObject({ code: 'CARRIER_AUTH_FAILED', message: expect.stringContaining('customer code or password') });
+    expect(await db.CarrierAccount.count({ where: { workspaceId: ctx.ws } })).toBe(0);
+  });
+
+  it('getOrders proves the credentials, getLocation refused: 200, pickup address saved unchecked, locationList unavailable', async () => {
+    const ctx = await store();
+    refuse('vip/checkCusPwd', 'location/getLocation');
+    const res = await connect(ctx);
+    expect(res.status).toBe(200);
+    expect(res.body.verification).toEqual({ locationList: 'unavailable' });
+    expect(res.body.carrier.connection).toMatchObject({ status: 'active', verification: { locationList: 'unavailable' } });
+    expect(res.body.carrier.capabilities.typedAddressNames).toBe(true);
+
+    const connection = await listed(ctx);
+    expect(connection.verification).toEqual({ locationList: 'unavailable' });
+    expect(connection.settings).toMatchObject({ senderArea: fake.SENDER.senderArea });
+    expect(connection.settings).not.toHaveProperty('_verification');
+    expect(await storedSettings(ctx)).toMatchObject({ _verification: { locationList: 'unavailable' } });
+  });
+
+  it('checkCusPwd proves the credentials, getLocation refused: 200 with locationList unavailable', async () => {
+    const ctx = await store();
+    refuse('location/getLocation');
+    const res = await connect(ctx);
+    expect(res.status).toBe(200);
+    expect(res.body.verification).toEqual({ locationList: 'unavailable' });
+  });
+
+  it('getLocation only runs for a pickup address when the credentials are proven', async () => {
+    const ctx = await store();
+    refuse('location/getLocation');
+    const res = await connect(ctx, { credentials: CREDS, settings: { defaultWeightGrams: 500 } });
+    expect(res.status).toBe(200);
+    expect(fake.callsTo('location/getLocation')).toHaveLength(0);
+    expect(res.body.verification).toEqual({});
+  });
+
+  it('a later connect whose getLocation succeeds clears the locationList mark', async () => {
+    const ctx = await store();
+    refuse('location/getLocation');
+    expect((await connect(ctx)).body.verification).toEqual({ locationList: 'unavailable' });
+    fake.state().noPermission.clear();
+    const again = await connect(ctx, { settings: SETTINGS });
+    expect(again.status).toBe(200);
+    expect(again.body.carrier.connection).not.toHaveProperty('verification');
+    expect(await storedSettings(ctx)).not.toHaveProperty('_verification');
   });
 
   it('all three refused: 422 CARRIER_PERMISSION_DENIED naming the location list, nothing stored', async () => {
@@ -322,6 +396,137 @@ describe('J&T refusing an action for lack of permission', () => {
     expect(label.status).toBe(422);
     expect(label.body.error).toMatchObject({ code: 'CARRIER_PERMISSION_DENIED', message: expect.stringContaining('printing labels') });
     expect(await accountStatus(ctx)).toBe('active');
+  });
+});
+
+// --- typed names (no location list) ---------------------------------------------------
+
+describe('booking J&T with typed names when getLocation is not permitted', () => {
+  const NAMES = ['القاهرة', 'مدينة نصر', 'الحي السابع'];
+  const stored = async (ctx) => db.CarrierAccount.findOne({ where: { workspaceId: ctx.ws } });
+
+  async function withoutList() {
+    const ctx = await store();
+    fake.state().noPermission.add('location/getLocation');
+    const res = await connect(ctx);
+    expect(res.body.verification).toEqual({ locationList: 'unavailable' });
+    return ctx;
+  }
+
+  it('without names: 422 CARRIER_ADDRESS_NAMES_REQUIRED naming the levels, nothing booked', async () => {
+    const ctx = await withoutList();
+    const order = await confirmedOrder(ctx);
+    const res = await ship(ctx, order.id);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatchObject({
+      code: 'CARRIER_ADDRESS_NAMES_REQUIRED',
+      details: [{ field: 'carrierAddress.names', levels: ['governorate', 'city', 'area'] }],
+    });
+    expect(addOrders()).toHaveLength(0);
+  });
+
+  it('with names: sent to addOrder as typed, without reading the list; the shipment keeps the names', async () => {
+    const ctx = await withoutList();
+    const order = await confirmedOrder(ctx);
+    const before = fake.callsTo('location/getLocation').length;
+    const res = await ship(ctx, order.id, { carrierCode: 'jtexpress', carrierAddress: { names: [' القاهرة ', ...NAMES.slice(1)] } });
+    expect(res.status).toBe(201);
+    expect(fake.callsTo('location/getLocation')).toHaveLength(before);
+    const [sent] = addOrders();
+    expect(sent.receiver).toMatchObject({ countryCode: 'EGY', prov: NAMES[0], city: NAMES[1], area: NAMES[2] });
+    expect(sent.sender).toMatchObject({ prov: fake.SENDER.senderProv, city: fake.SENDER.senderCity, area: fake.SENDER.senderArea });
+    const shipment = await db.Shipment.findByPk(res.body.shipment.id);
+    expect(shipment.carrierResponse.address).toEqual({ names: NAMES });
+    // The booking proves nothing about the list: the mark stays.
+    expect((await stored(ctx)).settings).toMatchObject({ _verification: { locationList: 'unavailable' } });
+  });
+
+  it('refuses a wrong number of names, or an empty one, before calling J&T', async () => {
+    const ctx = await withoutList();
+    const order = await confirmedOrder(ctx);
+    const two = await ship(ctx, order.id, { carrierCode: 'jtexpress', carrierAddress: { names: NAMES.slice(0, 2) } });
+    expect(two.status).toBe(422);
+    expect(two.body.error.details).toEqual([expect.objectContaining({ field: 'carrierAddress.names' })]);
+    const empty = await ship(ctx, order.id, { carrierCode: 'jtexpress', carrierAddress: { names: [NAMES[0], ' ', NAMES[2]] } });
+    expect(empty.status).toBe(422);
+    expect(empty.body.error.details).toEqual([expect.objectContaining({ field: 'carrierAddress.names.1' })]);
+    expect(addOrders()).toHaveLength(0);
+  });
+
+  it('an account with the list keeps today\'s behaviour: names are refused, the order\'s address is matched', async () => {
+    const ctx = await connected();
+    const order = await confirmedOrder(ctx);
+    const typed = await ship(ctx, order.id, { carrierCode: 'jtexpress', carrierAddress: { names: NAMES } });
+    expect(typed.status).toBe(422);
+    expect(typed.body.error).toMatchObject({ code: 'VALIDATION_ERROR', details: [expect.objectContaining({ field: 'carrierAddress.names' })] });
+    expect((await ship(ctx, order.id)).status).toBe(201);
+  });
+
+  it('getLocation refused at booking marks the account and asks for names; served again, the mark is cleared', async () => {
+    const ctx = await connected();
+    const order = await confirmedOrder(ctx);
+    fake.state().noPermission.add('location/getLocation');
+    const refused = await ship(ctx, order.id);
+    expect(refused.status).toBe(422);
+    expect(refused.body.error.code).toBe('CARRIER_ADDRESS_NAMES_REQUIRED');
+    expect((await stored(ctx)).settings).toMatchObject({ _verification: { locationList: 'unavailable' } });
+    expect((await stored(ctx)).status).toBe('active');
+
+    fake.state().noPermission.clear();
+    const res = await ship(ctx, order.id);
+    expect(res.status).toBe(201);
+    expect((await stored(ctx)).settings).not.toHaveProperty('_verification');
+  });
+
+  it('a booking that proves unverified credentials clears that mark and keeps locationList', async () => {
+    const ctx = await store();
+    fake.state().noPermission.add('vip/checkCusPwd');
+    fake.state().refuseGetOrders = { code: '145003097', msg: 'Illegal time range' };
+    expect((await connect(ctx, { credentials: CREDS, settings: { defaultWeightGrams: 500 } })).body.verification).toEqual({
+      customerCredentials: 'unverified',
+    });
+    // A connect can't leave both marks (unproven credentials need the list),
+    // but a later refused read at booking can: set that state directly.
+    fake.state().noPermission.add('location/getLocation');
+    const row = await stored(ctx);
+    await row.update({
+      settings: { ...row.settings, ...fake.SENDER, _verification: { customerCredentials: 'unverified', locationList: 'unavailable' } },
+    });
+
+    const order = await confirmedOrder(ctx);
+    const res = await ship(ctx, order.id, { carrierCode: 'jtexpress', carrierAddress: { names: NAMES } });
+    expect(res.status).toBe(201);
+    expect((await stored(ctx)).settings._verification).toEqual({ locationList: 'unavailable' });
+  });
+
+  it.each([
+    ['145003062', 'Province is illegal', 'carrierAddress.names.0', 'governorate'],
+    ['145003061', 'City is illegal', 'carrierAddress.names.1', 'city'],
+    ['145003060', 'Area is illegal', 'carrierAddress.names.2', 'area'],
+    ['145003065', 'Province, city and area address is illegal', 'carrierAddress.names', null],
+  ])('addOrder %s (%s): 422 CARRIER_ADDRESS_REJECTED on %s', async (code, msg, field, level) => {
+    const ctx = await withoutList();
+    const order = await confirmedOrder(ctx);
+    fake.state().refuseCreate = { code, msg };
+    const res = await ship(ctx, order.id, { carrierCode: 'jtexpress', carrierAddress: { names: NAMES } });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatchObject({
+      code: 'CARRIER_ADDRESS_REJECTED',
+      message: expect.stringContaining('check the pickup address'),
+      details: [{ field, level, carrierErrorCode: code, message: 'Not accepted by J&T Express' }],
+    });
+    expect(await db.Shipment.count({ where: { orderId: order.id } })).toBe(0);
+    expect((await stored(ctx)).status).toBe('active');
+  });
+
+  it('an address refusal on a matched path names carrierAddress.path', async () => {
+    const ctx = await connected();
+    const order = await confirmedOrder(ctx);
+    fake.state().refuseCreate = { code: '145003061', msg: 'City is illegal' };
+    const res = await ship(ctx, order.id);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatchObject({ code: 'CARRIER_ADDRESS_REJECTED', details: [{ field: 'carrierAddress.path.1', level: 'city' }] });
+    expect(res.body.error.message).not.toContain('pickup address');
   });
 });
 
@@ -446,7 +651,11 @@ describe('booking a J&T shipment', () => {
     // details and the stack.
     expect(error).toHaveBeenCalledWith(
       'J&T Express: Not yet open COD business',
-      expect.objectContaining({ code: 'CARRIER_ERROR', details: { carrierErrorCode: '145003112', httpStatus: 200 }, stack: expect.any(String) })
+      expect.objectContaining({
+        code: 'CARRIER_ERROR',
+        details: { carrierErrorCode: '145003112', carrierMessage: 'Not yet open COD business', httpStatus: 200 },
+        stack: expect.any(String),
+      })
     );
   });
 });
