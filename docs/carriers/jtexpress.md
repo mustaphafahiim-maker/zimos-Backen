@@ -84,6 +84,37 @@ The numbers match the `UNVERIFIED (n)` comments in the adapter.
     `01XXXXXXXXX`, but one sample shows `+01111400750`.
 14. **Timestamp skew.** The server's tolerance for the `timestamp` header
     is not documented.
+15. **`order/getOrders` as a credential check.** The connect check falls
+    back to it when `vip/checkCusPwd` is refused for lack of permission. It
+    is sent `{ command: 1, serialNumber: ["CONNECTION-CHECK"] }` (an order
+    number nobody books), and only `code "1"` counts as proof of the
+    customer code and password. Whether J&T answers that with success and
+    an empty list, or with a "not found" code, is not documented; any
+    refusal other than a signature or permission one is logged and leaves
+    the credentials unverified. There is no documented code for the
+    permission refusal either ("API account has no interface permissions"):
+    it is matched by that text (`PERMISSION_CODES` in the adapter takes
+    the code once one is seen).
+
+## Credential check and permissions
+
+Connecting runs the first of these the API account may call:
+
+1. `vip/checkCusPwd` (both digests): proves everything.
+2. `order/getOrders` (both digests): proves everything (UNVERIFIED 15).
+3. `location/getLocation` (header digest only): proves the API account and
+   private key. The connection is saved as active with
+   `verification: { customerCredentials: "unverified" }` in the connect
+   response and on `connection` in `GET /carriers`. The mark is kept in
+   `carrier_accounts.settings._verification` and cleared by a later connect
+   that proves everything, or by a successful booking. A wrong customer
+   code or password then shows at the first booking: 145003031, 422
+   `CARRIER_AUTH_FAILED`, account marked invalid.
+
+Any endpoint J&T refuses for lack of permission (booking, cancelling,
+tracking, printing, the location list) is 422 `CARRIER_PERMISSION_DENIED`
+naming the endpoint, and the account is **not** marked invalid: the
+credentials are fine, J&T has to open the endpoint to the API account.
 
 ## What a merchant enters
 

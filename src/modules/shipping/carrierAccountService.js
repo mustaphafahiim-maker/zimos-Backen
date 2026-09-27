@@ -58,15 +58,57 @@ function newWebhookToken() {
 }
 
 /**
+ * What a connect could not prove about the credentials, e.g. J&T's
+ * { customerCredentials: 'unverified' } when this API account may not call
+ * any endpoint that checks the customer password. Kept in the settings
+ * column under this key (no column of its own): never shown as a setting,
+ * never taken from a request, and dropped once a check or a booking proves
+ * the credentials.
+ */
+const VERIFICATION_KEY = '_verification';
+
+function verificationOf(account) {
+  const value = account && account.settings ? account.settings[VERIFICATION_KEY] : null;
+  return value && typeof value === 'object' ? value : null;
+}
+
+function merchantSettings(settings) {
+  const { [VERIFICATION_KEY]: _omit, ...rest } = settings || {};
+  return rest;
+}
+
+/** The settings to store after a connect whose adapter answered `verification`. */
+function settingsWithVerification(settings, verification) {
+  const rest = merchantSettings(settings);
+  return verification && verification.customerCredentials === 'unverified'
+    ? { ...rest, [VERIFICATION_KEY]: { customerCredentials: 'unverified' } }
+    : rest;
+}
+
+/**
+ * After a successful booking: the carrier accepted the stored credentials in
+ * full, so an 'unverified' mark no longer holds.
+ */
+async function markCredentialsProven(account, { transaction } = {}) {
+  if (!verificationOf(account)) return;
+  await account.update({ settings: merchantSettings(account.settings) }, { transaction });
+  logger.info('Carrier customer credentials proven by a booking; unverified mark cleared', {
+    workspaceId: account.workspaceId,
+    carrierCode: account.carrierCode,
+  });
+}
+
+/**
  * `environment` ('production' | 'sandbox') only for a carrier with a sandbox,
  * and only when the credentials could be read. It is derived from the
  * credentials; no credential value is ever part of the result.
+ * `verification` only when the connect could not check everything.
  */
 function describeConnection(account, adapter, credentials) {
   if (!account) return null;
   const connection = {
     status: account.status,
-    settings: account.settings || {},
+    settings: merchantSettings(account.settings),
     lastVerifiedAt: account.lastVerifiedAt,
     connectedAt: account.createdAt,
     updatedAt: account.updatedAt,
@@ -75,6 +117,8 @@ function describeConnection(account, adapter, credentials) {
   if (adapter && typeof adapter.isSandbox === 'function' && credentials) {
     connection.environment = adapter.isSandbox(credentials) ? 'sandbox' : 'production';
   }
+  const verification = verificationOf(account);
+  if (verification) connection.verification = verification;
   return connection;
 }
 
@@ -189,7 +233,11 @@ async function connect(workspaceId, code, body, req) {
     throw new ValidationError([{ field: 'credentials', message: '"credentials" is required' }], 'Invalid body');
   }
 
-  const settings = validatePart(adapter.settingsSchema, body.settings || (existing ? existing.settings : {}), 'settings');
+  const settings = validatePart(
+    adapter.settingsSchema,
+    merchantSettings(body.settings || (existing ? existing.settings : {})),
+    'settings'
+  );
   if (settings.tierMap) settings.tierMap = await ownTiersOnly(workspaceId, settings.tierMap);
   let credentials;
   if (body.credentials) {
@@ -207,7 +255,8 @@ async function connect(workspaceId, code, body, req) {
 
   const values = {
     credentialsEncrypted: cipher.encrypt(credentials, aadFor(workspaceId, code), credentialsKey()),
-    settings,
+    // A check that proved everything clears an earlier 'unverified' mark.
+    settings: settingsWithVerification(settings, verification),
     status: 'active',
     lastVerifiedAt: new Date(),
   };
@@ -236,7 +285,7 @@ async function connect(workspaceId, code, body, req) {
         entityType: 'CarrierAccount',
         entityId: row.id,
         before,
-        after: { carrierCode: code, status: 'active', settings, credentialsUpdated: Boolean(body.credentials) },
+        after: { carrierCode: code, status: 'active', settings: values.settings, credentialsUpdated: Boolean(body.credentials) },
         req,
         transaction,
       });
@@ -396,6 +445,7 @@ module.exports = {
   loadCities,
   getCities,
   withAuthHandling,
+  markCredentialsProven,
   webhookUrlFor,
   clearCitiesCache,
   decryptFor,

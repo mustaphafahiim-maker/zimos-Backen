@@ -23,18 +23,27 @@ class CarrierAuthError extends AppError {
   }
 }
 
-/** Valid credentials whose scope doesn't allow this action. */
+/**
+ * Valid credentials whose scope doesn't allow this action. `details.endpoint`
+ * when the carrier refuses the endpoint itself to this account (J&T): the
+ * cancel flow then answers with this error rather than CARRIER_CANCEL_FAILED.
+ */
 class CarrierPermissionError extends AppError {
-  constructor(message) {
-    super('CARRIER_PERMISSION_DENIED', message, 422);
+  constructor(message, details) {
+    super('CARRIER_PERMISSION_DENIED', message, 422, details);
     this.name = 'CarrierPermissionError';
   }
 }
 
-/** Anything else the carrier refused or failed at. */
+/**
+ * Anything else the carrier refused or failed at. 424 Failed Dependency, not
+ * 502: an edge proxy may swap a 502 for its own page, without our CORS
+ * headers, and the dashboard then sees a network failure instead of this
+ * message. The error handler still logs it at error level.
+ */
 class CarrierError extends AppError {
   constructor(message, details) {
-    super('CARRIER_ERROR', message, 502, details);
+    super('CARRIER_ERROR', message, 424, details);
     this.name = 'CarrierError';
   }
 }

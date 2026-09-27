@@ -33,9 +33,11 @@ class GatewayRejectedError extends AppError {
   }
 }
 
+// 424 Failed Dependency rather than 502, for the reason in
+// carriers/carrierErrors.js; still logged at error level.
 class GatewayError extends AppError {
   constructor(message, details) {
-    super('GATEWAY_ERROR', message, 502, details);
+    super('GATEWAY_ERROR', message, 424, details);
     this.name = 'GatewayError';
   }
 }

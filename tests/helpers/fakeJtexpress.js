@@ -53,6 +53,11 @@ function reset() {
     refuseCancel: null, // null | message
     refuseCreate: null, // null | { code, msg }
     awbNotPdf: false,
+    // Paths this API account may not call: J&T answers them with its
+    // permission refusal (no code is documented for it; this one is made up).
+    noPermission: new Set(),
+    permissionCode: '0',
+    refuseGetOrders: null, // null | { code, msg }
   };
 }
 reset();
@@ -61,7 +66,7 @@ const reply = (json, status = 200) => ({ status, ok: status >= 200 && status < 3
 const ok = (data) => reply({ code: '1', msg: 'success', ...(data !== undefined ? { data } : {}) });
 const fail = (code, msg) => reply({ code, msg });
 
-const ORDER_PATHS = ['order/addOrder', 'order/cancelOrder', 'order/printOrder', 'vip/checkCusPwd'];
+const ORDER_PATHS = ['order/addOrder', 'order/cancelOrder', 'order/printOrder', 'order/getOrders', 'vip/checkCusPwd'];
 
 async function handle({ method = 'GET', url, headers = {}, form }) {
   const path = new URL(url).pathname.replace(/^\/webopenplatformapi\/api\//, '');
@@ -73,11 +78,17 @@ async function handle({ method = 'GET', url, headers = {}, form }) {
   if (headers.apiAccount !== API_ACCOUNT || headers.digest !== phpDigest(bizContent + PRIVATE_KEY) || !/^\d{13}$/.test(headers.timestamp || '')) {
     return fail('145003030', 'headers signature verification failed');
   }
+  if (fake.noPermission.has(path)) return fail(fake.permissionCode, 'API account has no interface permissions');
   if (ORDER_PATHS.includes(path) && (biz.customerCode !== CUSTOMER_CODE || biz.digest !== expectedBusinessDigest(CUSTOMER_CODE, PASSWORD, PRIVATE_KEY))) {
     return fail('145003031', 'Business parameter signature verification failed');
   }
 
   if (path === 'vip/checkCusPwd') return reply({ code: '1', msg: 'success' });
+  if (path === 'order/getOrders') {
+    if (fake.refuseGetOrders) return fail(fake.refuseGetOrders.code, fake.refuseGetOrders.msg);
+    const serials = Array.isArray(biz.serialNumber) ? biz.serialNumber : [];
+    return ok(serials.filter((s) => fake.orders.has(s)).map((s) => ({ txlogisticId: s, billCode: fake.orders.get(s).billCode })));
+  }
   if (path === 'location/getLocation') {
     if (biz.countryCode !== 'EGY') return fail('145003090', 'three-letter code incomplete');
     return ok(LOCATIONS.map((r, i) => ({ parentId: i, ...r })));

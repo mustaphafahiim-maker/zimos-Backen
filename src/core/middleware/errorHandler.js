@@ -15,6 +15,12 @@ function errorHandler(err, req, res, next) {
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
       logger.error(err.message, { code: err.code, requestId, stack: err.stack });
+    } else if (err.statusCode === 424) {
+      // A courier or payment gateway failed us (CARRIER_ERROR, GATEWAY_ERROR,
+      // CARRIER_BOOKING_NOT_SAVED). Below 500 only so no edge proxy replaces
+      // the answer; these still need seeing. Their details are already
+      // sanitised by the adapters (codes and HTTP statuses, no credentials).
+      logger.error(err.message, { code: err.code, requestId, details: err.details, stack: err.stack });
     } else {
       logger.warn(err.message, { code: err.code, requestId });
     }

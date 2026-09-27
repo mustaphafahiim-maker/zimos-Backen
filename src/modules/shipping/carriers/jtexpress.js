@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const Joi = require('joi');
 const carrierHttp = require('./carrierHttp');
-const { CarrierAuthError, CarrierError, sanitizeCarrierMessage } = require('./carrierErrors');
+const { CarrierAuthError, CarrierPermissionError, CarrierError, sanitizeCarrierMessage } = require('./carrierErrors');
 const { AppError } = require('../../../core/errors/AppError');
 const { assertInt } = require('../../../core/utils/money');
 const { normalizePhone } = require('../../../core/utils/phone');
@@ -51,6 +51,28 @@ const PASSWORD_SALT = 'jadada236t2';
 const CODE_OK = '1';
 const CODE_HEADER_SIGNATURE = '145003030'; // Headers signature verification failed
 const CODE_BUSINESS_SIGNATURE = '145003031'; // Business parameter signature verification failed
+
+// J&T's answer when the platform has not opened an endpoint to this API
+// account ("API account has no interface permissions", seen in production on
+// vip/checkCusPwd). No code is documented for it, so it is matched by text;
+// add its code here once one is seen.
+const PERMISSION_PATTERN = /no interface permission/i;
+const PERMISSION_CODES = [];
+
+// What each endpoint does, for the permission message.
+const ACTIONS = {
+  'vip/checkCusPwd': 'checking the customer account',
+  'order/getOrders': 'looking up orders',
+  'location/getLocation': 'reading the location list',
+  'order/addOrder': 'booking shipments',
+  'order/cancelOrder': 'cancelling shipments',
+  'logistics/trace': 'tracking shipments',
+  'order/printOrder': 'printing labels',
+};
+
+// A customer order number nobody books: order/getOrders is asked for it only
+// to have J&T check the business digest.
+const PROBE_ORDER_ID = 'CONNECTION-CHECK';
 
 // addOrder: "Weight, unit kg, range 0.01-30".
 const MIN_WEIGHT_KG = 0.01;
@@ -154,11 +176,20 @@ function baseUrl(creds) {
   return BASE_URLS[creds.environment] || BASE_URLS.production;
 }
 
-function failFrom(res, creds) {
+function failFrom(res, creds, path) {
   const body = res.json || {};
   const code = body.code != null ? String(body.code) : null;
   if (code === CODE_HEADER_SIGNATURE) return new CarrierAuthError(NAME, 'the API account or private key');
   if (code === CODE_BUSINESS_SIGNATURE) return new CarrierAuthError(NAME, 'the customer code or password');
+  // The credentials are fine: the account is just not allowed this call, so
+  // it is not marked invalid.
+  if (PERMISSION_CODES.includes(code) || PERMISSION_PATTERN.test(String(body.msg || ''))) {
+    return new CarrierPermissionError(
+      `${NAME} has not given your API account permission for ${ACTIONS[path] || path}. ` +
+        `Ask your J&T account manager to enable ${path} for it, then try again.`,
+      { endpoint: path, carrierErrorCode: code }
+    );
+  }
   const message = sanitizeCarrierMessage(body.msg, secretsOf(creds));
   return new CarrierError(message ? `${NAME}: ${message}` : `${NAME} returned HTTP ${res.status}`, {
     carrierErrorCode: code,
@@ -199,7 +230,7 @@ async function call(creds, { path, payload, business = false, retry = false, act
   // getLocation's sample answers code "10" with msg "success"; every other
   // sample answers "1" (UNVERIFIED 5).
   const ok = res.ok && res.json && (String(res.json.code) === CODE_OK || (res.json.msg === 'success' && res.json.data != null));
-  if (!ok) throw failFrom(res, creds);
+  if (!ok) throw failFrom(res, creds, path);
   return res.json.data;
 }
 
@@ -383,12 +414,52 @@ function senderInTree(tree, settings) {
 }
 
 /**
- * vip/checkCusPwd ("check whether the e-waybill account exists and its
- * information is correct") — read-only, and it exercises both digests. A
- * sender address in the settings must be complete and one J&T knows.
+ * Whether J&T accepts the customer code + password, by the first endpoint
+ * this API account may call. Each one exercises both digests; one J&T refuses
+ * for lack of permission hands over to the next.
+ *
+ *   vip/checkCusPwd   "check whether the e-waybill account exists and its
+ *                     information is correct"
+ *   order/getOrders   asked for an order number nobody booked (UNVERIFIED 15)
+ *
+ * 'verified' or 'unverified' (neither could be called); a rejected digest
+ * throws CarrierAuthError.
+ */
+async function checkCustomer(creds) {
+  try {
+    await call(creds, { path: 'vip/checkCusPwd', payload: {}, business: true, retry: true });
+    return 'verified';
+  } catch (err) {
+    if (!(err instanceof CarrierPermissionError)) throw err;
+  }
+  try {
+    await call(creds, { path: 'order/getOrders', payload: { command: 1, serialNumber: [PROBE_ORDER_ID] }, business: true, retry: true });
+    return 'verified';
+  } catch (err) {
+    if (err instanceof CarrierPermissionError) return 'unverified';
+    // Another refusal from J&T: the digests were not what it objected to,
+    // but nothing says they were checked either (UNVERIFIED 15).
+    if (err instanceof CarrierError && err.details && err.details.carrierErrorCode != null) {
+      logger.warn('J&T order/getOrders refused the connection check; customer credentials left unverified', {
+        carrierErrorCode: err.details.carrierErrorCode,
+      });
+      return 'unverified';
+    }
+    throw err;
+  }
+}
+
+/**
+ * The customer code + password (checkCustomer), then location/getLocation
+ * when they could not be checked: it takes the header digest only, so it
+ * proves the API account + private key and nothing more. The connection is
+ * then saved with { customerCredentials: 'unverified' }; a wrong customer
+ * code or password surfaces at the first booking (145003031).
+ * A sender address in the settings must be complete and one J&T knows.
  */
 async function verifyCredentials(creds, settings = {}) {
-  await call(creds, { path: 'vip/checkCusPwd', payload: {}, business: true, retry: true });
+  const customer = await checkCustomer(creds);
+  let tree = customer === 'unverified' ? await listAddressTree(creds) : null;
 
   const given = SENDER_KEYS.filter((k) => settings[k]);
   if (given.length > 0) {
@@ -397,12 +468,12 @@ async function verifyCredentials(creds, settings = {}) {
       throw new AppError('VALIDATION_ERROR', 'Validation failed', 422, missing.map((k) => ({ field: `settings.${k}`, message: 'Required with the rest of the pickup address' })));
     }
     localMobile(settings.senderMobile, 'settings.senderMobile');
-    const tree = await listAddressTree(creds);
+    tree = tree || (await listAddressTree(creds));
     if (!senderInTree(tree, settings)) {
       throw invalid('settings.senderArea', `Not a province > city > area in ${NAME}'s location list`);
     }
   }
-  return {};
+  return customer === 'unverified' ? { customerCredentials: 'unverified' } : {};
 }
 
 /** addOrder's receiver address fields from a matched [governorate, city, area] path. */

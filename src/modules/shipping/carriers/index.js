@@ -39,7 +39,7 @@ const { AppError, ValidationError } = require('../../../core/errors/AppError');
  * Every function receives the DECRYPTED credentials first. Never log them.
  * Errors: throw CarrierAuthError (credentials rejected -> 422, account marked
  * invalid), CarrierPermissionError (key lacks the scope -> 422) or
- * CarrierError (anything else -> 502) from ./carrierErrors; messages must be
+ * CarrierError (anything else -> 424) from ./carrierErrors; messages must be
  * sanitised (sanitizeCarrierMessage). All HTTP goes through
  * ./carrierHttp.request — creates without retry, reads with retry.
  *

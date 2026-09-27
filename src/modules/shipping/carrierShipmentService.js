@@ -10,7 +10,7 @@ const { getAdapter, availableFor, assertSandboxAllowed, reservedAdapterFor, MANU
 const { isCityDistrict } = require('./carriers/adapterContract');
 const accounts = require('./carrierAccountService');
 const { matchAddress } = require('./carrierAddressMatching');
-const { CarrierAuthError } = require('./carriers/carrierErrors');
+const { CarrierAuthError, CarrierPermissionError } = require('./carriers/carrierErrors');
 const { loadTiers } = require('./shippingPricing');
 
 /**
@@ -342,6 +342,7 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       );
 
       if (account.status !== 'active') await account.update({ status: 'active' }, { transaction });
+      await accounts.markCredentialsProven(account, { transaction });
 
       await recordAudit({
         workspaceId,
@@ -380,7 +381,7 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       throw new AppError(
         'CARRIER_BOOKING_NOT_SAVED',
         `${adapter.name} created shipment ${booked.trackingNumber}, but it could not be saved here. Cancel it in the ${adapter.name} dashboard, then book the order again.`,
-        502,
+        424,
         { carrierCode: adapter.code, trackingNumber: booked.trackingNumber, manualCancelRequired: true }
       );
     }
@@ -601,6 +602,10 @@ async function cancelCarrierShipmentsForOrder(workspaceId, orderId, transaction,
       );
     } catch (err) {
       const check = await alreadySettledAtCarrier(adapter, account, credentials, shipment, err);
+      // Not a refusal of this cancel: the carrier does not let this account
+      // call its cancel endpoint at all (J&T). 422 CARRIER_PERMISSION_DENIED
+      // as it is; the order is not cancelled.
+      if (!check.settled && err instanceof CarrierPermissionError && err.details && err.details.endpoint) throw err;
       if (!check.settled) {
         throw new AppError(
           'CARRIER_CANCEL_FAILED',

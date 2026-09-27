@@ -394,13 +394,13 @@ describe('a courier without a cancel API', () => {
     expect(audit.metadata.trigger).toBe('confirmation_correction');
   });
 
-  it('a booking that could not be saved: no cancel attempt, 502 CARRIER_BOOKING_NOT_SAVED and an audit row', async () => {
+  it('a booking that could not be saved: no cancel attempt, 424 CARRIER_BOOKING_NOT_SAVED and an audit row', async () => {
     const store = await connectedStore('fakemanual');
     const order = await store.api.confirmedOrder(store.wid, store.variant.id, MANUAL_ADDRESS);
     const spy = jest.spyOn(db.Shipment, 'create').mockRejectedValueOnce(new Error('disk full'));
     try {
       const res = await store.api.ship(store.wid, order.id, { carrierCode: 'fakemanual' });
-      expect(res.status).toBe(502);
+      expect(res.status).toBe(424);
       expect(res.body.error.code).toBe('CARRIER_BOOKING_NOT_SAVED');
       expect(res.body.error.details).toMatchObject({ carrierCode: 'fakemanual', trackingNumber: 'FM00001', manualCancelRequired: true });
     } finally {

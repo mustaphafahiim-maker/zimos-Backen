@@ -623,7 +623,7 @@ describe('booking a Bosta shipment', () => {
     expect(await db.Shipment.count({ where: { orderId: ctx.order.id } })).toBe(0);
   });
 
-  it('turns other Bosta errors into 502 CARRIER_ERROR with the sanitised message', async () => {
+  it('turns other Bosta errors into 424 CARRIER_ERROR with the sanitised message', async () => {
     const ctx = await readyToBook();
     httpSpy.mockImplementation(async (opts) =>
       opts.method === 'POST'
@@ -631,7 +631,7 @@ describe('booking a Bosta shipment', () => {
         : fakeBosta(opts)
     );
     const res = await createShipment(ctx.token, ctx.workspace.id, ctx.order.id);
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(424);
     expect(res.body.error.code).toBe('CARRIER_ERROR');
     expect(res.body.error.message).toBe('Bosta: City Not Found for key [redacted]');
     expect(res.body.error.details).toEqual({ carrierErrorCode: 3001, httpStatus: 400 });
@@ -955,7 +955,7 @@ describe('carrier HTTP timeouts', () => {
     }
   });
 
-  it('a create that times out: 502, nothing recorded, no cancel attempt, and the order can be booked again', async () => {
+  it('a create that times out: 424, nothing recorded, no cancel attempt, and the order can be booked again', async () => {
     const ctx = await readyToBook();
     httpSpy.mockImplementation(async (opts) => {
       if (opts.method === 'POST' && new URL(opts.url).pathname.endsWith('/deliveries')) {
@@ -965,7 +965,7 @@ describe('carrier HTTP timeouts', () => {
     });
 
     const res = await createShipment(ctx.token, ctx.workspace.id, ctx.order.id);
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(424);
     expect(res.body.error.code).toBe('CARRIER_ERROR');
     expect(res.body.error.message).toMatch(/may still have been created.*Bosta dashboard/);
     expect(await db.Shipment.count({ where: { orderId: ctx.order.id } })).toBe(0);
@@ -1021,7 +1021,7 @@ describe('the cities list is loaded before the order is locked', () => {
     );
 
     const res = await createShipment(ctx.token, ctx.workspace.id, ctx.order.id);
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(424);
     expect(res.body.error.code).toBe('CARRIER_ERROR');
     expect(callsTo('POST', '/deliveries')).toHaveLength(0);
     expect(await db.Shipment.count({ where: { orderId: ctx.order.id } })).toBe(0);

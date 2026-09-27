@@ -274,12 +274,12 @@ describe('booking a Mylerz shipment', () => {
     expect(fake.state().calls).toHaveLength(0);
   });
 
-  it('turns a package-level refusal into 502 CARRIER_ERROR with Mylerz\'s message, recording nothing', async () => {
+  it('turns a package-level refusal into 424 CARRIER_ERROR with Mylerz\'s message, recording nothing', async () => {
     const ctx = await connected();
     const order = await confirmedOrder(ctx);
     fake.state().refuseCreate = 'Neighborhood is not covered';
     const res = await ship(ctx, order.id);
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(424);
     expect(res.body.error).toMatchObject({ code: 'CARRIER_ERROR', message: 'Mylerz: Neighborhood is not covered' });
     expect(await db.Shipment.count({ where: { orderId: order.id } })).toBe(0);
   });
@@ -421,11 +421,11 @@ describe('the Mylerz label', () => {
     expect(fake.callsTo('POST', '/api/packages/GetAWB')[0].body).toEqual({ Barcode: ctx.shipment.waybillNumber });
   });
 
-  it('refuses anything that is not a PDF with 502', async () => {
+  it('refuses anything that is not a PDF with 424', async () => {
     const ctx = await booked();
     fake.state().awbNotPdf = true;
     const res = await getLabel(ctx);
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(424);
   });
 });
 
