@@ -3,7 +3,21 @@
 const env = require('../../config/env');
 
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
-const currentLevel = env.isProduction ? LEVELS.info : LEVELS.debug;
+
+// Production logs info and up. Under NODE_ENV=test the default is warn so a
+// suite run isn't buried in info/debug lines; LOG_LEVEL overrides it there.
+// Level filtering happens inside log(), so jest.spyOn(logger, 'info') etc.
+// still sees every call.
+function resolveLevel() {
+  if (env.isProduction) return LEVELS.info;
+  if (env.isTest) {
+    const override = LEVELS[String(process.env.LOG_LEVEL || '').trim().toLowerCase()];
+    return override ?? LEVELS.warn;
+  }
+  return LEVELS.debug;
+}
+
+const currentLevel = resolveLevel();
 
 // Secrets/PII that must never be written to logs even if accidentally passed in `meta`.
 const REDACT_KEYS = new Set([
