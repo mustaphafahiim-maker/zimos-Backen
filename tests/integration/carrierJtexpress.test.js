@@ -178,14 +178,18 @@ describe('a J&T API account without permission for the credential check', () => 
     refuse('vip/checkCusPwd');
     const res = await connect(ctx);
     expect(res.status).toBe(200);
+    // Command 2 (by waybill number) for one waybill in J&T's billCode shape
+    // that cannot exist, in serialNumber and in the waybillNos list J&T
+    // validates (1 to 1000 items). Read-only: nothing is booked.
     const [probe] = fake.callsTo('order/getOrders');
-    const stamp = expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-    expect(probe.biz).toEqual({ customerCode: fake.CUSTOMER_CODE, digest: expect.any(String), command: 3, startDate: stamp, endDate: stamp, current: 1, size: 1 });
-    // One minute, in the past (Cairo time).
-    const asDate = (s) => new Date(`${s.replace(' ', 'T')}Z`).getTime();
-    expect(asDate(probe.biz.endDate) - asDate(probe.biz.startDate)).toBe(60 * 1000);
-    const cairoNow = new Date(new Intl.DateTimeFormat('sv-SE', { timeZone: 'Africa/Cairo', dateStyle: 'short', timeStyle: 'medium' }).format(new Date()).replace(' ', 'T') + 'Z');
-    expect(asDate(probe.biz.endDate)).toBeLessThan(cairoNow.getTime());
+    expect(probe.biz).toEqual({
+      customerCode: fake.CUSTOMER_CODE,
+      digest: expect.any(String),
+      command: 2,
+      serialNumber: ['UEG999999999999'],
+      waybillNos: ['UEG999999999999'],
+    });
+    expect(fake.callsTo('order/addOrder')).toHaveLength(0);
     expect(res.body.verification).toEqual({});
     expect(res.body.carrier.connection).not.toHaveProperty('verification');
     expect(await listed(ctx)).not.toHaveProperty('verification');
@@ -230,6 +234,41 @@ describe('a J&T API account without permission for the credential check', () => 
       carrierMessage: 'Illegal time range',
       httpStatus: 200,
     });
+  });
+
+  it('the probe without waybillNos is refused with 999001030 (as on mj): nothing proven, logged, and with getLocation refused the connect fails', async () => {
+    const ctx = await store();
+    refuse('vip/checkCusPwd', 'location/getLocation');
+    // Re-send the probe the way it went before waybillNos was added.
+    const handle = carrierHttp.request.getMockImplementation();
+    carrierHttp.request.mockImplementation((req) => {
+      if (!req.url.endsWith('/order/getOrders')) return handle(req);
+      const biz = JSON.parse(req.form.bizContent);
+      delete biz.waybillNos;
+      const bizContent = JSON.stringify(biz);
+      return handle({ ...req, form: { ...req.form, bizContent }, headers: { ...req.headers, digest: fake.phpDigest(bizContent + fake.PRIVATE_KEY) } });
+    });
+    const warn = jest.spyOn(logger, 'warn');
+    const res = await connect(ctx);
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('CARRIER_PERMISSION_DENIED');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('getOrders refused the connection check'), {
+      carrierErrorCode: '999001030',
+      carrierMessage: '参数无效:waybillNos size must be between 1 and 1000;',
+      httpStatus: 200,
+    });
+    expect(await db.CarrierAccount.count({ where: { workspaceId: ctx.ws } })).toBe(0);
+  });
+
+  it('getOrders code "1" with a row proves the credentials', async () => {
+    const ctx = await store();
+    refuse('vip/checkCusPwd');
+    const order = { txlogisticId: 'X1', billCode: 'UEG999999999999', details: [], cancelled: false };
+    fake.state().orders.set(order.txlogisticId, order);
+    fake.state().byBill.set(order.billCode, order);
+    const res = await connect(ctx);
+    expect(res.status).toBe(200);
+    expect(res.body.verification).toEqual({});
   });
 
   it('getOrders answering 145003064 "no data found" proves the credentials', async () => {

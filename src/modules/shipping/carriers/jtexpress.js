@@ -80,11 +80,14 @@ const ACTIONS = {
   'order/printOrder': 'printing labels',
 };
 
-// order/getOrders as a credential check: command 3 (orders placed in a time
-// window, "returns unlimited number") over one minute in the past, one row
-// per page. An empty answer is the documented success, code "1".
-const PROBE_WINDOW_MS = 60 * 1000;
-const PROBE_LAG_MS = 2 * 60 * 1000;
+// order/getOrders as a credential check: command 2 (query by waybill number)
+// for one waybill that cannot exist. J&T validates a waybillNos list of 1 to
+// 1000 items whatever the command (999001030 "waybillNos size must be between
+// 1 and 1000" in production; not in the docs), so the number goes in both
+// serialNumber (the documented field, as the SDK sample sends it) and
+// waybillNos. The number has the documented billCode shape (UEG + 12 digits,
+// samples run near UEG000000190000) at the far end of the range. Read-only.
+const PROBE_WAYBILL = 'UEG999999999999';
 // Answers that can only follow a passed business digest (UNVERIFIED 15).
 const PROBE_PROVEN_CODES = [CODE_NO_DATA];
 
@@ -438,7 +441,7 @@ function senderInTree(tree, settings) {
  *
  *   vip/checkCusPwd   "check whether the e-waybill account exists and its
  *                     information is correct"
- *   order/getOrders   command 3 over a past minute: code "1" (with or
+ *   order/getOrders   command 2 for a waybill that cannot exist: code "1" (with or
  *                     without rows), or 145003064 "no data found"
  *                     (UNVERIFIED 15)
  *
@@ -452,14 +455,7 @@ async function checkCustomer(creds) {
   } catch (err) {
     if (!(err instanceof CarrierPermissionError)) throw err;
   }
-  const end = new Date(Date.now() - PROBE_LAG_MS);
-  const probe = {
-    command: 3,
-    startDate: cairoTime(new Date(end.getTime() - PROBE_WINDOW_MS)),
-    endDate: cairoTime(end),
-    current: 1,
-    size: 1,
-  };
+  const probe = { command: 2, serialNumber: [PROBE_WAYBILL], waybillNos: [PROBE_WAYBILL] };
   try {
     await call(creds, { path: 'order/getOrders', payload: probe, business: true, retry: true });
     return 'verified';
@@ -468,8 +464,9 @@ async function checkCustomer(creds) {
     const details = (err instanceof CarrierError && err.details) || {};
     if (details.carrierErrorCode == null) throw err;
     if (PROBE_PROVEN_CODES.includes(details.carrierErrorCode)) return 'verified';
-    // Another refusal (e.g. 145003097, the time range): the digests were not
-    // what J&T objected to, but nothing says they were checked either.
+    // Another refusal (e.g. 999001030 "参数无效", J&T's undocumented parameter
+    // validation): the digests were not what J&T objected to, but nothing says
+    // they were checked either.
     logger.warn('J&T order/getOrders refused the connection check; customer credentials left unverified', {
       carrierErrorCode: details.carrierErrorCode,
       carrierMessage: details.carrierMessage || null,

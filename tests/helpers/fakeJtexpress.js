@@ -86,6 +86,17 @@ async function handle({ method = 'GET', url, headers = {}, form }) {
   if (path === 'vip/checkCusPwd') return reply({ code: '1', msg: 'success' });
   if (path === 'order/getOrders') {
     if (fake.refuseGetOrders) return fail(fake.refuseGetOrders.code, fake.refuseGetOrders.msg);
+    // Production validates a waybillNos list whatever the command (undocumented).
+    const waybills = biz.waybillNos;
+    if (!Array.isArray(waybills) || waybills.length < 1 || waybills.length > 1000) {
+      return fail('999001030', '参数无效:waybillNos size must be between 1 and 1000;');
+    }
+    // command 2: by waybill number.
+    if (Number(biz.command) === 2) {
+      const serials = Array.isArray(biz.serialNumber) ? biz.serialNumber : [];
+      const found = serials.map((b) => fake.byBill.get(b)).filter(Boolean);
+      return ok(found.map((o) => ({ txlogisticId: o.txlogisticId, billCode: o.billCode })));
+    }
     // command 3: orders placed between startDate and endDate (at most 7 days).
     if (Number(biz.command) === 3) {
       const stamp = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;

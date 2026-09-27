@@ -90,14 +90,19 @@ The numbers match the `UNVERIFIED (n)` comments in the adapter.
     is not documented.
 15. **`order/getOrders` as a credential check.** The connect check falls
     back to it when `vip/checkCusPwd` is refused for lack of permission. It
-    is sent `{ command: 3, startDate, endDate, current: 1, size: 1 }`: the
-    orders placed in one minute ending two minutes ago, Cairo time.
+    is sent `{ command: 2, serialNumber: ["UEG999999999999"], waybillNos:
+    ["UEG999999999999"] }`: a lookup by waybill number for one waybill in the
+    documented billCode shape that cannot exist. Nothing is written.
+    `waybillNos` is not documented on getOrders (only on
+    `waybill/getWaybillInfo`, "1000 at most at one time"), but production
+    refused the earlier command 3 probe without it: 999001030
+    "参数无效:waybillNos size must be between 1 and 1000;" (HTTP 200).
     `code "1"` (the documented success, rows or none) proves the customer
     code and password. So does 145003064 "no data found", which is documented
     only on addOrder: we assume J&T checks the digest before it looks up any
     data. 145003080 "customer not found" (documented on `ess/balance`) is
     treated like 145003031: 422 `CARRIER_AUTH_FAILED`. Any other refusal,
-    e.g. 145003097 (time range), is logged with J&T's code, message and
+    e.g. 999001030 (parameter validation), is logged with J&T's code, message and
     HTTP status, and leaves the credentials unverified. There is no documented code for the
     permission refusal either ("API account has no interface permissions"):
     it is matched by that text (`PERMISSION_CODES` in the adapter takes
