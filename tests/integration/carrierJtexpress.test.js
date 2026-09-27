@@ -236,27 +236,60 @@ describe('a J&T API account without permission for the credential check', () => 
     });
   });
 
-  it('the probe without waybillNos is refused with 999001030 (as on mj): nothing proven, logged, and with getLocation refused the connect fails', async () => {
+  it('getOrders 999001030 (parameter validation, as on mj) + getLocation refused: 200, active, customerCredentials unverified and locationList unavailable', async () => {
     const ctx = await store();
     refuse('vip/checkCusPwd', 'location/getLocation');
-    // Re-send the probe the way it went before waybillNos was added.
-    const handle = carrierHttp.request.getMockImplementation();
-    carrierHttp.request.mockImplementation((req) => {
-      if (!req.url.endsWith('/order/getOrders')) return handle(req);
-      const biz = JSON.parse(req.form.bizContent);
-      delete biz.waybillNos;
-      const bizContent = JSON.stringify(biz);
-      return handle({ ...req, form: { ...req.form, bizContent }, headers: { ...req.headers, digest: fake.phpDigest(bizContent + fake.PRIVATE_KEY) } });
-    });
+    // Production refuses even the waybillNos probe this way: J&T passed the
+    // header digest and processed the request, so the API account is proven.
+    fake.state().refuseGetOrders = { code: '999001030', msg: '参数无效:waybillNos size must be between 1 and 1000;' };
     const warn = jest.spyOn(logger, 'warn');
     const res = await connect(ctx);
-    expect(res.status).toBe(422);
-    expect(res.body.error.code).toBe('CARRIER_PERMISSION_DENIED');
+    expect(res.status).toBe(200);
+    const marks = { customerCredentials: 'unverified', locationList: 'unavailable' };
+    expect(res.body.verification).toEqual(marks);
+    expect(res.body.carrier.connection).toMatchObject({ status: 'active', verification: marks });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('getOrders refused the connection check'), {
       carrierErrorCode: '999001030',
       carrierMessage: '参数无效:waybillNos size must be between 1 and 1000;',
       httpStatus: 200,
     });
+    // One getLocation, whether or not a pickup address was given.
+    expect(fake.callsTo('location/getLocation')).toHaveLength(1);
+
+    const connection = await listed(ctx);
+    expect(connection).toMatchObject({ status: 'active', verification: marks });
+    expect(connection.settings).toMatchObject({ senderArea: fake.SENDER.senderArea });
+    expect(await storedSettings(ctx)).toMatchObject({ _verification: marks });
+  });
+
+  it('getOrders 999001030 + getLocation refused, without a pickup address: 200 with both marks', async () => {
+    const ctx = await store();
+    refuse('vip/checkCusPwd', 'location/getLocation');
+    fake.state().refuseGetOrders = { code: '999001030', msg: '参数无效:waybillNos size must be between 1 and 1000;' };
+    const res = await connect(ctx, { credentials: CREDS, settings: { defaultWeightGrams: 500 } });
+    expect(res.status).toBe(200);
+    expect(res.body.verification).toEqual({ customerCredentials: 'unverified', locationList: 'unavailable' });
+  });
+
+  it('getOrders 999001030 + getLocation served: 200, customerCredentials unverified, pickup address checked', async () => {
+    const ctx = await store();
+    refuse('vip/checkCusPwd');
+    fake.state().refuseGetOrders = { code: '999001030', msg: '参数无效:waybillNos size must be between 1 and 1000;' };
+    const res = await connect(ctx, { credentials: CREDS, settings: { ...SETTINGS, senderArea: 'Atlantis' } });
+    expect(res.status).toBe(422);
+    expect(res.body.error.details[0].field).toBe('settings.senderArea');
+    const ok = await connect(ctx);
+    expect(ok.status).toBe(200);
+    expect(ok.body.verification).toEqual({ customerCredentials: 'unverified' });
+  });
+
+  it('getOrders refused with a header signature failure still fails the connect: 422 CARRIER_AUTH_FAILED', async () => {
+    const ctx = await store();
+    refuse('vip/checkCusPwd', 'location/getLocation');
+    fake.state().refuseGetOrders = { code: '145003030', msg: 'headers signature verification failed' };
+    const res = await connect(ctx);
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('CARRIER_AUTH_FAILED');
     expect(await db.CarrierAccount.count({ where: { workspaceId: ctx.ws } })).toBe(0);
   });
 

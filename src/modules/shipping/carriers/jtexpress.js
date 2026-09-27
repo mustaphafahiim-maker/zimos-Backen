@@ -445,8 +445,16 @@ function senderInTree(tree, settings) {
  *                     without rows), or 145003064 "no data found"
  *                     (UNVERIFIED 15)
  *
- * 'verified' or 'unverified' (neither could prove it); a rejected digest or
- * an unknown customer (145003080) throws CarrierAuthError.
+ *   'verified'    the customer code + password are proven
+ *   'account'     getOrders answered with another business code (e.g.
+ *                 999001030, parameter validation): J&T passed the header
+ *                 digest and processed the request, so the API account +
+ *                 private key are proven, the customer code + password not
+ *   'unverified'  nothing proven: both refused for lack of permission, or
+ *                 getOrders' refusal came without an HTTP 2xx
+ *
+ * A rejected digest or an unknown customer (145003080) throws
+ * CarrierAuthError.
  */
 async function checkCustomer(creds) {
   try {
@@ -465,36 +473,58 @@ async function checkCustomer(creds) {
     if (details.carrierErrorCode == null) throw err;
     if (PROBE_PROVEN_CODES.includes(details.carrierErrorCode)) return 'verified';
     // Another refusal (e.g. 999001030 "参数无效", J&T's undocumented parameter
-    // validation): the digests were not what J&T objected to, but nothing says
-    // they were checked either.
+    // validation): the business digest was not what J&T objected to, but
+    // nothing says it was checked either.
     logger.warn('J&T order/getOrders refused the connection check; customer credentials left unverified', {
       carrierErrorCode: details.carrierErrorCode,
       carrierMessage: details.carrierMessage || null,
       httpStatus: details.httpStatus != null ? details.httpStatus : null,
     });
-    return 'unverified';
+    const answered = details.httpStatus >= 200 && details.httpStatus < 300;
+    return answered ? 'account' : 'unverified';
   }
+}
+
+/** location/getLocation refused for lack of permission: the pickup address stays unchecked. */
+function locationListRefused(err, verification) {
+  if (!(err instanceof CarrierPermissionError)) throw err;
+  logger.warn('J&T refused location/getLocation; pickup address saved unchecked', {
+    carrierErrorCode: err.details ? err.details.carrierErrorCode : null,
+  });
+  verification.locationList = 'unavailable';
 }
 
 /**
  * The customer code + password (checkCustomer), then location/getLocation:
  *
- *   - when checkCustomer could not prove them: it takes the header digest
- *     only, so it proves the API account + private key and nothing more.
- *     Refused too, nothing is proven and the refusal fails the connect.
+ *   - when checkCustomer proved nothing ('unverified'): it takes the header
+ *     digest only, so it proves the API account + private key and nothing
+ *     more. Refused too, nothing is proven and the refusal fails the connect
+ *     (CARRIER_PERMISSION_DENIED).
+ *   - when checkCustomer proved the API account only ('account'): to learn
+ *     whether bookings can use the list.
  *   - when a pickup address needs checking against J&T's names.
  *
- * With the credentials proven, a getLocation refused for lack of permission
- * does not fail the connect: the pickup address is kept unchecked and the
- * answer carries { locationList: 'unavailable' } (bookings then take typed
- * names). A wrong customer code or password under 'unverified' surfaces at
- * the first booking (145003031).
+ * With the API account proven ('verified' or 'account'), a getLocation
+ * refused for lack of permission does not fail the connect: the pickup
+ * address is kept unchecked and the answer carries
+ * { locationList: 'unavailable' } (bookings then take typed names). Unless
+ * 'verified', it also carries { customerCredentials: 'unverified' }: a wrong
+ * customer code or password surfaces at the first booking (145003031).
  */
 async function verifyCredentials(creds, settings = {}) {
   const customer = await checkCustomer(creds);
-  const verification = customer === 'unverified' ? { customerCredentials: 'unverified' } : {};
+  const verification = customer === 'verified' ? {} : { customerCredentials: 'unverified' };
 
-  let tree = customer === 'unverified' ? await listAddressTree(creds) : null;
+  let tree = null;
+  if (customer === 'unverified') tree = await listAddressTree(creds);
+  if (customer === 'account') {
+    try {
+      tree = await listAddressTree(creds);
+    } catch (err) {
+      locationListRefused(err, verification);
+    }
+  }
 
   const given = SENDER_KEYS.filter((k) => settings[k]);
   if (given.length > 0) {
@@ -503,15 +533,11 @@ async function verifyCredentials(creds, settings = {}) {
       throw new AppError('VALIDATION_ERROR', 'Validation failed', 422, missing.map((k) => ({ field: `settings.${k}`, message: 'Required with the rest of the pickup address' })));
     }
     localMobile(settings.senderMobile, 'settings.senderMobile');
-    if (!tree) {
+    if (!tree && !verification.locationList) {
       try {
         tree = await listAddressTree(creds);
       } catch (err) {
-        if (!(err instanceof CarrierPermissionError)) throw err;
-        logger.warn('J&T refused location/getLocation; pickup address saved unchecked', {
-          carrierErrorCode: err.details ? err.details.carrierErrorCode : null,
-        });
-        verification.locationList = 'unavailable';
+        locationListRefused(err, verification);
       }
     }
     if (tree && !senderInTree(tree, settings)) {

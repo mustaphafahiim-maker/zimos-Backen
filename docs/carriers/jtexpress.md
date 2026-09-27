@@ -103,7 +103,12 @@ The numbers match the `UNVERIFIED (n)` comments in the adapter.
     data. 145003080 "customer not found" (documented on `ess/balance`) is
     treated like 145003031: 422 `CARRIER_AUTH_FAILED`. Any other refusal,
     e.g. 999001030 (parameter validation), is logged with J&T's code, message and
-    HTTP status, and leaves the credentials unverified. There is no documented code for the
+    HTTP status, and leaves the customer code and password unverified. With
+    HTTP 2xx such a refusal still proves the API account and private key
+    (J&T passed the header digest and processed the request); see below.
+    Production answers 999001030 even though the probe carries `waybillNos`
+    (the request was checked through the real adapter code: the field is
+    in bizContent). There is no documented code for the
     permission refusal either ("API account has no interface permissions"):
     it is matched by that text (`PERMISSION_CODES` in the adapter takes
     the code once one is seen).
@@ -114,6 +119,13 @@ Connecting runs the first of these the API account may call:
 
 1. `vip/checkCusPwd` (both digests): proves everything.
 2. `order/getOrders` (both digests): proves everything (UNVERIFIED 15).
+   Refused with any other business code over HTTP 2xx (e.g. 999001030), it
+   proves the API account and private key only. getLocation then runs once
+   whether or not a pickup address was given. Refused for lack of
+   permission, the connection is still saved as active with
+   `verification: { customerCredentials: "unverified", locationList:
+   "unavailable" }`. The first booking proves or rejects the customer code
+   and password, as under 3.
 3. `location/getLocation` (header digest only): proves the API account and
    private key. The connection is saved as active with
    `verification: { customerCredentials: "unverified" }` in the connect
@@ -123,6 +135,9 @@ Connecting runs the first of these the API account may call:
    code or password then shows at the first booking: 145003031, 422
    `CARRIER_AUTH_FAILED`, account marked invalid. If getLocation is refused
    too, nothing is proven: 422 `CARRIER_PERMISSION_DENIED`, nothing stored.
+   This is the only case that fails the connect for permission: every probe
+   was refused for permission (or a signature failed: 422
+   `CARRIER_AUTH_FAILED`).
 
 With the credentials proven by 1 or 2, getLocation runs only to check a
 pickup address. Refused for lack of permission, it no longer fails the
