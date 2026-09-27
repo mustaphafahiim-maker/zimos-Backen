@@ -11,6 +11,7 @@ const inventoryService = require('../inventory/inventoryService');
 const { completeOrderInTransaction, afterOrderCompleted } = require('../orders/orderCompletion');
 const { setFinancialState } = require('../orders/orderStateService');
 const fraudRules = require('../fraud/fraudRules');
+const platformBlocklist = require('../risk/platformBlocklistService');
 const gateways = require('./gateways');
 const gatewayRuntime = require('./gatewayRuntime');
 const methodsService = require('./paymentMethodsService');
@@ -52,11 +53,24 @@ const methodsService = require('./paymentMethodsService');
  *   - Paid twice: both payments are recorded, the order is flagged
  *     duplicate_payment. Nothing is refunded automatically.
  *   - Paid in test mode: flagged test_payment; such an order cannot be shipped.
+ *
+ * The platform blocklist (risk/platformBlocklistService) is checked again at
+ * the two steps that make the order a sale, on what the order stores — an
+ * entry may have been added or extended since checkout:
+ *   - Switch to COD: refused with the generic ORDER_REJECTED, the order left
+ *     exactly as it was.
+ *   - Paid (or paid after expiry, which would reopen it): the gateway has the
+ *     money already, so the payment is recorded as received, but the order is
+ *     cancelled ('customer_blocked') instead of completed: stock released, no
+ *     invoice or confirmation, flagged blacklisted_customer and
+ *     paid_after_cancel (paid_after_expiry when it had expired) for the
+ *     merchant to refund. Nothing is refunded automatically.
  */
 
 const PAID_STATES = ['paid', 'partially_paid', 'refunded', 'partially_refunded'];
 const OPEN_ATTEMPT = 'initialized';
 const EXPIRED_REASON = 'payment_expired';
+const BLOCKED_REASON = 'customer_blocked';
 // How often a shopper's status check may ask the gateway about one attempt.
 const INQUIRY_THROTTLE_MS = 5000;
 
@@ -322,8 +336,28 @@ async function recordPaymentTransaction(account, tx) {
     const wasPaid = isPaid(order) && Number(order.amountPaid) > 0;
     if (wasPaid) flags = withFlag(flags, FLAGS.DUPLICATE_PAYMENT);
 
+    // A payment that would make the order a sale (one still waiting for it,
+    // or one that expired waiting and would be reopened) meets the platform
+    // blocklist first, as the order did at checkout. A match cannot turn the
+    // money away, the gateway already has it: the payment is recorded below
+    // and the order is cancelled instead of completed, for the merchant to
+    // refund.
+    const becomesSale = !order.completedAt && (!order.cancelledAt || order.cancellationReason === EXPIRED_REASON);
+    const platformBlock = becomesSale ? await platformBlocklist.findActiveMatchForOrder(order, transaction) : null;
+
     let reopened = false;
-    if (order.cancelledAt) {
+    if (platformBlock) {
+      flags = withFlag(flags, platformBlocklist.BLOCKED_FLAG);
+      flags = withFlag(flags, order.cancelledAt ? FLAGS.PAID_AFTER_EXPIRY : FLAGS.PAID_AFTER_CANCEL);
+      if (!order.cancelledAt) {
+        // What expiry does on the way out; an expired order has done it already.
+        await releaseStock(order, transaction, 'order_customer_blocked');
+        await db.Payment.update(
+          { status: 'cancelled' },
+          { where: { orderId: order.id, status: OPEN_ATTEMPT, id: { [Op.ne]: payment.id } }, transaction }
+        );
+      }
+    } else if (order.cancelledAt) {
       if (order.cancellationReason === EXPIRED_REASON && (await reReserveStock(order, transaction))) {
         reopened = true;
       } else {
@@ -347,6 +381,10 @@ async function recordPaymentTransaction(account, tx) {
 
     const amountPaid = Number(order.amountPaid) + (sameCurrency ? received : 0);
     const updates = { amountPaid, riskFlags: flags };
+    if (platformBlock) {
+      updates.cancelledAt = order.cancelledAt || new Date();
+      updates.cancellationReason = BLOCKED_REASON;
+    }
     if (reopened) {
       updates.cancelledAt = null;
       updates.cancellationReason = null;
@@ -365,8 +403,9 @@ async function recordPaymentTransaction(account, tx) {
     }
 
     // The order becomes a sale now — unless it stays cancelled (the merchant
-    // refunds it) or was already one (a COD switch, a duplicate).
-    const standing = !order.cancelledAt || reopened;
+    // refunds it), was cancelled just now (platform blocklist) or was already
+    // one (a COD switch, a duplicate).
+    const standing = !platformBlock && (!order.cancelledAt || reopened);
     if (standing && !order.completedAt) {
       const context = order.completionContext || {};
       await completeOrderInTransaction(order, { discount: context.discount || null, lateRedemption: true }, transaction);
@@ -392,6 +431,10 @@ async function recordPaymentTransaction(account, tx) {
       transaction,
     });
 
+    if (platformBlock) {
+      await platformBlocklist.recordOrderBlocked(order, platformBlock, { on: 'payment', transaction });
+      return 'paid_blocked';
+    }
     return reopened ? 'paid_reopened' : 'paid';
   });
 
@@ -548,6 +591,9 @@ async function loadOrderForShopper(workspaceId, orderId, token) {
 }
 
 function shopperStatusOf(order) {
+  // Paid, but not going ahead: the shopper sees a cancelled order, not a
+  // confirmation, and is told nothing about why.
+  if (order.cancelledAt && order.cancellationReason === BLOCKED_REASON) return 'cancelled';
   if (isPaid(order) && Number(order.amountPaid) > 0) return 'paid';
   if (order.cancelledAt) return order.cancellationReason === EXPIRED_REASON ? 'expired' : 'cancelled';
   if (order.paymentMethod === 'cod') return 'cod';
@@ -711,6 +757,12 @@ function assertAwaiting(order) {
  * order-completed step, no expiry. Refused when the store's fraud rules would
  * have blocked it as a COD order in the first place (decision: for online
  * payments a rule's "block" only flags — paying cash is not online).
+ *
+ * Refused first, whatever the store's rules say, when the order's phone,
+ * email or shipping address now matches an active platform blocklist entry:
+ * same generic ORDER_REJECTED, an `order.blocked` row in the store, and the
+ * order left as it was (still awaiting its online payment, which the same
+ * check meets if it lands).
  */
 async function switchToCod(workspaceId, orderId, token, req) {
   const workspace = await publicWorkspace(workspaceId);
@@ -724,6 +776,12 @@ async function switchToCod(workspaceId, orderId, token, req) {
   await inquireOpenAttempts(order.id);
   order = await db.Order.findByPk(order.id);
   assertAwaiting(order);
+
+  const platformBlock = await platformBlocklist.findActiveMatchForOrder(order);
+  if (platformBlock) {
+    await platformBlocklist.recordOrderBlocked(order, platformBlock, { on: 'switch_to_cod', req });
+    throw platformBlocklist.rejection(order.customerId, platformBlock);
+  }
 
   const rules = fraudRules.resolveFraudRules(workspace.settings);
   const ruleFlags = Object.values(fraudRules.FLAGS);
@@ -776,6 +834,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
 module.exports = {
   FLAGS,
   EXPIRED_REASON,
+  BLOCKED_REASON,
   PAID_STATES,
   assertReturnUrl,
   prepareOnlineCheckout,

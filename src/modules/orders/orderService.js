@@ -8,6 +8,7 @@ const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
+const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const customerService = require('../customers/customerService');
 const discountService = require('../discounts/discountService');
@@ -112,27 +113,33 @@ function weightUnit(variant, quantity) {
 }
 
 /**
- * A refused storefront order leaves a trace the merchant can see. Written
- * after the order's transaction has rolled back, on its own connection: an
- * audit row inserted inside that transaction would roll back with it. The
- * customer id is always a committed row here — every refusal needs a
- * blacklist flag, past orders or past rejections, none of which a customer
- * created by this very checkout can have.
+ * A refused order leaves a trace the merchant can see. Written after the
+ * order's transaction has rolled back, on its own connection: an audit row
+ * inserted inside that transaction would roll back with it. The customer id
+ * is a committed row in every case but one: a first-time buyer refused by a
+ * platform blocklist entry, whose customer row was created by this very
+ * order and rolled back with it. The entry itself is named in the metadata,
+ * so that refusal is still traceable.
+ *
+ * The actor is the staff member when a platform block refuses an order
+ * placed from the dashboard; a storefront refusal has none.
  */
 async function recordRefusal(workspaceId, refusal, req) {
-  logger.warn('Storefront order refused by fraud rules', {
+  logger.warn(refusal.platformBlock ? 'Order refused by the platform blocklist' : 'Storefront order refused by fraud rules', {
     workspaceId,
     customerId: refusal.customerId,
     flags: refusal.flags,
+    platformBlocklistEntryId: refusal.platformBlock ? refusal.platformBlock.id : undefined,
   });
   try {
     await recordAudit({
       workspaceId,
-      actorUserId: null,
+      actorUserId: req && req.user ? req.user.id : null,
       action: 'order.blocked',
       entityType: 'Customer',
       entityId: refusal.customerId,
       after: { flags: refusal.flags },
+      metadata: refusal.platformBlock ? platformBlocklist.auditMetadata(refusal.platformBlock) : null,
       req,
     });
   } catch (err) {
@@ -157,6 +164,12 @@ async function recordRefusal(workspaceId, refusal, req) {
  * completion step, which also gets the discount to redeem. Fraud rules treat
  * it as an online payment: the blocklist still refuses, any other rule set to
  * "block" only flags.
+ *
+ * The platform blocklist (risk/platformBlocklistService) is not a fraud rule
+ * and none of the above exempts an order from it: an active entry matching
+ * the order's phone, email or shipping address refuses every order — storefront
+ * or staff, COD or online, checkout or funnel upsell — whatever the store's
+ * own settings say.
  */
 async function createOrder(
   workspaceId,
@@ -174,6 +187,19 @@ async function createOrder(
 
   const run = async (transaction) => {
     const customer = await customerService.findOrCreateByPhone(workspaceId, contact, transaction);
+
+    // An active platform blocklist entry refuses the order outright, in every
+    // store and for every caller, before the store's own rules are consulted.
+    // The refusal is recorded as a blocked customer ('order.blocked', flag
+    // blacklisted_customer, the entry in the metadata); the customer row
+    // itself is not touched. Expired entries never match. An order placed
+    // before its entry existed is checked again when it would become a sale
+    // (payments/onlinePaymentService: switch to COD, a payment landing).
+    const platformBlock = await platformBlocklist.findActiveMatch(
+      { phoneNormalized: customer.phoneNormalized, email: contact.email, shippingAddress },
+      transaction
+    );
+    if (platformBlock) throw platformBlocklist.rejection(customer.id, platformBlock);
 
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');

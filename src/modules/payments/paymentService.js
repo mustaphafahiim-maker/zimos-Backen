@@ -20,9 +20,10 @@ const PROVIDERS = {
 };
 
 // env.payments.defaultProvider (PAYMENTS_DEFAULT_PROVIDER) is not read on this
-// path — the provider is derived from the order's own paymentMethod. It is
-// still surfaced on the platform-admin services page
-// (platformAdmin/systemServicesService.js), so it is not dead config.
+// path — the provider is derived from the order's own paymentMethod — nor
+// anywhere else any more: the platform-admin services page reports
+// PAYMENTS_ONLINE_ENABLED and the gateways instead. It stays parsed in
+// config/env.js so a deployment that still sets it is unaffected.
 
 function getProvider(code) {
   const provider = PROVIDERS[code];

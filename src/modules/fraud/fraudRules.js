@@ -63,11 +63,13 @@ function hasCountingRule(rules) {
 
 /** Thrown to refuse a storefront order. The public error carries no rule names. */
 class OrderRejectedError extends AppError {
-  constructor({ customerId, flags }) {
+  constructor({ customerId, flags, platformBlock = null }) {
     super('ORDER_REJECTED', REJECTION_MESSAGE, 422);
     // Kept off the serialized error (the handler only emits code, message and
     // details) — createOrder reads it to log and audit the refusal.
-    Object.defineProperty(this, 'refusal', { value: { customerId, flags }, enumerable: false });
+    // `platformBlock` is the platform blocklist entry ({ id, type }) when that
+    // is what refused the order.
+    Object.defineProperty(this, 'refusal', { value: { customerId, flags, platformBlock }, enumerable: false });
   }
 }
 
@@ -152,6 +154,9 @@ async function ordersInLastDay(workspaceId, customerId, transaction) {
  * `onlinePayment`: the order is paid through a gateway before anything ships,
  * so the counting rules' "block" only flags it — the money is real, and the
  * merchant decides. The blocklist still refuses.
+ *
+ * The platform blocklist is not evaluated here: orderService.createOrder
+ * refuses a platform match before any store rule runs.
  */
 async function evaluateStorefrontOrder({ workspaceId, customer, variantIds, transaction, onlinePayment = false }) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'], transaction });
