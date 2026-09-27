@@ -17,6 +17,10 @@ const list = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
+const counts = asyncHandler(async (req, res) => {
+  res.json(await service.countOrders(req.tenant.workspaceId, req.query));
+});
+
 const cancel = asyncHandler(async (req, res) => {
   const order = await service.cancelOrder(req.tenant.workspaceId, req.params.orderId, req.body, req);
   res.json({ order });
@@ -52,4 +56,4 @@ const refreshShipment = asyncHandler(async (req, res) => {
   res.json({ shipment });
 });
 
-module.exports = { create, get, list, cancel, update, listShipments, createShipment, updateShipment, refreshShipment };
+module.exports = { create, get, list, counts, cancel, update, listShipments, createShipment, updateShipment, refreshShipment };

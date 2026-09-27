@@ -149,7 +149,29 @@
           "422": { "description": "Insufficient stock / invalid discount / validation error" }
         }
       },
-      "get": { "summary": "List orders (filterable by confirmation/financial/fulfillment state)", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK" } } }
+      "get": {
+        "summary": "List orders (search, filters, sortable keyset pagination; each order carries its `funnel` {id,name,subdomain} or null for store orders)",
+        "parameters": [
+          { "$ref": "#/components/parameters/workspaceId" },
+          { "name": "q", "in": "query", "schema": { "type": "string", "maxLength": 100 }, "description": "Matches order number, customer name or phone (case-insensitive substring)" },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "createdAt >= from" },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "createdAt < to" },
+          { "name": "source", "in": "query", "schema": { "type": "string", "enum": ["store", "funnel"] } },
+          { "name": "funnelId", "in": "query", "schema": { "type": "string", "format": "uuid" } },
+          { "name": "paymentMethod", "in": "query", "schema": { "type": "string", "enum": ["cod", "card", "wallet", "bank_transfer"] } },
+          { "name": "cancelled", "in": "query", "schema": { "type": "boolean" }, "description": "true = only cancelled, false = only non-cancelled, omitted = both" },
+          { "name": "confirmationState", "in": "query", "schema": { "type": "string", "enum": ["pending", "confirmed", "rejected", "unreachable", "postponed"] } },
+          { "name": "financialState", "in": "query", "schema": { "type": "string", "enum": ["pending", "partially_paid", "paid", "failed", "refunded", "partially_refunded"] } },
+          { "name": "fulfillmentState", "in": "query", "schema": { "type": "string", "enum": ["unfulfilled", "partially_fulfilled", "fulfilled", "returned"] } },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["newest", "oldest", "total_desc", "total_asc"], "default": "newest" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque nextCursor from the previous page" }
+        ],
+        "responses": { "200": { "description": "{ orders: [...], nextCursor: string | null }" }, "422": { "description": "Malformed cursor or filter" } }
+      }
+    },
+    "/workspaces/{workspaceId}/orders/counts": {
+      "get": { "summary": "Tab counts for the orders page (same filters as the list, minus confirmationState/sort/limit/cursor)", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "{ counts: { all, pending, confirmed, unreachable, postponed, rejected, cancelled, unfulfilled, fulfilled, returned, unpaid } }" } } }
     },
     "/workspaces/{workspaceId}/orders/{orderId}": {
       "get": { "summary": "Get an order with items/payments/shipments", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK" }, "404": { "description": "Not found (including cross-tenant access)" } } }

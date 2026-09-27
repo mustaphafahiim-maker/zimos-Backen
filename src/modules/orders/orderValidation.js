@@ -19,6 +19,19 @@ const address = Joi.object({
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
 
+// Filters shared by GET /orders and GET /orders/counts.
+const listFilters = {
+  q: Joi.string().trim().max(100).optional(),
+  from: Joi.date().iso().optional(),
+  to: Joi.date().iso().optional(),
+  source: Joi.string().valid('store', 'funnel').optional(),
+  funnelId: uuid.optional(),
+  paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').optional(),
+  cancelled: Joi.boolean().optional(),
+  financialState: Joi.string().valid('pending', 'partially_paid', 'paid', 'failed', 'refunded', 'partially_refunded').optional(),
+  fulfillmentState: Joi.string().valid('unfulfilled', 'partially_fulfilled', 'fulfilled', 'returned').optional(),
+};
+
 module.exports = {
   create: {
     params: Joi.object({ workspaceId: uuid.required() }),
@@ -89,10 +102,15 @@ module.exports = {
     params: Joi.object({ workspaceId: uuid.required() }),
     query: Joi.object({
       limit: Joi.number().integer().min(1).max(200).default(50),
-      cursor: uuid.optional(),
+      // Opaque keyset cursor (base64url JSON) — see orderService#listOrders.
+      cursor: Joi.string().max(500).optional(),
+      sort: Joi.string().valid('newest', 'oldest', 'total_desc', 'total_asc').default('newest'),
       confirmationState: Joi.string().valid('pending', 'confirmed', 'rejected', 'unreachable', 'postponed').optional(),
-      financialState: Joi.string().valid('pending', 'partially_paid', 'paid', 'failed', 'refunded', 'partially_refunded').optional(),
-      fulfillmentState: Joi.string().valid('unfulfilled', 'partially_fulfilled', 'fulfilled', 'returned').optional(),
+      ...listFilters,
     }),
+  },
+  counts: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    query: Joi.object(listFilters),
   },
 };

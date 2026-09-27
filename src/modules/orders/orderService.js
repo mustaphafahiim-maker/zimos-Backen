@@ -292,23 +292,125 @@ async function getOrder(workspaceId, orderId) {
       { model: db.OrderItem, as: 'items' },
       { model: db.Payment, as: 'payments' },
       { model: db.Shipment, as: 'shipments' },
+      { model: db.Funnel, as: 'funnel', attributes: ['id', 'name', 'subdomain'] },
     ],
   });
   if (!order) throw new NotFoundError('Order');
   return order;
 }
 
-async function listOrders(workspaceId, { limit = 50, cursor, confirmationState, financialState, fulfillmentState } = {}) {
+// Sort key → [attribute, direction]. `id` is always appended as the final
+// tiebreaker so keyset pagination is deterministic even when many orders
+// share a createdAt/totalAmount.
+const LIST_SORTS = {
+  newest: ['createdAt', 'DESC'],
+  oldest: ['createdAt', 'ASC'],
+  total_desc: ['totalAmount', 'DESC'],
+  total_asc: ['totalAmount', 'ASC'],
+};
+
+/** Filters shared by listOrders and countOrders (everything but the cursor/sort). */
+function buildOrderFilters(workspaceId, { q, from, to, source, funnelId, paymentMethod, cancelled, financialState, fulfillmentState }) {
+  const { Op, literal, where: sqlWhere } = db.Sequelize;
   const where = { workspaceId };
-  if (cursor) where.id = { [db.Sequelize.Op.gt]: cursor };
-  if (confirmationState) where.confirmationState = confirmationState;
   if (financialState) where.financialState = financialState;
   if (fulfillmentState) where.fulfillmentState = fulfillmentState;
+  if (paymentMethod) where.paymentMethod = paymentMethod;
+  if (funnelId) where.funnelId = funnelId;
+  else if (source === 'store') where.funnelId = null;
+  else if (source === 'funnel') where.funnelId = { [Op.ne]: null };
+  if (cancelled === true) where.cancelledAt = { [Op.ne]: null };
+  else if (cancelled === false) where.cancelledAt = null;
+  if (from || to) {
+    where.createdAt = {};
+    if (from) where.createdAt[Op.gte] = from;
+    if (to) where.createdAt[Op.lt] = to;
+  }
+  if (q) {
+    // Column references are constants; the user's string only ever travels
+    // as a bound value on the right-hand side.
+    const like = { [Op.iLike]: `%${q}%` };
+    const or = [
+      { orderNumber: like },
+      sqlWhere(literal(`"Order"."contact_snapshot"->>'fullName'`), like),
+      sqlWhere(literal(`"Order"."contact_snapshot"->>'phone'`), like),
+    ];
+    const digits = q.replace(/[\s-]/g, '');
+    if (digits && digits !== q) or.push(sqlWhere(literal(`"Order"."contact_snapshot"->>'phone'`), { [Op.iLike]: `%${digits}%` }));
+    where[Op.or] = or;
+  }
+  return where;
+}
 
-  const orders = await db.Order.findAll({ where, order: [['id', 'ASC']], limit: limit + 1, include: [{ model: db.OrderItem, as: 'items' }] });
+function encodeCursor(row, attr) {
+  const v = row[attr] instanceof Date ? row[attr].toISOString() : String(row[attr]);
+  return Buffer.from(JSON.stringify({ v, id: row.id })).toString('base64url');
+}
+
+function decodeCursor(cursor, attr) {
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || typeof parsed.id !== 'string' || parsed.v === undefined) {
+    throw new ValidationError([{ field: 'cursor', message: 'Malformed cursor' }], 'Invalid query');
+  }
+  const v = attr === 'createdAt' ? new Date(parsed.v) : Number(parsed.v);
+  if (Number.isNaN(attr === 'createdAt' ? v.getTime() : v)) {
+    throw new ValidationError([{ field: 'cursor', message: 'Malformed cursor' }], 'Invalid query');
+  }
+  return { v, id: parsed.id };
+}
+
+async function listOrders(workspaceId, { limit = 50, cursor, sort = 'newest', confirmationState, ...filters } = {}) {
+  const { Op } = db.Sequelize;
+  const [attr, dir] = LIST_SORTS[sort] || LIST_SORTS.newest;
+  const where = buildOrderFilters(workspaceId, filters);
+  if (confirmationState) where.confirmationState = confirmationState;
+  if (cursor) {
+    // Keyset: rows strictly after the last one seen, in (attr, id) order.
+    const { v, id } = decodeCursor(cursor, attr);
+    const cmp = dir === 'DESC' ? Op.lt : Op.gt;
+    where[Op.and] = [{ [Op.or]: [{ [attr]: { [cmp]: v } }, { [attr]: v, id: { [cmp]: id } }] }];
+  }
+
+  const orders = await db.Order.findAll({
+    where,
+    order: [[attr, dir], ['id', dir]],
+    limit: limit + 1,
+    include: [
+      { model: db.OrderItem, as: 'items' },
+      { model: db.Funnel, as: 'funnel', attributes: ['id', 'name', 'subdomain'] },
+    ],
+  });
   const hasMore = orders.length > limit;
   const page = orders.slice(0, limit);
-  return { orders: page, nextCursor: hasMore ? page[page.length - 1].id : null };
+  return { orders: page, nextCursor: hasMore ? encodeCursor(page[page.length - 1], attr) : null };
+}
+
+/** Tab counts for the orders page; same filters as the list minus confirmationState. */
+async function countOrders(workspaceId, filters = {}) {
+  const rows = await db.Order.findAll({
+    where: buildOrderFilters(workspaceId, filters),
+    attributes: ['confirmationState', 'financialState', 'fulfillmentState', 'cancelledAt'],
+    raw: true,
+  });
+  const counts = {
+    all: rows.length, pending: 0, confirmed: 0, unreachable: 0, postponed: 0, rejected: 0,
+    cancelled: 0, unfulfilled: 0, fulfilled: 0, returned: 0, unpaid: 0,
+  };
+  for (const r of rows) {
+    if (r.cancelledAt) {
+      counts.cancelled += 1;
+      continue;
+    }
+    counts[r.confirmationState] += 1;
+    if (r.fulfillmentState in counts) counts[r.fulfillmentState] += 1;
+    if (r.financialState === 'pending') counts.unpaid += 1;
+  }
+  return { counts };
 }
 
 /**
@@ -581,6 +683,7 @@ module.exports = {
   createOrder,
   getOrder,
   listOrders,
+  countOrders,
   generateOrderNumber,
   generateTrackingCode,
   priceLine,

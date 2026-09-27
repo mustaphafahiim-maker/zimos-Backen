@@ -22,6 +22,8 @@ router.post(
   idempotent('order.create')(controller.create)
 );
 router.get('/', validate(schemas.list), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.list);
+// Before '/:orderId' so "counts" is never read as an order id.
+router.get('/counts', validate(schemas.counts), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.counts);
 router.get('/:orderId', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.get);
 
 router.post(

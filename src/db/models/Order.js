@@ -84,6 +84,7 @@ module.exports = (sequelize, DataTypes) => {
   Order.associate = (models) => {
     Order.belongsTo(models.Workspace, { foreignKey: 'workspaceId', as: 'workspace' });
     Order.belongsTo(models.Customer, { foreignKey: 'customerId', as: 'customer' });
+    Order.belongsTo(models.Funnel, { foreignKey: 'funnelId', as: 'funnel' });
     Order.hasMany(models.OrderItem, { foreignKey: 'orderId', as: 'items' });
     Order.hasMany(models.Payment, { foreignKey: 'orderId', as: 'payments' });
     Order.hasMany(models.Refund, { foreignKey: 'orderId', as: 'refunds' });
