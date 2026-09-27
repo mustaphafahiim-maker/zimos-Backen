@@ -649,3 +649,211 @@ describe('DELETE /api/v1/admin/templates/:templateId', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('admin templates — audit', () => {
+  const audits = (action) => db.AuditLog.findAll({ where: { action } });
+
+  it('audits create, update and delete as platform-level entries', async () => {
+    const { H, userId } = await setupAdmin();
+    const created = await request(app).post('/api/v1/admin/templates').set(H).send({ name: 'Audited' });
+    const id = created.body.template.id;
+    await request(app).patch(`/api/v1/admin/templates/${id}`).set(H).send({ name: 'Renamed' }).expect(200);
+    await request(app).delete(`/api/v1/admin/templates/${id}`).set(H).expect(200);
+
+    const [create] = await audits('template.create');
+    expect(create).toMatchObject({ workspaceId: null, actorUserId: userId, entityType: 'Template', entityId: id });
+    expect(create.afterState.name).toBe('Audited');
+
+    const [update] = await audits('template.update');
+    expect(update.beforeState.name).toBe('Audited');
+    expect(update.afterState.name).toBe('Renamed');
+
+    const [del] = await audits('template.delete');
+    expect(del.beforeState).toMatchObject({ name: 'Renamed', versionCount: 0 });
+  });
+
+  it('writes nothing when a write is refused', async () => {
+    const { H } = await setupAdmin();
+    await request(app).post('/api/v1/admin/templates').set(H).send({ name: 'Nope', isPublished: true }).expect(409);
+    expect(await db.AuditLog.count({ where: { entityType: 'Template' } })).toBe(0);
+  });
+
+  it('labels template entries in the audit log', async () => {
+    const { H } = await setupAdmin();
+    await request(app).post('/api/v1/admin/templates').set(H).send({ name: 'Labelled' }).expect(201);
+    const res = await request(app).get('/api/v1/admin/audit-log?entityType=Template').set(H);
+    expect(res.body.auditLog[0].entityLabel).toBe('Labelled');
+  });
+});
+
+describe('POST /api/v1/admin/templates/:templateId/publish and /unpublish', () => {
+  it('publishes a template with an active version, which the public gallery then lists', async () => {
+    const { H } = await setupAdmin();
+    const { template } = await makeTemplate({ name: 'To Publish', published: false });
+
+    const res = await request(app).post(`/api/v1/admin/templates/${template.id}/publish`).set(H);
+    expect(res.status).toBe(200);
+    expect(res.body.template).toMatchObject({ isPublished: true, inGallery: true });
+    const gallery = await request(app).get('/api/v1/templates');
+    expect(gallery.body.templates.map((t) => t.id)).toContain(template.id);
+
+    const [row] = await db.AuditLog.findAll({ where: { action: 'template.publish' } });
+    expect(row).toMatchObject({ entityId: template.id, beforeState: { isPublished: false }, afterState: { isPublished: true } });
+  });
+
+  it('refuses to publish a template with no active version', async () => {
+    const { H } = await setupAdmin();
+    const bare = await db.Template.create({ name: 'Bare' });
+    const res = await request(app).post(`/api/v1/admin/templates/${bare.id}/publish`).set(H);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('TEMPLATE_HAS_NO_ACTIVE_VERSION');
+    expect((await db.Template.findByPk(bare.id)).isPublished).toBe(false);
+  });
+
+  it('unpublishes, removing it from the gallery, and is idempotent', async () => {
+    const { H } = await setupAdmin();
+    const { template } = await makeTemplate({ name: 'To Unpublish' });
+
+    const res = await request(app).post(`/api/v1/admin/templates/${template.id}/unpublish`).set(H);
+    expect(res.body.template).toMatchObject({ isPublished: false, inGallery: false });
+    expect((await request(app).get('/api/v1/templates')).body.templates).toEqual([]);
+
+    await request(app).post(`/api/v1/admin/templates/${template.id}/unpublish`).set(H).expect(200);
+    expect(await db.AuditLog.count({ where: { action: 'template.unpublish' } })).toBe(1);
+  });
+
+  it('refuses a non-admin and 404s an unknown template', async () => {
+    const { template } = await makeTemplate({ name: 'Guarded', published: false });
+    const plain = await registerAndActivate();
+    const refused = await request(app).post(`/api/v1/admin/templates/${template.id}/publish`).set(bearer(plain.accessToken));
+    expect(refused.status).toBe(403);
+    const { H } = await setupAdmin();
+    const unknown = await request(app).post('/api/v1/admin/templates/11111111-1111-4111-8111-111111111111/publish').set(H);
+    expect(unknown.status).toBe(404);
+  });
+});
+
+describe('admin template versions', () => {
+  const versionBody = (heading = 'Version two') => ({
+    globalStyles: { primaryColor: '#0EA5E9', fontFamily: 'Cairo' },
+    pages: [
+      { path: '/', title: 'Home', pageType: 'home', builderData: tree(heading), seo: {} },
+      { path: '/contact', title: 'Contact', builderData: tree('Call us') },
+    ],
+  });
+
+  it('lists a template with its versions, newest first, and how many sites each one seeded', async () => {
+    const { H } = await setupAdmin();
+    const { template, version } = await makeTemplate({ name: 'Detailed' });
+    const auth = await registerAndActivate();
+    const ws = await createWorkspace(auth.accessToken, 'Seeded WS');
+    await request(app)
+      .post(`/api/v1/workspaces/${ws.id}/websites`)
+      .set(bearer(auth.accessToken))
+      .send({ name: 'Site', templateVersionId: version.id })
+      .expect(201);
+
+    const res = await request(app).get(`/api/v1/admin/templates/${template.id}`).set(H);
+    expect(res.status).toBe(200);
+    expect(res.body.template).toMatchObject({ id: template.id, inGallery: true, versionCount: 1 });
+    expect(res.body.versions).toEqual([
+      expect.objectContaining({
+        id: version.id,
+        version: 1,
+        isActive: true,
+        pageCount: 2,
+        pagePaths: ['/', '/about'],
+        websiteCount: 1,
+      }),
+    ]);
+    // The summary leaves the content out; the version endpoint has it.
+    expect(res.body.versions[0].pages).toBeUndefined();
+    const one = await request(app).get(`/api/v1/admin/templates/${template.id}/versions/${version.id}`).set(H);
+    expect(one.body.version.pages).toHaveLength(2);
+    expect(one.body.version.globalStyles.primaryColor).toBe('#2563EB');
+  });
+
+  it('adds the next version, which becomes what the gallery offers', async () => {
+    const { H, userId } = await setupAdmin();
+    const { template } = await makeTemplate({ name: 'Evolving' });
+
+    const res = await request(app).post(`/api/v1/admin/templates/${template.id}/versions`).set(H).send(versionBody());
+    expect(res.status).toBe(201);
+    expect(res.body.version).toMatchObject({ version: 2, isActive: true, pageCount: 2, primaryColor: '#0EA5E9' });
+
+    const card = (await request(app).get('/api/v1/templates')).body.templates[0];
+    expect(card.templateVersionId).toBe(res.body.version.id);
+
+    const [row] = await db.AuditLog.findAll({ where: { action: 'template_version.create' } });
+    expect(row).toMatchObject({
+      workspaceId: null,
+      actorUserId: userId,
+      entityType: 'TemplateVersion',
+      entityId: res.body.version.id,
+    });
+  });
+
+  it('can add a version without activating it', async () => {
+    const { H } = await setupAdmin();
+    const { template, version } = await makeTemplate({ name: 'Staged' });
+    const res = await request(app)
+      .post(`/api/v1/admin/templates/${template.id}/versions`)
+      .set(H)
+      .send({ ...versionBody(), activate: false });
+    expect(res.body.version).toMatchObject({ version: 2, isActive: false });
+    expect((await request(app).get('/api/v1/templates')).body.templates[0].templateVersionId).toBe(version.id);
+  });
+
+  it('refuses a version whose pages a website could not be built from', async () => {
+    const { H } = await setupAdmin();
+    const { template } = await makeTemplate({ name: 'Strict' });
+    const url = `/api/v1/admin/templates/${template.id}/versions`;
+
+    const badTree = await request(app).post(url).set(H).send({ pages: [{ path: '/', builderData: { sections: 'nope' } }] });
+    expect(badTree.status).toBe(422);
+    const dupPaths = await request(app).post(url).set(H).send({ pages: [{ path: '/About' }, { path: '/about/' }] });
+    expect(dupPaths.status).toBe(422);
+    expect((await request(app).post(url).set(H).send({ pages: [] })).status).toBe(422);
+    expect(await db.TemplateVersion.count({ where: { templateId: template.id } })).toBe(1);
+  });
+
+  it('switches a version off and on, but never the last active version of a published template', async () => {
+    const { H } = await setupAdmin();
+    const { template, version } = await makeTemplate({ name: 'Switchable' });
+    const url = (id) => `/api/v1/admin/templates/${template.id}/versions/${id}`;
+
+    const refused = await request(app).patch(url(version.id)).set(H).send({ isActive: false });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('TEMPLATE_NEEDS_ACTIVE_VERSION');
+
+    const v2 = (await request(app).post(`/api/v1/admin/templates/${template.id}/versions`).set(H).send(versionBody())).body.version;
+    const off = await request(app).patch(url(version.id)).set(H).send({ isActive: false });
+    expect(off.status).toBe(200);
+    expect(off.body.version.isActive).toBe(false);
+
+    // A merchant can no longer pick the switched-off version.
+    const auth = await registerAndActivate();
+    const ws = await createWorkspace(auth.accessToken, 'Late WS');
+    await request(app)
+      .post(`/api/v1/workspaces/${ws.id}/websites`)
+      .set(bearer(auth.accessToken))
+      .send({ name: 'Site', templateVersionId: version.id })
+      .expect(404);
+
+    // Unpublished, even the last active version may go.
+    await request(app).post(`/api/v1/admin/templates/${template.id}/unpublish`).set(H).expect(200);
+    expect((await request(app).patch(url(v2.id)).set(H).send({ isActive: false })).status).toBe(200);
+
+    const actions = (await db.AuditLog.findAll({ where: { entityType: 'TemplateVersion' } })).map((a) => a.action).sort();
+    expect(actions).toEqual(['template_version.create', 'template_version.deactivate', 'template_version.deactivate']);
+  });
+
+  it('404s a version of another template', async () => {
+    const { H } = await setupAdmin();
+    const a = await makeTemplate({ name: 'A' });
+    const b = await makeTemplate({ name: 'B' });
+    const path = `/api/v1/admin/templates/${a.template.id}/versions/${b.version.id}`;
+    expect((await request(app).get(path).set(H)).status).toBe(404);
+    expect((await request(app).patch(path).set(H).send({ isActive: false })).status).toBe(404);
+  });
+});

@@ -1,7 +1,11 @@
 'use strict';
 
 const Joi = require('joi');
+const joiEmail = require('../../core/utils/joiEmail');
 const { TEMPLATE_KINDS } = require('../templates/templateValidation');
+const { TYPES: BLOCKLIST_TYPES } = require('../risk/platformBlocklistService');
+const { STATUSES: TICKET_STATUSES, PRIORITIES: TICKET_PRIORITIES } = require('../support/supportService');
+const { messageBody: ticketMessageBody } = require('../support/supportValidation');
 
 const uuid = Joi.string().uuid();
 
@@ -107,6 +111,52 @@ const createTemplateBody = Joi.object({
 // loaded `tags` reset it to [] via the default.
 const updateTemplateBody = Joi.object(templateFields).min(1);
 
+// One page of a template version — the shape pagesService.createWebsite
+// copies from. `builderData` is checked in depth by the page-tree validator
+// in the service; here it only has to be an object.
+const PAGE_TYPES = ['home', 'product', 'collection', 'static', 'blog_post', 'cart', 'custom'];
+const templatePage = Joi.object({
+  path: Joi.string().trim().min(1).max(200).required(),
+  title: Joi.string().trim().max(200).allow('').optional(),
+  pageType: Joi.string().valid(...PAGE_TYPES).optional(),
+  builderData: Joi.object().unknown(true).optional(),
+  seo: Joi.object().unknown(true).optional(),
+});
+
+const templateVersionIds = Joi.object({ templateId: uuid.required(), versionId: uuid.required() });
+
+// --- Platform risk -----------------------------------------------------------
+
+// The address a platform block is fingerprinted from — the same fields, and
+// the same limits, as an order's shipping address (orderValidation).
+const blockAddress = Joi.object({
+  country: Joi.string().trim().length(2).uppercase().required(),
+  province: Joi.string().trim().max(100).allow(null, '').optional(),
+  city: Joi.string().trim().min(1).max(100).required(),
+  addressLine: Joi.string().trim().min(1).max(500).required(),
+});
+
+// null = never expires. A past date is refused by the service (422), which
+// can compare against its own clock.
+const expiresAt = Joi.date().iso().allow(null);
+
+const blockBody = Joi.object({
+  type: Joi.string().valid(...BLOCKLIST_TYPES).required(),
+  // The identifier: a phone or an email in `value`, an address in `address`.
+  value: Joi.when('type', {
+    switch: [
+      { is: 'phone', then: Joi.string().trim().min(1).max(32).required() },
+      { is: 'email', then: joiEmail().trim().max(255).required() },
+    ],
+    otherwise: Joi.forbidden(),
+  }),
+  address: Joi.when('type', { is: 'address', then: blockAddress.required(), otherwise: Joi.forbidden() }),
+  reason: Joi.string().trim().min(1).max(300).required(),
+  expiresAt: expiresAt.default(null),
+  // Where the block was made from — recorded in the audit metadata only.
+  source: Joi.string().valid('manual', 'signal').default('manual'),
+});
+
 module.exports = {
   createPlan: { body: planBody },
   updatePlan: { params: Joi.object({ planId: uuid.required() }), body: planBody },
@@ -157,4 +207,82 @@ module.exports = {
     body: updateTemplateBody,
   },
   deleteTemplate: { params: Joi.object({ templateId: uuid.required() }) },
+  templateParams: { params: Joi.object({ templateId: uuid.required() }) },
+  createTemplateVersion: {
+    params: Joi.object({ templateId: uuid.required() }),
+    body: Joi.object({
+      globalStyles: Joi.object().unknown(true).default({}),
+      pages: Joi.array().items(templatePage).min(1).max(50).required(),
+      sections: Joi.array().items(Joi.object().unknown(true)).max(200).default([]),
+      // Make it the version the gallery offers (the highest active one).
+      activate: Joi.boolean().default(true),
+    }),
+  },
+  templateVersionParams: { params: templateVersionIds },
+  updateTemplateVersion: { params: templateVersionIds, body: Joi.object({ isActive: Joi.boolean().required() }) },
+
+  listBlocklist: {
+    query: Joi.object({
+      type: Joi.string().valid(...BLOCKLIST_TYPES).optional(),
+      status: Joi.string().valid('active', 'expired', 'all').default('all'),
+      q: Joi.string().trim().min(1).max(200).optional(),
+      limit: Joi.number().integer().min(1).max(200).default(50),
+      offset: Joi.number().integer().min(0).default(0),
+    }),
+  },
+  createBlocklistEntry: { body: blockBody },
+  // The identifier is fixed once blocked — delete and re-block to change it.
+  updateBlocklistEntry: {
+    params: Joi.object({ entryId: uuid.required() }),
+    body: Joi.object({
+      reason: Joi.string().trim().min(1).max(300),
+      expiresAt,
+    }).min(1),
+  },
+  deleteBlocklistEntry: { params: Joi.object({ entryId: uuid.required() }) },
+
+  // An adapter code: lower-case letters, digits, '-' and '_' (adapterContract).
+  providerCode: { params: Joi.object({ code: Joi.string().pattern(/^[a-z0-9_-]{1,50}$/).required() }) },
+
+  listTickets: {
+    query: Joi.object({
+      status: Joi.string().valid(...TICKET_STATUSES).optional(),
+      priority: Joi.string().valid(...TICKET_PRIORITIES).optional(),
+      workspaceId: uuid.optional(),
+      q: Joi.string().trim().min(1).max(200).optional(),
+      limit: Joi.number().integer().min(1).max(200).default(50),
+      offset: Joi.number().integer().min(0).default(0),
+    }),
+  },
+  ticketParams: { params: Joi.object({ ticketId: uuid.required() }) },
+  replyTicket: {
+    params: Joi.object({ ticketId: uuid.required() }),
+    body: Joi.object({
+      body: ticketMessageBody.required(),
+      // Where the ticket goes after the reply; default pending (waiting on
+      // the merchant). Replying cannot close a ticket — close it explicitly.
+      status: Joi.string().valid('open', 'pending', 'resolved').optional(),
+    }),
+  },
+  updateTicket: {
+    params: Joi.object({ ticketId: uuid.required() }),
+    body: Joi.object({
+      status: Joi.string().valid(...TICKET_STATUSES),
+      priority: Joi.string().valid(...TICKET_PRIORITIES),
+    }).min(1),
+  },
+
+  grantAdmin: { body: Joi.object({ email: joiEmail().trim().max(255).required() }) },
+  revokeAdmin: { params: Joi.object({ userId: uuid.required() }) },
+
+  listRiskSignals: {
+    query: Joi.object({
+      type: Joi.string().valid(...BLOCKLIST_TYPES).default('phone'),
+      windowDays: Joi.number().integer().min(1).max(365).default(90),
+      minWorkspaces: Joi.number().integer().min(2).max(100).default(3),
+      minRefused: Joi.number().integer().min(1).max(1000).default(3),
+      limit: Joi.number().integer().min(1).max(200).default(50),
+      offset: Joi.number().integer().min(0).default(0),
+    }),
+  },
 };

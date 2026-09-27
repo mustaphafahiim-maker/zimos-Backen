@@ -654,16 +654,108 @@ describe('platform admin — system services', () => {
     expect(pg.detail).toEqual(expect.any(String));
   });
 
-  it('reports an absent payment gateway as not_configured, never operational', async () => {
-    const { H } = await setupAdmin();
-    const res = await request(app).get('/api/v1/admin/system/services').set(H);
+  describe('the payment gateways tile', () => {
+    const crypto = require('crypto');
+    const saved = {
+      onlineEnabled: env.payments.onlineEnabled,
+      credentialsKey: env.payments.credentialsKey,
+      defaultProvider: env.payments.defaultProvider,
+    };
+    afterEach(() => {
+      Object.assign(env.payments, saved);
+      jest.restoreAllMocks();
+    });
+    const newKey = () => crypto.randomBytes(32).toString('base64');
+    const paymentsTile = async (H) =>
+      (await request(app).post('/api/v1/admin/system/services/check').set(H)).body.services.find((s) => s.key === 'payments');
 
-    // `mock` and `cod` run in-process and reach nothing. A green tile here
-    // would assert a payment gateway that does not exist.
-    const payments = res.body.services.find((s) => s.key === 'payments');
-    expect(payments.status).toBe('not_configured');
-    expect(payments.detail).toEqual(expect.stringContaining('in-process'));
-    expect(payments.latencyMs).toBeNull();
+    it('reports online payments switched off as not_configured, naming the gateways and the key state', async () => {
+      const { H } = await setupAdmin();
+      env.payments.onlineEnabled = false;
+      env.payments.credentialsKey = '';
+      const fetchSpy = jest.spyOn(global, 'fetch');
+
+      const off = await paymentsTile(H);
+      expect(off.status).toBe('not_configured');
+      expect(off.latencyMs).toBeNull();
+      expect(off.detail).toContain('PAYMENTS_ONLINE_ENABLED is off');
+      expect(off.detail).toMatch(/Paymob/);
+      expect(off.detail).toMatch(/Kashier/);
+      expect(off.detail).toContain('GATEWAY_CREDENTIALS_KEY is not set');
+
+      env.payments.credentialsKey = newKey();
+      const keyed = await paymentsTile(H);
+      expect(keyed.status).toBe('not_configured');
+      expect(keyed.detail).toContain('GATEWAY_CREDENTIALS_KEY is present');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('no longer reads PAYMENTS_DEFAULT_PROVIDER', async () => {
+      const { H } = await setupAdmin();
+      env.payments.onlineEnabled = false;
+      env.payments.defaultProvider = 'mock';
+      const withMock = await paymentsTile(H);
+      env.payments.defaultProvider = 'something-else';
+      const withOther = await paymentsTile(H);
+      expect(withOther.status).toBe(withMock.status);
+      expect(withOther.detail).toBe(withMock.detail);
+      expect(withOther.detail).not.toContain('PAYMENTS_DEFAULT_PROVIDER');
+    });
+
+    it('warns about a malformed key even while online payments are off', async () => {
+      const { H } = await setupAdmin();
+      env.payments.onlineEnabled = false;
+      env.payments.credentialsKey = 'not-a-32-byte-key';
+      const tile = await paymentsTile(H);
+      expect(tile.status).toBe('degraded');
+      expect(tile.detail).toContain('not 32 bytes');
+    });
+
+    it('reports online payments on without a usable key as down, without probing anything', async () => {
+      const { H } = await setupAdmin();
+      env.payments.onlineEnabled = true;
+      env.payments.credentialsKey = '';
+      const fetchSpy = jest.spyOn(global, 'fetch');
+      const tile = await paymentsTile(H);
+      expect(tile.status).toBe('down');
+      expect(tile.detail).toContain('503');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('with online payments on, probes each gateway host without credentials', async () => {
+      const { H } = await setupAdmin();
+      env.payments.onlineEnabled = true;
+      env.payments.credentialsKey = newKey();
+      const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async () => new Response(null, { status: 401 }));
+
+      const tile = await paymentsTile(H);
+      expect(tile.status).toBe('operational');
+      expect(tile.detail).toContain('Online payments on, credentials key present');
+      expect(tile.detail).toContain(`${new URL(env.payments.paymobBaseUrl).host} HTTP 401`);
+      expect(tile.detail).toContain(`${new URL(env.payments.kashier.liveApiUrl).host} HTTP 401`);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      for (const [, init] of fetchSpy.mock.calls) {
+        expect(Object.keys(init.headers).map((h) => h.toLowerCase())).not.toContain('authorization');
+      }
+    });
+
+    it('reads one unreachable gateway as degraded and all of them as down', async () => {
+      const { H } = await setupAdmin();
+      env.payments.onlineEnabled = true;
+      env.payments.credentialsKey = newKey();
+      const paymobHost = new URL(env.payments.paymobBaseUrl).host;
+      jest.spyOn(global, 'fetch').mockImplementation(async (url) => {
+        if (new URL(url).host === paymobHost) throw new TypeError('fetch failed');
+        return new Response(null, { status: 200 });
+      });
+      const partial = await paymentsTile(H);
+      expect(partial.status).toBe('degraded');
+      expect(partial.detail).toContain(`${paymobHost} did not answer`);
+
+      jest.restoreAllMocks();
+      jest.spyOn(global, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+      expect((await paymentsTile(H)).status).toBe('down');
+    });
   });
 
   it('marks an unconfigured integration not_configured rather than down', async () => {
@@ -1027,5 +1119,122 @@ describe('platform admin — overview metrics', () => {
     // and summing the two would make it look like growth.
     expect(overview.mrrTrend).toBeNull();
     expect(overview.mrrTrendCurrency).toBeNull();
+  });
+});
+
+describe('platform admin — plan, flag and announcement writes are audited', () => {
+  const rows = (entityType) =>
+    db.AuditLog.findAll({ where: { entityType }, order: [['createdAt', 'ASC'], ['action', 'ASC']] });
+
+  it('audits a plan create, update and delete as platform-level entries', async () => {
+    const { H, userId } = await setupAdmin();
+    const created = await request(app).post('/api/v1/admin/plans').set(H).send(PLAN_BODY);
+    const id = created.body.plan.id;
+    await request(app).patch(`/api/v1/admin/plans/${id}`).set(H).send({ ...PLAN_BODY, monthlyPrice: 159900 }).expect(200);
+    await request(app).delete(`/api/v1/admin/plans/${id}`).set(H).expect(200);
+
+    const [create, update, del] = await rows('Plan');
+    for (const row of [create, update, del]) {
+      expect(row).toMatchObject({ workspaceId: null, actorUserId: userId, entityType: 'Plan', entityId: id });
+    }
+    expect(create.action).toBe('plan.create');
+    expect(create.afterState).toMatchObject({ code: 'scale', name: 'Scale', monthlyPrice: 149900 });
+    expect(create.afterState).not.toHaveProperty('id');
+    expect(update.action).toBe('plan.update');
+    expect(update.beforeState.monthlyPrice).toBe(149900);
+    expect(update.afterState.monthlyPrice).toBe(159900);
+    expect(del.action).toBe('plan.delete');
+    expect(del.beforeState).toMatchObject({ code: 'scale', monthlyPrice: 159900 });
+    expect(del.afterState).toBeNull();
+  });
+
+  it('writes nothing for a plan write that is refused', async () => {
+    const { H, wid } = await setupAdmin();
+    await request(app).post('/api/v1/admin/plans').set(H).send(PLAN_BODY).expect(201);
+    await request(app).post('/api/v1/admin/plans').set(H).send(PLAN_BODY).expect(409);
+
+    const sub = await db.Subscription.findOne({ where: { workspaceId: wid } });
+    await request(app).delete(`/api/v1/admin/plans/${sub.planId}`).set(H).expect(409);
+
+    expect((await rows('Plan')).map((r) => r.action)).toEqual(['plan.create']);
+  });
+
+  it('audits a feature flag create, update and delete', async () => {
+    const { H, userId } = await setupAdmin();
+    const body = { key: 'checkout.one_page_v2', description: 'One page', enabled: false, rollout: 0, targetWorkspaceIds: [] };
+    const created = await request(app).post('/api/v1/admin/feature-flags').set(H).send(body);
+    const id = created.body.featureFlag.id;
+    await request(app).patch(`/api/v1/admin/feature-flags/${id}`).set(H).send({ ...body, enabled: true, rollout: 25 }).expect(200);
+    await request(app).delete(`/api/v1/admin/feature-flags/${id}`).set(H).expect(200);
+
+    const audited = await rows('FeatureFlag');
+    expect(audited.map((r) => r.action)).toEqual(['feature_flag.create', 'feature_flag.update', 'feature_flag.delete']);
+    for (const row of audited) {
+      expect(row).toMatchObject({ workspaceId: null, actorUserId: userId, entityId: id });
+    }
+    expect(audited[1].beforeState).toMatchObject({ key: 'checkout.one_page_v2', enabled: false, rollout: 0 });
+    expect(audited[1].afterState).toMatchObject({ enabled: true, rollout: 25 });
+    expect(audited[2].beforeState.key).toBe('checkout.one_page_v2');
+  });
+
+  it('writes nothing for a duplicate flag key', async () => {
+    const { H } = await setupAdmin();
+    const body = { key: 'dup.flag', enabled: false, rollout: 0 };
+    await request(app).post('/api/v1/admin/feature-flags').set(H).send(body).expect(201);
+    await request(app).post('/api/v1/admin/feature-flags').set(H).send(body).expect(409);
+    expect((await rows('FeatureFlag')).map((r) => r.action)).toEqual(['feature_flag.create']);
+  });
+
+  it('audits an announcement create, update and delete, workspace-targeted ones included', async () => {
+    const { H, userId, wid } = await setupAdmin();
+    const body = { title: 'Maintenance', body: 'Tonight at 2am.', audience: 'workspace', workspaceId: wid };
+    const created = await request(app).post('/api/v1/admin/announcements').set(H).send(body);
+    const id = created.body.announcement.id;
+    await request(app)
+      .patch(`/api/v1/admin/announcements/${id}`)
+      .set(H)
+      .send({ ...body, title: 'Maintenance moved', severity: 'warning' })
+      .expect(200);
+    await request(app).delete(`/api/v1/admin/announcements/${id}`).set(H).expect(200);
+
+    const audited = await rows('Announcement');
+    expect(audited.map((r) => r.action)).toEqual(['announcement.create', 'announcement.update', 'announcement.delete']);
+    for (const row of audited) {
+      // Platform-level: the targeted workspace is in the state, not on the row.
+      expect(row).toMatchObject({ workspaceId: null, actorUserId: userId, entityId: id });
+    }
+    expect(audited[0].afterState).toMatchObject({ title: 'Maintenance', audience: 'workspace', workspaceId: wid });
+    expect(audited[1].beforeState.title).toBe('Maintenance');
+    expect(audited[1].afterState).toMatchObject({ title: 'Maintenance moved', severity: 'warning' });
+    expect(audited[2].beforeState.title).toBe('Maintenance moved');
+  });
+
+  it('writes nothing for an announcement that is refused', async () => {
+    const { H } = await setupAdmin();
+    await request(app)
+      .post('/api/v1/admin/announcements')
+      .set(H)
+      .send({ title: 'Bad window', body: 'x', audience: 'all', startsAt: '2030-01-02T00:00:00.000Z', endsAt: '2030-01-01T00:00:00.000Z' })
+      .expect(422);
+    await request(app)
+      .post('/api/v1/admin/announcements')
+      .set(H)
+      .send({ title: 'No such plan', body: 'x', audience: 'plan', planId: '00000000-0000-4000-8000-000000000000' })
+      .expect(404);
+    expect(await rows('Announcement')).toEqual([]);
+  });
+
+  it('labels plan, flag and announcement entries in the audit log', async () => {
+    const { H } = await setupAdmin();
+    await request(app).post('/api/v1/admin/plans').set(H).send(PLAN_BODY).expect(201);
+    await request(app).post('/api/v1/admin/feature-flags').set(H).send({ key: 'labelled.flag', enabled: false, rollout: 0 }).expect(201);
+    await request(app).post('/api/v1/admin/announcements').set(H).send({ title: 'Labelled', body: 'x', audience: 'all' }).expect(201);
+
+    const labels = {};
+    for (const entityType of ['Plan', 'FeatureFlag', 'Announcement']) {
+      const res = await request(app).get(`/api/v1/admin/audit-log?entityType=${entityType}`).set(H);
+      labels[entityType] = res.body.auditLog[0].entityLabel;
+    }
+    expect(labels).toEqual({ Plan: 'Scale', FeatureFlag: 'labelled.flag', Announcement: 'Labelled' });
   });
 });

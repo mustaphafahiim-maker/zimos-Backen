@@ -1,7 +1,9 @@
 'use strict';
 
 const db = require('../../db/models');
-const { NotFoundError, ConflictError } = require('../../core/errors/AppError');
+const { NotFoundError, ConflictError, ValidationError } = require('../../core/errors/AppError');
+const { recordAudit } = require('../audit/auditService');
+const { validatePageTree } = require('../pages/pageTree');
 
 // The "current" version of a template = the highest `version` number that is
 // still active. A published template with no active version is not offered.
@@ -94,6 +96,9 @@ const NULLABLE_TEXT = new Set(['category', 'thumbnailUrl', 'primaryColor']);
 function toAdminRow(template, versions = []) {
   const active = versions.find((v) => v.isActive) || null;
   return {
+    // Exactly the public gallery's rule (listPublishedTemplates): published
+    // AND an active version. What a merchant sees, stated rather than implied.
+    inGallery: Boolean(template.isPublished && active),
     id: template.id,
     name: template.name,
     category: template.category,
@@ -139,68 +144,292 @@ async function listAllTemplates({ kind } = {}) {
   return templates.map((t) => toAdminRow(t, byTemplate.get(t.id) || []));
 }
 
-function versionsOf(templateId) {
-  return db.TemplateVersion.findAll({ where: { templateId }, order: VERSION_ORDER });
+function versionsOf(templateId, transaction) {
+  return db.TemplateVersion.findAll({ where: { templateId }, order: VERSION_ORDER, transaction });
+}
+
+// What an audit row records about a template: the editable columns.
+function templateAuditState(template) {
+  const out = {};
+  for (const key of EDITABLE) out[key] = key === 'priceAmount' ? Number(template[key]) : template[key];
+  return out;
+}
+
+// Every admin write is audited as a platform-level entry (workspace_id NULL).
+// `req` is absent only for a direct service call (a script or a seeder),
+// which has no actor to record.
+async function audit(req, fields, transaction) {
+  if (!req) return;
+  await recordAudit({ actorUserId: req.user ? req.user.id : null, req, transaction, ...fields });
 }
 
 /** Create (no `id`) or update (with `id`). The update is partial — only keys
  *  actually present are written, so a grid that toggles one switch cannot
  *  blank out the fields its form never loaded. */
-async function saveTemplate(input) {
+async function saveTemplate(input, req = null) {
   const fields = {};
   for (const key of EDITABLE) {
     if (input[key] === undefined) continue;
     fields[key] = NULLABLE_TEXT.has(key) && input[key] === '' ? null : input[key];
   }
 
-  const template = input.id ? await db.Template.findByPk(input.id) : null;
-  if (input.id && !template) throw new NotFoundError('Template');
+  return db.sequelize.transaction(async (transaction) => {
+    const template = input.id
+      ? await db.Template.findByPk(input.id, { transaction, lock: transaction.LOCK.UPDATE })
+      : null;
+    if (input.id && !template) throw new NotFoundError('Template');
 
-  // A template being created has no versions yet, which is exactly why the
-  // guard below applies to it too: nothing can be born published.
-  const versions = template ? await versionsOf(template.id) : [];
+    // A template being created has no versions yet, which is exactly why the
+    // guard below applies to it too: nothing can be born published.
+    const versions = template ? await versionsOf(template.id, transaction) : [];
 
-  // Publishing a template with no active version puts it nowhere: the gallery
-  // drops it on the way out. Refuse loudly instead of leaving the console
-  // showing "published" next to a template that never appears.
-  if (fields.isPublished === true && !versions.some((v) => v.isActive)) {
-    throw new ConflictError(
-      'This template has no active version yet, so publishing it would hide it from the gallery',
-      'TEMPLATE_HAS_NO_ACTIVE_VERSION'
-    );
-  }
-
-  if (!template) return toAdminRow(await db.Template.create(fields), []);
-
-  await template.update(fields);
-  return toAdminRow(template, versions);
-}
-
-async function deleteTemplate(id) {
-  const template = await db.Template.findByPk(id);
-  if (!template) throw new NotFoundError('Template');
-
-  const versions = await versionsOf(id);
-  if (versions.length > 0) {
-    // websites.source_template_version_id is ON DELETE SET NULL, so the
-    // database would let this through and quietly cut every affected site
-    // loose from the template it came from. This guard is the only thing
-    // keeping that provenance.
-    const inUse = await db.Website.count({
-      where: { sourceTemplateVersionId: versions.map((v) => v.id) },
-    });
-    if (inUse > 0) {
+    // Publishing a template with no active version puts it nowhere: the gallery
+    // drops it on the way out. Refuse loudly instead of leaving the console
+    // showing "published" next to a template that never appears.
+    if (fields.isPublished === true && !versions.some((v) => v.isActive)) {
       throw new ConflictError(
-        `${inUse} website(s) were created from this template — unpublish it instead`,
-        'TEMPLATE_IN_USE'
+        'This template has no active version yet, so publishing it would hide it from the gallery',
+        'TEMPLATE_HAS_NO_ACTIVE_VERSION'
       );
     }
-  }
 
-  // template_versions.template_id is ON DELETE CASCADE, so the versions go
-  // with it; nothing was built from them, per the check above.
-  await template.destroy();
-  return { success: true };
+    if (!template) {
+      const created = await db.Template.create(fields, { transaction });
+      await audit(
+        req,
+        { action: 'template.create', entityType: 'Template', entityId: created.id, after: templateAuditState(created) },
+        transaction
+      );
+      return toAdminRow(created, []);
+    }
+
+    const before = templateAuditState(template);
+    await template.update(fields, { transaction });
+    await audit(
+      req,
+      { action: 'template.update', entityType: 'Template', entityId: template.id, before, after: templateAuditState(template) },
+      transaction
+    );
+    return toAdminRow(template, versions);
+  });
+}
+
+/**
+ * POST /admin/templates/:id/publish and /unpublish. Same guard as the PATCH:
+ * publishing needs an active version. Idempotent — a template already in the
+ * requested state comes back unchanged, with no audit row.
+ */
+async function setPublished(id, isPublished, req = null) {
+  return db.sequelize.transaction(async (transaction) => {
+    const template = await db.Template.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!template) throw new NotFoundError('Template');
+    const versions = await versionsOf(id, transaction);
+    if (template.isPublished === isPublished) return toAdminRow(template, versions);
+
+    if (isPublished && !versions.some((v) => v.isActive)) {
+      throw new ConflictError(
+        'This template has no active version yet, so publishing it would hide it from the gallery',
+        'TEMPLATE_HAS_NO_ACTIVE_VERSION'
+      );
+    }
+    await template.update({ isPublished }, { transaction });
+    await audit(
+      req,
+      {
+        action: isPublished ? 'template.publish' : 'template.unpublish',
+        entityType: 'Template',
+        entityId: template.id,
+        before: { isPublished: !isPublished },
+        after: { isPublished },
+      },
+      transaction
+    );
+    return toAdminRow(template, versions);
+  });
+}
+
+async function deleteTemplate(id, req = null) {
+  return db.sequelize.transaction(async (transaction) => {
+    const template = await db.Template.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!template) throw new NotFoundError('Template');
+
+    const versions = await versionsOf(id, transaction);
+    if (versions.length > 0) {
+      // websites.source_template_version_id is ON DELETE SET NULL, so the
+      // database would let this through and quietly cut every affected site
+      // loose from the template it came from. This guard is the only thing
+      // keeping that provenance.
+      const inUse = await db.Website.count({
+        where: { sourceTemplateVersionId: versions.map((v) => v.id) },
+        transaction,
+      });
+      if (inUse > 0) {
+        throw new ConflictError(
+          `${inUse} website(s) were created from this template — unpublish it instead`,
+          'TEMPLATE_IN_USE'
+        );
+      }
+    }
+
+    const before = { ...templateAuditState(template), versionCount: versions.length };
+    // template_versions.template_id is ON DELETE CASCADE, so the versions go
+    // with it; nothing was built from them, per the check above.
+    await template.destroy({ transaction });
+    await audit(req, { action: 'template.delete', entityType: 'Template', entityId: id, before }, transaction);
+    return { success: true };
+  });
+}
+
+// ---------------------------------------------------------------- versions
+// A version is immutable once written: websites are deep-copied from it and
+// keep `source_template_version_id` pointing back. So the admin surface can
+// add a version and switch versions on or off, never edit one in place.
+// The gallery offers the highest-numbered ACTIVE version (latestActiveVersion).
+
+/** A version without its content — the list the editor shows. */
+function toVersionSummary(version, websiteCounts = new Map()) {
+  return {
+    id: version.id,
+    version: version.version,
+    isActive: version.isActive,
+    pageCount: Array.isArray(version.pages) ? version.pages.length : 0,
+    pagePaths: Array.isArray(version.pages) ? version.pages.map((pg) => pg.path || '/') : [],
+    sectionCount: Array.isArray(version.sections) ? version.sections.length : 0,
+    primaryColor: (version.globalStyles || {}).primaryColor || null,
+    websiteCount: websiteCounts.get(version.id) || 0,
+    createdAt: version.createdAt,
+  };
+}
+
+async function websiteCountsFor(versionIds, transaction) {
+  if (versionIds.length === 0) return new Map();
+  const rows = await db.Website.findAll({
+    where: { sourceTemplateVersionId: versionIds },
+    attributes: ['sourceTemplateVersionId', [db.sequelize.fn('COUNT', db.sequelize.col('id')), 'count']],
+    group: ['sourceTemplateVersionId'],
+    raw: true,
+    transaction,
+  });
+  return new Map(rows.map((r) => [r.sourceTemplateVersionId, Number(r.count)]));
+}
+
+/** GET /admin/templates/:id — the admin row plus every version, newest first. */
+async function getTemplateForAdmin(id) {
+  const template = await db.Template.findByPk(id);
+  if (!template) throw new NotFoundError('Template');
+  const versions = await versionsOf(id);
+  const counts = await websiteCountsFor(versions.map((v) => v.id));
+  return { template: toAdminRow(template, versions), versions: versions.map((v) => toVersionSummary(v, counts)) };
+}
+
+/** GET /admin/templates/:id/versions/:versionId — one version with its content. */
+async function getVersionForAdmin(templateId, versionId) {
+  const version = await db.TemplateVersion.findOne({ where: { id: versionId, templateId } });
+  if (!version) throw new NotFoundError('Template version');
+  const counts = await websiteCountsFor([version.id]);
+  return {
+    ...toVersionSummary(version, counts),
+    globalStyles: version.globalStyles,
+    pages: version.pages,
+    sections: version.sections,
+  };
+}
+
+/**
+ * Every page must survive the copy a merchant's "use this template" makes
+ * (pagesService.createWebsite): the same tree validator runs here, so a
+ * version that would fail there is refused when it is written instead. Paths
+ * must be unique once normalized, as they are on a website.
+ */
+function validateVersionPages(pages) {
+  const seen = new Set();
+  pages.forEach((page, i) => {
+    const path = String(page.path || '/').trim().toLowerCase().replace(/\/{2,}/g, '/').replace(/(.)\/+$/, '$1') || '/';
+    if (seen.has(path)) {
+      throw new ValidationError([{ field: `pages[${i}].path`, message: `Two pages use the path "${path}"` }]);
+    }
+    seen.add(path);
+    if (page.builderData !== undefined) validatePageTree(page.builderData, { label: `template page "${path}"` });
+  });
+}
+
+/**
+ * POST /admin/templates/:id/versions — the next version number, written
+ * whole. `activate` (default true) makes it the one the gallery offers;
+ * earlier versions stay as they are (still active ones remain selectable by
+ * id, exactly as before).
+ */
+async function createVersion(templateId, input, req = null) {
+  validateVersionPages(input.pages);
+  return db.sequelize.transaction(async (transaction) => {
+    // Locks the template so two admins adding a version at once get
+    // consecutive numbers instead of one of them hitting the unique index.
+    const template = await db.Template.findByPk(templateId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!template) throw new NotFoundError('Template');
+
+    const latest = await db.TemplateVersion.max('version', { where: { templateId }, transaction });
+    const version = await db.TemplateVersion.create(
+      {
+        templateId,
+        version: (latest || 0) + 1,
+        globalStyles: input.globalStyles,
+        pages: input.pages,
+        sections: input.sections,
+        isActive: input.activate !== false,
+      },
+      { transaction }
+    );
+    await audit(
+      req,
+      {
+        action: 'template_version.create',
+        entityType: 'TemplateVersion',
+        entityId: version.id,
+        after: { templateId, version: version.version, isActive: version.isActive, pageCount: input.pages.length },
+      },
+      transaction
+    );
+    return toVersionSummary(version);
+  });
+}
+
+/**
+ * PATCH /admin/templates/:id/versions/:versionId { isActive }. Switching off
+ * the last active version of a PUBLISHED template is refused: the gallery
+ * would silently stop listing it while the console still says "published".
+ * Unpublish first, or activate another version.
+ */
+async function setVersionActive(templateId, versionId, isActive, req = null) {
+  return db.sequelize.transaction(async (transaction) => {
+    const template = await db.Template.findByPk(templateId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!template) throw new NotFoundError('Template');
+    const versions = await versionsOf(templateId, transaction);
+    const version = versions.find((v) => v.id === versionId);
+    if (!version) throw new NotFoundError('Template version');
+    if (version.isActive === isActive) return toVersionSummary(version, await websiteCountsFor([version.id], transaction));
+
+    if (!isActive && template.isPublished && versions.filter((v) => v.isActive).length === 1) {
+      throw new ConflictError(
+        'This is the only active version of a published template — deactivating it would hide the template from the gallery. Unpublish it first, or activate another version.',
+        'TEMPLATE_NEEDS_ACTIVE_VERSION'
+      );
+    }
+
+    await version.update({ isActive }, { transaction });
+    await audit(
+      req,
+      {
+        action: isActive ? 'template_version.activate' : 'template_version.deactivate',
+        entityType: 'TemplateVersion',
+        entityId: version.id,
+        before: { isActive: !isActive },
+        after: { isActive },
+        metadata: { templateId, version: version.version },
+      },
+      transaction
+    );
+    return toVersionSummary(version, await websiteCountsFor([version.id], transaction));
+  });
 }
 
 module.exports = {
@@ -209,5 +438,10 @@ module.exports = {
   latestActiveVersion,
   listAllTemplates,
   saveTemplate,
+  setPublished,
   deleteTemplate,
+  getTemplateForAdmin,
+  getVersionForAdmin,
+  createVersion,
+  setVersionActive,
 };

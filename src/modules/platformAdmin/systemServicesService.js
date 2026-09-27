@@ -5,6 +5,8 @@ const db = require('../../db/models');
 const { probeStorage } = require('../media/storage');
 const brevo = require('../notifications/brevoEmailProvider');
 const twilio = require('../notifications/twilioSmsProvider');
+const gateways = require('../payments/gateways');
+const providerRegistry = require('./providerRegistryService');
 
 /**
  * Live health tiles for the platform admin console.
@@ -38,10 +40,6 @@ const SLOW_MS = 2000;
 // GET serves a recent result rather than firing real third-party requests on
 // every page load and refresh; POST /check always bypasses this.
 const CACHE_TTL_MS = 30000;
-
-// Payment providers that live in this process and have no third party behind
-// them, so there is nothing a probe could reach.
-const IN_PROCESS_PAYMENT_PROVIDERS = new Set(['mock', 'cod']);
 
 let cache = null;
 
@@ -145,19 +143,72 @@ const PROBES = [
   },
   {
     key: 'payments',
-    name: 'Payment gateway',
-    // There is no real gateway in this backend yet: `mock` and `cod` both run
-    // in-process and talk to nothing. Reporting `ok` here would put a green
-    // check next to a payment gateway that does not exist.
+    name: 'Payment gateways',
+    // Online payments are off unless PAYMENTS_ONLINE_ENABLED says otherwise,
+    // and off is a deliberate setting, not a failure. PAYMENTS_DEFAULT_PROVIDER
+    // is not consulted: nothing in the payment path reads it any more.
     skip: () => {
-      const provider = env.payments.defaultProvider;
-      return IN_PROCESS_PAYMENT_PROVIDERS.has(provider)
-        ? `PAYMENTS_DEFAULT_PROVIDER=${provider} — handled in-process, no external gateway to reach`
-        : `no health probe implemented for payment provider "${provider}"`;
+      if (env.payments.onlineEnabled) return null;
+      const key = providerRegistry.credentialsKeyState(env.payments.credentialsKey);
+      // A malformed key is worth a warning even while payments are off.
+      if (key === 'invalid') return null;
+      return (
+        `PAYMENTS_ONLINE_ENABLED is off — stores take cash on delivery only. ` +
+        `Registered gateways: ${gatewayNames()}. GATEWAY_CREDENTIALS_KEY ${key === 'present' ? 'is present, so merchants can already connect an account' : 'is not set, so merchants cannot connect an account yet'}.`
+      );
     },
-    run: async () => ({}),
+    run: probePaymentGateways,
   },
 ];
+
+function gatewayNames() {
+  const names = gateways.listAdapters().map((a) => a.name);
+  return names.length > 0 ? names.join(', ') : 'none';
+}
+
+/**
+ * The online payment state as it really is: the flag, the credentials key,
+ * and — only when both allow online payments — whether each registered
+ * gateway's API host answers. That probe is the registry's own (one
+ * unauthenticated GET per gateway, no merchant's keys), so it proves the host
+ * is reachable from this server and nothing about any account.
+ */
+async function probePaymentGateways() {
+  const key = providerRegistry.credentialsKeyState(env.payments.credentialsKey);
+  if (!env.payments.onlineEnabled) {
+    return {
+      status: 'degraded',
+      detail:
+        'PAYMENTS_ONLINE_ENABLED is off, and GATEWAY_CREDENTIALS_KEY is set but is not 32 bytes of base64 — fix it before turning online payments on.',
+    };
+  }
+  if (key !== 'present') {
+    return {
+      status: 'down',
+      detail: `PAYMENTS_ONLINE_ENABLED is on, but GATEWAY_CREDENTIALS_KEY is ${key === 'missing' ? 'not set' : 'not 32 bytes of base64'} — online checkout and every gateway feature answer 503.`,
+    };
+  }
+
+  const adapters = gateways.listAdapters();
+  if (adapters.length === 0) {
+    return { status: 'down', detail: 'PAYMENTS_ONLINE_ENABLED is on, but no payment gateway is registered.' };
+  }
+  const checks = await Promise.all(adapters.map((a) => providerRegistry.checkGateway(a.code)));
+  const reached = checks.filter((c) => c.status === 'operational' || c.status === 'degraded');
+  const readings = adapters
+    .map((a, i) => {
+      const c = checks[i];
+      if (c.status === 'not_checkable') return `${a.name}: not checkable`;
+      if (c.httpStatus === null) return `${a.name}: ${c.target} did not answer`;
+      return `${a.name}: ${c.target} HTTP ${c.httpStatus} (${c.latencyMs} ms)`;
+    })
+    .join('; ');
+  const detail = `Online payments on, credentials key present. ${readings}. Reachability only — no merchant account was used.`;
+
+  if (reached.length === 0) return { status: checks.some((c) => c.status === 'down') ? 'down' : 'degraded', detail };
+  if (reached.length < adapters.length || checks.some((c) => c.status === 'degraded')) return { status: 'degraded', detail };
+  return { detail };
+}
 
 async function runAll() {
   // In parallel: five sequential probes would make the page wait for the sum

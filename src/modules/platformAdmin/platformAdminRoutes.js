@@ -56,7 +56,49 @@ router.delete('/announcements/:announcementId', validate(schemas.deleteAnnouncem
 // changes a template lives here, behind the platform-admin guard.
 router.get('/templates', validate(schemas.listTemplates), controller.listTemplates);
 router.post('/templates', validate(schemas.createTemplate), controller.createTemplate);
+router.get('/templates/:templateId', validate(schemas.templateParams), controller.getTemplate);
 router.patch('/templates/:templateId', validate(schemas.updateTemplate), controller.updateTemplate);
 router.delete('/templates/:templateId', validate(schemas.deleteTemplate), controller.deleteTemplate);
+router.post('/templates/:templateId/publish', validate(schemas.templateParams), controller.publishTemplate);
+router.post('/templates/:templateId/unpublish', validate(schemas.templateParams), controller.unpublishTemplate);
+// Versions are immutable once written (websites are copied from them): they
+// can be added and switched on or off, never edited or deleted.
+router.post('/templates/:templateId/versions', validate(schemas.createTemplateVersion), controller.createTemplateVersion);
+router.get('/templates/:templateId/versions/:versionId', validate(schemas.templateVersionParams), controller.getTemplateVersion);
+router.patch('/templates/:templateId/versions/:versionId', validate(schemas.updateTemplateVersion), controller.updateTemplateVersion);
+
+// --- Platform risk -------------------------------------------------------
+// The blocklist is honoured by order creation in every workspace (see
+// modules/risk/platformBlocklistService). Signals are read-only aggregates
+// over existing orders; blocking one is a POST to the blocklist.
+router.get('/risk/blocklist', validate(schemas.listBlocklist), controller.listBlocklist);
+router.post('/risk/blocklist', validate(schemas.createBlocklistEntry), controller.createBlocklistEntry);
+router.patch('/risk/blocklist/:entryId', validate(schemas.updateBlocklistEntry), controller.updateBlocklistEntry);
+router.delete('/risk/blocklist/:entryId', validate(schemas.deleteBlocklistEntry), controller.deleteBlocklistEntry);
+router.get('/risk/signals', validate(schemas.listRiskSignals), controller.listRiskSignals);
+
+// --- Carriers and payment gateways (read-only registry) ------------------
+// No enable/disable here: the environment (CARRIERS_*, PAYMENTS_*) is the
+// only source of truth. The health-check POSTs mutate nothing — they are
+// POSTs for the same reason as /system/services/check: they fire a real
+// request at a third party and should not be repeated by a browser at will.
+router.get('/carriers', controller.listCarriers);
+router.post('/carriers/:code/health-check', validate(schemas.providerCode), controller.checkCarrier);
+router.get('/payment-gateways', controller.listGateways);
+router.post('/payment-gateways/:code/health-check', validate(schemas.providerCode), controller.checkGateway);
+
+// --- Platform admins -------------------------------------------------------
+// The users.platform_admin flag on existing accounts: no invitations, no
+// roles. Self-revocation and revoking the last admin are refused.
+router.get('/admins', controller.listAdmins);
+router.post('/admins', validate(schemas.grantAdmin), controller.grantAdmin);
+router.delete('/admins/:userId', validate(schemas.revokeAdmin), controller.revokeAdmin);
+
+// --- Support tickets ---------------------------------------------------------
+// The platform side of modules/support: the queue, replies, status/priority.
+router.get('/support/tickets', validate(schemas.listTickets), controller.listTickets);
+router.get('/support/tickets/:ticketId', validate(schemas.ticketParams), controller.getTicket);
+router.post('/support/tickets/:ticketId/messages', validate(schemas.replyTicket), controller.replyTicket);
+router.patch('/support/tickets/:ticketId', validate(schemas.updateTicket), controller.updateTicket);
 
 module.exports = router;

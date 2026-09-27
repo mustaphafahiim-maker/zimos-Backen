@@ -5,6 +5,11 @@ const service = require('./platformAdminService');
 const systemServices = require('./systemServicesService');
 const overviewMetrics = require('./overviewMetricsService');
 const templateService = require('../templates/templateService');
+const platformBlocklist = require('../risk/platformBlocklistService');
+const riskSignals = require('../risk/riskSignalsService');
+const providerRegistry = require('./providerRegistryService');
+const adminUsers = require('./adminUsersService');
+const supportService = require('../support/supportService');
 
 // Every handler here sits behind `authenticate` + `requirePlatformAdmin`.
 // Collections are returned under a named key, matching the rest of the API.
@@ -15,15 +20,15 @@ const listPlans = asyncHandler(async (req, res) => {
 });
 
 const createPlan = asyncHandler(async (req, res) => {
-  res.status(201).json({ plan: await service.savePlan(req.body) });
+  res.status(201).json({ plan: await service.savePlan(req.body, req) });
 });
 
 const updatePlan = asyncHandler(async (req, res) => {
-  res.json({ plan: await service.savePlan({ ...req.body, id: req.params.planId }) });
+  res.json({ plan: await service.savePlan({ ...req.body, id: req.params.planId }, req) });
 });
 
 const deletePlan = asyncHandler(async (req, res) => {
-  res.json(await service.deletePlan(req.params.planId));
+  res.json(await service.deletePlan(req.params.planId, req));
 });
 
 // --- Subscriptions -------------------------------------------------------
@@ -67,15 +72,15 @@ const listFlags = asyncHandler(async (req, res) => {
 });
 
 const createFlag = asyncHandler(async (req, res) => {
-  res.status(201).json({ featureFlag: await service.saveFlag(req.body) });
+  res.status(201).json({ featureFlag: await service.saveFlag(req.body, req) });
 });
 
 const updateFlag = asyncHandler(async (req, res) => {
-  res.json({ featureFlag: await service.saveFlag({ ...req.body, id: req.params.flagId }) });
+  res.json({ featureFlag: await service.saveFlag({ ...req.body, id: req.params.flagId }, req) });
 });
 
 const deleteFlag = asyncHandler(async (req, res) => {
-  res.json(await service.deleteFlag(req.params.flagId));
+  res.json(await service.deleteFlag(req.params.flagId, req));
 });
 
 // --- Announcements -------------------------------------------------------
@@ -84,17 +89,17 @@ const listAnnouncements = asyncHandler(async (req, res) => {
 });
 
 const createAnnouncement = asyncHandler(async (req, res) => {
-  res.status(201).json({ announcement: await service.saveAnnouncement(req.body, req.user.id) });
+  res.status(201).json({ announcement: await service.saveAnnouncement(req.body, req) });
 });
 
 const updateAnnouncement = asyncHandler(async (req, res) => {
   res.json({
-    announcement: await service.saveAnnouncement({ ...req.body, id: req.params.announcementId }, req.user.id),
+    announcement: await service.saveAnnouncement({ ...req.body, id: req.params.announcementId }, req),
   });
 });
 
 const deleteAnnouncement = asyncHandler(async (req, res) => {
-  res.json(await service.deleteAnnouncement(req.params.announcementId));
+  res.json(await service.deleteAnnouncement(req.params.announcementId, req));
 });
 
 // --- Templates -----------------------------------------------------------
@@ -106,15 +111,115 @@ const listTemplates = asyncHandler(async (req, res) => {
 });
 
 const createTemplate = asyncHandler(async (req, res) => {
-  res.status(201).json({ template: await templateService.saveTemplate(req.body) });
+  res.status(201).json({ template: await templateService.saveTemplate(req.body, req) });
+});
+
+// { template, versions } — the row plus every version, newest first.
+const getTemplate = asyncHandler(async (req, res) => {
+  res.json(await templateService.getTemplateForAdmin(req.params.templateId));
 });
 
 const updateTemplate = asyncHandler(async (req, res) => {
-  res.json({ template: await templateService.saveTemplate({ ...req.body, id: req.params.templateId }) });
+  res.json({ template: await templateService.saveTemplate({ ...req.body, id: req.params.templateId }, req) });
 });
 
 const deleteTemplate = asyncHandler(async (req, res) => {
-  res.json(await templateService.deleteTemplate(req.params.templateId));
+  res.json(await templateService.deleteTemplate(req.params.templateId, req));
+});
+
+const publishTemplate = asyncHandler(async (req, res) => {
+  res.json({ template: await templateService.setPublished(req.params.templateId, true, req) });
+});
+
+const unpublishTemplate = asyncHandler(async (req, res) => {
+  res.json({ template: await templateService.setPublished(req.params.templateId, false, req) });
+});
+
+const createTemplateVersion = asyncHandler(async (req, res) => {
+  res.status(201).json({ version: await templateService.createVersion(req.params.templateId, req.body, req) });
+});
+
+const getTemplateVersion = asyncHandler(async (req, res) => {
+  res.json({ version: await templateService.getVersionForAdmin(req.params.templateId, req.params.versionId) });
+});
+
+const updateTemplateVersion = asyncHandler(async (req, res) => {
+  const { templateId, versionId } = req.params;
+  res.json({ version: await templateService.setVersionActive(templateId, versionId, req.body.isActive, req) });
+});
+
+// --- Platform risk -------------------------------------------------------
+// Every write here is audited by the service, inside its own transaction.
+const listBlocklist = asyncHandler(async (req, res) => {
+  res.json(await platformBlocklist.listEntries(req.query));
+});
+
+// 201 for a new entry; 200 when the identifier was already listed and only
+// its reason/expiry changed — the workspace blocklist's convention.
+const createBlocklistEntry = asyncHandler(async (req, res) => {
+  const { created, entry } = await platformBlocklist.blockIdentifier(req.body, req);
+  res.status(created ? 201 : 200).json({ entry, created });
+});
+
+const updateBlocklistEntry = asyncHandler(async (req, res) => {
+  res.json({ entry: await platformBlocklist.updateEntry(req.params.entryId, req.body, req) });
+});
+
+const deleteBlocklistEntry = asyncHandler(async (req, res) => {
+  res.json(await platformBlocklist.deleteEntry(req.params.entryId, req));
+});
+
+const listRiskSignals = asyncHandler(async (req, res) => {
+  res.json(await riskSignals.listSignals(req.query));
+});
+
+// --- Carriers and payment gateways -----------------------------------------
+const listCarriers = asyncHandler(async (req, res) => {
+  res.json(await providerRegistry.listCarriers());
+});
+
+const checkCarrier = asyncHandler(async (req, res) => {
+  res.json({ check: await providerRegistry.checkCarrier(req.params.code) });
+});
+
+const listGateways = asyncHandler(async (req, res) => {
+  res.json(await providerRegistry.listGateways());
+});
+
+const checkGateway = asyncHandler(async (req, res) => {
+  res.json({ check: await providerRegistry.checkGateway(req.params.code) });
+});
+
+// --- Platform admins -------------------------------------------------------
+const listAdmins = asyncHandler(async (req, res) => {
+  res.json({ admins: await adminUsers.listAdmins(req.user.id) });
+});
+
+// 201 when the flag was granted; 200 when the account already had it.
+const grantAdmin = asyncHandler(async (req, res) => {
+  const { admin, granted } = await adminUsers.grantAdmin(req.body.email, req);
+  res.status(granted ? 201 : 200).json({ admin, granted });
+});
+
+const revokeAdmin = asyncHandler(async (req, res) => {
+  res.json(await adminUsers.revokeAdmin(req.params.userId, req));
+});
+
+// --- Support tickets ---------------------------------------------------------
+const listTickets = asyncHandler(async (req, res) => {
+  res.json(await supportService.listAllTickets(req.query));
+});
+
+const getTicket = asyncHandler(async (req, res) => {
+  res.json(await supportService.getTicketForAdmin(req.params.ticketId));
+});
+
+const replyTicket = asyncHandler(async (req, res) => {
+  res.status(201).json(await supportService.adminReply(req.params.ticketId, req.body, req));
+});
+
+const updateTicket = asyncHandler(async (req, res) => {
+  res.json({ ticket: await supportService.updateTicket(req.params.ticketId, req.body, req) });
 });
 
 module.exports = {
@@ -137,6 +242,28 @@ module.exports = {
   deleteAnnouncement,
   listTemplates,
   createTemplate,
+  getTemplate,
   updateTemplate,
   deleteTemplate,
+  publishTemplate,
+  unpublishTemplate,
+  createTemplateVersion,
+  getTemplateVersion,
+  updateTemplateVersion,
+  listBlocklist,
+  createBlocklistEntry,
+  updateBlocklistEntry,
+  deleteBlocklistEntry,
+  listRiskSignals,
+  listCarriers,
+  checkCarrier,
+  listGateways,
+  checkGateway,
+  listAdmins,
+  grantAdmin,
+  revokeAdmin,
+  listTickets,
+  getTicket,
+  replyTicket,
+  updateTicket,
 };

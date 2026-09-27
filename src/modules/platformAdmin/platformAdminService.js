@@ -3,6 +3,24 @@
 const { Op } = require('sequelize');
 const db = require('../../db/models');
 const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
+const { recordAudit } = require('../audit/auditService');
+
+/**
+ * Every write below is audited as a platform-level entry: workspace_id NULL,
+ * the admin as actor, the row's editable state before and after, written in
+ * the same transaction as the change so neither can exist without the other.
+ * A refused write (a duplicate key, a plan still in use) records nothing.
+ */
+async function audit(req, fields, transaction) {
+  await recordAudit({ actorUserId: req.user.id, req, transaction, ...fields });
+}
+
+/** The audited state of a row: its serialized form without id and timestamps. */
+function auditState(serialized, omit = []) {
+  const out = { ...serialized };
+  for (const key of ['id', 'createdAt', 'updatedAt', ...omit]) delete out[key];
+  return out;
+}
 
 // ---------------------------------------------------------------- serializers
 
@@ -155,7 +173,7 @@ async function listPlans() {
   return plans.map(serializePlan);
 }
 
-async function savePlan(input) {
+async function savePlan(input, req) {
   const fields = {
     key: input.code,
     name: input.name,
@@ -170,37 +188,48 @@ async function savePlan(input) {
   };
   if (input.currency) fields.currency = input.currency;
 
-  // `key` is unique — check first so a duplicate reads as a 409 with a useful
-  // message instead of a raw constraint violation.
-  const clash = await db.Plan.findOne({ where: { key: fields.key } });
-  if (clash && clash.id !== input.id) {
-    throw new ConflictError(`Another plan already uses the code "${fields.key}"`, 'PLAN_CODE_TAKEN');
-  }
+  return db.sequelize.transaction(async (transaction) => {
+    // `key` is unique — check first so a duplicate reads as a 409 with a useful
+    // message instead of a raw constraint violation.
+    const clash = await db.Plan.findOne({ where: { key: fields.key }, transaction });
+    if (clash && clash.id !== input.id) {
+      throw new ConflictError(`Another plan already uses the code "${fields.key}"`, 'PLAN_CODE_TAKEN');
+    }
 
-  if (input.id) {
-    const plan = await db.Plan.findByPk(input.id);
-    if (!plan) throw new NotFoundError('Plan');
-    await plan.update(fields);
-    return serializePlan(plan);
-  }
-  return serializePlan(await db.Plan.create(fields));
+    if (input.id) {
+      const plan = await db.Plan.findByPk(input.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!plan) throw new NotFoundError('Plan');
+      const before = auditState(serializePlan(plan));
+      await plan.update(fields, { transaction });
+      const after = serializePlan(plan);
+      await audit(req, { action: 'plan.update', entityType: 'Plan', entityId: plan.id, before, after: auditState(after) }, transaction);
+      return after;
+    }
+    const created = serializePlan(await db.Plan.create(fields, { transaction }));
+    await audit(req, { action: 'plan.create', entityType: 'Plan', entityId: created.id, after: auditState(created) }, transaction);
+    return created;
+  });
 }
 
-async function deletePlan(planId) {
-  const plan = await db.Plan.findByPk(planId);
-  if (!plan) throw new NotFoundError('Plan');
+async function deletePlan(planId, req) {
+  return db.sequelize.transaction(async (transaction) => {
+    const plan = await db.Plan.findByPk(planId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!plan) throw new NotFoundError('Plan');
 
-  // The subscriptions FK is ON DELETE RESTRICT, so this would fail at the
-  // database anyway; catching it here makes the reason legible.
-  const inUse = await db.Subscription.count({ where: { planId } });
-  if (inUse > 0) {
-    throw new ConflictError(
-      `${inUse} subscription(s) still use this plan — deactivate it instead`,
-      'PLAN_IN_USE'
-    );
-  }
-  await plan.destroy();
-  return { success: true };
+    // The subscriptions FK is ON DELETE RESTRICT, so this would fail at the
+    // database anyway; catching it here makes the reason legible.
+    const inUse = await db.Subscription.count({ where: { planId }, transaction });
+    if (inUse > 0) {
+      throw new ConflictError(
+        `${inUse} subscription(s) still use this plan — deactivate it instead`,
+        'PLAN_IN_USE'
+      );
+    }
+    const before = auditState(serializePlan(plan));
+    await plan.destroy({ transaction });
+    await audit(req, { action: 'plan.delete', entityType: 'Plan', entityId: planId, before }, transaction);
+    return { success: true };
+  });
 }
 
 // -------------------------------------------------------------- subscriptions
@@ -229,7 +258,7 @@ async function listFlags() {
   return flags.map(serializeFlag);
 }
 
-async function saveFlag(input) {
+async function saveFlag(input, req) {
   const fields = {
     key: input.key,
     description: input.description ?? '',
@@ -238,25 +267,44 @@ async function saveFlag(input) {
     targetWorkspaceIds: input.targetWorkspaceIds ?? [],
   };
 
-  const clash = await db.FeatureFlag.findOne({ where: { key: fields.key } });
-  if (clash && clash.id !== input.id) {
-    throw new ConflictError(`A flag with the key "${fields.key}" already exists`, 'FLAG_KEY_TAKEN');
-  }
+  return db.sequelize.transaction(async (transaction) => {
+    const clash = await db.FeatureFlag.findOne({ where: { key: fields.key }, transaction });
+    if (clash && clash.id !== input.id) {
+      throw new ConflictError(`A flag with the key "${fields.key}" already exists`, 'FLAG_KEY_TAKEN');
+    }
 
-  if (input.id) {
-    const flag = await db.FeatureFlag.findByPk(input.id);
-    if (!flag) throw new NotFoundError('Feature flag');
-    await flag.update(fields);
-    return serializeFlag(flag);
-  }
-  return serializeFlag(await db.FeatureFlag.create(fields));
+    if (input.id) {
+      const flag = await db.FeatureFlag.findByPk(input.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!flag) throw new NotFoundError('Feature flag');
+      const before = auditState(serializeFlag(flag));
+      await flag.update(fields, { transaction });
+      const after = serializeFlag(flag);
+      await audit(
+        req,
+        { action: 'feature_flag.update', entityType: 'FeatureFlag', entityId: flag.id, before, after: auditState(after) },
+        transaction
+      );
+      return after;
+    }
+    const created = serializeFlag(await db.FeatureFlag.create(fields, { transaction }));
+    await audit(
+      req,
+      { action: 'feature_flag.create', entityType: 'FeatureFlag', entityId: created.id, after: auditState(created) },
+      transaction
+    );
+    return created;
+  });
 }
 
-async function deleteFlag(flagId) {
-  const flag = await db.FeatureFlag.findByPk(flagId);
-  if (!flag) throw new NotFoundError('Feature flag');
-  await flag.destroy();
-  return { success: true };
+async function deleteFlag(flagId, req) {
+  return db.sequelize.transaction(async (transaction) => {
+    const flag = await db.FeatureFlag.findByPk(flagId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!flag) throw new NotFoundError('Feature flag');
+    const before = auditState(serializeFlag(flag));
+    await flag.destroy({ transaction });
+    await audit(req, { action: 'feature_flag.delete', entityType: 'FeatureFlag', entityId: flagId, before }, transaction);
+    return { success: true };
+  });
 }
 
 // -------------------------------------------------------------- announcements
@@ -279,61 +327,104 @@ async function listAnnouncements() {
  * pairing, but it is re-checked here so a direct service call can't write a
  * row that targets nothing (which would show the banner to every workspace).
  */
-async function resolveAudience(input) {
+async function resolveAudience(input, transaction) {
   if (input.audience === 'plan') {
     if (!input.planId) throw new AppError('AUDIENCE_TARGET_REQUIRED', 'A plan is required for a plan announcement', 422);
-    if (!(await db.Plan.findByPk(input.planId))) throw new NotFoundError('Plan');
+    if (!(await db.Plan.findByPk(input.planId, { transaction }))) throw new NotFoundError('Plan');
     return { planId: input.planId, workspaceId: null };
   }
   if (input.audience === 'workspace') {
     if (!input.workspaceId) {
       throw new AppError('AUDIENCE_TARGET_REQUIRED', 'A workspace is required for a workspace announcement', 422);
     }
-    if (!(await db.Workspace.findByPk(input.workspaceId))) throw new NotFoundError('Workspace');
+    if (!(await db.Workspace.findByPk(input.workspaceId, { transaction }))) throw new NotFoundError('Workspace');
     return { planId: null, workspaceId: input.workspaceId };
   }
   return { planId: null, workspaceId: null };
 }
 
-async function saveAnnouncement(input, actorUserId) {
-  const targets = await resolveAudience(input);
-  const startsAt = input.startsAt ? new Date(input.startsAt) : new Date();
-  const endsAt = input.endsAt ? new Date(input.endsAt) : null;
-  if (endsAt && endsAt <= startsAt) {
-    throw new AppError('INVALID_WINDOW', 'The end time must be after the start time', 422);
-  }
-
-  const fields = {
-    title: input.title,
-    body: input.body,
-    severity: input.severity,
-    audience: input.audience,
-    ...targets,
-    startsAt,
-    endsAt,
-    dismissible: input.dismissible,
+// An announcement's audited state: the columns an admin sets, not the names
+// the serializer resolves for display (workspaceName, createdBy).
+function announcementAuditState(row) {
+  return {
+    title: row.title,
+    body: row.body,
+    severity: row.severity,
+    audience: row.audience,
+    planId: row.planId,
+    workspaceId: row.workspaceId,
+    startsAt: row.startsAt ? new Date(row.startsAt).toISOString() : null,
+    endsAt: row.endsAt ? new Date(row.endsAt).toISOString() : null,
+    dismissible: row.dismissible,
   };
+}
 
-  if (input.id) {
-    const row = await db.Announcement.findByPk(input.id);
+async function saveAnnouncement(input, req) {
+  return db.sequelize.transaction(async (transaction) => {
+    const targets = await resolveAudience(input, transaction);
+    const startsAt = input.startsAt ? new Date(input.startsAt) : new Date();
+    const endsAt = input.endsAt ? new Date(input.endsAt) : null;
+    if (endsAt && endsAt <= startsAt) {
+      throw new AppError('INVALID_WINDOW', 'The end time must be after the start time', 422);
+    }
+
+    const fields = {
+      title: input.title,
+      body: input.body,
+      severity: input.severity,
+      audience: input.audience,
+      ...targets,
+      startsAt,
+      endsAt,
+      dismissible: input.dismissible,
+    };
+
+    if (input.id) {
+      const row = await db.Announcement.findByPk(input.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!row) throw new NotFoundError('Announcement');
+      const before = announcementAuditState(row);
+      await row.update(fields, { transaction });
+      await audit(
+        req,
+        {
+          action: 'announcement.update',
+          entityType: 'Announcement',
+          entityId: row.id,
+          before,
+          after: announcementAuditState(row),
+        },
+        transaction
+      );
+      return serializeAnnouncement(await reload(row.id, transaction));
+    }
+    // The author is recorded once, at creation; an edit does not reassign it.
+    const created = await db.Announcement.create({ ...fields, createdByUserId: req.user.id }, { transaction });
+    await audit(
+      req,
+      { action: 'announcement.create', entityType: 'Announcement', entityId: created.id, after: announcementAuditState(created) },
+      transaction
+    );
+    return serializeAnnouncement(await reload(created.id, transaction));
+  });
+}
+
+function reload(id, transaction) {
+  return db.Announcement.findByPk(id, { include: ANNOUNCEMENT_INCLUDES, transaction });
+}
+
+async function deleteAnnouncement(announcementId, req) {
+  return db.sequelize.transaction(async (transaction) => {
+    const row = await db.Announcement.findByPk(announcementId, { transaction, lock: transaction.LOCK.UPDATE });
     if (!row) throw new NotFoundError('Announcement');
-    await row.update(fields);
-    return serializeAnnouncement(await reload(row.id));
-  }
-  // The author is recorded once, at creation; an edit does not reassign it.
-  const created = await db.Announcement.create({ ...fields, createdByUserId: actorUserId });
-  return serializeAnnouncement(await reload(created.id));
-}
-
-function reload(id) {
-  return db.Announcement.findByPk(id, { include: ANNOUNCEMENT_INCLUDES });
-}
-
-async function deleteAnnouncement(announcementId) {
-  const row = await db.Announcement.findByPk(announcementId);
-  if (!row) throw new NotFoundError('Announcement');
-  await row.destroy();
-  return { success: true };
+    const before = announcementAuditState(row);
+    await row.destroy({ transaction });
+    await audit(
+      req,
+      { action: 'announcement.delete', entityType: 'Announcement', entityId: announcementId, before },
+      transaction
+    );
+    return { success: true };
+  });
 }
 
 // ------------------------------------------------------------------ audit log
@@ -365,6 +456,13 @@ const ENTITY_LABELS = {
   Domain: { model: 'Domain', label: (r) => r.hostname },
   Shipment: { model: 'Shipment', label: (r) => r.trackingCode },
   Membership: { model: 'Membership', label: (r) => r.invitedEmail },
+  Plan: { model: 'Plan', label: (r) => r.name },
+  FeatureFlag: { model: 'FeatureFlag', label: (r) => r.key },
+  Announcement: { model: 'Announcement', label: (r) => r.title },
+  PlatformBlocklistEntry: { model: 'PlatformBlocklistEntry', label: (r) => `${r.type}: ${r.label}` },
+  Template: { model: 'Template', label: (r) => r.name },
+  TemplateVersion: { model: 'TemplateVersion', label: (r) => `v${r.version}` },
+  SupportTicket: { model: 'SupportTicket', label: (r) => r.subject },
 };
 
 // `audit_logs.entity_id` is a STRING(100) but every model it points at has a

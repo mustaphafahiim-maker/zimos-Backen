@@ -115,6 +115,15 @@ function listAdapters() {
   return [...REGISTERED.values()].filter((adapter) => rollout(adapter.code));
 }
 
+/**
+ * Every registered adapter with its rollout on this server ('enabled' |
+ * 'beta' | null), whether or not it is switched on — for the platform
+ * admin's read-only registry. Nothing that decides availability reads this.
+ */
+function listRegistered() {
+  return [...REGISTERED.values()].map((adapter) => ({ adapter, rollout: rollout(adapter.code) }));
+}
+
 /** The store's slug (null when there is no such store) and whether it is in the beta. */
 async function betaMembership(workspaceId) {
   const workspace = workspaceId ? await db.Workspace.findByPk(workspaceId, { attributes: ['slug'] }) : null;
@@ -294,6 +303,7 @@ function registerTestAdapter(spec) {
 module.exports = {
   getAdapter,
   listAdapters,
+  listRegistered,
   adapterFor,
   adaptersFor,
   resolveAdaptersFor,

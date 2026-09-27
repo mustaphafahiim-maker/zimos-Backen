@@ -61,6 +61,11 @@ src/
     quickstart/               flat forms → EJS multi-product storefront + branding
     billing/                  internal subscription state + stubbed gateway webhook
     domains/                  custom domain record + DNS-TXT verification (no TLS)
+    risk/                     platform-wide blocklist (honoured by order creation in every
+                              workspace) + cross-workspace fraud signals, admin only
+    support/                  merchant support tickets: workspace side + platform queue
+    platformAdmin/            the /admin console API: plans, flags, announcements, audit log,
+                              system health, carrier/gateway registry, admin users
 views/                        EJS templates for the storefront viewer + admin dashboard
 tests/
   helpers/                   supertest app wrapper, DB truncation, test factories
