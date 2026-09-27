@@ -142,4 +142,4 @@ async function getSummary(workspaceId, query = {}) {
   };
 }
 
-module.exports = { getSummary };
+module.exports = { getSummary, resolveRange, dayKey, rate, toNumber, DAY_MS };
