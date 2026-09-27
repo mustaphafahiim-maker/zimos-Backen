@@ -43,6 +43,7 @@ const reviewRoutes = require('./modules/reviews/reviewRoutes');
 const templateRoutes = require('./modules/templates/templateRoutes');
 const platformOpsRoutes = require('./modules/platformAdmin/platformOpsRoutes');
 const analyticsRoutes = require('./modules/analytics/analyticsRoutes');
+const eventsPublicRoutes = require('./modules/analytics/eventsPublicRoutes');
 const merchantBillingRoutes = require('./modules/billing/merchantBillingRoutes');
 const auditRoutes = require('./modules/audit/auditRoutes');
 const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
@@ -169,6 +170,8 @@ v1.use('/admin', platformOpsRoutes);
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
+// Storefront visit tracking (page views, cart, checkout, purchase).
+v1.use('/store/:workspaceId/events', eventsPublicRoutes);
 // Online payment for a placed order; handles only its own two paths and passes
 // everything else through to the storefront router below.
 v1.use('/store/:workspaceId', paymobRoutes.store);
