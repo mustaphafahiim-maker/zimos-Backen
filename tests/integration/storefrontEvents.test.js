@@ -77,6 +77,27 @@ describe('POST /store/:workspaceId/events', () => {
     expect(rows[1].websiteId).toBeNull();
   });
 
+  it("takes a page's own utm tags as a set, rather than mixing them with the session's", async () => {
+    const ctx = await setup();
+    await ctx.post(
+      batch({
+        // The visitor arrived earlier from facebook; this page carries its own tags.
+        attribution: { source: 'facebook', medium: 'cpc', campaign: 'launch' },
+        events: [
+          { name: 'page_view', url: '/sale?utm_source=newsletter&utm_campaign=eid' },
+          { name: 'page_view', url: '/about' },
+        ],
+      })
+    );
+
+    const rows = await db.AnalyticsEvent.findAll({ where: { workspaceId: ctx.workspace.id }, order: [['urlPath', 'ASC']] });
+    // No tags of its own: the session's attribution stands.
+    expect(rows[0]).toMatchObject({ urlPath: '/about', source: 'facebook', medium: 'cpc', campaign: 'launch' });
+    // Its own tags win outright — no facebook/cpc glued to this campaign.
+    expect(rows[1]).toMatchObject({ urlPath: '/sale', source: 'newsletter', campaign: 'eid' });
+    expect(rows[1].medium).toBeNull();
+  });
+
   it('drops repeated dedupeIds silently (counted as accepted, stored once)', async () => {
     const ctx = await setup();
     const body = batch({ events: [{ name: 'add_to_cart', dedupeId: 'atc-1' }] });
