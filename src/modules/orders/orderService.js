@@ -438,7 +438,12 @@ async function createShipment(workspaceId, orderId, data, req) {
   if (data.carrierCode === 'bosta') {
     // Real carrier: book the delivery with Bosta and use what it returns —
     // never the staff-typed waybillNumber/trackingUrl for this carrier.
-    const booked = await bostaService.createDeliveryForOrder(workspaceId, preflightOrder, publicApiBase(req));
+    // `bostaDistrictId`, if the staff member picked one via the city/district
+    // lookups, is threaded through so Bosta can resolve the dropOffAddress;
+    // omitting it leaves booking exactly as before (see bostaCarrier.js#buildDropOffAddress).
+    const booked = await bostaService.createDeliveryForOrder(workspaceId, preflightOrder, publicApiBase(req), {
+      districtId: data.bostaDistrictId || null,
+    });
     waybillNumber = booked.waybillNumber;
     trackingUrl = booked.trackingUrl;
     carrierResponse = booked.carrierResponse;

@@ -89,13 +89,19 @@ const DELIVERY_TYPE = 10;
  * GET /cities and GET /cities/{cityId}/districts; see
  * components.schemas.AddressCreateDelivery in Bosta's OpenAPI spec). Our
  * stored shipping address only has a free-text city/province with no mapping
- * into Bosta's district system, and building that lookup/picker is its own
- * feature — out of scope here. So `districtId`/`cityId` are intentionally
- * left out below; Bosta will reject a delivery it cannot place with its own
- * clear validation error (e.g. errorCode 3009 "city, zoneId, or districtId is
- * required") rather than us guessing or silently mis-shipping it.
+ * into Bosta's district system, and building that lookup/picker into every
+ * order's address is its own feature — out of scope here.
+ *
+ * Staff can optionally resolve+pick the right district for one shipment at
+ * booking time (see listCities/listDistricts below, wired through
+ * bostaService#createDeliveryForOrder -> orderService#createShipment's
+ * `bostaDistrictId`) and it is passed in here as `districtId`. Without it,
+ * `districtId`/`cityId` are still left out and Bosta will reject a delivery
+ * it cannot place with its own clear validation error (e.g. errorCode 3009
+ * "city, zoneId, or districtId is required") rather than us guessing or
+ * silently mis-shipping it.
  */
-function buildDropOffAddress(address = {}) {
+function buildDropOffAddress(address = {}, districtId) {
   const firstLineRaw = String(address.addressLine || '').trim();
   // Bosta requires firstLine to be more than 5 characters.
   const firstLine = firstLineRaw.length > 5 ? firstLineRaw : firstLineRaw.padEnd(6, '.');
@@ -104,6 +110,7 @@ function buildDropOffAddress(address = {}) {
     city: String(address.city || '').trim(),
     firstLine,
     ...(secondLine ? { secondLine } : {}),
+    ...(districtId ? { districtId } : {}),
   };
 }
 
@@ -112,7 +119,7 @@ function buildDropOffAddress(address = {}) {
  * `contactSnapshot`, `shippingAddressSnapshot`, `paymentMethod`,
  * `totalAmount`, `amountPaid`, `orderNumber`, `id` (see db/models/Order.js).
  */
-async function createDelivery({ apiKey, order, businessLocationId, webhookUrl, webhookSecret }) {
+async function createDelivery({ apiKey, order, businessLocationId, webhookUrl, webhookSecret, districtId }) {
   const contact = order.contactSnapshot || {};
   const address = order.shippingAddressSnapshot || {};
   const { first, last } = splitName(contact.fullName);
@@ -121,7 +128,7 @@ async function createDelivery({ apiKey, order, businessLocationId, webhookUrl, w
   const body = {
     type: DELIVERY_TYPE,
     cod: codAmount,
-    dropOffAddress: buildDropOffAddress(address),
+    dropOffAddress: buildDropOffAddress(address, districtId),
     receiver: {
       firstName: first,
       ...(last ? { lastName: last } : {}),
@@ -145,6 +152,37 @@ async function createDelivery({ apiKey, order, businessLocationId, webhookUrl, w
     stateCode: data.state && typeof data.state.code === 'number' ? data.state.code : null,
     raw: data,
   };
+}
+
+/**
+ * GET /cities — Bosta's own list of serviceable cities, used by staff to
+ * resolve the district a shipment's dropOffAddress needs (see
+ * buildDropOffAddress above). Confirmed directly against Bosta's OpenAPI spec
+ * (docs.bosta.co/api/api.yaml, tag "city", operationId "list") on
+ * 2026-09-26: `{ success, message, data: { list: [ { _id, name, nameAr,
+ * alias, hub: { _id, name }, code, sector, pickupAvailability,
+ * dropOffAvailability, showAsDropOffCity, showAsPickupCity } ] } }` — same
+ * `data.list` wrapper shape as /pickup-locations. Only `_id`/`name` are used
+ * here; the rest is passed through for the dashboard to render if useful.
+ */
+async function listCities({ apiKey }) {
+  const result = await call('/cities', { method: 'GET', apiKey });
+  return result.data && Array.isArray(result.data.list) ? result.data.list : [];
+}
+
+/**
+ * GET /cities/{cityId}/districts — Bosta's own districts for one city, each
+ * carrying the `districtId` createDelivery's dropOffAddress needs. Confirmed
+ * against the same OpenAPI spec (tag "city", path
+ * /cities/{cityId}/districts) on 2026-09-26: `{ success, message, data: [ {
+ * zoneId, zoneName, zoneOtherName, districtId, districtName,
+ * districtOtherName, pickupAvailability, dropOffAvailability } ] }` — note
+ * `data` here is a plain array, unlike /cities and /pickup-locations which
+ * wrap theirs in `{ list: [...] }`.
+ */
+async function listDistricts({ apiKey, cityId }) {
+  const result = await call(`/cities/${encodeURIComponent(cityId)}/districts`, { method: 'GET', apiKey });
+  return Array.isArray(result.data) ? result.data : [];
 }
 
 /** GET /deliveries/business/{trackingNumber} — current status + full detail. */
@@ -207,6 +245,8 @@ module.exports = {
   code,
   base,
   verifyKey,
+  listCities,
+  listDistricts,
   createDelivery,
   getDelivery,
   mapStateCode,

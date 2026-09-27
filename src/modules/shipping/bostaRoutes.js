@@ -18,6 +18,12 @@ staff.get('/integration', validate(schemas.getIntegration), requirePermission(PE
 staff.put('/integration', validate(schemas.connect), requirePermission(PERMISSIONS.SHIPPING_MANAGE), controller.connect);
 staff.delete('/integration', validate(schemas.disconnect), requirePermission(PERMISSIONS.SHIPPING_MANAGE), controller.disconnect);
 
+// City/district lookups for the one-off shipment district picker (staff
+// picks a Bosta district when booking a single shipment — see
+// orders/orderService#createShipment's `bostaDistrictId`).
+staff.get('/cities', validate(schemas.listCities), requirePermission(PERMISSIONS.SHIPPING_MANAGE), controller.listCities);
+staff.get('/cities/:cityId/districts', validate(schemas.listDistricts), requirePermission(PERMISSIONS.SHIPPING_MANAGE), controller.listDistricts);
+
 // ---------------------------------------------------------------------------
 // Public webhook — mounted at /api/v1/webhooks/bosta. Bosta has no HMAC
 // signing; secured with a per-workspace shared secret sent back to Bosta as

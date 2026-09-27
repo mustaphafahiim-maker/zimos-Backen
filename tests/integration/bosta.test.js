@@ -27,6 +27,10 @@ server.use(errorHandler);
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 const API_KEY = 'test-bosta-api-key-0123456789abcdef';
 const BUSINESS_LOCATION = { _id: 'LOC001', locationName: 'Main Warehouse', isDefault: true };
+// Stubbed cities/districts — shapes confirmed against Bosta's OpenAPI spec
+// (see bostaCarrier.js#listCities/listDistricts doc comments).
+const CAIRO_CITY = { _id: 'FceDyHXwpSYYF9zGW', name: 'Cairo', code: 'EG-01' };
+const CAIRO_DISTRICT = { zoneId: 'g3jl3V8FMN', zoneName: 'New Cairo', districtId: 'wY_JL43TilR', districtName: '1st Settlement - District 10' };
 
 const realFetch = global.fetch;
 let calls;
@@ -56,6 +60,12 @@ beforeEach(() => {
     }
     if (path === '/pickup-locations') {
       return json(200, { success: true, message: 'Done successfully.', data: { total: 1, list: [BUSINESS_LOCATION], page: 1, limit: 50, pages: 1 } });
+    }
+    if (path === '/cities') {
+      return json(200, { success: true, message: 'Done successfully.', data: { list: [CAIRO_CITY] } });
+    }
+    if (path === `/cities/${CAIRO_CITY._id}/districts`) {
+      return json(200, { success: true, message: 'Done successfully.', data: [CAIRO_DISTRICT] });
     }
     if (path === '/deliveries?apiVersion=1' && opts.method === 'POST') {
       const trackingNumber = String(++trackingSeq);
@@ -110,11 +120,11 @@ async function placeOrder(token, workspaceId, variantId, { paymentMethod = 'cod'
   return res.body.order;
 }
 
-function createBostaShipment(token, workspaceId, orderId) {
+function createBostaShipment(token, workspaceId, orderId, extra = {}) {
   return request(server)
     .post(`/api/v1/workspaces/${workspaceId}/orders/${orderId}/shipments`)
     .set(bearer(token))
-    .send({ carrierCode: 'bosta' });
+    .send({ carrierCode: 'bosta', ...extra });
 }
 
 async function webhookSecretFor(workspaceId) {
@@ -188,6 +198,64 @@ describe('Bosta integration', () => {
     const row = await db.Shipment.findByPk(res.body.shipment.id);
     expect(row.waybillNumber).toBe(res.body.shipment.waybillNumber);
     expect(row.carrierCode).toBe('bosta');
+  });
+
+  it('passes a staff-picked bostaDistrictId through to Bosta dropOffAddress.districtId', async () => {
+    const { auth, workspace, variant } = await connected();
+    const order = await placeOrder(auth.accessToken, workspace.id, variant.id);
+
+    const res = await createBostaShipment(auth.accessToken, workspace.id, order.id, { bostaDistrictId: CAIRO_DISTRICT.districtId });
+    expect(res.status).toBe(201);
+
+    const createCall = calls.find((c) => c.path === '/deliveries?apiVersion=1');
+    expect(createCall.body.dropOffAddress).toMatchObject({ city: 'Cairo', districtId: CAIRO_DISTRICT.districtId });
+  });
+
+  it('omitting bostaDistrictId still books exactly as before (no districtId on dropOffAddress)', async () => {
+    const { auth, workspace, variant } = await connected();
+    const order = await placeOrder(auth.accessToken, workspace.id, variant.id);
+
+    const res = await createBostaShipment(auth.accessToken, workspace.id, order.id);
+    expect(res.status).toBe(201);
+
+    const createCall = calls.find((c) => c.path === '/deliveries?apiVersion=1');
+    expect(createCall.body.dropOffAddress).not.toHaveProperty('districtId');
+  });
+
+  it('lists Bosta cities and, for one, its districts, for the staff-side district picker', async () => {
+    const { auth, workspace } = await connected();
+
+    const cities = await request(server).get(`/api/v1/workspaces/${workspace.id}/bosta/cities`).set(bearer(auth.accessToken));
+    expect(cities.status).toBe(200);
+    expect(cities.body.cities).toEqual([CAIRO_CITY]);
+
+    const districts = await request(server)
+      .get(`/api/v1/workspaces/${workspace.id}/bosta/cities/${CAIRO_CITY._id}/districts`)
+      .set(bearer(auth.accessToken));
+    expect(districts.status).toBe(200);
+    expect(districts.body.districts).toEqual([CAIRO_DISTRICT]);
+
+    // Repeated calls within the TTL are served from the in-process cache —
+    // no second /cities hit on Bosta.
+    const citiesCallCount = calls.filter((c) => c.path === '/cities').length;
+    const again = await request(server).get(`/api/v1/workspaces/${workspace.id}/bosta/cities`).set(bearer(auth.accessToken));
+    expect(again.status).toBe(200);
+    expect(calls.filter((c) => c.path === '/cities')).toHaveLength(citiesCallCount);
+  });
+
+  it('the cities/districts picker is quietly empty (not an error) when Bosta is not connected', async () => {
+    const { auth, workspace } = await setupWorkspaceWithProduct();
+
+    const cities = await request(server).get(`/api/v1/workspaces/${workspace.id}/bosta/cities`).set(bearer(auth.accessToken));
+    expect(cities.status).toBe(200);
+    expect(cities.body.cities).toEqual([]);
+
+    const districts = await request(server)
+      .get(`/api/v1/workspaces/${workspace.id}/bosta/cities/${CAIRO_CITY._id}/districts`)
+      .set(bearer(auth.accessToken));
+    expect(districts.status).toBe(200);
+    expect(districts.body.districts).toEqual([]);
+    expect(calls).toHaveLength(0);
   });
 
   it('refuses to create a Bosta shipment when Bosta is not connected, and creates nothing', async () => {

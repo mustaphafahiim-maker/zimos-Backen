@@ -64,6 +64,12 @@ module.exports = {
       carrierCode: Joi.string().min(1).max(100).required(),
       waybillNumber: Joi.string().max(100).allow(null, '').optional(),
       trackingUrl: Joi.string().uri().max(500).allow(null, '').optional(),
+      // Optional Bosta district (staff-picked via the /bosta/cities +
+      // /bosta/cities/:cityId/districts lookups) for this one shipment only —
+      // only read when carrierCode is 'bosta'; ignored otherwise. Omitting it
+      // leaves booking behavior unchanged (Bosta may still refuse a delivery
+      // it can't place on its own — see bostaCarrier.js#buildDropOffAddress).
+      bostaDistrictId: Joi.string().max(100).allow(null, '').optional(),
     }),
   },
   refreshShipment: {

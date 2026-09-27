@@ -26,4 +26,15 @@ const webhook = asyncHandler(async (req, res) => {
   res.json({ received: true, ...result });
 });
 
-module.exports = { getIntegration, connect, disconnect, webhook };
+// Staff-facing city/district lookups for the one-off shipment district
+// picker (see orders/orderService#createShipment's `bostaDistrictId`).
+// Quietly `[]` rather than an error when Bosta isn't connected — see
+// bostaService#listCities/listDistricts.
+const listCities = asyncHandler(async (req, res) => {
+  res.json({ cities: await service.listCities(req.tenant.workspaceId) });
+});
+const listDistricts = asyncHandler(async (req, res) => {
+  res.json({ districts: await service.listDistricts(req.tenant.workspaceId, req.params.cityId) });
+});
+
+module.exports = { getIntegration, connect, disconnect, webhook, listCities, listDistricts };

@@ -81,6 +81,7 @@ async function disconnect(workspaceId, req) {
   const integration = await getIntegration(workspaceId);
   if (!integration) return { disconnected: false };
   await integration.destroy();
+  citiesCache.delete(workspaceId);
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'integration.bosta.disconnect', entityType: 'WorkspaceIntegration', entityId: integration.id, req });
   return { disconnected: true };
 }
@@ -93,13 +94,53 @@ async function requireConnected(workspaceId) {
   return integration;
 }
 
+// In-process TTL cache for Bosta's city list only (GET /cities) — Bosta's
+// cities barely change, and this saves the merchant dashboard from
+// re-fetching Bosta on every render of the district picker. Keyed by
+// workspaceId; no new table, this is disposable, read-through convenience
+// data (not districts, which are asked for one city at a time and cheap
+// enough to always fetch fresh).
+const CITIES_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const citiesCache = new Map(); // workspaceId -> { at: number, list: [] }
+
+/**
+ * Staff-facing city picker for one-off shipment booking (see
+ * orders/orderService#createShipment's `bostaDistrictId`). Returns `[]`
+ * rather than throwing when Bosta isn't connected, so the dashboard can just
+ * not offer the picker instead of showing an error for something the
+ * merchant hasn't set up.
+ */
+async function listCities(workspaceId) {
+  const integration = await getIntegration(workspaceId);
+  if (!integration || integration.status !== 'connected') return [];
+
+  const cached = citiesCache.get(workspaceId);
+  if (cached && Date.now() - cached.at < CITIES_CACHE_TTL_MS) return cached.list;
+
+  const { apiKey } = secretsOf(integration);
+  const list = await bosta.listCities({ apiKey });
+  citiesCache.set(workspaceId, { at: Date.now(), list });
+  return list;
+}
+
+/** Same "quietly empty, never throw" rule as listCities above. */
+async function listDistricts(workspaceId, cityId) {
+  const integration = await getIntegration(workspaceId);
+  if (!integration || integration.status !== 'connected') return [];
+
+  const { apiKey } = secretsOf(integration);
+  return bosta.listDistricts({ apiKey, cityId });
+}
+
 /**
  * Books a real delivery with Bosta for `order` and returns what
  * orders/orderService#createShipment needs to fill in the Shipment row.
  * `apiBase` is this API's own public base URL (e.g. https://api.zimos.app/api/v1),
- * used only to build the webhookUrl we hand to Bosta.
+ * used only to build the webhookUrl we hand to Bosta. `districtId`, if given,
+ * is the Bosta district staff picked for this one shipment (see listCities/
+ * listDistricts above) — optional, unchanged behavior when omitted.
  */
-async function createDeliveryForOrder(workspaceId, order, apiBase) {
+async function createDeliveryForOrder(workspaceId, order, apiBase, { districtId } = {}) {
   const integration = await requireConnected(workspaceId);
   const { apiKey, webhookSecret } = secretsOf(integration);
   const cfg = integration.config || {};
@@ -112,6 +153,7 @@ async function createDeliveryForOrder(workspaceId, order, apiBase) {
       businessLocationId: cfg.businessLocationId || null,
       webhookUrl: `${apiBase}/webhooks/bosta/${workspaceId}`,
       webhookSecret,
+      districtId: districtId || null,
     });
   } catch (err) {
     if (err.code === 'BOSTA_AUTH_FAILED') await integration.update({ status: 'error', lastError: String(err.message).slice(0, 500) });
@@ -195,6 +237,8 @@ module.exports = {
   connect,
   disconnect,
   requireConnected,
+  listCities,
+  listDistricts,
   createDeliveryForOrder,
   fetchDeliveryStatus,
   verifyWebhookAuth,

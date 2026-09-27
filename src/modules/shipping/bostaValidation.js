@@ -15,6 +15,11 @@ module.exports = {
   },
   disconnect: { params: Joi.object(ws) },
 
+  // Staff-facing city/district lookups for the one-off shipment district
+  // picker — see bostaService#listCities/listDistricts.
+  listCities: { params: Joi.object(ws) },
+  listDistricts: { params: Joi.object({ ...ws, cityId: Joi.string().min(1).max(100).required() }) },
+
   // Public webhook: no HMAC to check in the body (Bosta doesn't sign
   // callbacks) — the shared secret arrives as the Authorization header
   // instead (checked in bostaService#verifyWebhookAuth), so the body is read
