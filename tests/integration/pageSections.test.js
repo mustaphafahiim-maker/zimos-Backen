@@ -308,3 +308,80 @@ describe('template page trees go through the same validator', () => {
     expect(pages[0].draftData.sections[0].settings).toEqual(SECTION_SETTINGS);
   });
 });
+
+describe('row and column settings (the builder\'s layout options)', () => {
+  // The website and funnel-step editors keep a row's column gap and a column's
+  // surface/alignment in free-form `settings` objects, like a section's. The
+  // validator checks node structure only, so these pass through unchanged.
+  const ROW_SETTINGS = { gap: 'loose' };
+  const COLUMN_SETTINGS = { surface: 'card', align: 'center', verticalAlign: 'end' };
+
+  function layoutTree() {
+    return {
+      version: 1,
+      sections: [
+        {
+          id: 's1',
+          type: 'section',
+          settings: SECTION_SETTINGS,
+          rows: [
+            {
+              id: 'r1',
+              type: 'row',
+              settings: ROW_SETTINGS,
+              columns: [
+                { id: 'c1', type: 'column', span: 6, settings: COLUMN_SETTINGS, elements: [{ id: 'e1', type: 'text', props: { text: 'a' } }] },
+                { id: 'c2', type: 'column', span: 6, elements: [{ id: 'e2', type: 'text', props: { text: 'b' } }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('round-trips through a website page draft, publish and the public render', async () => {
+    const ctx = await setup();
+    const page = (await ctx.createPage({ path: '/', title: 'Home', draftData: layoutTree() })).body.page;
+    expect((await ctx.publish()).status).toBe(201);
+
+    const live = await ctx.getPublic();
+    expect(live.status).toBe(200);
+    const row = live.body.page.tree.sections[0].rows[0];
+    expect(live.body.page.tree.sections[0].settings).toEqual(SECTION_SETTINGS);
+    expect(row.settings).toEqual(ROW_SETTINGS);
+    expect(row.columns[0].settings).toEqual(COLUMN_SETTINGS);
+    expect(row.columns[1].settings).toBeUndefined();
+
+    // An autosave that edits them keeps what it was given.
+    const edited = layoutTree();
+    edited.sections[0].rows[0].settings = { gap: 'tight' };
+    const res = await ctx.patchPage(page.id, { draftData: edited });
+    expect(res.status).toBe(200);
+    expect(res.body.page.draftData.sections[0].rows[0].settings).toEqual({ gap: 'tight' });
+  });
+
+  it('round-trips through a funnel step, its publish and the public step', async () => {
+    const auth = await registerAndActivate();
+    const workspace = await createWorkspace(auth.accessToken, 'Layout Funnel');
+    const H = { Authorization: `Bearer ${auth.accessToken}` };
+    const base = `/api/v1/workspaces/${workspace.id}/funnels`;
+    const funnel = (await request(app).post(base).set(H).send({ name: 'Layout' })).body.funnel;
+    const step = await request(app)
+      .post(`${base}/${funnel.id}/steps`)
+      .set(H)
+      .send({ key: 'landing', stepType: 'landing', name: 'Landing', builderData: layoutTree() });
+    expect(step.status).toBe(201);
+    expect((await request(app).post(`${base}/${funnel.id}/publish`).set(H).send({})).status).toBe(201);
+
+    const store = `/api/v1/store/${workspace.id}/funnels`;
+    const session = await request(app).post(`${store}/${funnel.id}/sessions`).send({ visitorId: 'layout-visitor-1' });
+    expect(session.status).toBe(201);
+    const current = await request(app).get(`${store}/${funnel.id}/sessions/${session.body.session.id}/step`);
+    expect(current.status).toBe(200);
+    const tree = current.body.step.tree;
+    expect(tree.sections[0].settings).toEqual(SECTION_SETTINGS);
+    expect(tree.sections[0].rows[0].settings).toEqual(ROW_SETTINGS);
+    expect(tree.sections[0].rows[0].columns[0].settings).toEqual(COLUMN_SETTINGS);
+  });
+});

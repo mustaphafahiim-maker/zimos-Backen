@@ -261,6 +261,15 @@ const env = {
     syncBatchSize: Math.max(1, parseInt(process.env.CARRIER_SYNC_BATCH_SIZE || '200', 10) || 200),
     pollMaxAgeDays: Math.max(1, parseInt(process.env.CARRIER_POLL_MAX_AGE_DAYS || '45', 10) || 45),
   },
+
+  // Storefront analytics (modules/analytics). The event ingest can read a
+  // visitor's country/region/city from CDN geo headers, but only from the
+  // CDNs named here: this API is not behind a CDN today, so any client could
+  // send those headers itself. Unset or empty trusts none and geo is null.
+  // Accepted: cloudflare, vercel, cloudfront.
+  analytics: {
+    geoHeaders: csvList(process.env.ANALYTICS_GEO_HEADERS, ''),
+  },
 };
 
 module.exports = env;

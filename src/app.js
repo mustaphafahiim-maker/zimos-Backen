@@ -50,6 +50,8 @@ const carrierRoutes = require('./modules/shipping/carrierRoutes');
 const carrierWebhookRoutes = require('./modules/shipping/carrierWebhookRoutes');
 const onlinePaymentRoutes = require('./modules/payments/onlinePaymentRoutes');
 const paymentWebhookRoutes = require('./modules/payments/paymentWebhookRoutes');
+const analyticsRoutes = require('./modules/analytics/analyticsRoutes');
+const eventsPublicRoutes = require('./modules/analytics/eventsPublicRoutes');
 
 const app = express();
 
@@ -65,6 +67,9 @@ app.use(helmet());
 // Any origin for the public /api/v1/store API, the CORS_ORIGINS allowlist
 // everywhere else (see core/middleware/cors.js).
 app.use(corsPolicy);
+// Storefront analytics beacons get their own, much smaller, body limit. Mounted
+// before the API-wide parser below, which then skips the already-read body.
+app.use(`/api/${env.apiVersion}/store/:workspaceId/events`, eventsPublicRoutes.eventsBodyParser);
 // `verify` keeps the exact bytes Express parsed so webhook signatures can be
 // checked against what the gateway actually signed — a re-serialised req.body
 // would differ by key order or whitespace and never match. See
@@ -150,6 +155,7 @@ v1.use('/workspaces/:workspaceId/billing', workspaceBillingRoutes);
 v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
 v1.use('/workspaces/:workspaceId/carriers', carrierRoutes);
 v1.use('/workspaces/:workspaceId/payments', onlinePaymentRoutes);
+v1.use('/workspaces/:workspaceId/analytics', analyticsRoutes);
 v1.use('/billing', billingRoutes);
 // Courier status webhooks — public; the token in the path is the identity.
 v1.use('/webhooks/carriers', carrierWebhookRoutes);
@@ -164,6 +170,8 @@ v1.use('/admin', platformAdminRoutes);
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
+// Storefront visit tracking (page views, cart, checkout, purchase).
+v1.use('/store/:workspaceId/events', eventsPublicRoutes);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 

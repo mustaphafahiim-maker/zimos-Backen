@@ -1,0 +1,264 @@
+'use strict';
+
+const { Op } = require('sequelize');
+const db = require('../../db/models');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_RANGE_DAYS = 366;
+
+const toNumber = (v) => (v === null || v === undefined ? 0 : Number(v));
+
+/** YYYY-MM-DD in the workspace's timezone, so "today" matches the merchant's day. */
+function dayKey(date, timeZone) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+function resolveRange({ from, to } = {}) {
+  const end = to ? new Date(to) : new Date();
+  let start = from ? new Date(from) : new Date(end.getTime() - 30 * DAY_MS);
+  if (end.getTime() - start.getTime() > MAX_RANGE_DAYS * DAY_MS) start = new Date(end.getTime() - MAX_RANGE_DAYS * DAY_MS);
+  return { start, end };
+}
+
+const rate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null);
+
+const DEVICES = ['mobile', 'desktop', 'tablet'];
+
+function validTimeZone(tz) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return 'UTC';
+  }
+}
+
+/**
+ * Storefront traffic for a range, from analytics_events (written by
+ * POST /store/:workspaceId/events). A session is attributed to the device and
+ * source of its first event in the range; purchases count distinct orders.
+ * The conversion rate is purchases ÷ sessions — sessions that converted, the
+ * way Shopify defines it — so orders that predate the tracker (or came in by
+ * phone) never push it past 100%.
+ * Also fills `sessions` on each day of `series` (by a session's first event).
+ *
+ * Aggregated in Postgres rather than in Node: a year of a busy store's events
+ * is millions of rows, which must never be loaded into the API process.
+ */
+async function getTraffic(workspaceId, { start, end, timeZone, series }) {
+  const run = (sql) =>
+    db.sequelize.query(sql, {
+      replacements: { workspaceId, start, end, tz: validTimeZone(timeZone), devices: DEVICES },
+      type: db.Sequelize.QueryTypes.SELECT,
+    });
+  // Every event in range, with the key that groups it into a session.
+  const EVENTS = `
+    select coalesce(e.session_id, e.visitor_id) as sid, e.visitor_id, e.event_name, e.source, e.medium,
+           e.order_id, e.metadata, e.created_at, e.id
+    from analytics_events e
+    where e.workspace_id = :workspaceId and e.created_at >= :start and e.created_at < :end`;
+  // One row per session: what its first event says about it.
+  const FIRSTS = `
+    select distinct on (sid) sid,
+           case when metadata->>'device' in (:devices) then metadata->>'device' else 'unknown' end as device,
+           coalesce(nullif(source, ''), 'direct') as source,
+           nullif(medium, '') as medium,
+           to_char(created_at at time zone :tz, 'YYYY-MM-DD') as day
+    from ev
+    order by sid, created_at, id`;
+
+  const [[totals], byDevice, bySource, topPages, byDay] = await Promise.all([
+    run(`
+      with ev as (${EVENTS})
+      select
+        count(distinct sid) as sessions,
+        count(distinct visitor_id) as visitors,
+        count(*) filter (where event_name = 'page_view') as page_views,
+        count(*) filter (where event_name = 'view_content') as product_views,
+        count(distinct sid) filter (where event_name = 'add_to_cart') as add_to_cart,
+        count(distinct sid) filter (where event_name = 'begin_checkout') as checkouts,
+        count(distinct order_id) filter (where event_name = 'purchase' and order_id is not null) as purchase_orders,
+        count(*) filter (where event_name = 'purchase' and order_id is null) as purchases_without_order
+      from ev`),
+    run(`
+      with ev as (${EVENTS}), firsts as (${FIRSTS})
+      select device, count(*) as sessions from firsts group by device order by sessions desc, device`),
+    run(`
+      with ev as (${EVENTS}), firsts as (${FIRSTS})
+      select f.source, f.medium, count(distinct f.sid) as sessions,
+             count(distinct p.order_id) as orders
+      from firsts f
+      left join ev p on p.sid = f.sid and p.event_name = 'purchase' and p.order_id is not null
+      group by f.source, f.medium
+      order by sessions desc, orders desc, f.source
+      limit 10`),
+    run(`
+      with ev as (${EVENTS})
+      select metadata->>'path' as path, count(*) as views
+      from ev
+      where event_name = 'page_view' and coalesce(metadata->>'path', '') <> ''
+      group by 1
+      order by views desc, path
+      limit 10`),
+    run(`
+      with ev as (${EVENTS}), firsts as (${FIRSTS})
+      select day, count(*) as sessions from firsts group by day`),
+  ]);
+
+  for (const row of byDay) {
+    const day = series.get(row.day);
+    if (day) day.sessions += toNumber(row.sessions);
+  }
+
+  const sessionCount = toNumber(totals.sessions);
+  const purchaseOrders = toNumber(totals.purchase_orders);
+  const purchases = purchaseOrders > 0 ? purchaseOrders : toNumber(totals.purchases_without_order);
+  const addToCart = toNumber(totals.add_to_cart);
+  const checkouts = toNumber(totals.checkouts);
+  return {
+    sessions: sessionCount,
+    visitors: toNumber(totals.visitors),
+    pageViews: toNumber(totals.page_views),
+    productViews: toNumber(totals.product_views),
+    addToCart,
+    checkouts,
+    purchases,
+    conversionRate: rate(purchases, sessionCount),
+    addToCartRate: rate(addToCart, sessionCount),
+    checkoutRate: rate(checkouts, sessionCount),
+    byDevice: byDevice.map((r) => ({ device: r.device, sessions: toNumber(r.sessions) })),
+    bySource: bySource.map((r) => ({
+      source: r.source,
+      medium: r.medium,
+      sessions: toNumber(r.sessions),
+      orders: toNumber(r.orders),
+    })),
+    topPages: topPages.map((r) => ({ path: r.path, views: toNumber(r.views) })),
+  };
+}
+
+/**
+ * Store performance for a date range, computed only from real orders.
+ *
+ * - "Placed" excludes nothing; "active" excludes cancelled and rejected orders.
+ * - Delivered revenue counts orders whose fulfillmentState is `fulfilled`.
+ * - Profit uses the cost snapshot stored on each order item; `costCoverage`
+ *   tells the merchant how much of the delivered quantity had a cost set, so
+ *   the number is never presented as more complete than it is. Shipping fees
+ *   charged to the customer are reported separately (courier cost is unknown).
+ */
+async function getSummary(workspaceId, query = {}) {
+  const { start, end } = resolveRange(query);
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['defaultCurrency', 'timezone'] });
+  const timeZone = (workspace && workspace.timezone) || 'UTC';
+
+  const orders = await db.Order.findAll({
+    where: { workspaceId, createdAt: { [Op.gte]: start, [Op.lt]: end } },
+    attributes: [
+      'id', 'createdAt', 'currency', 'confirmationState', 'fulfillmentState', 'financialState', 'cancelledAt',
+      'subtotalAmount', 'discountAmount', 'shippingAmount', 'totalAmount', 'amountPaid', 'amountRefunded',
+    ],
+    include: [
+      {
+        model: db.OrderItem,
+        as: 'items',
+        attributes: ['productId', 'productNameSnapshot', 'quantity', 'unitCostAmount', 'lineTotalAmount'],
+      },
+    ],
+    order: [['createdAt', 'ASC']],
+  });
+
+  const counts = { placed: 0, pending: 0, confirmed: 0, rejected: 0, unreachable: 0, postponed: 0, cancelled: 0, delivered: 0, returned: 0 };
+  const revenue = { gross: 0, delivered: 0, collected: 0, refunded: 0, shippingCharged: 0, discounts: 0 };
+  const profit = { productCost: 0, deliveredItemsRevenue: 0, costedQuantity: 0, deliveredQuantity: 0 };
+  const series = new Map();
+  const products = new Map();
+
+  // Pre-fill every day so charts have a continuous axis.
+  for (let t = start.getTime(); t < end.getTime(); t += DAY_MS) {
+    series.set(dayKey(new Date(t), timeZone), { date: dayKey(new Date(t), timeZone), orders: 0, revenue: 0, delivered: 0, sessions: 0 });
+  }
+
+  for (const o of orders) {
+    const cancelled = Boolean(o.cancelledAt);
+    const active = !cancelled && o.confirmationState !== 'rejected';
+    const total = toNumber(o.totalAmount);
+    counts.placed += 1;
+    if (cancelled) counts.cancelled += 1;
+    else counts[o.confirmationState] = (counts[o.confirmationState] || 0) + 1;
+    if (o.fulfillmentState === 'fulfilled') counts.delivered += 1;
+    if (o.fulfillmentState === 'returned') counts.returned += 1;
+
+    revenue.collected += toNumber(o.amountPaid);
+    revenue.refunded += toNumber(o.amountRefunded);
+
+    const key = dayKey(o.createdAt, timeZone);
+    const day = series.get(key) || { date: key, orders: 0, revenue: 0, delivered: 0, sessions: 0 };
+    day.orders += 1;
+
+    if (active) {
+      revenue.gross += total;
+      day.revenue += total;
+      for (const item of o.items || []) {
+        const id = item.productId || item.productNameSnapshot;
+        const p = products.get(id) || { productId: item.productId, name: item.productNameSnapshot, quantity: 0, revenue: 0 };
+        p.quantity += item.quantity;
+        p.revenue += toNumber(item.lineTotalAmount);
+        products.set(id, p);
+      }
+    }
+
+    if (o.fulfillmentState === 'fulfilled') {
+      revenue.delivered += total;
+      revenue.shippingCharged += toNumber(o.shippingAmount);
+      revenue.discounts += toNumber(o.discountAmount);
+      day.delivered += 1;
+      for (const item of o.items || []) {
+        profit.deliveredQuantity += item.quantity;
+        profit.deliveredItemsRevenue += toNumber(item.lineTotalAmount);
+        if (item.unitCostAmount !== null && item.unitCostAmount !== undefined) {
+          profit.productCost += toNumber(item.unitCostAmount) * item.quantity;
+          profit.costedQuantity += item.quantity;
+        }
+      }
+    }
+    series.set(key, day);
+  }
+
+  const activeCount = counts.placed - counts.cancelled - counts.rejected;
+  const decided = counts.confirmed + counts.rejected + counts.unreachable;
+  const grossProfit = profit.deliveredItemsRevenue - revenue.discounts - profit.productCost - revenue.refunded;
+
+  // Mutates `series` (adds per-day sessions), so it runs before the array is built.
+  const traffic = await getTraffic(workspaceId, { start, end, timeZone, series });
+
+  return {
+    range: { from: start.toISOString(), to: end.toISOString(), timeZone },
+    currency: (workspace && workspace.defaultCurrency) || (orders[0] && orders[0].currency) || 'EGP',
+    orders: counts,
+    rates: {
+      confirmation: rate(counts.confirmed, decided),
+      delivery: rate(counts.delivered, counts.confirmed),
+      return: rate(counts.returned, counts.delivered + counts.returned),
+    },
+    revenue: { ...revenue, averageOrderValue: activeCount > 0 ? Math.round(revenue.gross / activeCount) : 0 },
+    profit: {
+      deliveredItemsRevenue: profit.deliveredItemsRevenue,
+      discounts: revenue.discounts,
+      productCost: profit.productCost,
+      refunded: revenue.refunded,
+      grossProfit,
+      costCoverage: rate(profit.costedQuantity, profit.deliveredQuantity),
+    },
+    series: Array.from(series.values()),
+    topProducts: Array.from(products.values()).sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue).slice(0, 5),
+    newCustomers: await db.Customer.count({ where: { workspaceId, createdAt: { [Op.gte]: start, [Op.lt]: end } } }),
+    traffic,
+  };
+}
+
+module.exports = { getSummary, getTraffic, resolveRange, dayKey, rate, toNumber, DAY_MS };

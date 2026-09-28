@@ -148,12 +148,28 @@ function resolveStorefrontClient(req, { secretDigest, serverIps }) {
   };
 }
 
+/*
+ * Analytics beacons (POST /store/:workspaceId/events) go through the same
+ * limiter with the same limits and the same shopper identification, but are
+ * counted in buckets of their own. A browser sends them without an
+ * X-Cart-Token, so they would otherwise share the per-IP bucket (and the
+ * connection ceiling) with every shopper behind that IP, and a busy
+ * carrier-NAT address could see its cart and checkout calls refused because
+ * of page views. Tracking must never be what stops a checkout.
+ */
+const EVENTS_PATH = /^\/[^/]+\/events\/?$/;
+
 function createStorefrontLimiter({ windowMs, visitorMax, ipMax, serverMax, secret, serverIps = [], skip: skipAll = () => false }) {
   const trust = { secretDigest: secret ? sha256(secret) : null, serverIps: buildIpList(serverIps) };
 
   const resolve = (req, res, next) => {
     req.rateLimitScope = 'storefront';
-    req.storefrontClient = resolveStorefrontClient(req, trust);
+    const client = resolveStorefrontClient(req, trust);
+    if (EVENTS_PATH.test(req.path || '')) {
+      if (client.visitorKey) client.visitorKey = `events:${client.visitorKey}`;
+      client.connectionKey = `events:${client.connectionKey}`;
+    }
+    req.storefrontClient = client;
     next();
   };
 
