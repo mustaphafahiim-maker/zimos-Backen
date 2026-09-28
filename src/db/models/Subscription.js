@@ -21,6 +21,10 @@ module.exports = (sequelize, DataTypes) => {
       currentPeriodEnd: { type: DataTypes.DATE, allowNull: false, field: 'current_period_end' },
       graceUntil: { type: DataTypes.DATE, allowNull: true, field: 'grace_until' },
       cancelAtPeriodEnd: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'cancel_at_period_end' },
+      // The agent referral code the merchant entered (migration 106). Stays
+      // attached, so it prices every charge: the first and each renewal.
+      referralCodeId: { type: DataTypes.UUID, allowNull: true, field: 'referral_code_id' },
+      referralCodeAttachedAt: { type: DataTypes.DATE, allowNull: true, field: 'referral_code_attached_at' },
     },
     { tableName: 'subscriptions', indexes: [{ unique: true, fields: ['workspace_id'] }] }
   );
@@ -28,6 +32,7 @@ module.exports = (sequelize, DataTypes) => {
     Subscription.belongsTo(models.Plan, { foreignKey: 'planId', as: 'plan' });
     Subscription.belongsTo(models.Workspace, { foreignKey: 'workspaceId', as: 'workspace' });
     Subscription.hasMany(models.BillingInvoice, { foreignKey: 'subscriptionId', as: 'invoices' });
+    Subscription.belongsTo(models.ReferralCode, { foreignKey: 'referralCodeId', as: 'referralCode' });
   };
   return Subscription;
 };

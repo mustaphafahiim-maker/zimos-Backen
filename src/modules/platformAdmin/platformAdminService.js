@@ -4,6 +4,7 @@ const { Op } = require('sequelize');
 const db = require('../../db/models');
 const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { planPrice, yearlyPriceFor } = require('../billing/planPricing');
 
 /**
  * Every write below is audited as a platform-level entry: workspace_id NULL,
@@ -46,7 +47,8 @@ function serializePlan(p) {
     code: p.key,
     // BIGINT arrives from pg as a string — hand the client a number.
     monthlyPrice: Number(p.monthlyPriceAmount),
-    yearlyPrice: Number(p.yearlyPriceAmount),
+    // Derived: 10 × monthlyPrice (billing/planPricing).
+    yearlyPrice: planPrice(p, 'yearly'),
     currency: p.currency,
     trialDays: p.trialDays,
     // null = unlimited.
@@ -131,9 +133,7 @@ function serializeSubscription(s) {
 function monthlyRunRate(s) {
   if (!s.plan) return 0;
   if (s.status !== 'active' && s.status !== 'past_due') return 0;
-  return s.billingCycle === 'yearly'
-    ? Math.round(Number(s.plan.yearlyPriceAmount) / 12)
-    : Number(s.plan.monthlyPriceAmount);
+  return s.billingCycle === 'yearly' ? Math.round(planPrice(s.plan, 'yearly') / 12) : planPrice(s.plan, 'monthly');
 }
 
 /**
@@ -178,7 +178,9 @@ async function savePlan(input, req) {
     key: input.code,
     name: input.name,
     monthlyPriceAmount: input.monthlyPrice,
-    yearlyPriceAmount: input.yearlyPrice,
+    // Always 10 × monthly (billing/planPricing); a yearlyPrice sent by an
+    // older client is ignored.
+    yearlyPriceAmount: yearlyPriceFor(input.monthlyPrice),
     trialDays: input.trialDays,
     softOrderQuota: input.orderQuota === undefined ? null : input.orderQuota,
     transactionFeeBp: input.transactionFeeBp,
@@ -463,6 +465,14 @@ const ENTITY_LABELS = {
   Template: { model: 'Template', label: (r) => r.name },
   TemplateVersion: { model: 'TemplateVersion', label: (r) => `v${r.version}` },
   SupportTicket: { model: 'SupportTicket', label: (r) => r.subject },
+  ReferralCode: { model: 'ReferralCode', label: (r) => r.code },
+  BillingInvoice: { model: 'BillingInvoice', label: (r) => `Charge ${r.amount} ${r.currency} (${r.status})` },
+  SubscriptionTerm: {
+    model: 'SubscriptionTerm',
+    label: (r) => (r.kind === 'free_months' ? `${r.months} free month(s)` : `Special price ${r.priceAmount} ${r.currency} × ${r.chargesTotal}`),
+  },
+  Subscription: { model: 'Subscription', label: (r) => `Subscription ${r.status}` },
+  AgentCommission: { model: 'AgentCommission', label: (r) => `${r.suggestedCommission} ${r.currency}` },
 };
 
 // `audit_logs.entity_id` is a STRING(100) but every model it points at has a

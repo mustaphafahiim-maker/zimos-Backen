@@ -23,8 +23,28 @@ module.exports = (sequelize, DataTypes) => {
       emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
       phoneVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'phone_verified_at' },
       lastLoginAt: { type: DataTypes.DATE, allowNull: true, field: 'last_login_at' },
-      // Global platform-admin flag (not a full role system).
-      platformAdmin: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'platform_admin' },
+      // Platform-console access (migration 105). NULL role = no access. The
+      // permission set is what every /admin route checks; the role is the
+      // label and the template it was seeded from.
+      platformRole: { type: DataTypes.STRING(64), allowNull: true, field: 'platform_role' },
+      platformPermissions: {
+        type: DataTypes.ARRAY(DataTypes.STRING(64)),
+        allowNull: false,
+        defaultValue: [],
+        field: 'platform_permissions',
+      },
+      // Read-only, for clients that predate roles: "may sign in to the
+      // platform console". Derived from the role; the old users.platform_admin
+      // column is no longer read.
+      platformAdmin: {
+        type: DataTypes.VIRTUAL,
+        get() {
+          return this.getDataValue('platformRole') != null;
+        },
+        set() {
+          throw new Error('platformAdmin is derived from platformRole; set platformRole instead');
+        },
+      },
     },
     {
       tableName: 'users',

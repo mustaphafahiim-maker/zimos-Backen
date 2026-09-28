@@ -3,7 +3,7 @@
 // Support tickets: the merchant side (/workspaces/:id/support/tickets) and the
 // platform side (/admin/support/tickets), with the status moves between them.
 
-const { app, request, registerAndActivate, createWorkspace, addMemberWithRole } = require('../helpers/factories');
+const { app, request, registerAndActivate, createWorkspace, addMemberWithRole, setPlatformRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
@@ -16,7 +16,7 @@ async function merchant(name = 'Support Co') {
 
 async function admin() {
   const auth = await registerAndActivate({ fullName: 'Adam Admin' });
-  await db.User.update({ platformAdmin: true }, { where: { id: auth.userId } });
+  await setPlatformRole(auth.userId, 'admin');
   return { auth, H: bearer(auth.accessToken) };
 }
 

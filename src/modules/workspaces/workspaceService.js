@@ -30,7 +30,7 @@ async function sendInviteEmail(workspace, email, role) {
   });
 }
 
-async function createWorkspace({ name, ownerUserId }, req) {
+async function createWorkspace({ name, ownerUserId, referralCode = null }, req) {
   const baseSlug = toWorkspaceSlug(name);
 
   return db.sequelize.transaction(async (t) => {
@@ -111,6 +111,13 @@ async function createWorkspace({ name, ownerUserId }, req) {
       req,
       transaction: t,
     });
+
+    // The subscription starts here, so this is where an agent's referral code
+    // is entered first. A code that is not usable rolls the whole creation
+    // back with REFERRAL_CODE_INVALID, so the merchant can correct it.
+    if (referralCode) {
+      await billingService.attachReferralCodeInTransaction(workspace.id, referralCode, req, t);
+    }
 
     return workspace;
   });

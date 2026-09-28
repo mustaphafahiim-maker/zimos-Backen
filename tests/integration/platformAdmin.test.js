@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, request, registerAndActivate, createWorkspace } = require('../helpers/factories');
+const { app, request, registerAndActivate, createWorkspace, setPlatformRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const billingService = require('../../src/modules/billing/billingService');
 
@@ -14,7 +14,7 @@ beforeEach(async () => {
 async function setupAdmin() {
   const auth = await registerAndActivate();
   const workspace = await createWorkspace(auth.accessToken, 'Admin Co');
-  await db.User.update({ platformAdmin: true }, { where: { id: auth.userId } });
+  await setPlatformRole(auth.userId, 'admin');
   return {
     wid: workspace.id,
     userId: auth.userId,
@@ -343,7 +343,7 @@ describe('platform admin — MRR never adds two currencies together', () => {
   async function setupAdminWithToken() {
     const auth = await registerAndActivate();
     const workspace = await createWorkspace(auth.accessToken, 'Admin Co');
-    await db.User.update({ platformAdmin: true }, { where: { id: auth.userId } });
+    await setPlatformRole(auth.userId, 'admin');
     return { auth, wid: workspace.id, H: { Authorization: `Bearer ${auth.accessToken}` } };
   }
 
@@ -864,7 +864,7 @@ describe('platform admin — overview metrics', () => {
   async function setupAdminWithToken() {
     const auth = await registerAndActivate();
     const workspace = await createWorkspace(auth.accessToken, 'Admin Co');
-    await db.User.update({ platformAdmin: true }, { where: { id: auth.userId } });
+    await setPlatformRole(auth.userId, 'admin');
     return { auth, wid: workspace.id, H: { Authorization: `Bearer ${auth.accessToken}` } };
   }
 

@@ -28,6 +28,11 @@ router.patch(
   controller.updateWorkspace
 );
 
+// Whether the store is restricted and what the dashboard should warn about
+// (subscription expiring / expired, manual suspension). Any member: everyone
+// who can hit the creation lock should be told why.
+router.get('/:workspaceId/access', validate(schemas.listMembers), resolveTenant, controller.getAccess);
+
 router.get(
   '/:workspaceId/roles',
   validate(schemas.listMembers),

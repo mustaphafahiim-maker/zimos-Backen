@@ -12,11 +12,17 @@ module.exports = (sequelize, DataTypes) => {
       name: { type: DataTypes.STRING(200), allowNull: false },
       slug: { type: DataTypes.STRING(200), allowNull: false, unique: true },
       ownerUserId: { type: DataTypes.UUID, allowNull: false, field: 'owner_user_id' },
+      // 'suspended' is a manual suspension by a platform admin (migration 111),
+      // independent of billing: the store is restricted until reactivated.
       status: {
         type: DataTypes.ENUM('active', 'suspended', 'closed'),
         allowNull: false,
         defaultValue: 'active',
       },
+      suspendedAt: { type: DataTypes.DATE, allowNull: true, field: 'suspended_at' },
+      suspendedByUserId: { type: DataTypes.UUID, allowNull: true, field: 'suspended_by_user_id' },
+      // An internal note from the admin; never shown to the merchant.
+      suspensionReason: { type: DataTypes.TEXT, allowNull: true, field: 'suspension_reason' },
       defaultCurrency: { type: DataTypes.STRING(3), allowNull: false, defaultValue: 'EGP', field: 'default_currency' },
       defaultLocale: { type: DataTypes.STRING(10), allowNull: false, defaultValue: 'ar-EG', field: 'default_locale' },
       timezone: { type: DataTypes.STRING(64), allowNull: false, defaultValue: 'Africa/Cairo' },
@@ -32,6 +38,18 @@ module.exports = (sequelize, DataTypes) => {
       indexes: [{ unique: true, fields: ['slug'] }],
     }
   );
+
+  // The merchant dashboard serializes workspaces whole (GET /workspaces and
+  // friends). Who suspended a store, and the admin's note, are the platform's
+  // business, so they never leave through JSON; platform-admin code reads the
+  // attributes directly.
+  const baseToJSON = Workspace.prototype.toJSON;
+  Workspace.prototype.toJSON = function toJSON() {
+    const json = baseToJSON.call(this);
+    delete json.suspensionReason;
+    delete json.suspendedByUserId;
+    return json;
+  };
 
   Workspace.associate = (models) => {
     Workspace.belongsTo(models.User, { foreignKey: 'ownerUserId', as: 'owner' });

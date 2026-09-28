@@ -154,13 +154,15 @@ function signupBuckets(since) {
  *
  * Real history, not today's subscription state projected backwards: there is
  * no subscription-history table, so back-projection would draw a flat line at
- * the current MRR and pass it off as a trend.
+ * the current MRR and pass it off as a trend. Counts what was received
+ * (amount_paid), which a payment recorded by hand can set apart from the
+ * amount due.
  */
 function invoiceBuckets(since) {
   return db.sequelize.query(
     `SELECT to_char(period_start AT TIME ZONE 'UTC', 'YYYY-MM') AS month,
             currency,
-            SUM(amount) AS total
+            SUM(COALESCE(amount_paid, amount)) AS total
        FROM billing_invoices
       WHERE status = 'paid'
         AND period_start >= :since

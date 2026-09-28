@@ -5,7 +5,6 @@ const validate = require('../../core/middleware/validate');
 const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
-const { requireActiveSubscription } = require('../../core/middleware/subscriptionGuard');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./pagesController');
 const schemas = require('./pagesValidation');
@@ -18,7 +17,6 @@ router.post(
   '/',
   validate(schemas.createWebsite),
   requirePermission(PERMISSIONS.WEBSITE_EDIT),
-  requireActiveSubscription,
   controller.createWebsite
 );
 router.get('/', requirePermission(PERMISSIONS.WEBSITE_EDIT), controller.listWebsites);
@@ -31,7 +29,6 @@ router.post(
   '/:websiteId/publish',
   validate(schemas.publish),
   requirePermission(PERMISSIONS.WEBSITE_PUBLISH),
-  requireActiveSubscription,
   controller.publishWebsite
 );
 router.get(

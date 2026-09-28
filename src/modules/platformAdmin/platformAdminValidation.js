@@ -6,6 +6,10 @@ const { TEMPLATE_KINDS } = require('../templates/templateValidation');
 const { TYPES: BLOCKLIST_TYPES } = require('../risk/platformBlocklistService');
 const { STATUSES: TICKET_STATUSES, PRIORITIES: TICKET_PRIORITIES } = require('../support/supportService');
 const { messageBody: ticketMessageBody } = require('../support/supportValidation');
+const { DISCOUNT_TYPES: REFERRAL_DISCOUNT_TYPES } = require('../referrals/referralCodeService');
+const { LIST_STATUSES: COMMISSION_LIST_STATUSES } = require('../referrals/commissionService');
+const { BILLING_CYCLES } = require('../billing/planPricing');
+const { KINDS: SPECIAL_TERMS_KINDS } = require('../billing/specialTermsService');
 
 const uuid = Joi.string().uuid();
 
@@ -21,7 +25,9 @@ const planBody = Joi.object({
   }),
   // Minor units (e.g. piastres), so an integer is the only valid shape.
   monthlyPrice: Joi.number().integer().min(0).required(),
-  yearlyPrice: Joi.number().integer().min(0).required(),
+  // Ignored: the annual price is always 10 × monthlyPrice. Still accepted so
+  // a client that sends it is not refused.
+  yearlyPrice: Joi.number().integer().min(0).optional(),
   currency: Joi.string().uppercase().length(3).optional(),
   trialDays: Joi.number().integer().min(0).max(365).required(),
   // null = unlimited.
@@ -157,6 +163,29 @@ const blockBody = Joi.object({
   source: Joi.string().valid('manual', 'signal').default('manual'),
 });
 
+// Platform roles are data, so any well-formed key passes here and the service
+// looks it up in platform_roles.
+const roleKey = Joi.string().pattern(/^[a-z][a-z0-9_]{1,63}$/);
+const permissionList = Joi.array().items(Joi.string().trim().max(64)).max(64).unique();
+
+// The discount fields have to agree with each other (a percentage has no
+// currency, 'none' has no value, ...); referralCodeService checks that on
+// the merged record, so a PATCH is judged against what it leaves behind.
+const referralCodeFields = {
+  label: Joi.string().trim().max(120).allow('', null),
+  discountType: Joi.string().valid(...REFERRAL_DISCOUNT_TYPES),
+  // Basis points for a percentage, minor units for a fixed amount.
+  discountValue: Joi.number().integer().min(1).allow(null),
+  discountCurrency: Joi.string().trim().uppercase().length(3).allow(null),
+  // Overrides the platform default commission rate; null = the default.
+  commissionRateBp: Joi.number().integer().min(0).max(10000).allow(null),
+};
+const referralCodeBody = Joi.object({
+  code: Joi.string().trim().min(3).max(32).required(),
+  ...referralCodeFields,
+  discountType: referralCodeFields.discountType.default('none'),
+});
+
 module.exports = {
   createPlan: { body: planBody },
   updatePlan: { params: Joi.object({ planId: uuid.required() }), body: planBody },
@@ -272,8 +301,115 @@ module.exports = {
     }).min(1),
   },
 
-  grantAdmin: { body: Joi.object({ email: joiEmail().trim().max(255).required() }) },
+  // `permissions` omitted = the role's default set. The keys themselves (and
+  // who may grant which) are checked by adminUsersService.
+  grantAdmin: {
+    body: Joi.object({
+      email: joiEmail().trim().max(255).required(),
+      role: roleKey.required(),
+      permissions: permissionList.optional(),
+    }),
+  },
+  updateAdmin: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({ role: roleKey, permissions: permissionList }).min(1),
+  },
   revokeAdmin: { params: Joi.object({ userId: uuid.required() }) },
+
+  createAgent: {
+    body: Joi.object({
+      email: joiEmail().trim().max(255).required(),
+      // Offered in the same form so a new agent can start with a code.
+      firstCode: referralCodeBody.optional(),
+    }),
+  },
+  agentParams: { params: Joi.object({ agentId: uuid.required() }) },
+  createReferralCode: { params: Joi.object({ agentId: uuid.required() }), body: referralCodeBody },
+  // The code string is fixed once created (merchants and print use it).
+  updateReferralCode: {
+    params: Joi.object({ codeId: uuid.required() }),
+    body: Joi.object({
+      label: referralCodeFields.label,
+      discountType: referralCodeFields.discountType,
+      discountValue: referralCodeFields.discountValue,
+      discountCurrency: referralCodeFields.discountCurrency,
+      commissionRateBp: referralCodeFields.commissionRateBp,
+      active: Joi.boolean(),
+    }).min(1),
+  },
+  listCommissions: {
+    query: Joi.object({
+      agentId: uuid.optional(),
+      codeId: uuid.optional(),
+      workspaceId: uuid.optional(),
+      status: Joi.string().valid(...COMMISSION_LIST_STATUSES).optional(),
+      limit: Joi.number().integer().min(1).max(200).default(50),
+      offset: Joi.number().integer().min(0).default(0),
+    }),
+  },
+  // No agentId: an agent's own list is always theirs.
+  listMyCommissions: {
+    query: Joi.object({
+      codeId: uuid.optional(),
+      status: Joi.string().valid(...COMMISSION_LIST_STATUSES).optional(),
+      limit: Joi.number().integer().min(1).max(200).default(50),
+      offset: Joi.number().integer().min(0).default(0),
+    }),
+  },
+  workspaceParams: { params: Joi.object({ workspaceId: uuid.required() }) },
+  // `amountReceived` is what actually arrived, in the charge's minor units;
+  // it may differ from the amount due, and the commission is worked out on it.
+  recordPayment: {
+    params: Joi.object({ chargeId: uuid.required() }),
+    body: Joi.object({
+      amountReceived: Joi.number().integer().min(0).max(Number.MAX_SAFE_INTEGER).required(),
+      note: Joi.string().trim().max(1000).allow('', null).optional(),
+      // When the money arrived; blank means now. A payment recorded late is
+      // dated in the past — never in the future.
+      paidAt: Joi.date().iso().max('now').allow('', null).optional(),
+    }),
+  },
+  setBillingCycle: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({ billingCycle: Joi.string().valid(...BILLING_CYCLES).required() }),
+  },
+  // A note is required on every grant: what was agreed and why.
+  grantSpecialTerms: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({
+      kind: Joi.string().valid(...SPECIAL_TERMS_KINDS).required(),
+      note: Joi.string().trim().min(1).max(2000).required(),
+      months: Joi.when('kind', {
+        is: 'free_months',
+        then: Joi.number().integer().min(1).max(36).required(),
+        otherwise: Joi.forbidden(),
+      }),
+      // Minor units of the plan's currency.
+      priceAmount: Joi.when('kind', {
+        is: 'price_override',
+        then: Joi.number().integer().min(0).max(Number.MAX_SAFE_INTEGER).required(),
+        otherwise: Joi.forbidden(),
+      }),
+      charges: Joi.when('kind', {
+        is: 'price_override',
+        then: Joi.number().integer().min(1).max(36).required(),
+        otherwise: Joi.forbidden(),
+      }),
+    }),
+  },
+  // A reason is required both ways; it goes to the audit log.
+  suspendWorkspace: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({ reason: Joi.string().trim().min(1).max(2000).required() }),
+  },
+  reversePayment: {
+    params: Joi.object({ chargeId: uuid.required() }),
+    body: Joi.object({ reason: Joi.string().trim().max(1000).allow('', null).optional() }),
+  },
+  markCommissionPaid: {
+    params: Joi.object({ commissionId: uuid.required() }),
+    body: Joi.object({ note: Joi.string().trim().max(1000).allow('', null).optional() }),
+  },
 
   listRiskSignals: {
     query: Joi.object({

@@ -2,9 +2,13 @@
 
 const asyncHandler = require('express-async-handler');
 const service = require('./workspaceService');
+const access = require('./workspaceAccessService');
 
 const create = asyncHandler(async (req, res) => {
-  const workspace = await service.createWorkspace({ name: req.body.name, ownerUserId: req.user.id }, req);
+  const workspace = await service.createWorkspace(
+    { name: req.body.name, ownerUserId: req.user.id, referralCode: req.body.referralCode || null },
+    req
+  );
   res.status(201).json({ workspace });
 });
 
@@ -70,8 +74,14 @@ const createRole = asyncHandler(async (req, res) => {
   res.status(201).json({ role });
 });
 
+// GET /workspaces/:workspaceId/access — restriction state and billing phase.
+const getAccess = asyncHandler(async (req, res) => {
+  res.json({ access: access.serializeAccess(await access.accessFor(req.tenant.workspaceId)) });
+});
+
 module.exports = {
   create,
+  getAccess,
   list,
   checkSlug,
   updateWorkspace,

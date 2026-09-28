@@ -2,15 +2,23 @@
 
 const db = require('../../db/models');
 const logger = require('../../core/utils/logger');
+const { ConflictError, NotFoundError } = require('../../core/errors/AppError');
+const { recordAudit } = require('../audit/auditService');
+const referralCodes = require('../referrals/referralCodeService');
+const charges = require('./subscriptionChargeService');
+const { yearlyPriceFor, planPrice } = require('./planPricing');
+const env = require('../../config/env');
+const access = require('../workspaces/workspaceAccessService');
 
 const Op = db.Sequelize.Op;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Subscription state. No payment gateway is connected yet — webhook bodies are
  * already authenticated (gatewaySignature.js, HMAC-SHA256 over the raw body),
  * so wiring a provider in means adapting that check to its header/encoding and
- * remapping `EVENT_STATUS_MAP` to its event names.
+ * remapping `EVENT_STATUS_MAP` and `INVOICE_EVENTS` to its event names.
  */
 
 // Generic gateway event name -> our Subscription.status. Remapped to a real
@@ -22,11 +30,52 @@ const EVENT_STATUS_MAP = {
   'subscription.cancelled': 'cancelled',
 };
 
+// Generic gateway events about one charge, identified by `data.invoiceId`
+// (the billing invoice id the charge was created with, see
+// subscriptionChargeService). `amountPaid` (minor units) is what the gateway
+// actually took; without it the charge counts as paid in full. Remapped like
+// EVENT_STATUS_MAP.
+const INVOICE_EVENTS = {
+  'invoice.paid': (data) =>
+    charges.markChargePaid(data.invoiceId, {
+      paidAt: data.paidAt ? new Date(data.paidAt) : new Date(),
+      externalReference: data.externalReference,
+      amountPaid: data.amountPaid == null ? undefined : data.amountPaid,
+    }),
+  'invoice.payment_failed': (data) => charges.markChargeFailed(data.invoiceId, { reason: data.reason }),
+};
+
+async function applyInvoiceEvent(type, data) {
+  if (!data.invoiceId || !UUID_PATTERN.test(String(data.invoiceId))) {
+    return { handled: false, reason: 'event data has no valid invoiceId' };
+  }
+  if (data.paidAt && Number.isNaN(new Date(data.paidAt).getTime())) {
+    return { handled: false, reason: 'event data has an invalid paidAt' };
+  }
+  if (data.amountPaid != null && !(Number.isInteger(data.amountPaid) && data.amountPaid >= 0)) {
+    return { handled: false, reason: 'event data has an invalid amountPaid' };
+  }
+  try {
+    const result = await INVOICE_EVENTS[type](data);
+    logger.info(`billing webhook ${type}: invoice ${data.invoiceId} -> ${result.invoice.status}`);
+    return {
+      handled: true,
+      invoiceId: result.invoice.id,
+      status: result.invoice.status,
+      commissionId: result.commission ? result.commission.id : undefined,
+    };
+  } catch (err) {
+    if (err instanceof NotFoundError) return { handled: false, reason: 'invoice not found' };
+    throw err;
+  }
+}
+
 const DEFAULT_PLANS = [
-  { key: 'free', name: 'Free', monthlyPriceAmount: 0, yearlyPriceAmount: 0, trialDays: 14, softOrderQuota: 50 },
-  { key: 'starter', name: 'Starter', monthlyPriceAmount: 29900, yearlyPriceAmount: 299900, trialDays: 14, softOrderQuota: 500 },
-  { key: 'growth', name: 'Growth', monthlyPriceAmount: 79900, yearlyPriceAmount: 799900, trialDays: 14, softOrderQuota: 5000 },
-];
+  { key: 'free', name: 'Free', monthlyPriceAmount: 0, trialDays: 14, softOrderQuota: 50 },
+  { key: 'starter', name: 'Starter', monthlyPriceAmount: 29900, trialDays: 14, softOrderQuota: 500 },
+  { key: 'growth', name: 'Growth', monthlyPriceAmount: 79900, trialDays: 14, softOrderQuota: 5000 },
+  // The annual price is always derived (billing/planPricing).
+].map((p) => ({ ...p, yearlyPriceAmount: yearlyPriceFor(p.monthlyPriceAmount) }));
 
 /** Idempotently create the default plan set. Safe to call repeatedly. */
 async function seedDefaultPlans() {
@@ -78,10 +127,12 @@ async function ensureSubscriptionForWorkspace(workspaceId, transaction) {
 /** Map a (already signature-verified) gateway webhook event onto a subscription. */
 async function applyWebhookEvent(event) {
   const type = event && event.type;
+  const data = (event && event.data) || {};
+  if (Object.prototype.hasOwnProperty.call(INVOICE_EVENTS, type)) return applyInvoiceEvent(type, data);
+
   const targetStatus = EVENT_STATUS_MAP[type];
   if (!targetStatus) return { handled: false, reason: `unmapped event type "${type}"` };
 
-  const data = (event && event.data) || {};
   let where = null;
   if (data.externalSubscriptionId) where = { externalSubscriptionId: data.externalSubscriptionId };
   else if (data.workspaceId) where = { workspaceId: data.workspaceId };
@@ -97,16 +148,22 @@ async function applyWebhookEvent(event) {
 }
 
 /**
- * Flip trialing subscriptions whose trial has lapsed to `past_due`. With no
- * gateway wired in there is nothing to charge, so this just marks them.
- * Callable manually now, on a schedule later.
+ * Flip trialing and active subscriptions whose period has ended unpaid to
+ * `past_due`. With no gateway wired in there is nothing to charge, so this
+ * just marks them. Callable manually now (POST /billing/run-trial-check), on
+ * a schedule later.
+ *
+ * Nothing depends on it running: workspaceAccessService already counts a
+ * lapsed period as past_due when it works out the expiry banners and the
+ * restriction. This only brings the stored status in line, for the lists and
+ * counts that read it.
  */
 async function expireStaleTrials(now = new Date()) {
   const [count] = await db.Subscription.update(
     { status: 'past_due' },
     {
       where: {
-        status: 'trialing',
+        status: ['trialing', 'active'],
         currentPeriodEnd: { [Op.lt]: now },
         externalSubscriptionId: { [Op.is]: null }, // no real paid subscription behind it
       },
@@ -117,6 +174,153 @@ async function expireStaleTrials(now = new Date()) {
 
 async function getSubscription(workspaceId) {
   return db.Subscription.findOne({ where: { workspaceId }, include: [{ model: db.Plan, as: 'plan' }] });
+}
+
+// ------------------------------------------------------------ referral code
+
+/**
+ * Attaches the referral code a merchant typed to their subscription. It stays
+ * attached for the life of the subscription and prices every charge (see
+ * subscriptionChargeService). One code per subscription: the same code again
+ * is a no-op (`attached: false`), a different one is refused, so a merchant
+ * cannot move between agents or shop for a bigger discount.
+ *
+ * Audited in the workspace. The agent is not named there, because the
+ * merchant can read their own audit log.
+ */
+async function attachReferralCodeInTransaction(workspaceId, input, req, transaction) {
+  const subscription = await db.Subscription.findOne({
+    where: { workspaceId },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  if (!subscription) throw new NotFoundError('Subscription');
+
+  const code = await referralCodes.findUsableCode(input, transaction);
+  if (subscription.referralCodeId === code.id) return { subscription, code, attached: false };
+  if (subscription.referralCodeId) {
+    throw new ConflictError('This workspace already has a referral code.', 'REFERRAL_CODE_ALREADY_SET');
+  }
+
+  await subscription.update({ referralCodeId: code.id, referralCodeAttachedAt: new Date() }, { transaction });
+  await recordAudit({
+    workspaceId,
+    actorUserId: req.user.id,
+    action: 'subscription.referral_code_attach',
+    entityType: 'Subscription',
+    entityId: subscription.id,
+    before: { referralCode: null },
+    after: { referralCode: code.code },
+    req,
+    transaction,
+  });
+  return { subscription, code, attached: true };
+}
+
+/**
+ * Switches the subscription between monthly and annual billing. It takes
+ * effect from the next charge — the current period is not re-dated or
+ * re-priced — so it is refused while a charge is open (OPEN_CHARGE_EXISTS):
+ * that charge was priced for the old cycle.
+ *
+ * `platform` is a platform admin acting from the console: audited as a
+ * platform-level entry. Otherwise it is the merchant, audited in the
+ * workspace.
+ */
+async function setBillingCycle(workspaceId, billingCycle, req, { platform = false } = {}) {
+  return db.sequelize.transaction(async (transaction) => {
+    const subscription = await db.Subscription.findOne({
+      where: { workspaceId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!subscription) throw new NotFoundError('Subscription');
+    if (subscription.billingCycle === billingCycle) return { subscription, changed: false };
+
+    const open = await db.BillingInvoice.findOne({
+      where: { subscriptionId: subscription.id, status: 'pending' },
+      attributes: ['id'],
+      transaction,
+    });
+    if (open) {
+      throw new ConflictError(
+        'A charge is open for this subscription at the current billing cycle. Settle it before switching.',
+        'OPEN_CHARGE_EXISTS'
+      );
+    }
+
+    const before = subscription.billingCycle;
+    await subscription.update({ billingCycle }, { transaction });
+    await recordAudit({
+      workspaceId: platform ? null : workspaceId,
+      actorUserId: req.user.id,
+      action: 'subscription.billing_cycle_change',
+      entityType: 'Subscription',
+      entityId: subscription.id,
+      before: { billingCycle: before },
+      after: { billingCycle },
+      metadata: platform ? { workspaceId } : null,
+      req,
+      transaction,
+    });
+    return { subscription, changed: true };
+  });
+}
+
+async function attachReferralCode(workspaceId, input, req) {
+  const { attached } = await db.sequelize.transaction((transaction) =>
+    attachReferralCodeInTransaction(workspaceId, input, req, transaction)
+  );
+  return { billing: await getWorkspaceBilling(workspaceId), attached };
+}
+
+/**
+ * The merchant's billing summary: plan and status, the attached referral
+ * code (the discount only — never the agent or the code's label) and a
+ * preview of the next charge, priced by the same function as the real one.
+ */
+async function getWorkspaceBilling(workspaceId) {
+  const subscription = await db.Subscription.findOne({
+    where: { workspaceId },
+    include: [
+      { model: db.Plan, as: 'plan' },
+      { model: db.ReferralCode, as: 'referralCode' },
+    ],
+  });
+  if (!subscription) throw new NotFoundError('Subscription');
+  const plan = subscription.plan;
+
+  let nextCharge = null;
+  if (plan && planPrice(plan, subscription.billingCycle) > 0) {
+    const { referralCodeId, specialTermsId, ...pricing } = await charges.priceCharge(subscription, plan);
+    nextCharge = pricing;
+  }
+
+  return {
+    subscription: {
+      status: subscription.status,
+      billingCycle: subscription.billingCycle,
+      trialEndsAt: subscription.trialEndsAt,
+      currentPeriodStart: subscription.currentPeriodStart,
+      currentPeriodEnd: subscription.currentPeriodEnd,
+      plan: plan
+        ? {
+            id: plan.id,
+            name: plan.name,
+            currency: plan.currency,
+            monthlyPrice: planPrice(plan, 'monthly'),
+            yearlyPrice: planPrice(plan, 'yearly'),
+          }
+        : null,
+    },
+    referralCode: subscription.referralCode
+      ? {
+          ...referralCodes.serializeCodeForMerchant(subscription.referralCode),
+          attachedAt: subscription.referralCodeAttachedAt,
+        }
+      : null,
+    nextCharge,
+  };
 }
 
 /** Platform-admin overview: one row per workspace. */
@@ -133,8 +337,10 @@ async function listWorkspacesOverview() {
   });
   const countMap = Object.fromEntries(counts.map((c) => [c.workspaceId, Number(c.cnt)]));
 
+  const now = new Date();
   return workspaces.map((w) => {
     const sub = w.subscription;
+    const lifecycle = access.billingLifecycle(sub, now);
     return {
       // Plain workspace entity fields, named as the API names them everywhere
       // else, so an admin client can treat a row as a Workspace.
@@ -152,6 +358,12 @@ async function listWorkspacesOverview() {
       trialEndsAt: sub ? sub.trialEndsAt : null,
       currentPeriodEnd: sub ? sub.currentPeriodEnd : null,
       orderCount: countMap[w.id] || 0,
+      // Store access (workspaces/workspaceAccessService): a manual suspension
+      // and the billing lifecycle are separate, and either restricts.
+      suspended: w.status === 'suspended',
+      suspendedAt: w.suspendedAt,
+      billingPhase: lifecycle.phase,
+      restricted: w.status === 'suspended' || (lifecycle.restricted && env.billing.restrictions === 'enforce'),
       // Legacy aliases — the EJS dashboard at /admin/dashboard reads these.
       workspaceId: w.id,
       workspaceName: w.name,
@@ -161,10 +373,15 @@ async function listWorkspacesOverview() {
 
 module.exports = {
   EVENT_STATUS_MAP,
+  INVOICE_EVENTS,
   seedDefaultPlans,
   ensureSubscriptionForWorkspace,
   applyWebhookEvent,
   expireStaleTrials,
   getSubscription,
+  attachReferralCode,
+  attachReferralCodeInTransaction,
+  setBillingCycle,
+  getWorkspaceBilling,
   listWorkspacesOverview,
 };

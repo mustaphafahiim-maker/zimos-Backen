@@ -308,8 +308,14 @@ forms → published page), not a page builder; platform subscriptions/billing
 exist as internal state only — every workspace gets a `trialing` Subscription
 on creation, a webhook endpoint maps generic events to status, and mutations
 are subscription-gated, but **no payment gateway is connected** (see
-"Payment gateway integration — NOT YET CONNECTED" below). `platformAdmin` is
-a single boolean flag on `User`, not a role system.
+"Payment gateway integration — NOT YET CONNECTED" below). Platform-console
+access is a role (creator / admin / agent, stored as data in `platform_roles`)
+plus an editable permission set on `User`; every `/admin` route names the
+permission it needs (`src/core/security/platformPermissions.js`). The first
+creator is set out-of-band with `node scripts/set-platform-role.js <email> creator`.
+Agent referral codes attach to a subscription and price every charge through
+`billing/subscriptionChargeService`; since no gateway exists, charges are only
+created by that service and settled through the signed billing webhook.
 
 **Modeled and migrated, with working CRUD services, but not yet as deep or
 covered by the test suite**:

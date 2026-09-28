@@ -10,8 +10,16 @@ const riskSignals = require('../risk/riskSignalsService');
 const providerRegistry = require('./providerRegistryService');
 const adminUsers = require('./adminUsersService');
 const supportService = require('../support/supportService');
+const agents = require('../referrals/agentService');
+const referralCodes = require('../referrals/referralCodeService');
+const commissions = require('../referrals/commissionService');
+const charges = require('../billing/subscriptionChargeService');
+const billingService = require('../billing/billingService');
+const specialTerms = require('../billing/specialTermsService');
+const suspension = require('./workspaceSuspensionService');
 
-// Every handler here sits behind `authenticate` + `requirePlatformAdmin`.
+// Every handler here sits behind `authenticate` and the platform permission
+// its route names (platformAdminRoutes).
 // Collections are returned under a named key, matching the rest of the API.
 
 // --- Plans ---------------------------------------------------------------
@@ -37,6 +45,77 @@ const deletePlan = asyncHandler(async (req, res) => {
 // be skipped by a caller that only wants the rows.
 const listSubscriptions = asyncHandler(async (req, res) => {
   res.json(await service.listSubscriptions({ status: req.query.status }));
+});
+
+// --- Subscription charges ----------------------------------------------------
+// { subscription, nextCharge, charges }: the workspace's billing as the console
+// shows it.
+const listCharges = asyncHandler(async (req, res) => {
+  res.json(await charges.listCharges(req.params.workspaceId));
+});
+
+// 201 when a new charge was priced; 200 when an open one already existed.
+const createCharge = asyncHandler(async (req, res) => {
+  const { invoice, created } = await charges.createCharge(req.params.workspaceId, { req });
+  res.status(created ? 201 : 200).json({ charge: await charges.getCharge(invoice.id), created });
+});
+
+const recordPayment = asyncHandler(async (req, res) => {
+  const { invoice, codeLapsed } = await charges.recordManualPayment(req.params.chargeId, req.body, req);
+  res.json({ charge: await charges.getCharge(invoice.id), referralCodeLapsed: codeLapsed });
+});
+
+// Monthly or annual, from the next charge; the billing view comes back.
+// 409 OPEN_CHARGE_EXISTS while a charge is open.
+const setBillingCycle = asyncHandler(async (req, res) => {
+  const { changed } = await billingService.setBillingCycle(req.params.workspaceId, req.body.billingCycle, req, {
+    platform: true,
+  });
+  res.json({ ...(await charges.listCharges(req.params.workspaceId)), changed });
+});
+
+// 201 with the grant and the refreshed billing view.
+const grantSpecialTerms = asyncHandler(async (req, res) => {
+  const term = await specialTerms.grant(req.params.workspaceId, req.body, req);
+  res.status(201).json({ term, ...(await charges.listCharges(req.params.workspaceId)) });
+});
+
+// --- Store access (manual suspension + billing restriction) -----------------
+const getStoreAccess = asyncHandler(async (req, res) => {
+  res.json({ access: await suspension.getStoreAccess(req.params.workspaceId) });
+});
+
+// 409 WORKSPACE_ALREADY_SUSPENDED / WORKSPACE_NOT_ACTIVE.
+const suspendWorkspace = asyncHandler(async (req, res) => {
+  await suspension.suspend(req.params.workspaceId, req.body, req);
+  res.json({ access: await suspension.getStoreAccess(req.params.workspaceId) });
+});
+
+// 409 WORKSPACE_NOT_SUSPENDED.
+const reactivateWorkspace = asyncHandler(async (req, res) => {
+  await suspension.reactivate(req.params.workspaceId, req.body, req);
+  res.json({ access: await suspension.getStoreAccess(req.params.workspaceId) });
+});
+
+// 409 CHARGE_NOT_PAID / PAYMENT_CONFIRMED_BY_GATEWAY / OPEN_CHARGE_EXISTS.
+const reversePayment = asyncHandler(async (req, res) => {
+  const { invoice, voidedCommission, subscriptionStatus } = await charges.reverseManualPayment(
+    req.params.chargeId,
+    req.body,
+    req
+  );
+  res.json({
+    charge: await charges.getCharge(invoice.id),
+    voidedCommission: voidedCommission
+      ? {
+          id: voidedCommission.id,
+          suggestedCommission: Number(voidedCommission.suggestedCommission),
+          payoutStatus: voidedCommission.payoutStatus,
+        }
+      : null,
+    // { from, to }: past_due when this payment is what had made it active.
+    subscriptionStatus,
+  });
 });
 
 // --- Overview metrics ----------------------------------------------------
@@ -190,19 +269,66 @@ const checkGateway = asyncHandler(async (req, res) => {
   res.json({ check: await providerRegistry.checkGateway(req.params.code) });
 });
 
-// --- Platform admins -------------------------------------------------------
+// --- Platform users (roles and permissions) --------------------------------
+// { roles, permissions }: the role templates and every permission key.
+const listRoles = asyncHandler(async (req, res) => {
+  res.json(await adminUsers.listRoles());
+});
+
 const listAdmins = asyncHandler(async (req, res) => {
   res.json({ admins: await adminUsers.listAdmins(req.user.id) });
 });
 
-// 201 when the flag was granted; 200 when the account already had it.
+// 201 when the role was granted; 200 when the account already had that role.
 const grantAdmin = asyncHandler(async (req, res) => {
-  const { admin, granted } = await adminUsers.grantAdmin(req.body.email, req);
+  const { admin, granted } = await adminUsers.grantAdmin(req.body, req);
   res.status(granted ? 201 : 200).json({ admin, granted });
+});
+
+const updateAdmin = asyncHandler(async (req, res) => {
+  res.json({ admin: await adminUsers.updateAdmin(req.params.userId, req.body, req) });
 });
 
 const revokeAdmin = asyncHandler(async (req, res) => {
   res.json(await adminUsers.revokeAdmin(req.params.userId, req));
+});
+
+// --- Agents, referral codes, commission ledger -------------------------------
+const listAgents = asyncHandler(async (req, res) => {
+  res.json(await agents.listAgents());
+});
+
+const createAgent = asyncHandler(async (req, res) => {
+  res.status(201).json(await agents.createAgent(req.body, req));
+});
+
+const getAgent = asyncHandler(async (req, res) => {
+  res.json(await agents.getAgent(req.params.agentId));
+});
+
+const createReferralCode = asyncHandler(async (req, res) => {
+  res.status(201).json({ code: await referralCodes.createCode(req.params.agentId, req.body, req) });
+});
+
+const updateReferralCode = asyncHandler(async (req, res) => {
+  res.json({ code: await referralCodes.updateCode(req.params.codeId, req.body, req) });
+});
+
+const listCommissions = asyncHandler(async (req, res) => {
+  res.json(await commissions.listCommissions(req.query));
+});
+
+const markCommissionPaid = asyncHandler(async (req, res) => {
+  res.json({ commission: await commissions.markPaid(req.params.commissionId, req.body, req) });
+});
+
+// The agent's own view: always req.user, never an id from the request.
+const getMyReferrals = asyncHandler(async (req, res) => {
+  res.json(await agents.getAgent(req.user.id, { forAgent: true }));
+});
+
+const listMyCommissions = asyncHandler(async (req, res) => {
+  res.json(await commissions.listCommissions({ ...req.query, agentId: req.user.id }, { forAgent: true }));
 });
 
 // --- Support tickets ---------------------------------------------------------
@@ -228,6 +354,15 @@ module.exports = {
   updatePlan,
   deletePlan,
   listSubscriptions,
+  listCharges,
+  createCharge,
+  recordPayment,
+  reversePayment,
+  setBillingCycle,
+  grantSpecialTerms,
+  getStoreAccess,
+  suspendWorkspace,
+  reactivateWorkspace,
   getOverview,
   listAuditLog,
   listServices,
@@ -259,9 +394,20 @@ module.exports = {
   checkCarrier,
   listGateways,
   checkGateway,
+  listRoles,
   listAdmins,
   grantAdmin,
+  updateAdmin,
   revokeAdmin,
+  listAgents,
+  createAgent,
+  getAgent,
+  createReferralCode,
+  updateReferralCode,
+  listCommissions,
+  markCommissionPaid,
+  getMyReferrals,
+  listMyCommissions,
   listTickets,
   getTicket,
   replyTicket,

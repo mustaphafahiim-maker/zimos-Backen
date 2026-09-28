@@ -3,7 +3,7 @@
 // Ready-made website templates: the public gallery, creating a website from a
 // template (deep one-time copy), and the workspace settings PATCH.
 
-const { app, request, registerAndActivate, createWorkspace } = require('../helpers/factories');
+const { app, request, registerAndActivate, createWorkspace, setPlatformRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
@@ -61,7 +61,7 @@ async function makeTemplate({
 /** A platform admin, for the /api/v1/admin/templates suites below. */
 async function setupAdmin() {
   const auth = await registerAndActivate();
-  await db.User.update({ platformAdmin: true }, { where: { id: auth.userId } });
+  await setPlatformRole(auth.userId, 'admin');
   return { H: { Authorization: `Bearer ${auth.accessToken}` }, userId: auth.userId };
 }
 

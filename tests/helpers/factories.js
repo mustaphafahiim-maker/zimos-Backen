@@ -105,9 +105,33 @@ async function confirmCodOrder(accessToken, workspaceId, orderId) {
   return res.body;
 }
 
+/**
+ * Gives an existing account a platform-console role with that role's default
+ * permission set, straight in the DB — the out-of-band way the first creator
+ * is made (scripts/set-platform-role.js). The roles themselves are seeded by
+ * migration 105 and survive the per-test truncate.
+ */
+async function setPlatformRole(userId, roleKey = 'admin') {
+  const role = await db.PlatformRole.findByPk(roleKey);
+  if (!role) throw new Error(`setPlatformRole: no platform role ${roleKey}`);
+  await db.User.update(
+    { platformRole: role.key, platformPermissions: role.defaultPermissions },
+    { where: { id: userId } }
+  );
+}
+
+/** A fresh active account holding `roleKey`, with a ready Authorization header. */
+async function makePlatformUser(roleKey = 'admin', overrides = {}) {
+  const auth = await registerAndActivate(overrides);
+  await setPlatformRole(auth.userId, roleKey);
+  return { ...auth, H: { Authorization: `Bearer ${auth.accessToken}` } };
+}
+
 module.exports = {
   addMemberWithRole,
   confirmCodOrder,
+  setPlatformRole,
+  makePlatformUser,
   app,
   request,
   uniqueEmail,

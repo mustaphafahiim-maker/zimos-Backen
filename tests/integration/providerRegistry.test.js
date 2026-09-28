@@ -6,7 +6,7 @@
 
 const crypto = require('crypto');
 const Joi = require('joi');
-const { app, request, registerAndActivate, createWorkspace } = require('../helpers/factories');
+const { app, request, registerAndActivate, createWorkspace, setPlatformRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const env = require('../../src/config/env');
 const carriers = require('../../src/modules/shipping/carriers');
@@ -32,7 +32,7 @@ const newKey = () => crypto.randomBytes(32).toString('base64');
 async function setupAdmin() {
   const auth = await registerAndActivate();
   const workspace = await createWorkspace(auth.accessToken, 'Admin Co');
-  await db.User.update({ platformAdmin: true }, { where: { id: auth.userId } });
+  await setPlatformRole(auth.userId, 'admin');
   return { wid: workspace.id, H: { Authorization: `Bearer ${auth.accessToken}` } };
 }
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, request, registerAndActivate, createWorkspace } = require('../helpers/factories');
+const { app, request, registerAndActivate, createWorkspace, setPlatformRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const env = require('../../src/config/env');
 const billingService = require('../../src/modules/billing/billingService');
@@ -91,7 +91,11 @@ describe('subscription scaffolding (no gateway)', () => {
     expect(res.body.handled).toBe(false);
   });
 
-  it('blocks creating new pages/funnels once the subscription lapses, but keeps a live storefront serving buyers', async () => {
+  // Replaces "blocks new pages/funnels once the subscription lapses, but keeps a
+  // live storefront serving buyers": a lapse now restricts only after the
+  // period has ended and a grace day has passed, and then the storefront does
+  // go unavailable (subscriptionLifecycle.test.js has the full lifecycle).
+  it('restricts a cancelled subscription only once its period and grace day are over', async () => {
     const { wid, H } = await setup();
 
     // Publish a store while still trialing.
@@ -102,24 +106,26 @@ describe('subscription scaffolding (no gateway)', () => {
       .send({ template: 'light', productName: 'Live Widget', price: '50.00', description: 'still selling' });
     expect(provisioned.status).toBe(200);
 
-    // Lapse it.
+    // Cancelled, but the period it paid for is still running: nothing changes.
     await postWebhook({ type: 'subscription.canceled', data: { workspaceId: wid } });
-
-    // Mutating actions are blocked with a clear error.
-    const blockedSite = await request(app)
-      .post(`/api/v1/workspaces/${wid}/websites`)
-      .set(H)
-      .send({ name: 'Another site' });
-    expect(blockedSite.status).toBe(402);
-    expect(blockedSite.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
-
-    const blockedFunnel = await request(app).post(`/api/v1/workspaces/${wid}/funnels`).set(H).send({ name: 'F' });
-    expect(blockedFunnel.status).toBe(402);
-
-    // The already-published storefront is untouched — never break a live campaign over billing.
+    expect((await request(app).post(`/api/v1/workspaces/${wid}/funnels`).set(H).send({ name: 'F' })).status).toBe(201);
     const shop = await request(app).get(`/shop/${wid}`);
     expect(shop.status).toBe(200);
     expect(shop.text).toContain('Live Widget');
+
+    // Two days past the period end: creation is locked, the store unavailable.
+    await db.Subscription.update(
+      { currentPeriodEnd: new Date(Date.now() - 2 * 86400000) },
+      { where: { workspaceId: wid } }
+    );
+    const blockedFunnel = await request(app).post(`/api/v1/workspaces/${wid}/funnels`).set(H).send({ name: 'G' });
+    expect(blockedFunnel.status).toBe(402);
+    expect(blockedFunnel.body.error.code).toBe('SUBSCRIPTION_REQUIRED');
+    expect((await request(app).get(`/api/v1/store/${wid}`)).status).toBe(423);
+
+    // Websites are not part of the creation lock.
+    const site = await request(app).post(`/api/v1/workspaces/${wid}/websites`).set(H).send({ name: 'Another site' });
+    expect(site.status).toBe(201);
   });
 
   it('the trial-expiry sweep flips a lapsed trial to past_due', async () => {
@@ -140,7 +146,7 @@ describe('subscription scaffolding (no gateway)', () => {
     const denied = await request(app).get('/api/v1/admin/workspaces').set(H);
     expect(denied.status).toBe(403);
 
-    await db.User.update({ platformAdmin: true }, { where: { id: userId } });
+    await setPlatformRole(userId, 'admin');
     const ok = await request(app).get('/api/v1/admin/workspaces').set(H);
     expect(ok.status).toBe(200);
 
@@ -158,7 +164,7 @@ describe('subscription scaffolding (no gateway)', () => {
 
   it('renders the platform-admin dashboard as HTML', async () => {
     const { H, userId } = await setup();
-    await db.User.update({ platformAdmin: true }, { where: { id: userId } });
+    await setPlatformRole(userId, 'admin');
 
     const res = await request(app).get('/api/v1/admin/dashboard').set(H);
     expect(res.status).toBe(200);

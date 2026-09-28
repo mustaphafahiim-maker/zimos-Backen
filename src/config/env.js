@@ -210,6 +210,24 @@ const env = {
   // anyone flip a subscription to `active`. See modules/billing/gatewaySignature.js.
   billing: {
     webhookSecret: (process.env.BILLING_WEBHOOK_SECRET || '').trim(),
+    // What an unpaid subscription past its grace day does (see
+    // workspaces/workspaceAccessService):
+    //   enforce  the storefront shows "unavailable" and new products/funnels
+    //            are blocked;
+    //   warn     the dashboard still shows the expiry banners, nothing is
+    //            restricted.
+    // Defaults to `warn` in production until merchants have a way to pay —
+    // with `enforce`, every store more than a day past its trial with no
+    // recorded payment goes unavailable. Tests always enforce. A manual
+    // suspension (workspace status) is enforced either way.
+    restrictions:
+      process.env.NODE_ENV === 'test'
+        ? 'enforce'
+        : ['enforce', 'warn'].includes(process.env.BILLING_RESTRICTIONS)
+          ? process.env.BILLING_RESTRICTIONS
+          : process.env.NODE_ENV === 'production'
+            ? 'warn'
+            : 'enforce',
   },
 
   // COD confirmation queue. A claim locks a task to one agent for this long;

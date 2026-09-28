@@ -37,4 +37,31 @@ const adminDashboard = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { webhook, runTrialCheck, adminWorkspaces, adminDashboard };
+// GET /api/v1/workspaces/:workspaceId/billing  — the merchant's own summary.
+const getWorkspaceBilling = asyncHandler(async (req, res) => {
+  res.json({ billing: await service.getWorkspaceBilling(req.tenant.workspaceId) });
+});
+
+// POST /api/v1/workspaces/:workspaceId/billing/referral-code
+// 201 when the code was attached; 200 when it already was.
+const attachReferralCode = asyncHandler(async (req, res) => {
+  const { billing, attached } = await service.attachReferralCode(req.tenant.workspaceId, req.body.code, req);
+  res.status(attached ? 201 : 200).json({ billing, attached });
+});
+
+// PATCH /api/v1/workspaces/:workspaceId/billing  — monthly or annual, from the
+// next charge. 409 OPEN_CHARGE_EXISTS while a charge is open.
+const setBillingCycle = asyncHandler(async (req, res) => {
+  const { changed } = await service.setBillingCycle(req.tenant.workspaceId, req.body.billingCycle, req);
+  res.json({ billing: await service.getWorkspaceBilling(req.tenant.workspaceId), changed });
+});
+
+module.exports = {
+  webhook,
+  runTrialCheck,
+  adminWorkspaces,
+  adminDashboard,
+  getWorkspaceBilling,
+  attachReferralCode,
+  setBillingCycle,
+};

@@ -10,7 +10,14 @@ const { FRAUD_ACTIONS } = require('../fraud/fraudRules');
 const uuid = Joi.string().uuid();
 
 module.exports = {
-  create: { body: Joi.object({ name: Joi.string().min(2).max(200).required() }) },
+  create: {
+    body: Joi.object({
+      name: Joi.string().min(2).max(200).required(),
+      // An agent's referral code, attached to the workspace's subscription.
+      // Optional; an unusable one refuses the whole creation (422).
+      referralCode: Joi.string().trim().max(64).allow('', null).optional(),
+    }),
+  },
   // Only the length is policed here: every other rule comes back as a `reason`
   // in a 200 response instead of a validation error, so the merchant UI can
   // explain what is wrong with an address as it is typed.

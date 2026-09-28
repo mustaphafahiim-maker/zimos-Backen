@@ -4,7 +4,7 @@
 // refuses order creation in every workspace, and the cross-workspace fraud
 // signals (/admin/risk/signals).
 
-const { app, request, registerAndActivate, createWorkspace, setupWorkspaceWithProduct } = require('../helpers/factories');
+const { app, request, registerAndActivate, createWorkspace, setupWorkspaceWithProduct, setPlatformRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const env = require('../../src/config/env');
 const { REJECTION_MESSAGE } = require('../../src/modules/fraud/fraudRules');
@@ -18,7 +18,7 @@ const ADDRESS = { country: 'EG', city: 'Cairo', addressLine: '12 Tahrir St.' };
 
 async function setupAdmin() {
   const auth = await registerAndActivate();
-  await db.User.update({ platformAdmin: true }, { where: { id: auth.userId } });
+  await setPlatformRole(auth.userId, 'admin');
   return { userId: auth.userId, H: bearer(auth.accessToken) };
 }
 

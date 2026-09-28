@@ -6,6 +6,7 @@ const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
+const { requireCreationAllowed } = require('../../core/middleware/subscriptionGuard');
 const controller = require('./catalogController');
 const schemas = require('./catalogValidation');
 
@@ -17,7 +18,9 @@ const canView = requirePermission(PERMISSIONS.PRODUCTS_VIEW);
 const canManage = requirePermission(PERMISSIONS.PRODUCTS_MANAGE);
 
 // --- Products ---------------------------------------------------------------
-router.post('/products', validate(schemas.product), canManage, controller.createProduct);
+// A new product is refused while the store is restricted (unpaid past its
+// grace day, or suspended); everything below keeps working.
+router.post('/products', validate(schemas.product), canManage, requireCreationAllowed, controller.createProduct);
 router.get('/products', validate(schemas.productList), canView, controller.listProducts);
 router.get('/products/:productId', validate(schemas.productGet), canView, controller.getProduct);
 router.patch('/products/:productId', validate(schemas.productUpdate), canManage, controller.updateProduct);
