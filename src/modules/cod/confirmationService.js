@@ -10,6 +10,7 @@ const { setConfirmationState } = require('../orders/orderStateService');
 const { assertNotShipped, SHIPMENT_IN_MOTION } = require('../orders/shipmentLifecycle');
 const carrierShipmentService = require('../shipping/carrierShipmentService');
 const inventoryService = require('../inventory/inventoryService');
+const { QUEUE_DEFAULT_SORT, orderSort, orderByClause, afterAnchorClause, anchorValue } = require('../orders/orderSort');
 
 /*
  * Task lifecycle
@@ -564,11 +565,20 @@ const tabFor = (status) => TABS[status === 'queued' ? 'pending' : status];
  * One page of a queue tab. `mine` narrows In progress to tasks the viewer
  * holds and Done to tasks the viewer recorded an attempt on; Pending has no
  * owner, so it ignores it.
+ *
+ * `sort` 'default' is the tab's own order (TABS above). The others sort the
+ * tab by its orders (orders/orderSort.js: newest, oldest, total_desc,
+ * total_asc), the task id breaking ties, and page on the same keyset.
  */
-async function listQueue(workspaceId, { status = 'pending', mine = false, cursor, limit = 50 } = {}, req) {
+async function listQueue(
+  workspaceId,
+  { status = 'pending', mine = false, cursor, limit = 50, sort: sortKey = QUEUE_DEFAULT_SORT } = {},
+  req
+) {
   await releaseExpiredLocks(workspaceId);
 
   const tab = tabFor(status);
+  const byOrder = sortKey && sortKey !== QUEUE_DEFAULT_SORT ? orderSort(sortKey) : null;
   const viewerId = req.user.id;
   const conditions = ['t.workspace_id = $workspaceId', 't.status = $status'];
   const bind = { workspaceId, status: tab.status, viewerId, limit: limit + 1 };
@@ -579,24 +589,35 @@ async function listQueue(workspaceId, { status = 'pending', mine = false, cursor
   }
 
   if (cursor) {
-    const anchor = await db.ConfirmationTask.findOne({ where: { id: cursor, workspaceId }, attributes: ['id'] });
+    const anchor = await db.ConfirmationTask.findOne({
+      where: { id: cursor, workspaceId },
+      attributes: ['id'],
+      include: byOrder ? [{ model: db.Order, as: 'order', attributes: ['id', 'createdAt', 'totalAmount'] }] : [],
+    });
     if (!anchor) {
       throw new ValidationError(
         [{ field: 'cursor', message: 'Cursor does not point at a confirmation task in this workspace' }],
         'Invalid query'
       );
     }
-    bind.cursor = cursor;
-    const comparison = tab.direction === 'ASC' ? '>' : '<';
-    conditions.push(
-      `(${tab.key}) ${comparison} (SELECT ${tab.key} FROM confirmation_tasks t WHERE t.id = $cursor)`
-    );
+    if (byOrder) {
+      conditions.push(afterAnchorClause(byOrder, 't.id', 'cursorValue', 'cursor'));
+      bind.cursorValue = anchorValue(byOrder, anchor.order);
+      bind.cursor = anchor.id;
+    } else {
+      bind.cursor = cursor;
+      const comparison = tab.direction === 'ASC' ? '>' : '<';
+      conditions.push(
+        `(${tab.key}) ${comparison} (SELECT ${tab.key} FROM confirmation_tasks t WHERE t.id = $cursor)`
+      );
+    }
   }
 
   const rows = await db.sequelize.query(
     `SELECT t.id FROM confirmation_tasks t
+       ${byOrder ? 'JOIN orders o ON o.id = t.order_id' : ''}
       WHERE ${conditions.join(' AND ')}
-      ORDER BY ${tab.order}
+      ORDER BY ${byOrder ? orderByClause(byOrder, 't.id') : tab.order}
       LIMIT $limit`,
     { bind, type: QueryTypes.SELECT }
   );

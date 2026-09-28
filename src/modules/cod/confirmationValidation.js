@@ -1,5 +1,7 @@
 'use strict';
 const Joi = require('joi');
+const { QUEUE_SORT_KEYS, QUEUE_DEFAULT_SORT } = require('../orders/orderSort');
+
 const uuid = Joi.string().uuid();
 const taskParams = Joi.object({ workspaceId: uuid.required(), taskId: uuid.required() });
 
@@ -12,6 +14,11 @@ module.exports = {
       mine: Joi.boolean().default(false),
       cursor: uuid.optional(),
       limit: Joi.number().integer().min(1).max(200).default(50),
+      // 'default' is each tab's own order; the rest sort by the task's order
+      // (orders/orderSort.js). A cursor only pages the sort it came from.
+      sort: Joi.string()
+        .valid(...QUEUE_SORT_KEYS)
+        .default(QUEUE_DEFAULT_SORT),
     }),
   },
   counts: { params: Joi.object({ workspaceId: uuid.required() }) },

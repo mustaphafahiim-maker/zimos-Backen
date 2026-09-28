@@ -13,6 +13,10 @@ const schemas = require('./shippingValidation');
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.SHIPPING_MANAGE));
 
+// --- Store prices and default courier ---------------------------------------
+router.get('/settings', validate(schemas.settings), controller.getSettings);
+router.patch('/settings', validate(schemas.updateSettings), controller.updateSettings);
+
 // --- Zones -----------------------------------------------------------------
 router.get('/zones', validate(schemas.listZones), controller.listZones);
 router.post('/zones', validate(schemas.createZone), controller.createZone);

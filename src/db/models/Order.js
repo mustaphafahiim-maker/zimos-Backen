@@ -71,6 +71,12 @@ module.exports = (sequelize, DataTypes) => {
       totalWeightGrams: { type: DataTypes.INTEGER, allowNull: true, field: 'total_weight_grams' },
       weightTierSnapshot: { type: DataTypes.JSONB, allowNull: true, field: 'weight_tier_snapshot' },
       weightEstimated: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'weight_estimated' },
+      // How shippingAmount was reached (rule, base, extra fees, governorate) —
+      // migration 114. Display only; the amount is shippingAmount.
+      shippingSnapshot: { type: DataTypes.JSONB, allowNull: true, field: 'shipping_snapshot' },
+      // When the current confirmation happened; null while not confirmed —
+      // migration 115, written by orderStateService.setConfirmationState.
+      confirmedAt: { type: DataTypes.DATE, allowNull: true, field: 'confirmed_at' },
       // When the order became a sale — see modules/orders/orderCompletion.js.
       completedAt: { type: DataTypes.DATE, allowNull: true, field: 'completed_at' },
       // Unpaid online orders — see migration 099. The token hash is never

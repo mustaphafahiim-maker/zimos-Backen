@@ -145,6 +145,37 @@ async function listForDashboard(workspaceId) {
 }
 
 /**
+ * What is wrong with a submitted list, as field errors — empty when nothing.
+ * Each id must be 'cod' or '<gateway>:<method>' naming a method that
+ * gateway's integration really takes (its adapter's `methods`: card and
+ * wallet for Paymob and Kashier today), listed once; at most one gateway may
+ * take each method. Whether the method is available with the store's
+ * connected account is checked separately (updateForDashboard).
+ */
+function methodListProblems(methods) {
+  const problems = [];
+  const seen = new Set();
+  const onFor = new Map();
+  methods.forEach((m, i) => {
+    const { provider, method } = parseId(m.id);
+    const adapter = m.id === COD ? null : gateways.getAdapter(provider);
+    const known = m.id === COD || Boolean(adapter && adapter.methods.includes(method));
+    if (!known) problems.push({ field: `methods.${i}.id`, message: `Unknown payment method "${m.id}"` });
+    if (seen.has(m.id)) problems.push({ field: `methods.${i}.id`, message: `"${m.id}" is listed twice` });
+    seen.add(m.id);
+    if (known && m.enabled && m.id !== COD) {
+      if (onFor.has(method)) {
+        problems.push({
+          field: `methods.${i}.enabled`,
+          message: `Only one gateway can take ${method} payments: switch off "${onFor.get(method)}" or "${m.id}"`,
+        });
+      } else onFor.set(method, m.id);
+    }
+  });
+  return problems;
+}
+
+/**
  * Replaces the merchant's list: `methods` is the full ordered list of
  * `{ id, enabled }`. Unknown ids are refused; at least one available method
  * must stay on so the store can always take an order.
@@ -154,25 +185,7 @@ async function updateForDashboard(workspaceId, { methods }, req) {
     const workspace = await db.Workspace.findByPk(workspaceId, { transaction, lock: transaction.LOCK.UPDATE });
     if (!workspace) throw new NotFoundError('Workspace');
 
-    const problems = [];
-    const seen = new Set();
-    const onFor = new Map();
-    methods.forEach((m, i) => {
-      const { provider, method } = parseId(m.id);
-      const known =
-        m.id === COD || (gateways.getAdapter(provider) && gateways.getAdapter(provider).methods.includes(method));
-      if (!known) problems.push({ field: `methods.${i}.id`, message: `Unknown payment method "${m.id}"` });
-      if (seen.has(m.id)) problems.push({ field: `methods.${i}.id`, message: `"${m.id}" is listed twice` });
-      seen.add(m.id);
-      if (known && m.enabled && m.id !== COD) {
-        if (onFor.has(method)) {
-          problems.push({
-            field: `methods.${i}.enabled`,
-            message: `Only one gateway can take ${method} payments: switch off "${onFor.get(method)}" or "${m.id}"`,
-          });
-        } else onFor.set(method, m.id);
-      }
-    });
+    const problems = methodListProblems(methods);
     if (problems.length) throw new ValidationError(problems, 'Invalid body');
 
     const current = await allMethods(workspace);
@@ -255,6 +268,7 @@ module.exports = {
   storefrontMethods,
   codOffered,
   resolveStorefrontMethod,
+  methodListProblems,
   listForDashboard,
   updateForDashboard,
   issuePreviewToken,

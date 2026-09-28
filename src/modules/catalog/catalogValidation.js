@@ -1,6 +1,8 @@
 'use strict';
 
 const Joi = require('joi');
+const { PRODUCT_SHIPPING_MODES } = require('../shipping/shippingRules');
+
 const uuid = Joi.string().uuid();
 
 const productStatus = Joi.string().valid('draft', 'active', 'archived');
@@ -29,6 +31,11 @@ const productFields = {
   tags: Joi.array().items(Joi.string()),
   seo: Joi.object(),
   websiteId: uuid,
+  // How the product ships (shipping/shippingRules.js). The extra fee is per
+  // unit, minor units, and goes with shippingMode 'extra_fee' only — the
+  // service checks the pair against what the product already has.
+  shippingMode: Joi.string().valid(...PRODUCT_SHIPPING_MODES),
+  shippingExtraAmount: Joi.number().integer().min(1).max(100000000).allow(null),
 };
 
 const product = {

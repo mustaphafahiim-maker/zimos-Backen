@@ -7,6 +7,7 @@ const { AppError, NotFoundError, ValidationError } = require('../../core/errors/
 const { recordAudit } = require('../audit/auditService');
 const slugify = require('../../core/utils/slugify');
 const inventoryService = require('../inventory/inventoryService');
+const { resolveProductShipping } = require('../shipping/shippingRules');
 
 const { Op } = db.Sequelize;
 
@@ -22,8 +23,19 @@ function generateProductCode() {
  * step (e.g. a duplicate SKU) leaves no half-built product behind. Initial
  * stock goes through inventoryService.restock like every other stock change.
  */
+/**
+ * The product's shipping fields as the row stores them, or a 422 when the
+ * mode and the extra fee don't go together (shippingRules.resolveProductShipping).
+ */
+function productShippingFields(current, data) {
+  const { value, error } = resolveProductShipping(current, data);
+  if (error) throw new ValidationError([error]);
+  return value || {};
+}
+
 async function createProduct(workspaceId, data, req) {
-  const { variant: variantData, ...productData } = data;
+  const { variant: variantData, shippingMode, shippingExtraAmount, ...rest } = data;
+  const productData = { ...rest, ...productShippingFields(null, { shippingMode, shippingExtraAmount }) };
   const products = scoped(db.Product, workspaceId);
   const baseSlug = slugify(productData.slug || productData.name);
   let slug = baseSlug;
@@ -169,7 +181,11 @@ async function updateProduct(workspaceId, productId, data, req) {
       lock: t.LOCK.UPDATE,
     });
     const before = product.toJSON();
-    await product.update(data, { transaction: t });
+    const { shippingMode, shippingExtraAmount, ...rest } = data;
+    await product.update(
+      { ...rest, ...productShippingFields(before, { shippingMode, shippingExtraAmount }) },
+      { transaction: t }
+    );
 
     let cascade;
     if (before.status !== 'archived' && product.status === 'archived') {

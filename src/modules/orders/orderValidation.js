@@ -2,6 +2,7 @@
 const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
 const { STAGES } = require('./orderStage');
+const { ORDER_SORT_KEYS, DEFAULT_ORDER_SORT } = require('./orderSort');
 const uuid = Joi.string().uuid();
 
 // carrierAddress.cityId / districtId: required together, unless the address
@@ -134,6 +135,10 @@ module.exports = {
     query: Joi.object({
       limit: Joi.number().integer().min(1).max(200).default(50),
       cursor: uuid.optional(),
+      // A whitelisted key (orderSort.js); a cursor only pages the sort it came from.
+      sort: Joi.string()
+        .valid(...ORDER_SORT_KEYS)
+        .default(DEFAULT_ORDER_SORT),
       confirmationState: Joi.string().valid('pending', 'confirmed', 'rejected', 'unreachable', 'postponed').optional(),
       financialState: Joi.string().valid('pending', 'partially_paid', 'paid', 'failed', 'refunded', 'partially_refunded').optional(),
       fulfillmentState: Joi.string().valid('unfulfilled', 'partially_fulfilled', 'fulfilled', 'returned').optional(),

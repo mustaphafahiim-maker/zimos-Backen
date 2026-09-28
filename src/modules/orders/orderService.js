@@ -18,6 +18,8 @@ const { completeOrderInTransaction } = require('./orderCompletion');
 const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState } = require('./orderStateService');
 const { STAGES, STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('./orderStage');
+const { orderSort, orderByClause, afterAnchorClause, anchorValue } = require('./orderSort');
+const gateways = require('../payments/gateways');
 const { assertNotShipped, generateTrackingCode, insertShipment, transitionShipment } = require('./shipmentLifecycle');
 const carrierShipmentService = require('../shipping/carrierShipmentService');
 const confirmationService = require('../cod/confirmationService');
@@ -80,6 +82,9 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
       shippingOverride: offer.shippingOverride,
       // One bundle weighs what its offer lines weigh — not the anchor variant.
       weightUnits: offer.lines.map((l) => weightUnit(l.variant, l.quantity)),
+      // An offer's lines are all variants of its product, so every unit the
+      // bundles hold ships under that product's rule.
+      shippingRule: productShippingRule(variant.product, consumedLines.reduce((sum, l) => sum + l.quantity, 0)),
     };
   }
 
@@ -100,7 +105,14 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     currency: variant.currency,
     shippingOverride: null,
     weightUnits: [weightUnit(variant, 1)],
+    shippingRule: productShippingRule(variant.product, quantity),
   };
+}
+
+// The product's shipping mode for shippingRules.productShipping: `units` is
+// how many units of it the line ships.
+function productShippingRule(product, units) {
+  return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units };
 }
 
 // One component of a line's unit, for shippingWeight.summarizeWeight.
@@ -109,6 +121,22 @@ function weightUnit(variant, quantity) {
     weightGrams: variant ? variant.weightGrams : null,
     quantity,
     weightless: Boolean(variant && variant.product && variant.product.productType !== 'physical'),
+  };
+}
+
+/**
+ * How the order's shipping amount was reached, kept on the order so the
+ * dashboard can say why (and a later change to the store's rates cannot
+ * rewrite that). Never read back for pricing: the amount is shippingAmount.
+ */
+function shippingSnapshot(shipping) {
+  return {
+    rule: shipping.rule,
+    pricingMode: shipping.pricingMode,
+    baseAmount: Number(shipping.baseAmount),
+    extraFeesAmount: shipping.extraFeesAmount,
+    governorate: shipping.governorate,
+    freeShippingThresholdAmount: shipping.freeShipping ? shipping.freeShipping.thresholdAmount : null,
   };
 }
 
@@ -269,6 +297,7 @@ async function createOrder(
       totalQuantity,
       offerShippingOverride,
       weightLines: pricedLines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
+      productLines: pricedLines.map((l) => l.shippingRule),
       transaction,
     });
     const shippingAmount = shipping.amount;
@@ -304,6 +333,7 @@ async function createOrder(
         totalWeightGrams: shipping.weightGrams,
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
+        shippingSnapshot: shippingSnapshot(shipping),
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,
@@ -417,8 +447,10 @@ async function getOrder(workspaceId, orderId) {
     ],
   });
   if (!order) throw new NotFoundError('Order');
+  const providers = await paymentProviders([order]);
   return {
     ...order.toJSON(),
+    paymentProvider: providers.get(order.id) || null,
     stage: await stageForOrder(order.id),
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
   };
@@ -501,7 +533,8 @@ function applySearchAndDates(conditions, bind, { q, from, to }) {
 
 /**
  * Resolves an opaque list cursor — the last order id of the previous page —
- * to the (created_at, id) pair the keyset pages on.
+ * to the row the keyset pages on: its (created_at, id), or (total_amount, id)
+ * for a sort by total.
  *
  * The id has to be looked up inside the workspace rather than trusted: an id
  * from another merchant's workspace would otherwise silently anchor the page
@@ -512,7 +545,7 @@ function applySearchAndDates(conditions, bind, { q, from, to }) {
 async function resolveCursor(workspaceId, cursor, field = 'cursor') {
   const anchor = await db.Order.findOne({
     where: { id: cursor, workspaceId },
-    attributes: ['id', 'createdAt'],
+    attributes: ['id', 'createdAt', 'totalAmount'],
   });
   if (!anchor) {
     throw new ValidationError(
@@ -533,19 +566,47 @@ async function hydrateOrders(page) {
     where: { id: page.map((row) => row.id) },
     include: [{ model: db.OrderItem, as: 'items' }],
   });
+  const providers = await paymentProviders(rows);
   const byId = new Map(rows.map((row) => [row.id, row]));
   return page
     .filter((row) => byId.has(row.id))
-    .map((row) => ({ ...byId.get(row.id).toJSON(), stage: row.stage }));
+    .map((row) => ({
+      ...byId.get(row.id).toJSON(),
+      stage: row.stage,
+      paymentProvider: providers.get(row.id) || null,
+    }));
 }
 
 /**
- * The merchant orders list: one workspace's orders, newest first.
+ * The gateway each online order is paid through: its latest attempt's
+ * provider. Cash on delivery (including an online order the shopper switched
+ * to COD) has none. One query for the page.
+ */
+async function paymentProviders(orders) {
+  const online = orders.filter((o) => o.paymentMethod === 'card' || o.paymentMethod === 'wallet').map((o) => o.id);
+  if (online.length === 0) return new Map();
+  const rows = await db.sequelize.query(
+    `SELECT DISTINCT ON (order_id) order_id, provider_code
+       FROM payments
+      WHERE order_id IN (:ids) AND provider_code IN (:gateways)
+      ORDER BY order_id, created_at DESC, id DESC`,
+    {
+      replacements: { ids: online, gateways: gateways.listAdapters().map((a) => a.code) },
+      type: QueryTypes.SELECT,
+    }
+  );
+  return new Map(rows.map((r) => [r.order_id, r.provider_code]));
+}
+
+/**
+ * The merchant orders list: one workspace's orders, newest first unless
+ * `sort` says otherwise (orderSort.js: newest, oldest, total_desc, total_asc).
  *
  * Paging is keyset, not offset: `cursor` carries the last order id of the
- * previous page and the query asks for rows strictly before that order's
- * (created_at, id) pair. Orders arrive constantly, and an OFFSET page would
- * skip or repeat rows every time one lands while the merchant is paging.
+ * previous page and the query asks for rows strictly after that order's
+ * (sort value, id) pair in the sort's direction — for the default, strictly
+ * before its (created_at, id). Orders arrive constantly, and an OFFSET page
+ * would skip or repeat rows every time one lands while the merchant is paging.
  *
  * The page is picked in SQL and hydrated separately. A single Sequelize
  * findAll cannot do it: the row-wise keyset comparison, the derived stage and
@@ -556,10 +617,11 @@ async function hydrateOrders(page) {
  */
 async function listOrders(
   workspaceId,
-  { limit = 50, cursor, confirmationState, financialState, fulfillmentState, stage, q, from, to } = {}
+  { limit = 50, cursor, sort: sortKey, confirmationState, financialState, fulfillmentState, stage, q, from, to } = {}
 ) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId, limit: limit + 1 };
+  const sort = orderSort(sortKey);
 
   if (confirmationState) {
     conditions.push('o.confirmation_state = $confirmationState');
@@ -585,9 +647,10 @@ async function listOrders(
     const anchor = await resolveCursor(workspaceId, cursor);
     // Row-wise comparison rather than (created_at < x OR (created_at = x AND
     // id < y)): it says the same thing and maps straight onto the
-    // (workspace_id, created_at DESC, id DESC) index.
-    conditions.push('(o.created_at, o.id) < ($cursorCreatedAt::timestamptz, $cursorId::uuid)');
-    bind.cursorCreatedAt = anchor.createdAt.toISOString();
+    // (workspace_id, created_at DESC, id DESC) index — or, sorted by total,
+    // the (workspace_id, total_amount DESC, id DESC) one (migration 116).
+    conditions.push(afterAnchorClause(sort, 'o.id', 'cursorValue', 'cursorId'));
+    bind.cursorValue = anchorValue(sort, anchor);
     bind.cursorId = anchor.id;
   }
 
@@ -595,7 +658,7 @@ async function listOrders(
     `SELECT o.id, ${STAGE_SQL} AS stage
        FROM ${ORDERS_WITH_STAGE_FROM}
       WHERE ${conditions.join(' AND ')}
-      ORDER BY o.created_at DESC, o.id DESC
+      ORDER BY ${orderByClause(sort, 'o.id')}
       LIMIT $limit`,
     { bind, type: QueryTypes.SELECT }
   );

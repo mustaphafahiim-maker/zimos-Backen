@@ -2,11 +2,13 @@
 
 const db = require('../../db/models');
 const { summarizeWeight, describeTiers, resolveTier } = require('./shippingWeight');
+const rules = require('./shippingRules');
 
 /**
  * Prices the shipping line shown at checkout and works out the order's
  * weight and weight tier. Real carrier integration (waybill creation,
- * tracking) lives in modules/shipping/carriers/*.
+ * tracking) lives in modules/shipping/carriers/*; the carrier a merchant
+ * books with never changes this amount.
  *
  * Weight: `weightLines` (see shippingWeight.summarizeWeight) are weighed with
  * the store's default_item_weight_grams standing in for a missing variant
@@ -14,29 +16,55 @@ const { summarizeWeight, describeTiers, resolveTier } = require('./shippingWeigh
  * instead. The tier is resolved whenever the store has tiers, in either
  * pricing mode, because courier bookings use it too.
  *
- * Amount precedence, highest first, in both modes:
+ * Amount — the full precedence is documented in shippingRules.js:
  *   1. No destination country → 0 (nothing to price against).
  *   2. An offer-level shipping override always wins.
- *   3. A configured free-shipping threshold the subtotal reaches → 0.
- *   4. The matching active zone — one lookup (findApplicableZone) shared by
- *      both modes, so a destination always lands in the same zone — priced
- *      by settings.shipping_pricing_mode:
- *        'rates' (default)  the cheapest active rate in that zone, exactly as
- *                           before tiers existed. Weight-based rates see
- *                           known weights only (a missing weight counts as
- *                           0), never the default weight.
+ *   3. Every line's product is set to free shipping → 0.
+ *   4. A configured free-shipping threshold the subtotal reaches → 0.
+ *   5. The destination's rate (the "base"), by settings.shipping_pricing_mode:
+ *        'rates' (default)  the merchant's price for the destination
+ *                           governorate (settings.shipping_governorate_rates),
+ *                           else the cheapest active rate in the matching zone,
+ *                           exactly as before tiers existed. Weight-based
+ *                           rates see known weights only (a missing weight
+ *                           counts as 0), never the default weight.
  *        'weight_tiers'     that zone's price for the order's tier. Other
  *                           matching zones are not consulted.
- *   5. The workspace's default shipping rate, or 0 when none is set (free
- *      rather than blocking checkout) — when no zone matches, or the zone has
- *      no active rate / no price for the tier.
+ *      The zone lookup (findApplicableZone) is shared by both modes, so a
+ *      destination always lands in the same zone. When nothing prices it:
+ *      the workspace's default shipping rate, or 0 when none is set (free
+ *      rather than blocking checkout).
+ *      Plus the extra fee of every "extra fee" product, per unit shipped.
+ *
+ * A store that sets none of the new knobs (governorate rates, product
+ * modes) prices exactly as it did before them.
+ *
+ * `productLines` — [{ mode, extraAmount, units }] per order line, see
+ * shippingRules.productShipping. Optional; without it no product rule applies.
+ *
+ * Live carrier prices: when they come, they are one more source for the base
+ * in resolveBase below (before the zone lookup, keyed on the destination and
+ * the weight/tier already worked out here) — nothing else here changes, and
+ * the order still stores the amount, never the carrier.
  *
  * @returns {Promise<{ amount: number, weightGrams: number|null, tier: object|null,
- *   weightEstimated: boolean, pricingMode: string, lineWeights: Array<number|null> }>}
+ *   weightEstimated: boolean, pricingMode: string, lineWeights: Array<number|null>,
+ *   rule: string, baseAmount: number, extraFeesAmount: number, governorate: string|null,
+ *   freeShipping: object|null }>}
  */
 async function calculateShippingAmount(
   workspaceId,
-  { country, region, subtotal, totalWeightGrams, totalQuantity, offerShippingOverride, weightLines, transaction }
+  {
+    country,
+    region,
+    subtotal,
+    totalWeightGrams,
+    totalQuantity,
+    offerShippingOverride,
+    weightLines,
+    productLines,
+    transaction,
+  }
 ) {
   const workspace = await db.Workspace.findByPk(workspaceId, { transaction });
   const settings = (workspace && workspace.settings) || {};
@@ -53,49 +81,77 @@ async function calculateShippingAmount(
   const tiers = await loadTiers(workspaceId, transaction);
   const tier = resolveTier(tiers, weight.grams);
 
-  const result = (amount) => ({
+  const products = rules.productShipping(productLines);
+  const freeShipping = rules.freeShippingProgress(subtotal, settings.free_shipping_threshold_amount);
+
+  const result = ({ rule, amount, baseAmount = amount, extraFeesAmount = 0, governorate = null }) => ({
     amount,
     weightGrams: weight.grams,
     tier,
     weightEstimated: weight.estimated,
     pricingMode,
     lineWeights: weight.perLine,
+    rule,
+    baseAmount,
+    extraFeesAmount,
+    governorate,
+    freeShipping,
   });
 
-  if (!country) return result(0);
+  const decided = rules.ruleBeforeRates({ country, offerShippingOverride, products, progress: freeShipping });
+  if (decided) return result(decided);
 
-  if (offerShippingOverride && offerShippingOverride.amount !== undefined) {
-    return result(offerShippingOverride.amount);
+  const base = await resolveBase(workspaceId, settings, {
+    pricingMode,
+    country,
+    region,
+    subtotal,
+    tier,
+    knownGrams: weight.knownGrams,
+    totalQuantity,
+    transaction,
+  });
+  return result({
+    ...base,
+    amount: Number(base.amount) + products.extraFeesAmount,
+    baseAmount: base.amount,
+    extraFeesAmount: products.extraFeesAmount,
+  });
+}
+
+/**
+ * The destination's price: { rule, amount, governorate? }. The sources are
+ * tried in order; a live carrier quote would be another source here.
+ */
+async function resolveBase(
+  workspaceId,
+  settings,
+  { pricingMode, country, region, subtotal, tier, knownGrams, totalQuantity, transaction }
+) {
+  const fallback = rules.fallbackRate(settings);
+
+  if (pricingMode === 'rates') {
+    const byGovernorate = rules.governorateRate(settings, country, region);
+    if (byGovernorate) return { rule: rules.RULES.GOVERNORATE_RATE, ...byGovernorate };
   }
-
-  // Free-shipping threshold: an integer minor-unit subtotal at/above which
-  // shipping is free, bypassing rate calculation. Only honoured when set.
-  const threshold = settings.free_shipping_threshold_amount;
-  if (threshold !== undefined && threshold !== null && Number(subtotal) >= Number(threshold)) {
-    return result(0);
-  }
-
-  // Fallback used whenever no active zone/rate matches the destination.
-  const defaultRate = settings.default_shipping_rate_amount;
-  const fallbackAmount = defaultRate !== undefined && defaultRate !== null ? Number(defaultRate) : 0;
 
   const applicableZone = await findApplicableZone(workspaceId, country, region, transaction);
-  if (!applicableZone) return result(fallbackAmount);
+  if (!applicableZone) return fallback;
 
   if (pricingMode === 'weight_tiers') {
-    if (!tier) return result(fallbackAmount);
+    if (!tier) return fallback;
     const price = await db.ShippingZoneTierPrice.findOne({
       where: { zoneId: applicableZone.id, tierId: tier.id },
       transaction,
     });
-    return result(price ? Number(price.amount) : fallbackAmount);
+    return price ? { rule: rules.RULES.ZONE_TIER_PRICE, amount: Number(price.amount) } : fallback;
   }
 
-  if (applicableZone.rates.length === 0) return result(fallbackAmount);
+  if (applicableZone.rates.length === 0) return fallback;
   const candidates = applicableZone.rates.map((rate) =>
-    computeRateAmount(rate, { subtotal, totalWeightGrams: weight.knownGrams, totalQuantity })
+    computeRateAmount(rate, { subtotal, totalWeightGrams: knownGrams, totalQuantity })
   );
-  return result(Math.min(...candidates));
+  return { rule: rules.RULES.ZONE_RATE, amount: Math.min(...candidates) };
 }
 
 /**
@@ -167,4 +223,4 @@ function computeRateAmount(rate, { subtotal, totalWeightGrams, totalQuantity }) 
   }
 }
 
-module.exports = { calculateShippingAmount, loadTiers, matchesZone, computeRateAmount };
+module.exports = { calculateShippingAmount, findApplicableZone, loadTiers, matchesZone, computeRateAmount };

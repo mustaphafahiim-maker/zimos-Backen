@@ -1,6 +1,8 @@
 'use strict';
 
 const Joi = require('joi');
+const { GOVERNORATE_CODES } = require('./governorates');
+
 const uuid = Joi.string().uuid();
 
 const country = Joi.string().length(2).uppercase();
@@ -70,6 +72,25 @@ const tierPricesBody = Joi.object({
     .required(),
 });
 
+// Integer minor units, capped like the tier prices above.
+const amount = Joi.number().integer().min(0).max(100000000);
+
+// The store's prices and default courier — see shippingSettingsService.
+const settingsBody = Joi.object({
+  defaultRateAmount: amount.allow(null),
+  freeShippingThresholdAmount: amount.allow(null),
+  // The whole map; a governorate left out uses the default rate. An unknown
+  // code is refused, not stripped: a typo must not silently lose a price.
+  governorateRates: Joi.object()
+    .pattern(Joi.string().max(40), amount.required())
+    .custom((value, helpers) => {
+      const unknown = Object.keys(value).find((code) => !GOVERNORATE_CODES.includes(code));
+      return unknown ? helpers.message(`"${unknown}" is not a governorate code`) : value;
+    }),
+  // 'manual' or a courier code, checked against the store's couriers by the service.
+  defaultCarrierCode: Joi.string().max(50).allow(null),
+}).min(1);
+
 const pricingModeBody = Joi.object({
   mode: Joi.string().valid('rates', 'weight_tiers').required(),
   defaultItemWeightGrams: Joi.number().integer().min(1).max(1000000).optional(),
@@ -99,6 +120,8 @@ module.exports = {
     body: tierPricesBody,
   },
   pricingMode: { params: Joi.object({ workspaceId: uuid.required() }), body: pricingModeBody },
+  settings: { params: Joi.object({ workspaceId: uuid.required() }) },
+  updateSettings: { params: Joi.object({ workspaceId: uuid.required() }), body: settingsBody },
 
   updateRate: {
     params: Joi.object({ workspaceId: uuid.required(), rateId: uuid.required() }),
