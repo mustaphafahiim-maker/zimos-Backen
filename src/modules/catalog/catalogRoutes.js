@@ -49,6 +49,16 @@ router.delete('/offers/:offerId', validate(schemas.offerDelete), canManage, cont
 // --- Collections -------------------------------------------------------------
 router.post('/collections', validate(schemas.collection), canManage, controller.createCollection);
 router.get('/collections', validate(schemas.collectionList), canView, controller.listCollections);
+// The whole tree's parents and positions in one request (drag and drop).
+router.post('/collections/reorder', validate(schemas.collectionReorder), canManage, controller.reorderCollections);
+router.put(
+  '/collections/:collectionId/products/order',
+  validate(schemas.collectionProductOrder),
+  canManage,
+  controller.reorderCollectionProducts
+);
+// Option names in use ("Size", "Color"), for choosing storefront filters.
+router.get('/option-names', validate(schemas.collectionList), canView, controller.listOptionNames);
 router.get('/collections/:collectionId', validate(schemas.collectionGet), canView, controller.getCollection);
 router.patch('/collections/:collectionId', validate(schemas.collectionUpdate), canManage, controller.updateCollection);
 router.delete('/collections/:collectionId', validate(schemas.collectionDelete), canManage, controller.deleteCollection);

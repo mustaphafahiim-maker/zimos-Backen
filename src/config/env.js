@@ -101,6 +101,10 @@ const env = {
     trackingWindowMs: parseInt(process.env.TRACKING_RATE_LIMIT_WINDOW_MS || '600000', 10),
     trackingMax: parseInt(process.env.TRACKING_RATE_LIMIT_MAX || '3', 10),
     trackingPhoneMax: parseInt(process.env.TRACKING_PHONE_RATE_LIMIT_MAX || '30', 10),
+    // Storefront search suggestions (GET /store/:id/products/suggest), per
+    // shopper: a minute and an hour. See core/middleware/rateLimiters.js.
+    suggestMinuteMax: parseInt(process.env.SUGGEST_RATE_LIMIT_PER_MINUTE || '60', 10),
+    suggestHourMax: parseInt(process.env.SUGGEST_RATE_LIMIT_PER_HOUR || '1200', 10),
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is

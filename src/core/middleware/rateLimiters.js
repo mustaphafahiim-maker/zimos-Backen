@@ -284,6 +284,41 @@ const trackingLimiter = createTrackingLimiter({
 });
 
 /*
+ * The storefront search box's suggestions (GET /store/:id/products/suggest)
+ * are asked for while the shopper types, so they get a bucket of their own —
+ * a minute and an hour — on top of the storefront limiter every /store
+ * request already passed. Keyed on the shopper as that limiter identified
+ * them (req.storefrontClient), falling back to the connection: our own
+ * storefront server never calls this, browsers do. A debounced search box
+ * sends a few requests per second at most while typing, so the minute limit
+ * is generous for a person and tight for a scraper walking the catalogue.
+ */
+function createSuggestLimiter({ minuteMax, hourMax, skip: skipAll = () => false }) {
+  const key = (req) => {
+    const client = req.storefrontClient;
+    const who = (client && (client.visitorKey || client.connectionKey)) || `ip:${ipKeyGenerator(req.ip || '')}`;
+    return `suggest:${who}`;
+  };
+  const bucket = (windowMs, limit, standardHeaders, prefix) =>
+    rateLimit({
+      windowMs,
+      limit,
+      standardHeaders,
+      legacyHeaders: false,
+      skip: skipAll,
+      keyGenerator: (req) => `${prefix}:${key(req)}`,
+      handler,
+    });
+  return [bucket(60 * 1000, minuteMax, true, 'm'), bucket(60 * 60 * 1000, hourMax, false, 'h')];
+}
+
+const suggestLimiter = createSuggestLimiter({
+  minuteMax: env.rateLimit.suggestMinuteMax,
+  hourMax: env.rateLimit.suggestHourMax,
+  skip,
+});
+
+/*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
  * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
  * put all merchants in one bucket; each merchant's webhook token gets its own.
@@ -346,4 +381,6 @@ module.exports = {
   createStorefrontLimiter,
   trackingLimiter,
   createTrackingLimiter,
+  suggestLimiter,
+  createSuggestLimiter,
 };

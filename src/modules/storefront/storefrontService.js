@@ -5,66 +5,40 @@ const { NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const reviewService = require('../reviews/reviewService');
 const { resolveCheckoutSettings } = require('../checkout/checkoutSettings');
+const { resolveCatalogSettings } = require('./catalogSettings');
+const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
+const productSearch = require('./productSearch');
 
 /**
  * Public (no-auth) storefront queries: only status='active' rows, and only
  * shopper-facing fields — no cost price, internal notes, or draft/archived
- * items. Don't reuse the staff catalog service here; it has no such filter.
+ * items (./publicProduct.js). Don't reuse the staff catalog service here; it
+ * has no such filter.
  */
 
-function toPublicVariant(variant) {
-  return {
-    id: variant.id,
-    sku: variant.sku,
-    optionValues: variant.optionValues,
-    priceAmount: variant.priceAmount,
-    compareAtAmount: variant.compareAtAmount,
-    currency: variant.currency,
-    weightGrams: variant.weightGrams,
-    // Availability is exposed as a boolean, not exact counts, so shoppers
-    // (and competitors) never see precise stock levels via the public API.
-    inStock: variant.allowOverselling || variant.stockOnHand - variant.reservedStock > 0,
-  };
+// Any of these asks for the search / filter / sort listing (./productSearch.js).
+const LISTING_PARAMS = ['search', 'collection', 'minPrice', 'maxPrice', 'options', 'sort', 'page', 'facets'];
+
+function wantsListing(query) {
+  if (LISTING_PARAMS.some((key) => query[key] !== undefined && query[key] !== '' && query[key] !== false)) return true;
+  // Several tags at once is the new filter; one tag stays on the old path.
+  return Array.isArray(query.tag);
 }
 
-function toPublicOffer(offer) {
-  return {
-    id: offer.id,
-    name: offer.name,
-    pricingMode: offer.pricingMode,
-    priceAmount: offer.priceAmount,
-    currency: offer.currency,
-    badge: offer.badge,
-    isDefault: offer.isDefault,
-    lines: (offer.lines || []).map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
-  };
-}
+/**
+ * The public product list. Plain requests (limit, collectionId, one tag,
+ * cursor) keep the original id-ordered cursor paging every existing caller
+ * relies on; anything from LISTING_PARAMS goes to productSearch.
+ */
+async function listProducts(workspaceId, query = {}) {
+  if (wantsListing(query)) return productSearch.searchProducts(workspaceId, query);
 
-function toPublicProduct(product) {
-  return {
-    id: product.id,
-    name: product.name,
-    slug: product.slug,
-    description: product.description,
-    productType: product.productType,
-    media: product.media,
-    tags: product.tags,
-    seo: product.seo,
-    variants: (product.variants || []).map(toPublicVariant),
-    offers: (product.offers || []).map(toPublicOffer),
-  };
-}
-
-async function listProducts(workspaceId, { collectionId, tag, search, limit = 24, cursor } = {}) {
+  const { collectionId, tag, limit = 24, cursor } = query;
   const where = { workspaceId, status: 'active' };
   if (cursor) where.id = { [db.Sequelize.Op.gt]: cursor };
   if (tag) where.tags = { [db.Sequelize.Op.contains]: [tag] };
-  if (search) where.name = { [db.Sequelize.Op.iLike]: `%${search}%` };
 
-  const include = [
-    { model: db.ProductVariant, as: 'variants', where: { status: 'active' }, required: false },
-    { model: db.Offer, as: 'offers', where: { status: 'active' }, required: false, include: [{ model: db.OfferVariant, as: 'lines' }] },
-  ];
+  const include = publicInclude();
   if (collectionId) {
     include.push({ model: db.Collection, as: 'collections', where: { id: collectionId }, attributes: [] });
   }
@@ -80,10 +54,7 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrSlug);
   const product = await db.Product.findOne({
     where: { workspaceId, status: 'active', ...(isUuid ? { id: idOrSlug } : { slug: idOrSlug }) },
-    include: [
-      { model: db.ProductVariant, as: 'variants', where: { status: 'active' }, required: false },
-      { model: db.Offer, as: 'offers', where: { status: 'active' }, required: false, include: [{ model: db.OfferVariant, as: 'lines' }] },
-    ],
+    include: publicInclude(),
   });
   if (!product) throw new NotFoundError('Product');
 
@@ -110,17 +81,40 @@ async function getStorefront(workspaceId) {
     // fully populated — an unconfigured store gets the defaults, which are
     // what the checkout already enforced before this existed.
     checkout: resolveCheckoutSettings(w),
+    // The product listing's sidebar, filters and default sort.
+    catalog: resolveCatalogSettings(w.settings),
   };
 }
 
+const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl'];
+
+/** The store's collections as a flat list, in the merchant's order; `parentId` builds the tree. */
 async function listCollections(workspaceId) {
-  return db.Collection.findAll({ where: { workspaceId }, attributes: ['id', 'name', 'slug', 'description', 'seo'] });
+  return db.Collection.findAll({
+    where: { workspaceId },
+    attributes: PUBLIC_COLLECTION_FIELDS,
+    order: [
+      ['position', 'ASC'],
+      ['name', 'ASC'],
+      ['id', 'ASC'],
+    ],
+  });
 }
 
-async function getCollection(workspaceId, collectionId) {
-  const collection = await db.Collection.findOne({ where: { id: collectionId, workspaceId }, attributes: ['id', 'name', 'slug', 'description', 'seo'] });
+/** One collection, by id or by slug. */
+async function getCollection(workspaceId, idOrSlug) {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrSlug);
+  const collection = await db.Collection.findOne({
+    where: { workspaceId, ...(isUuid ? { id: idOrSlug } : { slug: idOrSlug }) },
+    attributes: PUBLIC_COLLECTION_FIELDS,
+  });
   if (!collection) throw new NotFoundError('Collection');
   return collection;
+}
+
+/** The search box's suggestions — see productSearch.suggest. */
+async function suggestProducts(workspaceId, q) {
+  return productSearch.suggest(workspaceId, q);
 }
 
 /* --- Public order tracking ---------------------------------------------- */
@@ -232,6 +226,7 @@ module.exports = {
   getProductBySlugOrId,
   listCollections,
   getCollection,
+  suggestProducts,
   trackOrder,
   toPublicVariant,
 };

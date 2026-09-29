@@ -3,7 +3,8 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { resolvePublicWorkspace } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { trackingLimiter, suggestLimiter } = require('../../core/middleware/rateLimiters');
+const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
 const cartController = require('../cart/cartController');
 const checkoutController = require('../checkout/checkoutController');
@@ -20,7 +21,9 @@ const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
-router.get('/products', validate(schemas.listProducts), controller.listProducts);
+router.get('/products', collectOptionFilters, validate(schemas.listProducts), controller.listProducts);
+// Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
+router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
 router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getProduct);
 router.post('/products/:productId/reviews', validate(reviewSchemas.submit), reviewController.submit);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);

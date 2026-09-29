@@ -179,6 +179,13 @@ const offerUpdate = {
   }).min(1),
 };
 
+// A collection's picture: an http(s) URL, typically from the media library.
+const collectionImage = Joi.string()
+  .uri({ scheme: ['http', 'https'] })
+  .max(1000)
+  .allow('', null);
+const collectionPosition = Joi.number().integer().min(0).max(100000);
+
 const collection = {
   params: Joi.object({ workspaceId: uuid.required() }),
   body: Joi.object({
@@ -187,6 +194,11 @@ const collection = {
     description: Joi.string().allow('').optional(),
     rules: Joi.object().allow(null).optional(),
     seo: Joi.object().default({}),
+    // Null (or absent) is a top-level collection.
+    parentId: uuid.allow(null).optional(),
+    // Absent puts it after its siblings.
+    position: collectionPosition.optional(),
+    imageUrl: collectionImage.optional(),
   }),
 };
 
@@ -204,7 +216,36 @@ const collectionUpdate = {
     description: Joi.string().allow('').optional(),
     rules: Joi.object().allow(null).optional(),
     seo: Joi.object().optional(),
+    parentId: uuid.allow(null).optional(),
+    position: collectionPosition.optional(),
+    imageUrl: collectionImage.optional(),
   }).min(1),
+};
+
+const collectionReorder = {
+  params: Joi.object({ workspaceId: uuid.required() }),
+  body: Joi.object({
+    items: Joi.array()
+      .items(
+        Joi.object({
+          id: uuid.required(),
+          // Leave out to keep the current parent; null moves it to the top level.
+          parentId: uuid.allow(null).optional(),
+          position: collectionPosition.optional(),
+        })
+      )
+      .min(1)
+      .max(500)
+      .unique('id')
+      .required(),
+  }),
+};
+
+const collectionProductOrder = {
+  params: collectionParams,
+  body: Joi.object({
+    productIds: Joi.array().items(uuid.required()).min(1).max(2000).unique().required(),
+  }),
 };
 
 const addToCollection = {
@@ -237,4 +278,6 @@ module.exports = {
   collectionDelete,
   addToCollection,
   removeFromCollection,
+  collectionReorder,
+  collectionProductOrder,
 };

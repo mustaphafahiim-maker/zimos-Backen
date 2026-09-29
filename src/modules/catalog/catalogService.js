@@ -8,6 +8,7 @@ const { recordAudit } = require('../audit/auditService');
 const slugify = require('../../core/utils/slugify');
 const inventoryService = require('../inventory/inventoryService');
 const { resolveProductShipping } = require('../shipping/shippingRules');
+const { MAX_COLLECTION_DEPTH, findTreeProblem } = require('./collectionTree');
 
 const { Op } = db.Sequelize;
 
@@ -541,34 +542,243 @@ async function deleteOffer(workspaceId, offerId, req) {
   return { archived: true, id: offer.id };
 }
 
-async function listCollections(workspaceId) {
-  return db.Collection.findAll({ where: { workspaceId }, order: [['createdAt', 'ASC']] });
+// ---------------------------------------------------------------------------
+// Collections: a tree of at most MAX_COLLECTION_DEPTH levels, siblings in the
+// merchant's order (position, then name), products inside each in theirs.
+// ---------------------------------------------------------------------------
+
+const TREE_MESSAGES = {
+  COLLECTION_CYCLE: 'A collection cannot be placed inside itself or inside one of its own sub-collections',
+  COLLECTION_TOO_DEEP: `Collections can be nested at most ${MAX_COLLECTION_DEPTH} levels deep`,
+};
+
+/**
+ * Serialises every change to one workspace's tree. Two moves that are each
+ * fine on their own (A under B, B under A) must not both land, so every tree
+ * write takes this transaction-scoped lock before reading the tree.
+ */
+async function lockCollectionTree(workspaceId, transaction) {
+  await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext($key))', {
+    bind: { key: `collections:${workspaceId}` },
+    transaction,
+  });
 }
 
+async function loadParentMap(workspaceId, transaction) {
+  const rows = await db.Collection.findAll({ where: { workspaceId }, attributes: ['id', 'parentId'], transaction });
+  return new Map(rows.map((row) => [row.id, row.parentId || null]));
+}
+
+function assertValidTree(parentOf, field = 'parentId') {
+  const problem = findTreeProblem(parentOf);
+  if (problem) {
+    const message = TREE_MESSAGES[problem.code];
+    throw new AppError(problem.code, message, 422, [{ field, message, collectionId: problem.id }]);
+  }
+}
+
+function assertParentExists(parentOf, parentId, field = 'parentId') {
+  if (parentId && !parentOf.has(parentId)) {
+    throw new AppError('COLLECTION_PARENT_NOT_FOUND', 'The parent collection does not exist in this store', 422, [
+      { field, message: 'Unknown collection' },
+    ]);
+  }
+}
+
+async function nextSiblingPosition(workspaceId, parentId, transaction) {
+  const max = await db.Collection.max('position', { where: { workspaceId, parentId: parentId || null }, transaction });
+  return Number.isFinite(max) ? max + 1 : 0;
+}
+
+/** Siblings in the merchant's order, each with how many products it holds directly. */
+async function listCollections(workspaceId) {
+  return db.Collection.findAll({
+    where: { workspaceId },
+    attributes: {
+      include: [
+        [
+          db.sequelize.literal(
+            '(SELECT COUNT(*)::int FROM product_collections pc WHERE pc.collection_id = "Collection"."id")'
+          ),
+          'productCount',
+        ],
+      ],
+    },
+    order: [
+      ['position', 'ASC'],
+      ['name', 'ASC'],
+      ['id', 'ASC'],
+    ],
+  });
+}
+
+/** One collection with its products in the collection's own order. */
 async function getCollection(workspaceId, collectionId) {
   const collection = await db.Collection.findOne({
     where: { id: collectionId, workspaceId },
-    include: [{ model: db.Product, as: 'products', through: { attributes: [] } }],
+    include: [{ model: db.Product, as: 'products', through: { attributes: ['position'] } }],
   });
   if (!collection) throw new NotFoundError('Collection');
-  return collection;
+  const json = collection.toJSON();
+  json.products = (json.products || [])
+    .map(({ ProductCollection: link, ...product }) => ({ ...product, collectionPosition: link ? link.position : 0 }))
+    .sort((a, b) => a.collectionPosition - b.collectionPosition || String(a.name).localeCompare(String(b.name)));
+  return json;
 }
 
 async function updateCollection(workspaceId, collectionId, data, req) {
-  const collection = await scoped(db.Collection, workspaceId, 'Collection').findByPkOrThrow(collectionId);
-  const before = collection.toJSON();
-  await collection.update(data);
-  await recordAudit({
-    workspaceId,
-    actorUserId: req.user.id,
-    action: 'collection.update',
-    entityType: 'Collection',
-    entityId: collection.id,
-    before,
-    after: collection.toJSON(),
-    req,
+  return db.sequelize.transaction(async (transaction) => {
+    const moving = Object.prototype.hasOwnProperty.call(data, 'parentId');
+    if (moving) await lockCollectionTree(workspaceId, transaction);
+    const collection = await db.Collection.findOne({ where: { id: collectionId, workspaceId }, transaction });
+    if (!collection) throw new NotFoundError('Collection');
+    const before = collection.toJSON();
+
+    const patch = { ...data };
+    if (moving) {
+      const parentId = data.parentId || null;
+      const parentOf = await loadParentMap(workspaceId, transaction);
+      assertParentExists(parentOf, parentId);
+      parentOf.set(collection.id, parentId);
+      assertValidTree(parentOf);
+      patch.parentId = parentId;
+      // A move without a position lands at the end of its new siblings.
+      if (patch.position === undefined && parentId !== (collection.parentId || null)) {
+        patch.position = await nextSiblingPosition(workspaceId, parentId, transaction);
+      }
+    }
+    if (patch.imageUrl === '') patch.imageUrl = null;
+
+    await collection.update(patch, { transaction });
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'collection.update',
+      entityType: 'Collection',
+      entityId: collection.id,
+      before,
+      after: collection.toJSON(),
+      req,
+      transaction,
+    });
+    return collection;
   });
-  return collection;
+}
+
+/**
+ * Rearranges the tree in one go — what a drag-and-drop screen sends: each
+ * listed collection's parent and position. Collections not listed keep
+ * theirs. The result is checked as a whole (no cycles, at most three levels)
+ * before anything is written.
+ */
+async function reorderCollections(workspaceId, items, req) {
+  return db.sequelize.transaction(async (transaction) => {
+    await lockCollectionTree(workspaceId, transaction);
+    const rows = await db.Collection.findAll({ where: { workspaceId }, transaction });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const unknown = items.filter((item) => !byId.has(item.id)).map((item) => item.id);
+    if (unknown.length > 0) {
+      throw new AppError('COLLECTION_NOT_FOUND', 'Some collections do not exist in this store', 422, [
+        { field: 'items', message: 'Unknown collection', ids: unknown },
+      ]);
+    }
+
+    const parentOf = new Map(rows.map((row) => [row.id, row.parentId || null]));
+    for (const item of items) {
+      if (item.parentId !== undefined) {
+        assertParentExists(parentOf, item.parentId || null, 'items.parentId');
+        parentOf.set(item.id, item.parentId || null);
+      }
+    }
+    assertValidTree(parentOf, 'items.parentId');
+
+    let changed = 0;
+    for (const item of items) {
+      const row = byId.get(item.id);
+      const patch = {};
+      if (item.parentId !== undefined && (item.parentId || null) !== (row.parentId || null)) patch.parentId = item.parentId || null;
+      if (item.position !== undefined && item.position !== row.position) patch.position = item.position;
+      if (Object.keys(patch).length === 0) continue;
+      await row.update(patch, { transaction });
+      changed += 1;
+    }
+
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'collection.reorder',
+      entityType: 'Collection',
+      entityId: null,
+      after: { items: items.length, changed },
+      req,
+      transaction,
+    });
+    return { changed };
+  });
+}
+
+/**
+ * Sets the order of products inside one collection. `productIds` lists them
+ * first to last; any product of the collection left out keeps its relative
+ * order after the listed ones. Every listed id must already be in it.
+ */
+async function reorderCollectionProducts(workspaceId, collectionId, productIds, req) {
+  return db.sequelize.transaction(async (transaction) => {
+    const collection = await db.Collection.findOne({ where: { id: collectionId, workspaceId }, transaction });
+    if (!collection) throw new NotFoundError('Collection');
+    const links = await db.ProductCollection.findAll({
+      where: { collectionId: collection.id },
+      order: [
+        ['position', 'ASC'],
+        ['createdAt', 'ASC'],
+      ],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const byProduct = new Map(links.map((link) => [link.productId, link]));
+    const missing = productIds.filter((id) => !byProduct.has(id));
+    if (missing.length > 0) {
+      throw new AppError('PRODUCT_NOT_IN_COLLECTION', 'Some products are not in this collection', 422, [
+        { field: 'productIds', message: 'Not in this collection', ids: missing },
+      ]);
+    }
+    const listed = new Set(productIds);
+    const order = [...productIds, ...links.filter((link) => !listed.has(link.productId)).map((link) => link.productId)];
+    for (const [index, productId] of order.entries()) {
+      const link = byProduct.get(productId);
+      if (link.position !== index) await link.update({ position: index }, { transaction });
+    }
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'collection.reorder_products',
+      entityType: 'Collection',
+      entityId: collection.id,
+      after: { productIds: order },
+      req,
+      transaction,
+    });
+    return { productIds: order };
+  });
+}
+
+/**
+ * The option names this store's active variants use ("Size", "اللون"…), most
+ * used first — what the storefront sidebar can offer as filters.
+ */
+async function listOptionNames(workspaceId) {
+  const rows = await db.sequelize.query(
+    `SELECT k.key AS name, COUNT(DISTINCT v.product_id)::int AS "productCount"
+       FROM product_variants v
+       JOIN products p ON p.id = v.product_id AND p.status = 'active'
+       CROSS JOIN LATERAL jsonb_object_keys(v.option_values) AS k(key)
+      WHERE v.workspace_id = $workspaceId AND v.status = 'active' AND jsonb_typeof(v.option_values) = 'object'
+      GROUP BY k.key
+      ORDER BY "productCount" DESC, k.key ASC
+      LIMIT 50`,
+    { bind: { workspaceId }, type: db.Sequelize.QueryTypes.SELECT }
+  );
+  return rows;
 }
 
 // A collection is only a storefront grouping — nothing in order history
@@ -661,15 +871,43 @@ async function createCollection(workspaceId, data, req) {
   while (await collections.findOne({ where: { slug } })) {
     slug = `${baseSlug}-${++n}`;
   }
-  const collection = await collections.create({ ...data, slug });
-  await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'collection.create', entityType: 'Collection', entityId: collection.id, req });
-  return collection;
+  return db.sequelize.transaction(async (transaction) => {
+    const parentId = data.parentId || null;
+    if (parentId) {
+      await lockCollectionTree(workspaceId, transaction);
+      const parentOf = await loadParentMap(workspaceId, transaction);
+      assertParentExists(parentOf, parentId);
+      // The new collection sits one level below its parent.
+      parentOf.set('new', parentId);
+      assertValidTree(parentOf);
+    }
+    const position = data.position !== undefined ? data.position : await nextSiblingPosition(workspaceId, parentId, transaction);
+    const collection = await db.Collection.create(
+      { ...data, workspaceId, slug, parentId, position, imageUrl: data.imageUrl || null },
+      { transaction }
+    );
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'collection.create',
+      entityType: 'Collection',
+      entityId: collection.id,
+      req,
+      transaction,
+    });
+    return collection;
+  });
 }
 
 async function addProductToCollection(workspaceId, productId, collectionId, req) {
   const product = await scoped(db.Product, workspaceId).findByPkOrThrow(productId);
   const collection = await scoped(db.Collection, workspaceId, 'Collection').findByPkOrThrow(collectionId);
-  const [, created] = await db.ProductCollection.findOrCreate({ where: { productId: product.id, collectionId: collection.id } });
+  // A product joins at the end of the collection's order.
+  const last = await db.ProductCollection.max('position', { where: { collectionId: collection.id } });
+  const [, created] = await db.ProductCollection.findOrCreate({
+    where: { productId: product.id, collectionId: collection.id },
+    defaults: { position: Number.isFinite(last) ? last + 1 : 0 },
+  });
   if (created) {
     await recordAudit({
       workspaceId,
@@ -709,4 +947,7 @@ module.exports = {
   deleteCollection,
   addProductToCollection,
   removeProductFromCollection,
+  reorderCollections,
+  reorderCollectionProducts,
+  listOptionNames,
 };

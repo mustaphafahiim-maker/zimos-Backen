@@ -131,6 +131,8 @@ const MERCHANT_SETTINGS_KEYS = [
   'tax_enabled',
   'default_item_weight_grams',
   'confirmation_whatsapp_template',
+  // Replaced whole, not merged: its filter list is ordered.
+  'storefront_catalog',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one

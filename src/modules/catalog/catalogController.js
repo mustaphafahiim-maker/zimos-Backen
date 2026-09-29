@@ -107,6 +107,20 @@ const updateCollection = asyncHandler(async (req, res) => {
   res.json({ collection: await service.updateCollection(req.tenant.workspaceId, req.params.collectionId, req.body, req) });
 });
 
+const reorderCollections = asyncHandler(async (req, res) => {
+  res.json(await service.reorderCollections(req.tenant.workspaceId, req.body.items, req));
+});
+
+const reorderCollectionProducts = asyncHandler(async (req, res) => {
+  res.json(
+    await service.reorderCollectionProducts(req.tenant.workspaceId, req.params.collectionId, req.body.productIds, req)
+  );
+});
+
+const listOptionNames = asyncHandler(async (req, res) => {
+  res.json({ options: await service.listOptionNames(req.tenant.workspaceId) });
+});
+
 const deleteCollection = asyncHandler(async (req, res) => {
   res.json(await service.deleteCollection(req.tenant.workspaceId, req.params.collectionId, req));
 });
@@ -155,4 +169,7 @@ module.exports = {
   deleteCollection,
   addToCollection,
   removeFromCollection,
+  reorderCollections,
+  reorderCollectionProducts,
+  listOptionNames,
 };
