@@ -865,7 +865,11 @@ async function createOffer(workspaceId, productId, data, req) {
 
 async function createCollection(workspaceId, data, req) {
   const collections = scoped(db.Collection, workspaceId);
-  const baseSlug = slugify(data.slug || data.name);
+  // slugify keeps Latin letters only, so an all-Arabic name comes back as its
+  // generic "workspace" — which now shows in the storefront's collection URLs.
+  const source = data.slug || data.name;
+  const slugged = slugify(source);
+  const baseSlug = slugged === 'workspace' && !/workspace/i.test(source) ? 'collection' : slugged;
   let slug = baseSlug;
   let n = 1;
   while (await collections.findOne({ where: { slug } })) {

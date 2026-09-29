@@ -136,6 +136,14 @@ describe('collection tree', () => {
     expect(order.status).toBe(404);
   });
 
+  it('gives an all-Arabic collection a readable slug', async () => {
+    const ctx = await setup();
+    const first = await ctx.create({ name: 'قمصان' });
+    const second = await ctx.create({ name: 'بناطيل' });
+    expect(first.slug).toBe('collection');
+    expect(second.slug).toBe('collection-2');
+  });
+
   it('lists the option names in use', async () => {
     const ctx = await setup();
     await db.ProductVariant.update({ optionValues: { Size: 'M', Color: 'Red' } }, { where: { id: ctx.variant.id } });
