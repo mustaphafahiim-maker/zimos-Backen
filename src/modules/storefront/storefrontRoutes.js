@@ -3,7 +3,8 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { resolvePublicWorkspace } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
-const { trackingLimiter, suggestLimiter } = require('../../core/middleware/rateLimiters');
+const { trackingLimiter, suggestLimiter, uploadLimiter } = require('../../core/middleware/rateLimiters');
+const customerUploadController = require('../customerUploads/customerUploadController');
 const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
 const cartController = require('../cart/cartController');
@@ -27,6 +28,9 @@ router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), contr
 router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getProduct);
 router.post('/products/:productId/reviews', validate(reviewSchemas.submit), reviewController.submit);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
+// A shopper's photo for a product's image field (customerUploads). Limited
+// before multer reads a byte; multer refuses anything over 15 MB mid-stream.
+router.post('/uploads', uploadLimiter, customerUploadController.acceptFile, customerUploadController.create);
 router.get('/collections/:collectionId', validate(schemas.getCollection), controller.getCollection);
 
 // Shopper order lookup. The limiter runs ahead of `validate` so a request that

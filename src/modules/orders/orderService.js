@@ -23,6 +23,8 @@ const gateways = require('../payments/gateways');
 const { assertNotShipped, generateTrackingCode, insertShipment, transitionShipment } = require('./shipmentLifecycle');
 const carrierShipmentService = require('../shipping/carrierShipmentService');
 const confirmationService = require('../cod/confirmationService');
+const { resolveCustomizations, attachUploads } = require('../catalog/customFields');
+const { presentOrderItems } = require('../customerUploads/customerUploadService');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -78,6 +80,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
       unitCostAmount: variant.costAmount,
       lineTotalAmount: lineTotal,
       consumedInventory: consumedLines,
+      customFields: variant.product.customFields || [],
       currency: offer.currency,
       shippingOverride: offer.shippingOverride,
       // One bundle weighs what its offer lines weigh — not the anchor variant.
@@ -102,6 +105,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     unitCostAmount: variant.costAmount,
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
+    customFields: variant.product.customFields || [],
     currency: variant.currency,
     shippingOverride: null,
     weightUnits: [weightUnit(variant, 1)],
@@ -203,7 +207,7 @@ async function createOrder(
   workspaceId,
   payload,
   req,
-  { transaction: outerTransaction, skipFraudRules = false, awaitingPayment = null } = {}
+  { transaction: outerTransaction, skipFraudRules = false, awaitingPayment = null, customFields = {} } = {}
 ) {
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
 
@@ -252,6 +256,23 @@ async function createOrder(
     const pricedLines = [];
     for (const item of items) {
       const line = await priceLine(workspaceId, item, transaction);
+      // The shopper's answers to the product's custom fields, checked against
+      // its current definition (catalog/customFields.js). Required fields are
+      // enforced for the storefront checkout (customFields.enforceRequired);
+      // staff and funnel orders have no form for them and may leave them out.
+      if (item.customizations || line.customFields.length > 0) {
+        line.customizations = await resolveCustomizations(
+          { id: line.productId, customFields: line.customFields },
+          item.customizations,
+          {
+            workspaceId,
+            visitorId: customFields.visitorId || null,
+            cartId: customFields.cartId || null,
+            enforceRequired: Boolean(customFields.enforceRequired),
+            transaction,
+          }
+        );
+      }
       pricedLines.push(line);
       for (const consumed of line.consumedInventory) {
         await inventoryService.reserve(
@@ -368,10 +389,13 @@ async function createOrder(
             unitCostAmount: line.unitCostAmount,
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
+            customizations: line.customizations || null,
           },
           { transaction }
         )
       );
+      // The line's photos now belong to the order: attached, no longer expiring.
+      await attachUploads(line.customizations, orderItems[orderItems.length - 1].id, transaction);
     }
 
     if (paymentMethod === 'cod') {
@@ -448,8 +472,11 @@ async function getOrder(workspaceId, orderId) {
   });
   if (!order) throw new NotFoundError('Order');
   const providers = await paymentProviders([order]);
+  const json = order.toJSON();
+  // Shoppers' photos are shown through short-lived signed links, made per read.
+  await presentOrderItems(workspaceId, json.items);
   return {
-    ...order.toJSON(),
+    ...json,
     paymentProvider: providers.get(order.id) || null,
     stage: await stageForOrder(order.id),
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),

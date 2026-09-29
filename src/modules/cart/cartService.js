@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const db = require('../../db/models');
 const { NotFoundError, AppError } = require('../../core/errors/AppError');
 const { toPublicVariant } = require('../storefront/storefrontService');
+const { resolveCustomizations, sameCustomizations, snapshotToInput, bindUploadsToCart } = require('../catalog/customFields');
 
 function generateGuestToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -54,6 +55,8 @@ function withComputedTotals(cart) {
       lineTotal: Number(currentUnitPrice) * item.quantity,
       variant: item.variant ? toPublicVariant(item.variant) : null,
       isOrderBump: item.isOrderBump,
+      // The shopper's answers, labels included; photos by upload id only.
+      customizations: item.customizations || null,
     };
   });
   const subtotal = items.reduce((sum, i) => sum + i.lineTotal, 0);
@@ -67,13 +70,22 @@ function withComputedTotals(cart) {
   };
 }
 
-async function addItem(workspaceId, cartId, { variantId, offerId, quantity }) {
+async function addItem(workspaceId, cartId, { variantId, offerId, quantity, customizations, visitorId }) {
   // A draft or archived product isn't for sale, even if its variant row is active.
   const variant = await db.ProductVariant.findOne({
     where: { id: variantId, workspaceId, status: 'active' },
-    include: [{ model: db.Product, as: 'product', where: { status: 'active' }, attributes: ['id'] }],
+    include: [{ model: db.Product, as: 'product', where: { status: 'active' }, attributes: ['id', 'customFields'] }],
   });
   if (!variant) throw new NotFoundError('ProductVariant');
+
+  // Checked against the product's fields as the shopper adds it; checked again
+  // at checkout. A photo must be this visitor's, or already in this cart.
+  const snapshot = await resolveCustomizations(variant.product, customizations, {
+    workspaceId,
+    visitorId,
+    cartId,
+    enforceRequired: true,
+  });
 
   let unitPrice = variant.priceAmount;
   if (offerId) {
@@ -82,12 +94,23 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity }) {
     unitPrice = offer.priceAmount;
   }
 
-  const existing = await db.CartItem.findOne({ where: { cartId, variantId, offerId: offerId || null } });
+  // The same product with different answers ("Ahmed" / "Sara" engraved) is a
+  // line of its own; only identical ones add up.
+  const candidates = await db.CartItem.findAll({ where: { cartId, variantId, offerId: offerId || null } });
+  const existing = candidates.find((line) => sameCustomizations(line.customizations, snapshot));
   if (existing) {
     await existing.update({ quantity: existing.quantity + quantity, unitPriceSnapshot: unitPrice });
   } else {
-    await db.CartItem.create({ cartId, variantId, offerId: offerId || null, quantity, unitPriceSnapshot: unitPrice });
+    await db.CartItem.create({
+      cartId,
+      variantId,
+      offerId: offerId || null,
+      quantity,
+      unitPriceSnapshot: unitPrice,
+      customizations: snapshot,
+    });
   }
+  await bindUploadsToCart(snapshot, cartId);
 
   return getCart(workspaceId, cartId);
 }
@@ -119,7 +142,13 @@ async function toOrderItems(workspaceId, cartId) {
   }
   return {
     cart,
-    items: cart.items.map((i) => ({ variantId: i.variantId, offerId: i.offerId || undefined, quantity: i.quantity })),
+    items: cart.items.map((i) => ({
+      variantId: i.variantId,
+      offerId: i.offerId || undefined,
+      quantity: i.quantity,
+      // Re-checked against the product when the order is made.
+      customizations: snapshotToInput(i.customizations),
+    })),
   };
 }
 

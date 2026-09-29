@@ -10,6 +10,7 @@ const { setConfirmationState } = require('../orders/orderStateService');
 const { assertNotShipped, SHIPMENT_IN_MOTION } = require('../orders/shipmentLifecycle');
 const carrierShipmentService = require('../shipping/carrierShipmentService');
 const inventoryService = require('../inventory/inventoryService');
+const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { QUEUE_DEFAULT_SORT, orderSort, orderByClause, afterAnchorClause, anchorValue } = require('../orders/orderSort');
 
 /*
@@ -121,7 +122,10 @@ async function loadTasks(workspaceId, ids, transaction) {
     transaction,
   });
   const byId = new Map(rows.map((row) => [row.id, row]));
-  return ids.map((id) => byId.get(id)).filter(Boolean).map(serializeTask);
+  const tasks = ids.map((id) => byId.get(id)).filter(Boolean).map(serializeTask);
+  // The agent confirms the customer's photos and texts on the call too.
+  for (const task of tasks) if (task.order) await presentOrderItems(workspaceId, task.order.items);
+  return tasks;
 }
 
 async function loadTask(workspaceId, taskId, transaction) {

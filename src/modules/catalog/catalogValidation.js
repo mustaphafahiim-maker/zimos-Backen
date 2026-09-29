@@ -2,6 +2,7 @@
 
 const Joi = require('joi');
 const { PRODUCT_SHIPPING_MODES } = require('../shipping/shippingRules');
+const { customFieldsSchema } = require('./customFields');
 
 const uuid = Joi.string().uuid();
 
@@ -36,6 +37,9 @@ const productFields = {
   // service checks the pair against what the product already has.
   shippingMode: Joi.string().valid(...PRODUCT_SHIPPING_MODES),
   shippingExtraAmount: Joi.number().integer().min(1).max(100000000).allow(null),
+  // What the shopper fills in when ordering: at most five text / textarea /
+  // image fields (catalog/customFields.js). Sent whole; [] removes them all.
+  customFields: customFieldsSchema,
 };
 
 const product = {

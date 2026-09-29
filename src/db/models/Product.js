@@ -45,6 +45,8 @@ module.exports = (sequelize, DataTypes) => {
         field: 'shipping_mode',
       },
       shippingExtraAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'shipping_extra_amount' },
+      // Fields the shopper fills in when ordering (catalog/customFields.js), at most five.
+      customFields: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'custom_fields' },
     },
     {
       tableName: 'products',

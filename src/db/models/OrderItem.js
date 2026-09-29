@@ -27,6 +27,9 @@ module.exports = (sequelize, DataTypes) => {
       isUpsell: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_upsell' },
       // One unit of the line (one bundle for an offer); null when unknown.
       unitWeightGrams: { type: DataTypes.INTEGER, allowNull: true, field: 'unit_weight_grams' },
+      // What the shopper filled in for the product's custom fields, labels
+      // included as they were when ordered. Photos by upload id.
+      customizations: { type: DataTypes.JSONB, allowNull: true },
     },
     { tableName: 'order_items', indexes: [{ fields: ['order_id'] }] }
   );

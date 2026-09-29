@@ -168,7 +168,34 @@ const env = {
       secretAccessKey: (process.env.R2_SECRET_ACCESS_KEY || '').trim(),
       bucketName: (process.env.R2_BUCKET_NAME || '').trim(),
       publicUrl: (process.env.R2_PUBLIC_URL || '').trim().replace(/\/+$/, ''),
+      // Optional: a bucket with no public access for shoppers' photos. Unset,
+      // they go to the media bucket under customer-uploads/ (never linked publicly).
+      privateBucketName: (process.env.R2_PRIVATE_BUCKET_NAME || '').trim(),
     },
+  },
+
+  // Photos shoppers attach to an order through a product's custom fields
+  // (POST /store/:workspaceId/uploads). See modules/customerUploads.
+  customerUploads: {
+    // Refused before any processing above this (413).
+    maxRawBytes: 15 * 1024 * 1024,
+    // Photos one visitor may have waiting for an order at once.
+    maxPendingPerVisitor: parseInt(process.env.CUSTOMER_UPLOAD_MAX_PENDING || '10', 10),
+    // A photo no order took is deleted after this long.
+    pendingTtlHours: parseInt(process.env.CUSTOMER_UPLOAD_TTL_HOURS || '48', 10),
+    // How often the server sweeps expired photos; 0 turns the in-process sweep
+    // off (scripts/sweep-customer-uploads.js still works). Off under tests.
+    sweepMinutes:
+      process.env.NODE_ENV === 'test' ? 0 : parseInt(process.env.CUSTOMER_UPLOAD_SWEEP_MINUTES || '30', 10),
+    // Upload rate limits, per connecting IP and per visitor id.
+    ipPerMinute: parseInt(process.env.CUSTOMER_UPLOAD_IP_PER_MINUTE || '20', 10),
+    ipPerHour: parseInt(process.env.CUSTOMER_UPLOAD_IP_PER_HOUR || '120', 10),
+    visitorPerMinute: parseInt(process.env.CUSTOMER_UPLOAD_VISITOR_PER_MINUTE || '8', 10),
+    visitorPerHour: parseInt(process.env.CUSTOMER_UPLOAD_VISITOR_PER_HOUR || '40', 10),
+    // Signs the short-lived links the dashboard shows these photos through.
+    // Unset: derived from JWT_ACCESS_SECRET, so it is secret either way.
+    urlSecret: (process.env.UPLOAD_URL_SECRET || '').trim(),
+    urlTtlSeconds: parseInt(process.env.UPLOAD_URL_TTL_SECONDS || '900', 10),
   },
 
   payments: {

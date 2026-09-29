@@ -175,6 +175,10 @@ v1.use('/store/:workspaceId/events', eventsPublicRoutes);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 
+// The signed, short-lived link to a shopper's photo that staff open from an
+// order (customerUploads/uploadLinks.js). The signature is the credential.
+v1.get('/customer-uploads/:uploadId', require('./modules/customerUploads/customerUploadController').readSigned);
+
 app.use(`/api/${env.apiVersion}`, v1);
 
 // --- Public server-rendered storefront (HTML, no staff auth) -------------

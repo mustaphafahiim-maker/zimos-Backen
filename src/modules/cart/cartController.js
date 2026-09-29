@@ -1,6 +1,7 @@
 'use strict';
 const asyncHandler = require('express-async-handler');
 const service = require('./cartService');
+const { readVisitorId } = require('../customerUploads/customerUploadService');
 const { AppError } = require('../../core/errors/AppError');
 
 /**
@@ -30,7 +31,9 @@ const addItem = asyncHandler(async (req, res) => {
   const token = readToken(req);
   if (!token) throw new AppError('CART_TOKEN_REQUIRED', 'X-Cart-Token header is required', 400);
   const cart = await service.getOrCreateCart(req.tenant.workspaceId, token);
-  res.status(201).json(await service.addItem(req.tenant.workspaceId, cart.id, req.body));
+  // Photos in the answers must be this visitor's own uploads.
+  const visitorId = req.headers['x-visitor-id'] ? readVisitorId(req) : null;
+  res.status(201).json(await service.addItem(req.tenant.workspaceId, cart.id, { ...req.body, visitorId }));
 });
 
 const updateItem = asyncHandler(async (req, res) => {

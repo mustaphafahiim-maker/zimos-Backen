@@ -319,6 +319,53 @@ const suggestLimiter = createSuggestLimiter({
 });
 
 /*
+ * Shoppers' photo uploads (POST /store/:id/uploads): the most expensive public
+ * request we serve — up to 15 MB in, then decoded and re-encoded — so it gets
+ * its own buckets on top of the storefront limiter: per connecting IP and per
+ * visitor id (X-Visitor-Id), each by the minute and by the hour. The visitor
+ * id is the client's to choose, so its buckets only split shoppers behind one
+ * IP; rotating ids to dodge them still hits the IP buckets. The per-visitor
+ * cap on photos waiting for an order lives in the upload service.
+ */
+const VISITOR_HEADER_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+
+function createUploadLimiter({ ipPerMinute, ipPerHour, visitorPerMinute, visitorPerHour, skip: skipAll = () => false }) {
+  const ipKey = (req) => `upload-ip:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`;
+  const visitorKey = (req) => {
+    const id = req.headers['x-visitor-id'];
+    return typeof id === 'string' && VISITOR_HEADER_PATTERN.test(id) ? `upload-visitor:${id}` : null;
+  };
+  const bucket = (windowMs, limit, keyGenerator, standardHeaders, skipWhen = () => false) =>
+    rateLimit({
+      windowMs,
+      limit,
+      standardHeaders,
+      legacyHeaders: false,
+      skip: (req) => skipAll(req) || skipWhen(req),
+      keyGenerator,
+      handler,
+    });
+  const MINUTE = 60 * 1000;
+  const HOUR = 60 * MINUTE;
+  return [
+    // The visitor's own buckets first: a shopper over their limit never uses
+    // up the IP budget everyone behind that address shares.
+    bucket(MINUTE, visitorPerMinute, (req) => `m:${visitorKey(req)}`, true, (req) => !visitorKey(req)),
+    bucket(HOUR, visitorPerHour, (req) => `h:${visitorKey(req)}`, false, (req) => !visitorKey(req)),
+    bucket(MINUTE, ipPerMinute, (req) => `m:${ipKey(req)}`, false),
+    bucket(HOUR, ipPerHour, (req) => `h:${ipKey(req)}`, false),
+  ];
+}
+
+const uploadLimiter = createUploadLimiter({
+  ipPerMinute: env.customerUploads.ipPerMinute,
+  ipPerHour: env.customerUploads.ipPerHour,
+  visitorPerMinute: env.customerUploads.visitorPerMinute,
+  visitorPerHour: env.customerUploads.visitorPerHour,
+  skip,
+});
+
+/*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
  * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
  * put all merchants in one bucket; each merchant's webhook token gets its own.
@@ -383,4 +430,6 @@ module.exports = {
   createTrackingLimiter,
   suggestLimiter,
   createSuggestLimiter,
+  uploadLimiter,
+  createUploadLimiter,
 };

@@ -48,6 +48,8 @@ function toPublicProduct(product) {
     seo: product.seo,
     variants: (product.variants || []).map(toPublicVariant),
     offers: (product.offers || []).map(toPublicOffer),
+    // The fields the shopper fills in when ordering; [] for most products.
+    customFields: Array.isArray(product.customFields) ? product.customFields : [],
   };
 }
 

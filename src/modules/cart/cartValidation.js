@@ -1,6 +1,7 @@
 'use strict';
 const Joi = require('joi');
 const { workspaceRef } = require('../../core/utils/workspaceSlug');
+const { customizationsInputSchema } = require('../catalog/customFields');
 
 const uuid = Joi.string().uuid();
 const workspaceIdParam = workspaceRef().required();
@@ -13,6 +14,9 @@ module.exports = {
       variantId: uuid.required(),
       offerId: uuid.optional(),
       quantity: Joi.number().integer().min(1).default(1),
+      // Answers to the product's custom fields: field id → text, or the id of
+      // a photo uploaded to POST /uploads. Checked against the product.
+      customizations: customizationsInputSchema.optional(),
     }),
   },
   updateItem: {

@@ -7,6 +7,7 @@ const { afterOrderCompleted } = require('../orders/orderCompletion');
 const { AppError, ValidationError } = require('../../core/errors/AppError');
 const { assertRequiredCheckoutFields } = require('./checkoutSettings');
 const methodsService = require('../payments/paymentMethodsService');
+const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
 
 /**
@@ -61,7 +62,7 @@ const checkout = asyncHandler(async (req, res) => {
     if (!cart) throw new AppError('CART_NOT_FOUND', 'No active cart found for this token', 404);
     ({ items } = await cartService.toOrderItems(workspaceId, cart.id));
   } else if (item) {
-    items = [{ variantId: item.variantId, offerId: item.offerId, quantity: item.quantity || 1 }];
+    items = [{ variantId: item.variantId, offerId: item.offerId, quantity: item.quantity || 1, customizations: item.customizations }];
   } else {
     throw new AppError(
       'CART_TOKEN_OR_ITEM_REQUIRED',
@@ -74,9 +75,18 @@ const checkout = asyncHandler(async (req, res) => {
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
 
   const context = { cartId: cart ? cart.id : null, checkoutSessionId: checkoutSessionId || null };
+  // The shopper's answers to custom fields are checked again here, required
+  // ones enforced; photos must be this visitor's or in this cart.
+  const customFields = {
+    enforceRequired: true,
+    visitorId: req.headers['x-visitor-id'] ? readVisitorId(req) : null,
+    cartId: cart ? cart.id : null,
+  };
 
   if (!isOnline) {
-    const { order, items: orderItems } = await orderService.createOrder(workspaceId, { ...orderBody, items }, req);
+    const { order, items: orderItems } = await orderService.createOrder(workspaceId, { ...orderBody, items }, req, {
+      customFields,
+    });
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
@@ -89,6 +99,7 @@ const checkout = asyncHandler(async (req, res) => {
     { ...orderBody, paymentMethod: prepared.method.method, items },
     req,
     {
+      customFields,
       awaitingPayment: {
         expiresAt: prepared.expiresAt,
         tokenHash: prepared.tokenHash,

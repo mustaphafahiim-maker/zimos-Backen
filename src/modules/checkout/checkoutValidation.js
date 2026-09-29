@@ -2,6 +2,7 @@
 const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
 const { workspaceRef } = require('../../core/utils/workspaceSlug');
+const { customizationsInputSchema } = require('../catalog/customFields');
 
 const contact = Joi.object({
   fullName: Joi.string().max(200).required(),
@@ -54,6 +55,8 @@ module.exports = {
         variantId: uuid.required(),
         offerId: uuid.optional(),
         quantity: Joi.number().integer().min(1).default(1),
+        // Answers to the product's custom fields (see cartValidation.addItem).
+        customizations: customizationsInputSchema.optional(),
       }).optional(),
     }),
   },

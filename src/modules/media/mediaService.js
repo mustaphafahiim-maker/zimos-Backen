@@ -6,6 +6,7 @@ const logger = require('../../core/utils/logger');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { getStorage, UPLOAD_ROOT } = require('./storage');
+const { processMerchantImage } = require('./imageProcessing');
 
 const Op = db.Sequelize.Op;
 
@@ -41,11 +42,17 @@ async function storeImage(workspaceId, file, req) {
     throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Only PNG, JPEG, GIF or WEBP images are accepted', 415);
   }
 
+  // Upright, re-encoded in its own format, and stripped of EXIF / XMP / IPTC
+  // (a phone photo's GPS position among them) before anything is stored. A
+  // GIF keeps its frames and only loses its comment and XMP blocks. An image
+  // that cannot be decoded is refused here (422 IMAGE_UNREADABLE).
+  const processed = await processMerchantImage(file.buffer, sig);
+
   const filename = `${crypto.randomUUID()}.${sig.ext}`;
   const { url, path } = await getStorage().put({
     workspaceId,
     filename,
-    buffer: file.buffer,
+    buffer: processed,
     contentType: sig.mime,
   });
 
@@ -57,10 +64,10 @@ async function storeImage(workspaceId, file, req) {
     url,
     path,
     mimeType: sig.mime,
-    sizeBytes: file.size,
+    sizeBytes: processed.length,
   });
 
-  const result = { id: asset.id, url, path, mimeType: sig.mime, size: file.size };
+  const result = { id: asset.id, url, path, mimeType: sig.mime, size: processed.length };
 
   await recordAudit({
     workspaceId,
