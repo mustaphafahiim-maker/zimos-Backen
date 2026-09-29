@@ -130,6 +130,7 @@ const MERCHANT_SETTINGS_KEYS = [
   'default_shipping_rate_amount',
   'tax_enabled',
   'default_item_weight_grams',
+  'confirmation_whatsapp_template',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one
@@ -179,6 +180,15 @@ async function updateWorkspace({ workspaceId, patch }, req) {
     patch.settings && typeof patch.settings === 'object' && Object.prototype.hasOwnProperty.call(patch.settings, 'fraud_rules');
   if (touchesFraudRules && !req.tenant.hasPermission(PERMISSIONS.WORKSPACE_MANAGE)) {
     throw new AuthorizationError('Changing fraud rules requires the workspace.manage permission');
+  }
+  // The confirmation team's WhatsApp message is theirs to manage: an Editor's
+  // website.edit is not enough.
+  const touchesWhatsappTemplate =
+    patch.settings &&
+    typeof patch.settings === 'object' &&
+    Object.prototype.hasOwnProperty.call(patch.settings, 'confirmation_whatsapp_template');
+  if (touchesWhatsappTemplate && !req.tenant.hasPermission(PERMISSIONS.ORDERS_MANAGE)) {
+    throw new AuthorizationError('Changing the WhatsApp confirmation message requires the orders.manage permission');
   }
 
   const before = {
