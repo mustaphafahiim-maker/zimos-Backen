@@ -10,6 +10,7 @@ const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
+const orderStock = require('../inventory/orderStock');
 const customerService = require('../customers/customerService');
 const discountService = require('../discounts/discountService');
 const { calculateShippingAmount } = require('../shipping/shippingPricing');
@@ -231,6 +232,9 @@ async function createOrder(
   const evaluateFraudRules = !req.user && !skipFraudRules;
 
   const run = async (transaction) => {
+    // Chosen now so the reservations below can name the order they hold stock
+    // for (inventory/orderStock.js releases exactly what they reserved).
+    const orderId = crypto.randomUUID();
     const customer = await customerService.findOrCreateByPhone(workspaceId, contact, transaction);
 
     // An active platform blocklist entry refuses the order outright, in every
@@ -305,7 +309,7 @@ async function createOrder(
               variantId: consumed.variantId,
               quantity: consumed.quantity,
               referenceType: 'order_pending',
-              referenceId: null, // filled in after the order row exists, see movement backfill below
+              referenceId: orderId,
               actorUserId: req.user ? req.user.id : null,
             },
             transaction
@@ -363,6 +367,7 @@ async function createOrder(
 
     const order = await db.Order.create(
       {
+        id: orderId,
         workspaceId,
         websiteId: websiteId || null,
         funnelId: funnelId || null,
@@ -958,21 +963,11 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
     }
     await assertNotShipped(order, transaction);
 
-    const items = await db.OrderItem.findAll({ where: { orderId: order.id }, transaction });
-    for (const item of items) {
-      if (!item.variantId) continue;
-      await inventoryService.release(
-        {
-          workspaceId,
-          variantId: item.variantId,
-          quantity: item.quantity,
-          referenceType: 'order_cancelled',
-          referenceId: order.id,
-          actorUserId: req.user.id,
-        },
-        transaction
-      );
-    }
+    // Whatever the order still holds: nothing more if a rejection already gave it back.
+    await orderStock.releaseOrderStock(
+      { workspaceId, orderId: order.id, referenceType: 'order_cancelled', actorUserId: req.user.id },
+      transaction
+    );
 
     // A shipment booked with a connected courier is cancelled there first. If
     // the courier refuses, this throws and the whole cancellation rolls back:

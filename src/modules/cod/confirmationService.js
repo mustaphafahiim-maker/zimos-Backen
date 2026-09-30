@@ -9,7 +9,7 @@ const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState } = require('../orders/orderStateService');
 const { assertNotShipped, SHIPMENT_IN_MOTION } = require('../orders/shipmentLifecycle');
 const carrierShipmentService = require('../shipping/carrierShipmentService');
-const inventoryService = require('../inventory/inventoryService');
+const orderStock = require('../inventory/orderStock');
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { QUEUE_DEFAULT_SORT, orderSort, orderByClause, afterAnchorClause, anchorValue } = require('../orders/orderSort');
 
@@ -327,26 +327,14 @@ async function releaseTask(workspaceId, taskId, req) {
 // Outcomes
 // ---------------------------------------------------------------------------
 
+// What the order's reservations actually hold (inventory/orderStock.js): every
+// line of an offer, a bump, a joined upsell — and nothing twice.
 async function releaseOrderStock(workspaceId, orderId, referenceType, actorUserId, transaction) {
-  const items = await db.OrderItem.findAll({ where: { orderId }, transaction });
-  for (const item of items) {
-    if (!item.variantId) continue;
-    await inventoryService.release(
-      { workspaceId, variantId: item.variantId, quantity: item.quantity, referenceType, referenceId: orderId, actorUserId },
-      transaction
-    );
-  }
+  await orderStock.releaseOrderStock({ workspaceId, orderId, referenceType, actorUserId }, transaction);
 }
 
 async function reserveOrderStock(workspaceId, orderId, referenceType, actorUserId, transaction) {
-  const items = await db.OrderItem.findAll({ where: { orderId }, transaction });
-  for (const item of items) {
-    if (!item.variantId) continue;
-    await inventoryService.reserve(
-      { workspaceId, variantId: item.variantId, quantity: item.quantity, referenceType, referenceId: orderId, actorUserId },
-      transaction
-    );
-  }
+  await orderStock.reserveOrderStock({ workspaceId, orderId, referenceType, actorUserId }, transaction);
 }
 
 /**

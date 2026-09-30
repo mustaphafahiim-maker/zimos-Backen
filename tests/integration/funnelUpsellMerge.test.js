@@ -403,4 +403,25 @@ describe('funnel offer fallback', () => {
     expect(await db.FunnelOfferAcceptance.count()).toBe(0);
     expect(await db.OrderItem.count({ where: { orderId: order.id } })).toBe(1);
   });
+
+  it('gives back the joined upsell with the order when the order is cancelled', async () => {
+    const ctx = await setup();
+    const before = { main: await reserved(ctx.variant.id), addOn: await reserved(ctx.addOn.variant.id) };
+    const order = await checkout(ctx);
+    const sid = await session(ctx, order.id);
+    expect((await advance(ctx, sid, 'upsell', { type: 'accepted_offer' })).status).toBe(200);
+    expect(await reserved(ctx.addOn.variant.id)).toBe(before.addOn + 1);
+
+    const res = await ctx.api('post', `/orders/${order.id}/cancel`).send({ reason: 'Changed their mind' });
+    expect(res.status).toBe(200);
+    expect(await reserved(ctx.variant.id)).toBe(before.main);
+    expect(await reserved(ctx.addOn.variant.id)).toBe(before.addOn);
+    const released = await db.InventoryMovement.findAll({ where: { referenceId: order.id, type: 'release' } });
+    expect(released.map((m) => [m.variantId, m.reservedDelta]).sort()).toEqual(
+      [
+        [ctx.variant.id, -1],
+        [ctx.addOn.variant.id, -1],
+      ].sort()
+    );
+  });
 });

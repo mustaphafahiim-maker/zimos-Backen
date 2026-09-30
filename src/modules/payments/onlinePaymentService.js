@@ -7,7 +7,7 @@ const env = require('../../config/env');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const logger = require('../../core/utils/logger');
 const { recordAudit } = require('../audit/auditService');
-const inventoryService = require('../inventory/inventoryService');
+const orderStock = require('../inventory/orderStock');
 const { completeOrderInTransaction, afterOrderCompleted } = require('../orders/orderCompletion');
 const { setFinancialState } = require('../orders/orderStateService');
 const fraudRules = require('../fraud/fraudRules');
@@ -228,27 +228,16 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
 
 /**
  * Stock for a reopened order, all or nothing (a savepoint inside the caller's
- * transaction). Mirrors orderService.cancelOrder, which releases exactly
- * these quantities.
+ * transaction): what the order was placed with, as expiry released it
+ * (inventory/orderStock.js).
  */
 async function reReserveStock(order, transaction) {
-  const items = await db.OrderItem.findAll({ where: { orderId: order.id }, transaction });
   try {
     await db.sequelize.transaction({ transaction }, async (savepoint) => {
-      for (const item of items) {
-        if (!item.variantId) continue;
-        await inventoryService.reserve(
-          {
-            workspaceId: order.workspaceId,
-            variantId: item.variantId,
-            quantity: item.quantity,
-            referenceType: 'order_reopened',
-            referenceId: order.id,
-            actorUserId: null,
-          },
-          savepoint
-        );
-      }
+      await orderStock.reserveOrderStock(
+        { workspaceId: order.workspaceId, orderId: order.id, referenceType: 'order_reopened', actorUserId: null },
+        savepoint
+      );
     });
     return true;
   } catch (err) {
@@ -259,21 +248,10 @@ async function reReserveStock(order, transaction) {
 }
 
 async function releaseStock(order, transaction, referenceType) {
-  const items = await db.OrderItem.findAll({ where: { orderId: order.id }, transaction });
-  for (const item of items) {
-    if (!item.variantId) continue;
-    await inventoryService.release(
-      {
-        workspaceId: order.workspaceId,
-        variantId: item.variantId,
-        quantity: item.quantity,
-        referenceType,
-        referenceId: order.id,
-        actorUserId: null,
-      },
-      transaction
-    );
-  }
+  await orderStock.releaseOrderStock(
+    { workspaceId: order.workspaceId, orderId: order.id, referenceType, actorUserId: null },
+    transaction
+  );
 }
 
 /**
