@@ -131,6 +131,23 @@ async function afterSessionMove(workspaceId, session, snapshot, transaction) {
   if (finished) await closeOfferWindow(workspaceId, session.orderId, transaction);
 }
 
+/**
+ * Whether accepting the offer on screen will join the session's checkout order
+ * (its window is open and the merge is on), for the offer card's wording. The
+ * accept itself decides again, with the order locked.
+ */
+async function offerJoinsOrder(workspaceId, session, transaction) {
+  if (!session.orderId) return false;
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'], transaction });
+  if (!mergeSettings(workspace && workspace.settings).enabled) return false;
+  const task = await db.ConfirmationTask.findOne({
+    where: { workspaceId, orderId: session.orderId, status: 'queued' },
+    order: [['createdAt', 'DESC']],
+    transaction,
+  });
+  return Boolean(task && task.availableAt && task.availableAt > new Date());
+}
+
 const offerUnavailable = (resource) => new AppError('FUNNEL_OFFER_UNAVAILABLE', `${resource} not found`, 404);
 
 /** The order is still open for a line to join it (and its task waits in the window). */
@@ -335,5 +352,6 @@ module.exports = {
   offerReachable,
   closeOfferWindow,
   afterSessionMove,
+  offerJoinsOrder,
   acceptOffer,
 };

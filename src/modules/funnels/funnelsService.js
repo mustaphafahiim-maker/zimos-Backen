@@ -835,6 +835,8 @@ async function getSessionStep(workspaceId, funnelId, sessionId) {
     await resetSessionToEntry(session, snapshot);
   }
   const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+  // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
+  if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session);
   return { session: publicSession(session), ...payload };
 }
 
@@ -986,6 +988,8 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       }
       await session.save({ transaction: t });
       const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+      // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
+      if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session, t);
       result = { ...(finished ? { done: true } : {}), session: publicSession(session), ...payload };
     } else {
       // No matching outbound edge — the funnel ends here.

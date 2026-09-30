@@ -156,6 +156,17 @@ describe('funnel offer window', () => {
     expect((await ctx.api('post', `/confirmation-tasks/${t.id}/claim`)).status).toBe(200);
   });
 
+  it('tells the offer step whether accepting joins the order', async () => {
+    const ctx = await setup();
+    const order = await checkout(ctx);
+    const sid = await session(ctx, order.id);
+    const step = await request(app).get(`${storeApi(ctx)}/funnels/${ctx.funnel.id}/sessions/${sid}/step`);
+    expect(step.body.offerJoinsOrder).toBe(true);
+    await db.ConfirmationTask.update({ availableAt: new Date(Date.now() - 1000) }, { where: { orderId: order.id } });
+    const later = await request(app).get(`${storeApi(ctx)}/funnels/${ctx.funnel.id}/sessions/${sid}/step`);
+    expect(later.body.offerJoinsOrder).toBe(false);
+  });
+
   it('leaves an order placed outside a funnel as it was, flag or not', async () => {
     const ctx = await setup();
     const order = await checkout(ctx, { funnelId: undefined });
