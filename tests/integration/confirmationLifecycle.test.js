@@ -474,6 +474,7 @@ describe('queue tabs and counts', () => {
     expect(c.body.counts).toEqual({
       pending: 1,
       pendingDue: 1,
+      waitingForOffers: 0,
       inProgress: 2,
       inProgressMine: 1,
       done: 1,

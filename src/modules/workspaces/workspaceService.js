@@ -136,6 +136,9 @@ const MERCHANT_SETTINGS_KEYS = [
   'storefront_catalog',
   // Replaced whole: { enabled, offer_id, title, description }.
   'order_bump',
+  // Funnel upsells joined to the checkout order (funnels/funnelOfferMerge.js).
+  'funnel_upsell_merge',
+  'funnel_offer_window_minutes',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one
@@ -194,6 +197,15 @@ async function updateWorkspace({ workspaceId, patch }, req) {
     Object.prototype.hasOwnProperty.call(patch.settings, 'confirmation_whatsapp_template');
   if (touchesWhatsappTemplate && !req.tenant.hasPermission(PERMISSIONS.ORDERS_MANAGE)) {
     throw new AuthorizationError('Changing the WhatsApp confirmation message requires the orders.manage permission');
+  }
+  // Whether funnel orders wait for their offers before confirmation changes
+  // how the confirmation team works: theirs too.
+  const touchesFunnelMerge =
+    patch.settings &&
+    typeof patch.settings === 'object' &&
+    ['funnel_upsell_merge', 'funnel_offer_window_minutes'].some((key) => Object.prototype.hasOwnProperty.call(patch.settings, key));
+  if (touchesFunnelMerge && !req.tenant.hasPermission(PERMISSIONS.ORDERS_MANAGE)) {
+    throw new AuthorizationError('Changing how funnel upsells join orders requires the orders.manage permission');
   }
 
   const before = {

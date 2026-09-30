@@ -105,6 +105,7 @@ function serializeTask(task) {
   return {
     ...json,
     order: json.order ? order : null,
+    waitingForOffers: isWaitingForOffers(json),
     lockedBy: task.status === 'in_progress' ? userSummary(json.lockedBy) : null,
     lockExpiresAt: lockExpiresAt(task),
     assignedTo: userSummary(json.assignedTo),
@@ -142,6 +143,19 @@ function lockedError(task) {
 
 const doneError = () =>
   new AppError('TASK_ALREADY_DONE', 'This task already has a final outcome', 409);
+
+/**
+ * The task of a funnel order still waiting for its offer window to close
+ * (funnels/funnelOfferMerge.js): listed in the queue, but nobody works it yet —
+ * the shopper may still add to the order.
+ */
+const isWaitingForOffers = (task, now = new Date()) =>
+  Boolean(task.availableAt) && new Date(task.availableAt) > now && task.status === 'queued';
+
+const waitingError = (task) =>
+  new AppError('TASK_WAITING_FOR_OFFERS', 'This order is still in its funnel offer window', 409, {
+    availableAt: task.availableAt,
+  });
 
 function assignedError(assignee) {
   return new AppError('TASK_ASSIGNED_TO_OTHER', 'This task is assigned to another agent', 403, {
@@ -228,6 +242,7 @@ async function claimTask(workspaceId, taskId, req) {
           AND status IN ('queued', 'in_progress')
           AND (locked_by_user_id IS NULL OR locked_by_user_id = $agentUserId OR locked_at < $cutoff)
           AND (assigned_to_user_id IS NULL OR assigned_to_user_id = $agentUserId OR $manager)
+          AND (available_at IS NULL OR available_at <= $now)
         RETURNING id, order_id`,
       {
         bind: { taskId, workspaceId, agentUserId, now, cutoff: lockCutoff(), manager },
@@ -247,6 +262,7 @@ async function claimTask(workspaceId, taskId, req) {
       });
       if (!task) throw new NotFoundError('ConfirmationTask');
       if (task.status === 'done') throw doneError();
+      if (isWaitingForOffers(task, now)) throw waitingError(task);
       if (!mayWorkAssigned(task, req)) throw assignedError(task.assignedTo);
       throw lockedError(task);
     }
@@ -427,6 +443,7 @@ async function confirmFromOrder(workspaceId, orderId, { notes, channel }, req) {
     }
 
     const task = await openTaskForOrder(workspaceId, order.id, transaction);
+    if (isWaitingForOffers(task)) throw waitingError(task);
     if (!mayWorkAssigned(task, req)) {
       throw assignedError(await db.User.findByPk(task.assignedToUserId, { attributes: ['id', 'fullName'], transaction }));
     }
@@ -697,11 +714,12 @@ async function assignTask(workspaceId, taskId, userId, req) {
  *   done         most recently finished first: COALESCE(completed_at, updated_at), id DESC
  */
 const TABS = {
+  // A task waiting for its funnel offer window is due when the window closes.
   pending: {
     status: 'queued',
-    key: 'COALESCE(t.next_retry_at, t.created_at), t.id',
+    key: 'COALESCE(t.next_retry_at, t.available_at, t.created_at), t.id',
     direction: 'ASC',
-    order: 'COALESCE(t.next_retry_at, t.created_at) ASC, t.id ASC',
+    order: 'COALESCE(t.next_retry_at, t.available_at, t.created_at) ASC, t.id ASC',
   },
   in_progress: {
     status: 'in_progress',
@@ -800,7 +818,9 @@ async function queueCounts(workspaceId, req) {
   const [row] = await db.sequelize.query(
     `SELECT
        COUNT(*) FILTER (WHERE status = 'queued')::int AS pending,
-       COUNT(*) FILTER (WHERE status = 'queued' AND (next_retry_at IS NULL OR next_retry_at <= NOW()))::int AS pending_due,
+       COUNT(*) FILTER (WHERE status = 'queued' AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+                          AND (available_at IS NULL OR available_at <= NOW()))::int AS pending_due,
+       COUNT(*) FILTER (WHERE status = 'queued' AND available_at > NOW())::int AS waiting_for_offers,
        COUNT(*) FILTER (WHERE status = 'in_progress')::int AS in_progress,
        COUNT(*) FILTER (WHERE status = 'in_progress' AND locked_by_user_id = $viewerId)::int AS in_progress_mine,
        COUNT(*) FILTER (WHERE status = 'done')::int AS done,
@@ -813,6 +833,8 @@ async function queueCounts(workspaceId, req) {
   return {
     pending: row.pending,
     pendingDue: row.pending_due,
+    // Funnel orders whose offer window is still open (not claimable yet).
+    waitingForOffers: row.waiting_for_offers,
     inProgress: row.in_progress,
     inProgressMine: row.in_progress_mine,
     done: row.done,
@@ -848,6 +870,8 @@ async function taskSummaryForOrder(workspaceId, orderId) {
     outcome: task.outcome,
     attemptCount: task.attemptCount,
     nextRetryAt: task.nextRetryAt,
+    availableAt: task.availableAt,
+    waitingForOffers: isWaitingForOffers(task),
     completedAt: task.completedAt,
     lockedBy: live ? userSummary(task.lockedBy) : null,
     lockedAt: live ? task.lockedAt : null,

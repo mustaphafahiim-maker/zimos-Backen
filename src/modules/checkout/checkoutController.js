@@ -10,6 +10,7 @@ const methodsService = require('../payments/paymentMethodsService');
 const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
 const { resolveOrderBumpItem } = require('./orderBump');
+const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
 
 /**
  * Guest checkout (no login). Runs the same orderService.createOrder as the
@@ -93,6 +94,10 @@ const checkout = asyncHandler(async (req, res) => {
   if (!isOnline) {
     const { order, items: orderItems } = await orderService.createOrder(workspaceId, { ...orderBody, items }, req, {
       customFields,
+      // A funnel with offers after its checkout (and the store's
+      // funnel_upsell_merge on): nobody confirms the order until the shopper
+      // is past them, so an accepted offer can still join it.
+      confirmationAvailableAt: await offerWindowEnd(workspace, orderBody.funnelId),
     });
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets

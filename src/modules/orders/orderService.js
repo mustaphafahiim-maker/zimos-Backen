@@ -34,18 +34,23 @@ function generateOrderNumber() {
 
 // Prices one line from server-side data only. variantId/offerId are looked up
 // fresh inside the caller's transaction; any client-sent price is ignored.
-async function priceLine(workspaceId, { variantId, offerId, quantity }, transaction) {
+//
+// `forSale: false` reads a line an order already holds — its variant, product
+// or offer may have been archived since — for what it weighs and how it ships
+// (recalculateOrder); the caller keeps the prices the order recorded.
+async function priceLine(workspaceId, { variantId, offerId, quantity }, transaction, { forSale = true } = {}) {
+  const active = forSale ? { status: 'active' } : {};
   const variant = await db.ProductVariant.findOne({
-    where: { id: variantId, workspaceId, status: 'active' },
+    where: { id: variantId, workspaceId, ...active },
     // A draft or archived product isn't for sale, even if its variant row is active.
-    include: [{ model: db.Product, as: 'product', where: { status: 'active' } }],
+    include: [{ model: db.Product, as: 'product', ...(forSale ? { where: { status: 'active' } } : {}) }],
     transaction,
   });
   if (!variant) throw new NotFoundError('ProductVariant');
 
   if (offerId) {
     const offer = await db.Offer.findOne({
-      where: { id: offerId, workspaceId, productId: variant.productId, status: 'active' },
+      where: { id: offerId, workspaceId, productId: variant.productId, ...active },
       include: [
         {
           model: db.OfferVariant,
@@ -208,7 +213,14 @@ async function createOrder(
   workspaceId,
   payload,
   req,
-  { transaction: outerTransaction, skipFraudRules = false, awaitingPayment = null, customFields = {} } = {}
+  {
+    transaction: outerTransaction,
+    skipFraudRules = false,
+    awaitingPayment = null,
+    customFields = {},
+    confirmationAvailableAt = null,
+    shippingOverride = null,
+  } = {}
 ) {
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
 
@@ -307,7 +319,9 @@ async function createOrder(
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     const productIds = pricedLines.map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
-    const offerShippingOverride = pricedLines.find((l) => l.shippingOverride)?.shippingOverride || null;
+    // `shippingOverride` (a funnel add-on placed as its own order after the
+    // order it follows: the shopper pays shipping once) wins over any offer's.
+    const offerShippingOverride = shippingOverride || pricedLines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
     let discountAmount = 0;
     let discountsSnapshot = [];
@@ -415,7 +429,12 @@ async function createOrder(
     }
 
     if (paymentMethod === 'cod') {
-      await db.ConfirmationTask.create({ workspaceId, orderId: order.id, status: 'queued' }, { transaction });
+      // `confirmationAvailableAt`: a funnel order waits for the funnel's offer
+      // window before anyone may confirm it (funnels/funnelOfferMerge.js).
+      await db.ConfirmationTask.create(
+        { workspaceId, orderId: order.id, status: 'queued', availableAt: confirmationAvailableAt || null },
+        { transaction }
+      );
     }
 
     order.items = orderItems;
@@ -459,6 +478,171 @@ async function createOrder(
 }
 
 /**
+ * Adds one line to an order that is still open — a funnel upsell or downsell
+ * the shopper accepted while the order waited in its offer window
+ * (funnels/funnelOfferMerge.js) — and prices the whole order again, exactly as
+ * createOrder would have priced it with that line in it: subtotal, the code's
+ * discount on the new subtotal, shipping (the weight may move it to another
+ * tier; the subtotal may reach free shipping), tax, total. The new line is
+ * priced from its offer on the server and its stock reserved here; the lines
+ * already in the order keep the prices they were sold at.
+ *
+ * `order` must be locked FOR UPDATE by the caller, in `transaction`, and
+ * checked to still be open (pending confirmation, not paid, not shipped). The
+ * invoice issued when the order was placed is brought up to the new total and
+ * lines in place — same number — so the invoice always equals the order; the
+ * discount redemption is updated to the new amount.
+ *
+ * @returns {Promise<{ order, item, before }>} before: the totals it replaced
+ */
+async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = false, actorUserId = null } = {}, transaction) {
+  const before = {
+    subtotalAmount: Number(order.subtotalAmount),
+    discountAmount: Number(order.discountAmount),
+    shippingAmount: Number(order.shippingAmount),
+    taxAmount: Number(order.taxAmount),
+    totalAmount: Number(order.totalAmount),
+    totalWeightGrams: order.totalWeightGrams,
+  };
+
+  const existing = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction });
+  const newLine = await priceLine(workspaceId, lineInput, transaction);
+  for (const consumed of newLine.consumedInventory) {
+    await inventoryService.reserve(
+      {
+        workspaceId,
+        variantId: consumed.variantId,
+        quantity: consumed.quantity,
+        referenceType: 'order_upsell',
+        referenceId: order.id,
+        actorUserId,
+      },
+      transaction
+    );
+  }
+
+  // What the lines already in the order weigh and how they ship, from the
+  // catalogue; their amounts stay as sold.
+  const lines = [];
+  for (const item of existing) {
+    const facts = item.variantId
+      ? await priceLine(
+          workspaceId,
+          { variantId: item.variantId, offerId: item.offerId, quantity: item.quantity },
+          transaction,
+          { forSale: false }
+        ).catch(() => null)
+      : null;
+    lines.push({
+      productId: item.productId,
+      quantity: item.quantity,
+      lineTotalAmount: Number(item.lineTotalAmount),
+      shippingOverride: facts ? facts.shippingOverride : null,
+      // A line whose catalogue rows are gone ships at the weight it was sold at.
+      weightUnits: facts
+        ? facts.weightUnits
+        : [{ weightGrams: item.unitWeightGrams === null ? null : Number(item.unitWeightGrams), quantity: 1, weightless: false }],
+      shippingRule: facts ? facts.shippingRule : productShippingRule({}, item.quantity),
+    });
+  }
+  lines.push({ ...newLine, lineTotalAmount: Number(newLine.lineTotalAmount) });
+
+  const subtotal = add(...lines.map((l) => l.lineTotalAmount));
+  const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
+  const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
+
+  // The code the order was placed with, on the new subtotal. It was checked
+  // and redeemed when the order was placed and is not checked again.
+  let discountAmount = before.discountAmount;
+  let discountsSnapshot = order.discountsSnapshot || [];
+  const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
+  if (redemption) {
+    const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
+    if (discount) {
+      discountAmount = discountService.amountFor(discount, subtotal);
+      discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
+      await redemption.update({ amountAllocated: discountAmount }, { transaction });
+    }
+  }
+
+  const address = order.shippingAddressSnapshot || null;
+  const shipping = await calculateShippingAmount(workspaceId, {
+    country: address ? address.country : null,
+    region: address ? address.province : null,
+    subtotal,
+    totalQuantity,
+    offerShippingOverride,
+    weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
+    productLines: lines.map((l) => l.shippingRule),
+    transaction,
+  });
+  const { taxAmount } = await calculateTax(workspaceId, {
+    country: address ? address.country : null,
+    region: address ? address.province : null,
+    lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+    shippingAmount: shipping.amount,
+  });
+  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
+
+  const item = await db.OrderItem.create(
+    {
+      orderId: order.id,
+      productId: newLine.productId,
+      variantId: newLine.variantId,
+      offerId: newLine.offerId,
+      productNameSnapshot: newLine.productName,
+      variantOptionsSnapshot: newLine.variantOptions,
+      skuSnapshot: newLine.sku,
+      offerNameSnapshot: newLine.offerName,
+      quantity: newLine.quantity,
+      unitPriceAmount: newLine.unitPriceAmount,
+      unitCostAmount: newLine.unitCostAmount,
+      lineTotalAmount: newLine.lineTotalAmount,
+      unitWeightGrams: shipping.lineWeights[lines.length - 1],
+      isUpsell,
+    },
+    { transaction }
+  );
+
+  await order.update(
+    {
+      subtotalAmount: subtotal,
+      discountAmount,
+      discountsSnapshot,
+      shippingAmount: shipping.amount,
+      taxAmount,
+      totalAmount,
+      totalWeightGrams: shipping.weightGrams,
+      weightTierSnapshot: shipping.tier,
+      weightEstimated: shipping.weightEstimated,
+      shippingSnapshot: shippingSnapshot(shipping),
+    },
+    { transaction }
+  );
+
+  // The invoice issued with the order follows it: same number, new lines and total.
+  const items = [...existing, item];
+  const invoice = await db.Invoice.findOne({ where: { orderId: order.id }, order: [['issuedAt', 'DESC']], transaction });
+  if (invoice) {
+    await invoice.update(
+      {
+        totalAmount,
+        lineItems: items.map((i) => ({
+          name: i.productNameSnapshot,
+          quantity: i.quantity,
+          unitPriceAmount: i.unitPriceAmount,
+          lineTotalAmount: i.lineTotalAmount,
+        })),
+      },
+      { transaction }
+    );
+  }
+
+  order.items = items;
+  return { order, item, before };
+}
+
+/**
  * The order's derived stage. One row, the same expression the list and the
  * counts use — see orderStage.js for why it is derived and not stored.
  */
@@ -491,11 +675,23 @@ async function getOrder(workspaceId, orderId) {
   const json = order.toJSON();
   // Shoppers' photos are shown through short-lived signed links, made per read.
   await presentOrderItems(workspaceId, json.items);
+  // A funnel offer the shopper took after this order had left its offer
+  // window is an order of its own: both ends name the other.
+  const linkedOrders = await db.Order.findAll({
+    where: { workspaceId, linkedFromOrderId: order.id },
+    attributes: ['id', 'orderNumber', 'totalAmount', 'currency', 'createdAt'],
+    order: [['createdAt', 'ASC']],
+  });
+  const linkedFrom = order.linkedFromOrderId
+    ? await db.Order.findOne({ where: { workspaceId, id: order.linkedFromOrderId }, attributes: ['id', 'orderNumber'] })
+    : null;
   return {
     ...json,
     paymentProvider: providers.get(order.id) || null,
     stage: await stageForOrder(order.id),
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
+    linkedOrders: linkedOrders.map((o) => o.toJSON()),
+    linkedFromOrder: linkedFrom ? linkedFrom.toJSON() : null,
   };
 }
 
@@ -932,6 +1128,7 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
 
 module.exports = {
   createOrder,
+  addLineToOpenOrder,
   getOrder,
   listOrders,
   orderPipeline,

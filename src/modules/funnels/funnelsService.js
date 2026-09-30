@@ -17,6 +17,7 @@ const {
 } = require('./funnelGraph');
 const { conditionProblem, pickNextEdge } = require('./funnelRouting');
 const { assertBumpOfferUsable, bumpProblem, presentBump } = require('../checkout/orderBump');
+const funnelOfferMerge = require('./funnelOfferMerge');
 
 const Op = db.Sequelize.Op;
 
@@ -935,11 +936,15 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       return { session: publicSession(session), ...restarted };
     }
 
-    // Accepted upsell/downsell -> a linked follow-on order, in this same
-    // transaction so it cannot outlive a failed advance.
+    // Accepted upsell/downsell, in this same transaction so it cannot outlive
+    // a failed advance: joined to the checkout order while its offer window is
+    // open when the store has turned that on (funnelOfferMerge), else a linked
+    // follow-on order as it has always been.
     let followOn = null;
+    let accepted = null;
     if (outcome.type === 'accepted_offer' && OFFER_STEP_TYPES.has(currentStep.stepType)) {
-      followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t);
+      accepted = await funnelOfferMerge.acceptOffer({ workspaceId, funnelId, step: currentStep, session, req }, t);
+      if (!accepted) followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t);
     }
 
     // completed_checkout carries the order just placed on this step. An order
@@ -989,6 +994,12 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       await session.save({ transaction: t });
       result = { done: true, session: publicSession(session) };
     }
+
+    // No offer can follow from here: the order's offer window closes and it
+    // goes to the confirmation queue (a no-op unless the merge is on).
+    await funnelOfferMerge.afterSessionMove(workspaceId, session, snapshot, t);
+    if (accepted && accepted.followOn) result.followOnOrder = accepted.followOn;
+    if (accepted && accepted.merged) result.mergedOrder = { ...accepted.merged, addedItemId: accepted.addedItemId };
 
     if (followOn) {
       await db.Order.update(

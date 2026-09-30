@@ -61,6 +61,11 @@ module.exports = {
         // and text (checkout/orderBump.js). Sent whole and stored whole;
         // `null` removes it.
         order_bump: orderBumpSettingsSchema.allow(null).optional(),
+        // Funnel upsells joined to the checkout order within an offer window
+        // (funnels/funnelOfferMerge.js). Off unless true; needs orders.manage.
+        funnel_upsell_merge: Joi.boolean().allow(null).optional(),
+        // How long a funnel order waits for its offers at most; null → 15.
+        funnel_offer_window_minutes: Joi.number().integer().min(1).max(120).allow(null).optional(),
         // Which optional checkout fields this store asks for. Key names track
         // the checkout request fields they govern — see
         // modules/checkout/checkoutSettings.js. Sub-keys merge, so a form that
