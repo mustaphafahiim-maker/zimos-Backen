@@ -16,6 +16,8 @@ const {
   EMPTY_TREE,
 } = require('./funnelGraph');
 const { conditionProblem, pickNextEdge } = require('./funnelRouting');
+const { assertBumpOfferUsable, bumpProblem, presentBump } = require('../checkout/orderBump');
+const funnelOfferMerge = require('./funnelOfferMerge');
 
 const Op = db.Sequelize.Op;
 
@@ -91,8 +93,17 @@ function toSnapshotSteps(stepRows) {
     name: s.name,
     builderData: s.builderData,
     offerId: s.offerId,
+    // Only a checkout step has a form to offer a bump on.
+    bumpOfferId: s.stepType === 'checkout' ? s.bumpOfferId || null : null,
     seo: s.seo || {},
   }));
+}
+
+/** A bump offer belongs on a checkout step only (422 elsewhere). */
+function assertBumpStepType(stepType) {
+  if (stepType !== 'checkout') {
+    throw new ValidationError([{ field: 'bumpOfferId', message: 'Only a checkout step can offer an order bump' }]);
+  }
 }
 
 function toSnapshotEdges(edgeRows) {
@@ -211,8 +222,9 @@ async function duplicateFunnel(workspaceId, funnelId, data, req) {
             name: s.name,
             builderData: deepClone(s.builderData),
             // Offers are workspace-scoped, so the copy's step sells the same
-            // one the source did.
+            // one the source did (and offers the same bump).
             offerId: s.offerId,
+            bumpOfferId: s.bumpOfferId,
             // abTestExperimentId is intentionally not carried over: an
             // experiment belongs to the step it was set up on.
             seo: deepClone(s.seo) || {},
@@ -279,6 +291,10 @@ async function createStep(workspaceId, funnelId, data, req) {
   const builderData = data.builderData !== undefined ? data.builderData : EMPTY_TREE;
   validateStepData(builderData, { label: `step "${data.key}"` });
   if (data.offerId) await assertOfferUsable(workspaceId, data.offerId);
+  if (data.bumpOfferId) {
+    assertBumpStepType(data.stepType);
+    await assertBumpOfferUsable(workspaceId, data.bumpOfferId, 'bumpOfferId');
+  }
 
   const clash = await db.FunnelStep.findOne({ where: { funnelId, key: data.key }, attributes: ['id'] });
   if (clash) throw new ConflictError(`A step with key "${data.key}" already exists in this funnel`, 'FUNNEL_STEP_KEY_TAKEN');
@@ -291,6 +307,7 @@ async function createStep(workspaceId, funnelId, data, req) {
     name: data.name,
     builderData,
     offerId: data.offerId || null,
+    bumpOfferId: data.bumpOfferId || null,
     seo: data.seo || {},
   });
   await recordAudit({
@@ -331,6 +348,15 @@ async function updateStep(workspaceId, funnelId, stepId, data, req) {
   if (data.offerId !== undefined) {
     if (data.offerId) await assertOfferUsable(workspaceId, data.offerId);
     patch.offerId = data.offerId; // null clears it
+  }
+  const stepType = patch.stepType || step.stepType;
+  if (data.bumpOfferId) {
+    assertBumpStepType(stepType);
+    await assertBumpOfferUsable(workspaceId, data.bumpOfferId, 'bumpOfferId');
+    patch.bumpOfferId = data.bumpOfferId;
+  } else if (data.bumpOfferId === null || (stepType !== 'checkout' && step.bumpOfferId)) {
+    // Cleared, or the step stopped being a checkout: no form, no bump.
+    patch.bumpOfferId = null;
   }
 
   await step.update(patch);
@@ -525,6 +551,22 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
           problems.push({ field: `steps.${s.key}.offerId`, message: `Offer for step "${s.key}" not found or not active` });
         }
       }
+      if (s.bumpOfferId) {
+        const bump = await db.Offer.findOne({
+          where: { id: s.bumpOfferId, workspaceId },
+          include: [
+            { model: db.Product, as: 'product', attributes: ['id', 'status', 'customFields'] },
+            { model: db.OfferVariant, as: 'lines', include: [{ model: db.ProductVariant, as: 'variant', attributes: ['id', 'status'] }] },
+          ],
+          transaction: t,
+        });
+        if (bumpProblem(bump)) {
+          problems.push({
+            field: `steps.${s.key}.bumpOfferId`,
+            message: `The order bump on step "${s.key}" can no longer be offered (archived, unpriced or asks for custom details)`,
+          });
+        }
+      }
     }
     if (problems.length) {
       throw new ValidationError(problems, 'Funnel cannot be published yet — fix the issues below');
@@ -661,6 +703,10 @@ async function resolveStepPayload(workspaceId, snapshot, stepKey) {
   const step = (snapshot.steps || []).find((s) => s.key === stepKey);
   if (!step) throw stepNotFound();
   const payload = { step: renderStepData(snapshot, stepKey) };
+  // The checkout step's order bump, when it has one that can still be sold.
+  if (step.stepType === 'checkout' && step.bumpOfferId) {
+    payload.bump = await presentBump(workspaceId, step.bumpOfferId);
+  }
   if (OFFER_STEP_TYPES.has(step.stepType) && step.offerId) {
     // An archived offer (e.g. its product was archived) isn't shown; accepting
     // it would fail anyway (createFollowOnOrder also requires 'active').
@@ -789,6 +835,8 @@ async function getSessionStep(workspaceId, funnelId, sessionId) {
     await resetSessionToEntry(session, snapshot);
   }
   const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+  // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
+  if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session);
   return { session: publicSession(session), ...payload };
 }
 
@@ -890,11 +938,15 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       return { session: publicSession(session), ...restarted };
     }
 
-    // Accepted upsell/downsell -> a linked follow-on order, in this same
-    // transaction so it cannot outlive a failed advance.
+    // Accepted upsell/downsell, in this same transaction so it cannot outlive
+    // a failed advance: joined to the checkout order while its offer window is
+    // open when the store has turned that on (funnelOfferMerge), else a linked
+    // follow-on order as it has always been.
     let followOn = null;
+    let accepted = null;
     if (outcome.type === 'accepted_offer' && OFFER_STEP_TYPES.has(currentStep.stepType)) {
-      followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t);
+      accepted = await funnelOfferMerge.acceptOffer({ workspaceId, funnelId, step: currentStep, session, req }, t);
+      if (!accepted) followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t);
     }
 
     // completed_checkout carries the order just placed on this step. An order
@@ -936,6 +988,8 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       }
       await session.save({ transaction: t });
       const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+      // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
+      if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session, t);
       result = { ...(finished ? { done: true } : {}), session: publicSession(session), ...payload };
     } else {
       // No matching outbound edge — the funnel ends here.
@@ -944,6 +998,12 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       await session.save({ transaction: t });
       result = { done: true, session: publicSession(session) };
     }
+
+    // No offer can follow from here: the order's offer window closes and it
+    // goes to the confirmation queue (a no-op unless the merge is on).
+    await funnelOfferMerge.afterSessionMove(workspaceId, session, snapshot, t);
+    if (accepted && accepted.followOn) result.followOnOrder = accepted.followOn;
+    if (accepted && accepted.merged) result.mergedOrder = { ...accepted.merged, addedItemId: accepted.addedItemId };
 
     if (followOn) {
       await db.Order.update(

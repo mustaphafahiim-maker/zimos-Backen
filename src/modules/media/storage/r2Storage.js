@@ -1,6 +1,12 @@
 'use strict';
 
-const { S3Client, PutObjectCommand, DeleteObjectCommand, HeadBucketCommand } = require('@aws-sdk/client-s3');
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  HeadBucketCommand,
+  GetObjectCommand,
+} = require('@aws-sdk/client-s3');
 const env = require('../../../config/env');
 
 // Cloudflare R2 is S3-compatible. The bucket is served publicly from
@@ -56,6 +62,67 @@ async function remove(storagePath) {
   await s3.send(new DeleteObjectCommand({ Bucket: env.storage.r2.bucketName, Key: key }));
 }
 
+/**
+ * Reads one media object back by the `path` put() returned — for maintenance
+ * scripts (scripts/strip-media-exif.js), never a request path. Null when gone.
+ */
+async function get(storagePath) {
+  const s3 = getClient();
+  const key = String(storagePath).replace(/^\/+/, '');
+  try {
+    const res = await s3.send(new GetObjectCommand({ Bucket: env.storage.r2.bucketName, Key: key }));
+    return { buffer: Buffer.from(await res.Body.transformToByteArray()), contentType: res.ContentType || null };
+  } catch (err) {
+    if (err && (err.name === 'NoSuchKey' || (err.$metadata && err.$metadata.httpStatusCode === 404))) return null;
+    throw err;
+  }
+}
+
+/*
+ * Private objects: shoppers' photos (customer-uploads/<workspaceId>/<uuid>).
+ * They go to R2_PRIVATE_BUCKET_NAME when it is set — a bucket with no public
+ * access at all — and otherwise to the media bucket under the
+ * customer-uploads/ prefix. Their URL is never built from R2_PUBLIC_URL and
+ * never handed out: the merchant reads them through the API's signed,
+ * short-lived link (customerUploads/uploadLinks.js), which streams them from
+ * here. With the shared bucket the key is a random UUID nobody is told; the
+ * private bucket (or a rule blocking /customer-uploads/* on the public
+ * domain) closes even that.
+ */
+const privateBucket = () => env.storage.r2.privateBucketName || env.storage.r2.bucketName;
+
+async function putPrivate({ key, buffer, contentType }) {
+  const s3 = getClient();
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: privateBucket(),
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+      CacheControl: 'private, no-store',
+    })
+  );
+  return { path: key };
+}
+
+/** The object's bytes and type, or null when it is gone. */
+async function getPrivate(key) {
+  const s3 = getClient();
+  try {
+    const res = await s3.send(new GetObjectCommand({ Bucket: privateBucket(), Key: key }));
+    const bytes = Buffer.from(await res.Body.transformToByteArray());
+    return { buffer: bytes, contentType: res.ContentType || null };
+  } catch (err) {
+    if (err && (err.name === 'NoSuchKey' || (err.$metadata && err.$metadata.httpStatusCode === 404))) return null;
+    throw err;
+  }
+}
+
+async function removePrivate(key) {
+  const s3 = getClient();
+  await s3.send(new DeleteObjectCommand({ Bucket: privateBucket(), Key: key }));
+}
+
 // Lets tests reset the memoized client between provider switches.
 function _resetClient() {
   client = null;
@@ -74,4 +141,4 @@ async function probe() {
   return { detail: `r2 bucket "${env.storage.r2.bucketName}"` };
 }
 
-module.exports = { put, remove, probe, _resetClient };
+module.exports = { put, get, remove, probe, putPrivate, getPrivate, removePrivate, _resetClient };

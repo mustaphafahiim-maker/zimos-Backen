@@ -20,6 +20,7 @@ const {
 const { recordAudit } = require('../audit/auditService');
 const notify = require('../notifications/notify');
 const billingService = require('../billing/billingService');
+const { assertBumpOfferUsable } = require('../checkout/orderBump');
 
 async function sendInviteEmail(workspace, email, role) {
   await notify.email({
@@ -130,6 +131,14 @@ const MERCHANT_SETTINGS_KEYS = [
   'default_shipping_rate_amount',
   'tax_enabled',
   'default_item_weight_grams',
+  'confirmation_whatsapp_template',
+  // Replaced whole, not merged: its filter list is ordered.
+  'storefront_catalog',
+  // Replaced whole: { enabled, offer_id, title, description }.
+  'order_bump',
+  // Funnel upsells joined to the checkout order (funnels/funnelOfferMerge.js).
+  'funnel_upsell_merge',
+  'funnel_offer_window_minutes',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one
@@ -180,6 +189,24 @@ async function updateWorkspace({ workspaceId, patch }, req) {
   if (touchesFraudRules && !req.tenant.hasPermission(PERMISSIONS.WORKSPACE_MANAGE)) {
     throw new AuthorizationError('Changing fraud rules requires the workspace.manage permission');
   }
+  // The confirmation team's WhatsApp message is theirs to manage: an Editor's
+  // website.edit is not enough.
+  const touchesWhatsappTemplate =
+    patch.settings &&
+    typeof patch.settings === 'object' &&
+    Object.prototype.hasOwnProperty.call(patch.settings, 'confirmation_whatsapp_template');
+  if (touchesWhatsappTemplate && !req.tenant.hasPermission(PERMISSIONS.ORDERS_MANAGE)) {
+    throw new AuthorizationError('Changing the WhatsApp confirmation message requires the orders.manage permission');
+  }
+  // Whether funnel orders wait for their offers before confirmation changes
+  // how the confirmation team works: theirs too.
+  const touchesFunnelMerge =
+    patch.settings &&
+    typeof patch.settings === 'object' &&
+    ['funnel_upsell_merge', 'funnel_offer_window_minutes'].some((key) => Object.prototype.hasOwnProperty.call(patch.settings, key));
+  if (touchesFunnelMerge && !req.tenant.hasPermission(PERMISSIONS.ORDERS_MANAGE)) {
+    throw new AuthorizationError('Changing how funnel upsells join orders requires the orders.manage permission');
+  }
 
   const before = {
     name: workspace.name,
@@ -228,6 +255,12 @@ async function updateWorkspace({ workspaceId, patch }, req) {
     next.themeSettings = blob;
   }
   if (patch.settings !== undefined) {
+    // A bump that is switched on must name an offer that can be one (active,
+    // priced, asks the shopper nothing) in this workspace.
+    const bump = patch.settings && patch.settings.order_bump;
+    if (bump && bump.enabled) {
+      await assertBumpOfferUsable(workspaceId, bump.offer_id, 'settings.order_bump.offer_id');
+    }
     next.settings = applyMerchantSettings(workspace.settings, patch.settings);
     // Tier pricing weighs products without a weight at the default weight;
     // it can't be removed while tier pricing depends on it.

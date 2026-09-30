@@ -471,7 +471,16 @@ describe('queue tabs and counts', () => {
 
     const c = await counts(ctx, ctx.agentA.accessToken);
     expect(c.status).toBe(200);
-    expect(c.body.counts).toEqual({ pending: 1, pendingDue: 1, inProgress: 2, inProgressMine: 1, done: 1 });
+    expect(c.body.counts).toEqual({
+      pending: 1,
+      pendingDue: 1,
+      waitingForOffers: 0,
+      inProgress: 2,
+      inProgressMine: 1,
+      done: 1,
+      assignedToMe: 0,
+      unassigned: 3,
+    });
   });
 
   it('pages with a cursor, due callbacks before later ones', async () => {

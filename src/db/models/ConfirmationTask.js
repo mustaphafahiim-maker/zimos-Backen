@@ -21,8 +21,16 @@ module.exports = (sequelize, DataTypes) => {
       },
       lockedByUserId: { type: DataTypes.UUID, allowNull: true, field: 'locked_by_user_id' },
       lockedAt: { type: DataTypes.DATE, allowNull: true, field: 'locked_at' },
+      // The agent a manager handed this task to. While set, only that agent
+      // (or someone with orders.manage) may claim it; null is open to all.
+      assignedToUserId: { type: DataTypes.UUID, allowNull: true, field: 'assigned_to_user_id' },
+      assignedAt: { type: DataTypes.DATE, allowNull: true, field: 'assigned_at' },
       attemptCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'attempt_count' },
       nextRetryAt: { type: DataTypes.DATE, allowNull: true, field: 'next_retry_at' },
+      // While in the future, the task waits for its funnel's offer window to
+      // close (funnels/funnelOfferMerge.js) and cannot be claimed. Null is
+      // available at once.
+      availableAt: { type: DataTypes.DATE, allowNull: true, field: 'available_at' },
       outcome: {
         type: DataTypes.ENUM('confirmed', 'rejected', 'unreachable', 'postponed'),
         allowNull: true,
@@ -30,12 +38,13 @@ module.exports = (sequelize, DataTypes) => {
       rejectionReason: { type: DataTypes.STRING(300), allowNull: true, field: 'rejection_reason' },
       completedAt: { type: DataTypes.DATE, allowNull: true, field: 'completed_at' },
     },
-    { tableName: 'confirmation_tasks', indexes: [{ fields: ['workspace_id', 'status'] }, { fields: ['workspace_id', 'status', 'locked_at'] }, { fields: ['order_id'] }] }
+    { tableName: 'confirmation_tasks', indexes: [{ fields: ['workspace_id', 'status'] }, { fields: ['workspace_id', 'status', 'locked_at'] }, { fields: ['order_id'] }, { fields: ['workspace_id', 'assigned_to_user_id', 'status'] }] }
   );
   ConfirmationTask.associate = (models) => {
     ConfirmationTask.belongsTo(models.Order, { foreignKey: 'orderId', as: 'order' });
     ConfirmationTask.hasMany(models.ConfirmationAttempt, { foreignKey: 'taskId', as: 'attempts' });
     ConfirmationTask.belongsTo(models.User, { foreignKey: 'lockedByUserId', as: 'lockedBy' });
+    ConfirmationTask.belongsTo(models.User, { foreignKey: 'assignedToUserId', as: 'assignedTo' });
   };
   return ConfirmationTask;
 };

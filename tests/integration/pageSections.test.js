@@ -185,6 +185,16 @@ describe('page engine — motion section types', () => {
     });
     expect(partial.status).toBe(200);
 
+    // The editor's presets start with an empty id: "not picked yet", not a bad UUID.
+    const unpicked = await ctx.patchPage(page.id, {
+      draftData: treeWith({ id: 'e1', type: 'orbit_gallery', props: { title: '', limit: 8, collectionId: '' } }),
+    });
+    expect(unpicked.status).toBe(200);
+    const badId = await ctx.patchPage(page.id, {
+      draftData: treeWith({ id: 'e1', type: 'orbit_gallery', props: { collectionId: 'not-a-uuid' } }),
+    });
+    expect(badId.status).toBe(422);
+
     const tooMany = await ctx.patchPage(page.id, {
       draftData: treeWith({
         id: 'e1',

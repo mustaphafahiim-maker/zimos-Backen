@@ -35,3 +35,6 @@ wipe-db.js
 
 # Sample PDFs from scripts/waybill-samples.js
 waybill-samples/
+
+# Shoppers' photos on local disk (STORAGE_PROVIDER=local): private, never served or committed
+storage/private/

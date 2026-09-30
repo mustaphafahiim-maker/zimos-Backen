@@ -16,6 +16,8 @@ module.exports = (sequelize, DataTypes) => {
       name: { type: DataTypes.STRING(200), allowNull: false },
       builderData: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'builder_data' },
       offerId: { type: DataTypes.UUID, allowNull: true, field: 'offer_id' }, // for upsell/downsell steps
+      // The order bump a checkout step offers on its form (checkout/orderBump.js).
+      bumpOfferId: { type: DataTypes.UUID, allowNull: true, field: 'bump_offer_id' },
       abTestExperimentId: { type: DataTypes.UUID, allowNull: true, field: 'ab_test_experiment_id' },
       seo: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
     },
@@ -25,6 +27,7 @@ module.exports = (sequelize, DataTypes) => {
     FunnelStep.belongsTo(models.Funnel, { foreignKey: 'funnelId', as: 'funnel' });
     // `offerId` is what an upsell/downsell step sells when a visitor accepts it.
     FunnelStep.belongsTo(models.Offer, { foreignKey: 'offerId', as: 'offer' });
+    FunnelStep.belongsTo(models.Offer, { foreignKey: 'bumpOfferId', as: 'bumpOffer' });
   };
   return FunnelStep;
 };

@@ -2,6 +2,7 @@
 
 const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
+const { usernameSchema } = require('../users/username');
 
 // Password strength is enforced here, server-side, so that a request hitting
 // the API directly (bypassing the frontend's own check) still can't set a weak
@@ -30,7 +31,17 @@ module.exports = {
       password,
       fullName: Joi.string().min(2).max(200).required(),
       phone: Joi.string().max(32).optional(),
+      // The sign-up form requires it. Checked strictly when given; a client
+      // that sends none (from before usernames) gets one made from the email.
+      username: usernameSchema.optional(),
     }),
+  },
+  usernameAvailable: {
+    // Judged by the endpoint itself (it answers "invalid" rather than 422).
+    query: Joi.object({ u: Joi.string().max(100).allow('').required() }),
+  },
+  changeUsername: {
+    body: Joi.object({ username: usernameSchema.required() }),
   },
   login: {
     body: Joi.object({

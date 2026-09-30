@@ -19,6 +19,9 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: 'queue',
       },
+      // How the customer was reached: 'call', 'whatsapp' or 'other' (checked
+      // in confirmationValidation.js). Null on attempts recorded before it existed.
+      channel: { type: DataTypes.STRING(16), allowNull: true },
       // On a correction, the outcome it replaced.
       previousOutcome: {
         type: DataTypes.ENUM('confirmed', 'rejected', 'unreachable', 'postponed'),

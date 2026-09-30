@@ -14,6 +14,12 @@ module.exports = (sequelize, DataTypes) => {
       passwordHash: { type: DataTypes.STRING, allowNull: true, field: 'password_hash' },
       googleId: { type: DataTypes.STRING(64), allowNull: true, unique: true, field: 'google_id' },
       fullName: { type: DataTypes.STRING(200), allowNull: false, field: 'full_name' },
+      // Public handle, always lower-case, unique regardless of case (migration
+      // 124; rules in modules/users/username.js). Null only for an account made
+      // through Google until its owner picks one.
+      username: { type: DataTypes.STRING(30), allowNull: true },
+      // The last time its owner changed it (not the first choice).
+      usernameChangedAt: { type: DataTypes.DATE, allowNull: true, field: 'username_changed_at' },
       phone: { type: DataTypes.STRING(32), allowNull: true },
       status: {
         type: DataTypes.ENUM('active', 'suspended', 'pending_verification'),

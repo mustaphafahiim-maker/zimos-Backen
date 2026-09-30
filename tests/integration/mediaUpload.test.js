@@ -8,6 +8,7 @@ const path = require('path');
 const bwipjs = require('bwip-js');
 const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace } = require('../helpers/factories');
 const { UPLOAD_ROOT } = require('../../src/modules/media/mediaService');
+const { jpegWithExif } = require('../helpers/images');
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 
@@ -38,13 +39,14 @@ describe('media upload', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.mimeType).toBe('image/png');
-    expect(res.body.size).toBe(PNG.length);
     expect(res.body.path).toMatch(new RegExp(`^/uploads/${workspace.id}/[0-9a-f-]+\\.png$`));
     expect(res.body.url).toContain(res.body.path);
 
-    // it's really on disk
+    // it's really on disk — re-encoded without metadata, so `size` is what was stored
     const onDisk = path.join(UPLOAD_ROOT, res.body.path.replace('/uploads/', ''));
     expect(fs.existsSync(onDisk)).toBe(true);
+    const storedLength = fs.statSync(onDisk).size;
+    expect(res.body.size).toBe(storedLength);
 
     // and served back
     const fetched = await request(app).get(res.body.path).buffer(true).parse((r, cb) => {
@@ -53,7 +55,7 @@ describe('media upload', () => {
       r.on('end', () => cb(null, Buffer.concat(d)));
     });
     expect(fetched.status).toBe(200);
-    expect(fetched.body.length).toBe(PNG.length);
+    expect(fetched.body.length).toBe(storedLength);
   });
 
   it('decides type by content, not by extension', async () => {
@@ -78,7 +80,8 @@ describe('media upload', () => {
 
   it('accepts a JPEG by its magic bytes', async () => {
     const { auth, workspace } = await setupWorkspaceWithProduct();
-    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(256, 0x20)]);
+    // A real JPEG: an undecodable one is refused (see customFieldsAndUploads.test.js).
+    const jpeg = await jpegWithExif();
     const res = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/media`)
       .set(bearer(auth.accessToken))

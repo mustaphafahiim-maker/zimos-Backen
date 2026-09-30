@@ -52,7 +52,9 @@ describe('media library', () => {
     expect(res.status).toBe(201);
     // Existing response fields are unchanged.
     expect(res.body.mimeType).toBe('image/png');
-    expect(res.body.size).toBe(PNG.length);
+    // Re-encoded without metadata: the size is the stored file's, never larger here.
+    expect(res.body.size).toBeGreaterThan(0);
+    expect(res.body.size).toBeLessThanOrEqual(PNG.length);
     expect(res.body.url).toContain(res.body.path);
     // ...plus the new id.
     expect(res.body.id).toEqual(expect.any(String));
@@ -62,7 +64,7 @@ describe('media library', () => {
     expect(row.workspaceId).toBe(ctx.workspace.id);
     expect(row.uploadedByUserId).toBe(ctx.auth.userId);
     expect(row.path).toBe(res.body.path);
-    expect(row.sizeBytes).toBe(PNG.length);
+    expect(row.sizeBytes).toBe(res.body.size);
   });
 
   it('lists a workspace newest-first and pages with a cursor', async () => {
@@ -90,7 +92,7 @@ describe('media library', () => {
       id: expect.any(String),
       url: expect.any(String),
       mimeType: 'image/png',
-      size: PNG.length,
+      size: expect.any(Number),
       createdAt: expect.any(String),
     });
 

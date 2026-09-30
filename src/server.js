@@ -6,6 +6,8 @@ const db = require('./db/models');
 const logger = require('./core/utils/logger');
 const { describeStorage, r2ConfigError } = require('./modules/media/storage');
 const { logRollout: logCarrierRollout } = require('./modules/shipping/carriers');
+const { imageProcessingStatus } = require('./modules/media/imageProcessing');
+const { startUploadSweep } = require('./modules/customerUploads/customerUploadService');
 
 async function start() {
   try {
@@ -26,6 +28,13 @@ async function start() {
   logger.info(`Storage backend: ${describeStorage()}`);
   const storageProblem = r2ConfigError();
   if (storageProblem) logger.error(`Storage misconfigured: ${storageProblem} — uploads will fail until this is fixed`);
+
+  // Image processing (sharp): every upload is re-encoded and stripped of its
+  // metadata, so a missing native binary must be visible at boot.
+  logger.info(`Image processing: ${imageProcessingStatus()}`);
+
+  // Shoppers' photos no order took are deleted after CUSTOMER_UPLOAD_TTL_HOURS.
+  startUploadSweep();
 
   // And for couriers: which adapters this process actually switched on, from
   // CARRIERS_ENABLED / CARRIERS_BETA / CARRIERS_BETA_WORKSPACES as parsed.

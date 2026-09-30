@@ -5,6 +5,7 @@ const authService = require('./authService');
 const { authenticate, authenticateAllowPending } = require('../../core/middleware/authenticate');
 const { AppError } = require('../../core/errors/AppError');
 const env = require('../../config/env');
+const usernameService = require('../users/usernameService');
 
 const register = asyncHandler(async (req, res) => {
   const result = await authService.register(req.body, req);
@@ -70,10 +71,28 @@ const listSessions = [
   }),
 ];
 
+// `suggestedUsername` only for an account with no username yet (made through
+// Google): the dashboard asks its owner to pick one, starting from this.
 const me = [
   authenticate,
   asyncHandler(async (req, res) => {
-    res.json({ user: req.user.toSafeJSON() });
+    const user = req.user.toSafeJSON();
+    if (user.username) return res.json({ user });
+    return res.json({ user, suggestedUsername: await usernameService.suggestFor(user.email) });
+  }),
+];
+
+// GET /auth/username-available?u= — public, tightly rate limited per IP.
+const usernameAvailable = asyncHandler(async (req, res) => {
+  res.json(await usernameService.availability(req.query.u));
+});
+
+// PATCH /auth/me/username — the first choice, or a change (once per 30 days).
+const changeUsername = [
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const user = await usernameService.changeUsername(req.user.id, req.body.username, req);
+    res.json({ user: user.toSafeJSON() });
   }),
 ];
 
@@ -125,6 +144,8 @@ module.exports = {
   revokeAllSessions,
   listSessions,
   me,
+  usernameAvailable,
+  changeUsername,
   requestPasswordReset,
   resetPassword,
   requestPhoneVerification,

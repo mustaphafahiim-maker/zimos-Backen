@@ -14,6 +14,9 @@ module.exports = (sequelize, DataTypes) => {
       // field is never trusted for totals calculation.
       unitPriceSnapshot: { type: DataTypes.BIGINT, allowNull: false, field: 'unit_price_snapshot' },
       isOrderBump: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_order_bump' },
+      // The shopper's answers to the product's custom fields, snapshotted with
+      // their labels (catalog/customFields.js). Null: none.
+      customizations: { type: DataTypes.JSONB, allowNull: true },
     },
     { tableName: 'cart_items', indexes: [{ fields: ['cart_id'] }] }
   );

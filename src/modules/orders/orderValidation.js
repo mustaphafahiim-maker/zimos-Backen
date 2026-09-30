@@ -3,6 +3,7 @@ const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
 const { STAGES } = require('./orderStage');
 const { ORDER_SORT_KEYS, DEFAULT_ORDER_SORT } = require('./orderSort');
+const { CHANNELS: CONFIRMATION_CHANNELS } = require('../cod/confirmationValidation');
 const uuid = Joi.string().uuid();
 
 // carrierAddress.cityId / districtId: required together, unless the address
@@ -76,7 +77,11 @@ module.exports = {
   },
   confirm: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
-    body: Joi.object({ notes: Joi.string().max(1000).allow('').optional() }),
+    body: Joi.object({
+      notes: Joi.string().max(1000).allow('').optional(),
+      // How the customer was reached — see cod/confirmationValidation.js.
+      channel: Joi.string().valid(...CONFIRMATION_CHANNELS).optional(),
+    }),
   },
   update: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),

@@ -9,7 +9,8 @@ const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState } = require('../orders/orderStateService');
 const { assertNotShipped, SHIPMENT_IN_MOTION } = require('../orders/shipmentLifecycle');
 const carrierShipmentService = require('../shipping/carrierShipmentService');
-const inventoryService = require('../inventory/inventoryService');
+const orderStock = require('../inventory/orderStock');
+const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { QUEUE_DEFAULT_SORT, orderSort, orderByClause, afterAnchorClause, anchorValue } = require('../orders/orderSort');
 
 /*
@@ -25,6 +26,12 @@ const { QUEUE_DEFAULT_SORT, orderSort, orderByClause, afterAnchorClause, anchorV
  * is no job runner, so an expired lock is released lazily: every read of the
  * queue and every claim first runs releaseExpiredLocks. Until then the holder
  * can still record an outcome — nobody else has taken the task.
+ *
+ * A manager may assign an open task to one agent (assignTask / assignTasks).
+ * While assigned, only that agent — or someone with orders.manage — may claim
+ * it or confirm it from the order page; an unassigned task is open to anyone.
+ * The assignment survives unreachable / postponed, so the same agent calls
+ * back.
  *
  * A done task can be corrected (confirmed ⇄ rejected) by a manager while the
  * order hasn't shipped. Every outcome — queue call, order page, correction —
@@ -68,6 +75,7 @@ const taskInclude = () => [
     ],
   },
   { model: db.User, as: 'lockedBy', attributes: ['id', 'fullName'] },
+  { model: db.User, as: 'assignedTo', attributes: ['id', 'fullName'] },
   {
     model: db.ConfirmationAttempt,
     as: 'attempts',
@@ -97,8 +105,10 @@ function serializeTask(task) {
   return {
     ...json,
     order: json.order ? order : null,
+    waitingForOffers: isWaitingForOffers(json),
     lockedBy: task.status === 'in_progress' ? userSummary(json.lockedBy) : null,
     lockExpiresAt: lockExpiresAt(task),
+    assignedTo: userSummary(json.assignedTo),
     attempts,
     correctable: isCorrectable(json, json.order),
   };
@@ -113,7 +123,10 @@ async function loadTasks(workspaceId, ids, transaction) {
     transaction,
   });
   const byId = new Map(rows.map((row) => [row.id, row]));
-  return ids.map((id) => byId.get(id)).filter(Boolean).map(serializeTask);
+  const tasks = ids.map((id) => byId.get(id)).filter(Boolean).map(serializeTask);
+  // The agent confirms the customer's photos and texts on the call too.
+  for (const task of tasks) if (task.order) await presentOrderItems(workspaceId, task.order.items);
+  return tasks;
 }
 
 async function loadTask(workspaceId, taskId, transaction) {
@@ -130,6 +143,31 @@ function lockedError(task) {
 
 const doneError = () =>
   new AppError('TASK_ALREADY_DONE', 'This task already has a final outcome', 409);
+
+/**
+ * The task of a funnel order still waiting for its offer window to close
+ * (funnels/funnelOfferMerge.js): listed in the queue, but nobody works it yet —
+ * the shopper may still add to the order.
+ */
+const isWaitingForOffers = (task, now = new Date()) =>
+  Boolean(task.availableAt) && new Date(task.availableAt) > now && task.status === 'queued';
+
+const waitingError = (task) =>
+  new AppError('TASK_WAITING_FOR_OFFERS', 'This order is still in its funnel offer window', 409, {
+    availableAt: task.availableAt,
+  });
+
+function assignedError(assignee) {
+  return new AppError('TASK_ASSIGNED_TO_OTHER', 'This task is assigned to another agent', 403, {
+    assignedTo: userSummary(assignee),
+  });
+}
+
+const isManager = (req) => req.tenant.hasPermission(PERMISSIONS.ORDERS_MANAGE);
+
+/** Whether the caller may work a task as it is assigned: unassigned, theirs, or they manage orders. */
+const mayWorkAssigned = (task, req) =>
+  !task.assignedToUserId || task.assignedToUserId === req.user.id || isManager(req);
 
 // ---------------------------------------------------------------------------
 // Lock expiry
@@ -190,28 +228,42 @@ async function releaseExpiredLocks(workspaceId, transaction) {
  */
 async function claimTask(workspaceId, taskId, req) {
   const agentUserId = req.user.id;
+  const manager = isManager(req);
   return db.sequelize.transaction(async (transaction) => {
     await releaseExpiredLocks(workspaceId, transaction);
 
     const now = new Date();
+    // A task assigned to someone else is theirs to claim, unless the caller
+    // manages orders.
     const [affected] = await db.sequelize.query(
       `UPDATE confirmation_tasks
           SET status = 'in_progress', locked_by_user_id = $agentUserId, locked_at = $now, updated_at = $now
         WHERE id = $taskId AND workspace_id = $workspaceId
           AND status IN ('queued', 'in_progress')
           AND (locked_by_user_id IS NULL OR locked_by_user_id = $agentUserId OR locked_at < $cutoff)
+          AND (assigned_to_user_id IS NULL OR assigned_to_user_id = $agentUserId OR $manager)
+          AND (available_at IS NULL OR available_at <= $now)
         RETURNING id, order_id`,
-      { bind: { taskId, workspaceId, agentUserId, now, cutoff: lockCutoff() }, type: QueryTypes.SELECT, transaction }
+      {
+        bind: { taskId, workspaceId, agentUserId, now, cutoff: lockCutoff(), manager },
+        type: QueryTypes.SELECT,
+        transaction,
+      }
     );
 
     if (!affected) {
       const task = await db.ConfirmationTask.findOne({
         where: { id: taskId, workspaceId },
-        include: [{ model: db.User, as: 'lockedBy', attributes: ['id', 'fullName'] }],
+        include: [
+          { model: db.User, as: 'lockedBy', attributes: ['id', 'fullName'] },
+          { model: db.User, as: 'assignedTo', attributes: ['id', 'fullName'] },
+        ],
         transaction,
       });
       if (!task) throw new NotFoundError('ConfirmationTask');
       if (task.status === 'done') throw doneError();
+      if (isWaitingForOffers(task, now)) throw waitingError(task);
+      if (!mayWorkAssigned(task, req)) throw assignedError(task.assignedTo);
       throw lockedError(task);
     }
 
@@ -275,26 +327,14 @@ async function releaseTask(workspaceId, taskId, req) {
 // Outcomes
 // ---------------------------------------------------------------------------
 
+// What the order's reservations actually hold (inventory/orderStock.js): every
+// line of an offer, a bump, a joined upsell — and nothing twice.
 async function releaseOrderStock(workspaceId, orderId, referenceType, actorUserId, transaction) {
-  const items = await db.OrderItem.findAll({ where: { orderId }, transaction });
-  for (const item of items) {
-    if (!item.variantId) continue;
-    await inventoryService.release(
-      { workspaceId, variantId: item.variantId, quantity: item.quantity, referenceType, referenceId: orderId, actorUserId },
-      transaction
-    );
-  }
+  await orderStock.releaseOrderStock({ workspaceId, orderId, referenceType, actorUserId }, transaction);
 }
 
 async function reserveOrderStock(workspaceId, orderId, referenceType, actorUserId, transaction) {
-  const items = await db.OrderItem.findAll({ where: { orderId }, transaction });
-  for (const item of items) {
-    if (!item.variantId) continue;
-    await inventoryService.reserve(
-      { workspaceId, variantId: item.variantId, quantity: item.quantity, referenceType, referenceId: orderId, actorUserId },
-      transaction
-    );
-  }
+  await orderStock.reserveOrderStock({ workspaceId, orderId, referenceType, actorUserId }, transaction);
 }
 
 /**
@@ -303,10 +343,10 @@ async function reserveOrderStock(workspaceId, orderId, referenceType, actorUserI
  * release and the customer's rejection counter. The caller has already
  * checked that the task is open and that the caller may work it.
  */
-async function applyOutcome(task, order, { outcome, notes, rejectionReason, source }, req, transaction) {
+async function applyOutcome(task, order, { outcome, notes, rejectionReason, source, channel }, req, transaction) {
   const { workspaceId } = task;
   await db.ConfirmationAttempt.create(
-    { taskId: task.id, agentUserId: req.user.id, outcome, notes: notes || null, source },
+    { taskId: task.id, agentUserId: req.user.id, outcome, notes: notes || null, source, channel: channel || null },
     { transaction }
   );
 
@@ -345,7 +385,7 @@ function assertOrderOpen(order) {
 }
 
 /** A queue call's outcome, recorded by the agent holding the task. */
-async function recordOutcome(workspaceId, taskId, { outcome, notes, rejectionReason }, req) {
+async function recordOutcome(workspaceId, taskId, { outcome, notes, rejectionReason, channel }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const task = await db.ConfirmationTask.findOne({ where: { id: taskId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!task) throw new NotFoundError('ConfirmationTask');
@@ -356,7 +396,7 @@ async function recordOutcome(workspaceId, taskId, { outcome, notes, rejectionRea
     const order = await db.Order.findOne({ where: { id: task.orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     assertOrderOpen(order);
 
-    await applyOutcome(task, order, { outcome, notes, rejectionReason, source: 'queue' }, req, transaction);
+    await applyOutcome(task, order, { outcome, notes, rejectionReason, channel, source: 'queue' }, req, transaction);
     return loadTask(workspaceId, task.id, transaction);
   });
 }
@@ -378,7 +418,7 @@ async function openTaskForOrder(workspaceId, orderId, transaction) {
  * claiming first. Refused while another agent holds a live lock on the task —
  * they may be on the phone with the customer right now.
  */
-async function confirmFromOrder(workspaceId, orderId, { notes }, req) {
+async function confirmFromOrder(workspaceId, orderId, { notes, channel }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!order) throw new NotFoundError('Order');
@@ -391,12 +431,16 @@ async function confirmFromOrder(workspaceId, orderId, { notes }, req) {
     }
 
     const task = await openTaskForOrder(workspaceId, order.id, transaction);
+    if (isWaitingForOffers(task)) throw waitingError(task);
+    if (!mayWorkAssigned(task, req)) {
+      throw assignedError(await db.User.findByPk(task.assignedToUserId, { attributes: ['id', 'fullName'], transaction }));
+    }
     if (task.lockedByUserId && task.lockedByUserId !== req.user.id && lockIsLive(task)) {
       task.lockedBy = await db.User.findByPk(task.lockedByUserId, { attributes: ['id', 'fullName'], transaction });
       throw lockedError(task);
     }
 
-    await applyOutcome(task, order, { outcome: 'confirmed', notes, source: 'order_page' }, req, transaction);
+    await applyOutcome(task, order, { outcome: 'confirmed', notes, channel, source: 'order_page' }, req, transaction);
     return loadTask(workspaceId, task.id, transaction);
   });
 }
@@ -524,6 +568,127 @@ async function correctOutcome(workspaceId, taskId, { outcome, reason, notes, ack
 }
 
 // ---------------------------------------------------------------------------
+// Assignment
+// ---------------------------------------------------------------------------
+
+const canConfirm = (permissions) => permissions.includes('*') || permissions.includes(PERMISSIONS.ORDERS_CONFIRM);
+
+/**
+ * Active members of the workspace whose role lets them confirm orders — the
+ * people a task may be assigned to. Owners count ('*').
+ */
+async function listAssignees(workspaceId) {
+  const memberships = await db.Membership.findAll({
+    where: { workspaceId, status: 'active' },
+    include: [
+      { model: db.Role, as: 'role', attributes: ['id', 'key', 'name', 'permissions'] },
+      { model: db.User, as: 'user', attributes: ['id', 'fullName', 'email'], required: true },
+    ],
+  });
+  return memberships
+    .filter((m) => m.role && canConfirm(m.role.permissions))
+    .map((m) => ({
+      id: m.user.id,
+      fullName: m.user.fullName,
+      email: m.user.email,
+      role: { key: m.role.key, name: m.role.name },
+    }))
+    .sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
+}
+
+/**
+ * The user a task may be assigned to: an active member of *this* workspace
+ * whose role can confirm orders. A user from another workspace gets the same
+ * answer as one that does not exist, so nothing about them leaks.
+ */
+async function assertAssignable(workspaceId, userId, transaction) {
+  const membership = await db.Membership.findOne({
+    where: { workspaceId, userId, status: 'active' },
+    include: [
+      { model: db.Role, as: 'role', attributes: ['permissions'] },
+      { model: db.User, as: 'user', attributes: ['id', 'fullName'] },
+    ],
+    transaction,
+  });
+  if (!membership || !membership.user) {
+    throw new AppError('ASSIGNEE_NOT_MEMBER', 'This user is not an active member of this workspace', 422, [
+      { field: 'userId', message: 'Not an active member of this workspace' },
+    ]);
+  }
+  if (!membership.role || !canConfirm(membership.role.permissions)) {
+    throw new AppError('ASSIGNEE_CANNOT_CONFIRM', 'This member\'s role cannot confirm orders', 422, [
+      { field: 'userId', message: 'Their role does not include orders.confirm' },
+    ]);
+  }
+  return membership.user;
+}
+
+/**
+ * Assigns (userId) or unassigns (null) open tasks. Done tasks are skipped —
+ * nobody works them any more — and so are ids outside this workspace. Returns
+ * the tasks now carrying the assignment and what was skipped, auditing each
+ * change. One transaction, rows locked in id order, so two managers assigning
+ * overlapping batches cannot deadlock.
+ */
+async function assignTasks(workspaceId, { taskIds, userId }, req) {
+  const ids = [...new Set(taskIds)];
+  const target = userId || null;
+  return db.sequelize.transaction(async (transaction) => {
+    const assignee = target ? await assertAssignable(workspaceId, target, transaction) : null;
+    const tasks = await db.ConfirmationTask.findAll({
+      where: { id: ids, workspaceId },
+      order: [['id', 'ASC']],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const found = new Set(tasks.map((t) => t.id));
+    const skipped = ids.filter((id) => !found.has(id)).map((id) => ({ taskId: id, code: 'NOT_FOUND' }));
+    const updated = [];
+    const now = new Date();
+
+    for (const task of tasks) {
+      if (task.status === 'done') {
+        skipped.push({ taskId: task.id, code: 'TASK_ALREADY_DONE' });
+        continue;
+      }
+      updated.push(task.id);
+      if ((task.assignedToUserId || null) === target) continue;
+
+      const before = { assignedToUserId: task.assignedToUserId, assignedAt: task.assignedAt };
+      const after = { assignedToUserId: target, assignedAt: target ? now : null };
+      await task.update(after, { transaction });
+      await recordAudit({
+        workspaceId,
+        actorUserId: req.user.id,
+        action: target ? 'confirmation_task.assign' : 'confirmation_task.unassign',
+        entityType: 'ConfirmationTask',
+        entityId: task.id,
+        before,
+        after,
+        metadata: { orderId: task.orderId },
+        req,
+        transaction,
+      });
+    }
+
+    return {
+      assignedTo: userSummary(assignee),
+      tasks: await loadTasks(workspaceId, updated, transaction),
+      skipped,
+    };
+  });
+}
+
+/** One task: unlike the batch, a done task or an unknown id is an error, not a skip. */
+async function assignTask(workspaceId, taskId, userId, req) {
+  const result = await assignTasks(workspaceId, { taskIds: [taskId], userId }, req);
+  const [skip] = result.skipped;
+  if (skip && skip.code === 'NOT_FOUND') throw new NotFoundError('ConfirmationTask');
+  if (skip) throw doneError();
+  return result.tasks[0];
+}
+
+// ---------------------------------------------------------------------------
 // Listing
 // ---------------------------------------------------------------------------
 
@@ -537,11 +702,12 @@ async function correctOutcome(workspaceId, taskId, { outcome, reason, notes, ack
  *   done         most recently finished first: COALESCE(completed_at, updated_at), id DESC
  */
 const TABS = {
+  // A task waiting for its funnel offer window is due when the window closes.
   pending: {
     status: 'queued',
-    key: 'COALESCE(t.next_retry_at, t.created_at), t.id',
+    key: 'COALESCE(t.next_retry_at, t.available_at, t.created_at), t.id',
     direction: 'ASC',
-    order: 'COALESCE(t.next_retry_at, t.created_at) ASC, t.id ASC',
+    order: 'COALESCE(t.next_retry_at, t.available_at, t.created_at) ASC, t.id ASC',
   },
   in_progress: {
     status: 'in_progress',
@@ -572,7 +738,7 @@ const tabFor = (status) => TABS[status === 'queued' ? 'pending' : status];
  */
 async function listQueue(
   workspaceId,
-  { status = 'pending', mine = false, cursor, limit = 50, sort: sortKey = QUEUE_DEFAULT_SORT } = {},
+  { status = 'pending', mine = false, assignedTo, cursor, limit = 50, sort: sortKey = QUEUE_DEFAULT_SORT } = {},
   req
 ) {
   await releaseExpiredLocks(workspaceId);
@@ -586,6 +752,13 @@ async function listQueue(
   if (mine && tab.status === 'in_progress') conditions.push('t.locked_by_user_id = $viewerId');
   if (mine && tab.status === 'done') {
     conditions.push('EXISTS (SELECT 1 FROM confirmation_attempts a WHERE a.task_id = t.id AND a.agent_user_id = $viewerId)');
+  }
+  // `assignedTo`: 'me', 'unassigned', or one member's id.
+  if (assignedTo === 'unassigned') conditions.push('t.assigned_to_user_id IS NULL');
+  else if (assignedTo === 'me') conditions.push('t.assigned_to_user_id = $viewerId');
+  else if (assignedTo) {
+    conditions.push('t.assigned_to_user_id = $assignedTo');
+    bind.assignedTo = assignedTo;
   }
 
   if (cursor) {
@@ -633,10 +806,14 @@ async function queueCounts(workspaceId, req) {
   const [row] = await db.sequelize.query(
     `SELECT
        COUNT(*) FILTER (WHERE status = 'queued')::int AS pending,
-       COUNT(*) FILTER (WHERE status = 'queued' AND (next_retry_at IS NULL OR next_retry_at <= NOW()))::int AS pending_due,
+       COUNT(*) FILTER (WHERE status = 'queued' AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+                          AND (available_at IS NULL OR available_at <= NOW()))::int AS pending_due,
+       COUNT(*) FILTER (WHERE status = 'queued' AND available_at > NOW())::int AS waiting_for_offers,
        COUNT(*) FILTER (WHERE status = 'in_progress')::int AS in_progress,
        COUNT(*) FILTER (WHERE status = 'in_progress' AND locked_by_user_id = $viewerId)::int AS in_progress_mine,
-       COUNT(*) FILTER (WHERE status = 'done')::int AS done
+       COUNT(*) FILTER (WHERE status = 'done')::int AS done,
+       COUNT(*) FILTER (WHERE status <> 'done' AND assigned_to_user_id = $viewerId)::int AS assigned_to_me,
+       COUNT(*) FILTER (WHERE status <> 'done' AND assigned_to_user_id IS NULL)::int AS unassigned
      FROM confirmation_tasks
      WHERE workspace_id = $workspaceId`,
     { bind: { workspaceId, viewerId: req.user.id }, type: QueryTypes.SELECT }
@@ -644,9 +821,14 @@ async function queueCounts(workspaceId, req) {
   return {
     pending: row.pending,
     pendingDue: row.pending_due,
+    // Funnel orders whose offer window is still open (not claimable yet).
+    waitingForOffers: row.waiting_for_offers,
     inProgress: row.in_progress,
     inProgressMine: row.in_progress_mine,
     done: row.done,
+    // Open tasks (pending or in progress) by assignment.
+    assignedToMe: row.assigned_to_me,
+    unassigned: row.unassigned,
   };
 }
 
@@ -657,7 +839,15 @@ async function queueCounts(workspaceId, req) {
 async function taskSummaryForOrder(workspaceId, orderId) {
   const task = await db.ConfirmationTask.findOne({
     where: { workspaceId, orderId },
-    include: [{ model: db.User, as: 'lockedBy', attributes: ['id', 'fullName'] }],
+    include: [
+      { model: db.User, as: 'lockedBy', attributes: ['id', 'fullName'] },
+      { model: db.User, as: 'assignedTo', attributes: ['id', 'fullName'] },
+      {
+        model: db.ConfirmationAttempt,
+        as: 'attempts',
+        include: [{ model: db.User, as: 'agent', attributes: ['id', 'fullName'] }],
+      },
+    ],
     order: [['createdAt', 'DESC']],
   });
   if (!task) return null;
@@ -668,15 +858,35 @@ async function taskSummaryForOrder(workspaceId, orderId) {
     outcome: task.outcome,
     attemptCount: task.attemptCount,
     nextRetryAt: task.nextRetryAt,
+    availableAt: task.availableAt,
+    waitingForOffers: isWaitingForOffers(task),
     completedAt: task.completedAt,
     lockedBy: live ? userSummary(task.lockedBy) : null,
     lockedAt: live ? task.lockedAt : null,
     lockExpiresAt: live ? lockExpiresAt(task) : null,
+    assignedTo: userSummary(task.assignedTo),
+    assignedAt: task.assignedAt,
+    // Oldest first, as the queue lists them, with the channel each one used.
+    attempts: (task.attempts || [])
+      .slice()
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      .map((a) => ({
+        id: a.id,
+        outcome: a.outcome,
+        channel: a.channel,
+        source: a.source,
+        notes: a.notes,
+        createdAt: a.createdAt,
+        agent: userSummary(a.agent),
+      })),
   };
 }
 
 module.exports = {
   claimTask,
+  assignTask,
+  assignTasks,
+  listAssignees,
   releaseTask,
   recordOutcome,
   confirmFromOrder,

@@ -6,6 +6,8 @@ const { ALL_PERMISSIONS } = require('../../core/security/permissions');
 const { workspaceSlug, SLUG_LOOKUP_MAX } = require('../../core/utils/workspaceSlug');
 const { CHECKOUT_FIELD_MODES, CHECKOUT_NOTES_MODES } = require('../checkout/checkoutSettings');
 const { FRAUD_ACTIONS } = require('../fraud/fraudRules');
+const { catalogSettingsSchema } = require('../storefront/catalogSettings');
+const { orderBumpSettingsSchema } = require('../checkout/orderBump');
 
 const uuid = Joi.string().uuid();
 
@@ -47,6 +49,23 @@ module.exports = {
         // Grams used for a product with no weight when pricing by weight tiers
         // or telling a courier the parcel weight. Tier mode needs it set.
         default_item_weight_grams: Joi.number().integer().min(1).max(1000000).allow(null).optional(),
+        // The message the confirmation queue's WhatsApp button opens with.
+        // Placeholders {store} {orderNumber} {items} {total} {customerName} are
+        // filled in by the dashboard; `null` goes back to its built-in text.
+        confirmation_whatsapp_template: Joi.string().trim().min(1).max(1000).allow(null).optional(),
+        // The storefront listing: sidebar on/off, which filters in what order,
+        // and the default sort (storefront/catalogSettings.js). Sent whole and
+        // stored whole; `null` goes back to the defaults.
+        storefront_catalog: catalogSettingsSchema.allow(null).optional(),
+        // The store checkout's order bump: which offer, and the card's title
+        // and text (checkout/orderBump.js). Sent whole and stored whole;
+        // `null` removes it.
+        order_bump: orderBumpSettingsSchema.allow(null).optional(),
+        // Funnel upsells joined to the checkout order within an offer window
+        // (funnels/funnelOfferMerge.js). Off unless true; needs orders.manage.
+        funnel_upsell_merge: Joi.boolean().allow(null).optional(),
+        // How long a funnel order waits for its offers at most; null → 15.
+        funnel_offer_window_minutes: Joi.number().integer().min(1).max(120).allow(null).optional(),
         // Which optional checkout fields this store asks for. Key names track
         // the checkout request fields they govern — see
         // modules/checkout/checkoutSettings.js. Sub-keys merge, so a form that

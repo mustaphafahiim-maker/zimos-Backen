@@ -7,7 +7,10 @@ const { afterOrderCompleted } = require('../orders/orderCompletion');
 const { AppError, ValidationError } = require('../../core/errors/AppError');
 const { assertRequiredCheckoutFields } = require('./checkoutSettings');
 const methodsService = require('../payments/paymentMethodsService');
+const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
+const { resolveOrderBumpItem } = require('./orderBump');
+const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
 
 /**
  * Guest checkout (no login). Runs the same orderService.createOrder as the
@@ -27,7 +30,7 @@ const online = require('../payments/onlinePaymentService');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, checkoutSessionId, paymentProvider, returnUrl, ...orderBody } = req.body;
+  const { item, checkoutSessionId, paymentProvider, returnUrl, orderBump, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -61,7 +64,7 @@ const checkout = asyncHandler(async (req, res) => {
     if (!cart) throw new AppError('CART_NOT_FOUND', 'No active cart found for this token', 404);
     ({ items } = await cartService.toOrderItems(workspaceId, cart.id));
   } else if (item) {
-    items = [{ variantId: item.variantId, offerId: item.offerId, quantity: item.quantity || 1 }];
+    items = [{ variantId: item.variantId, offerId: item.offerId, quantity: item.quantity || 1, customizations: item.customizations }];
   } else {
     throw new AppError(
       'CART_TOKEN_OR_ITEM_REQUIRED',
@@ -70,13 +73,32 @@ const checkout = asyncHandler(async (req, res) => {
     );
   }
 
+  // The ticked order bump becomes one more line of this order, built by the
+  // server from the configured offer (422 when it is not that offer).
+  if (orderBump) {
+    items = [...items, await resolveOrderBumpItem(workspace, { offerId: orderBump.offerId, funnelId: orderBody.funnelId })];
+  }
+
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
 
   const context = { cartId: cart ? cart.id : null, checkoutSessionId: checkoutSessionId || null };
+  // The shopper's answers to custom fields are checked again here, required
+  // ones enforced; photos must be this visitor's or in this cart.
+  const customFields = {
+    enforceRequired: true,
+    visitorId: req.headers['x-visitor-id'] ? readVisitorId(req) : null,
+    cartId: cart ? cart.id : null,
+  };
 
   if (!isOnline) {
-    const { order, items: orderItems } = await orderService.createOrder(workspaceId, { ...orderBody, items }, req);
+    const { order, items: orderItems } = await orderService.createOrder(workspaceId, { ...orderBody, items }, req, {
+      customFields,
+      // A funnel with offers after its checkout (and the store's
+      // funnel_upsell_merge on): nobody confirms the order until the shopper
+      // is past them, so an accepted offer can still join it.
+      confirmationAvailableAt: await offerWindowEnd(workspace, orderBody.funnelId),
+    });
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
@@ -89,6 +111,7 @@ const checkout = asyncHandler(async (req, res) => {
     { ...orderBody, paymentMethod: prepared.method.method, items },
     req,
     {
+      customFields,
       awaitingPayment: {
         expiresAt: prepared.expiresAt,
         tokenHash: prepared.tokenHash,

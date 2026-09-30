@@ -41,6 +41,22 @@ router.patch('/workspaces/:workspaceId/subscription', can(P.SUBSCRIPTIONS_MANAGE
 // next N charges. A note is required; every grant is audited.
 router.post('/workspaces/:workspaceId/special-terms', can(P.SUBSCRIPTIONS_MANAGE), validate(schemas.grantSpecialTerms), controller.grantSpecialTerms);
 
+// --- Manual subscription (billing/manualSubscriptionService) ---------------
+// Activate a plan for a period, change the plan, extend, end now — by hand,
+// with a note, source 'manual_admin'. No charge, no invoice, no commission.
+// An optional Idempotency-Key makes a double click one change.
+router.get('/workspaces/:workspaceId/subscription', can(P.SUBSCRIPTIONS_VIEW), validate(schemas.workspaceParams), controller.getManualSubscription);
+router.post('/workspaces/:workspaceId/subscription/activate', can(P.SUBSCRIPTIONS_MANAGE), validate(schemas.activateSubscription), controller.activateSubscription);
+router.post('/workspaces/:workspaceId/subscription/change-plan', can(P.SUBSCRIPTIONS_MANAGE), validate(schemas.changeSubscriptionPlan), controller.changeSubscriptionPlan);
+router.post('/workspaces/:workspaceId/subscription/extend', can(P.SUBSCRIPTIONS_MANAGE), validate(schemas.extendSubscription), controller.extendSubscription);
+router.post('/workspaces/:workspaceId/subscription/end', can(P.SUBSCRIPTIONS_MANAGE), validate(schemas.endSubscription), controller.endSubscription);
+
+// --- Features: the plan's, plus one store's overrides (billing/entitlementsService)
+router.get('/workspaces/:workspaceId/features', can(P.SUBSCRIPTIONS_VIEW), validate(schemas.workspaceParams), controller.listWorkspaceFeatures);
+router.post('/workspaces/:workspaceId/feature-overrides', can(P.SUBSCRIPTIONS_MANAGE), validate(schemas.addFeatureOverride), controller.addFeatureOverride);
+router.patch('/workspaces/:workspaceId/feature-overrides/:overrideId', can(P.SUBSCRIPTIONS_MANAGE), validate(schemas.updateFeatureOverride), controller.updateFeatureOverride);
+router.post('/workspaces/:workspaceId/feature-overrides/:overrideId/revoke', can(P.SUBSCRIPTIONS_MANAGE), validate(schemas.revokeFeatureOverride), controller.revokeFeatureOverride);
+
 // --- Store access: manual suspension, alongside the billing restriction ---
 // A suspension is independent of billing: it never touches the subscription,
 // and paying never lifts it (workspaces/workspaceAccessService).
@@ -112,6 +128,12 @@ router.get('/carriers', can(P.PROVIDERS_VIEW), controller.listCarriers);
 router.post('/carriers/:code/health-check', can(P.PROVIDERS_VIEW), validate(schemas.providerCode), controller.checkCarrier);
 router.get('/payment-gateways', can(P.PROVIDERS_VIEW), controller.listGateways);
 router.post('/payment-gateways/:code/health-check', can(P.PROVIDERS_VIEW), validate(schemas.providerCode), controller.checkGateway);
+
+// --- Users: search every account (userSearchService) ------------------------
+// The store list's permission: the people behind the stores are store data.
+// Agents never held it and still see only their own referrals (/my/*).
+router.get('/users', can(P.WORKSPACES_VIEW), validate(schemas.searchUsers), controller.searchUsers);
+router.get('/users/:userId', can(P.WORKSPACES_VIEW), validate(schemas.userParams), controller.getUser);
 
 // --- Platform users (roles and permissions) --------------------------------
 // A role and a permission set on an existing account: no invitations. Only a
