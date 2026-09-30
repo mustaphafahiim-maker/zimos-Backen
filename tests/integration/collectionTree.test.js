@@ -139,9 +139,20 @@ describe('collection tree', () => {
   it('gives an all-Arabic collection a readable slug', async () => {
     const ctx = await setup();
     const first = await ctx.create({ name: 'قمصان' });
-    const second = await ctx.create({ name: 'بناطيل' });
+    const second = await ctx.create({ name: 'بناطيل رجالي' });
+    const latin = await ctx.create({ name: 'Summer — 2026 ' });
     expect(first.slug).toBe('collection');
     expect(second.slug).toBe('collection-2');
+    expect(latin.slug).toBe('summer-2026');
+  });
+
+  it('gives an all-Arabic product a readable slug', async () => {
+    const ctx = await setup();
+    const create = (name) =>
+      request(app).post(`${ctx.base}/products`).set(ctx.H).send({ name }).then((res) => res.body.product.slug);
+    expect(await create('قميص كتان أبيض')).toBe('product');
+    expect(await create('ساعة')).toBe('product-2');
+    expect(await create('Linen shirt')).toBe('linen-shirt');
   });
 
   it('lists the option names in use', async () => {

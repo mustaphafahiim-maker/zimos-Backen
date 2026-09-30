@@ -34,11 +34,24 @@ function productShippingFields(current, data) {
   return value || {};
 }
 
+/**
+ * A URL slug for a new product or collection. slugify keeps ASCII word
+ * characters only, so an all-Arabic name comes back as "-" (several words) or
+ * the generic "workspace" (one word) — which then shows in the store's URLs.
+ * Anything with no Latin letter or digit left gets `fallback` instead.
+ */
+function slugFor(source, fallback) {
+  const slugged = slugify(source);
+  if (slugged === 'workspace' && !/workspace/i.test(source)) return fallback;
+  const trimmed = slugged.replace(/^-+|-+$/g, '');
+  return /[a-z0-9]/i.test(trimmed) ? trimmed : fallback;
+}
+
 async function createProduct(workspaceId, data, req) {
   const { variant: variantData, shippingMode, shippingExtraAmount, ...rest } = data;
   const productData = { ...rest, ...productShippingFields(null, { shippingMode, shippingExtraAmount }) };
   const products = scoped(db.Product, workspaceId);
-  const baseSlug = slugify(productData.slug || productData.name);
+  const baseSlug = slugFor(productData.slug || productData.name, 'product');
   let slug = baseSlug;
   let n = 1;
   while (await products.findOne({ where: { slug } })) {
@@ -865,11 +878,7 @@ async function createOffer(workspaceId, productId, data, req) {
 
 async function createCollection(workspaceId, data, req) {
   const collections = scoped(db.Collection, workspaceId);
-  // slugify keeps Latin letters only, so an all-Arabic name comes back as its
-  // generic "workspace" — which now shows in the storefront's collection URLs.
-  const source = data.slug || data.name;
-  const slugged = slugify(source);
-  const baseSlug = slugged === 'workspace' && !/workspace/i.test(source) ? 'collection' : slugged;
+  const baseSlug = slugFor(data.slug || data.name, 'collection');
   let slug = baseSlug;
   let n = 1;
   while (await collections.findOne({ where: { slug } })) {
