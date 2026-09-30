@@ -320,6 +320,9 @@ async function getWorkspaceBilling(workspaceId) {
         }
       : null,
     nextCharge,
+    // The store's features: its plan's, with any override a platform admin
+    // set for it (billing/entitlementsService — the one place they are worked out).
+    features: await require('./entitlementsService').effectiveFeatures(workspaceId),
   };
 }
 

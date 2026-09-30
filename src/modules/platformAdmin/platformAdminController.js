@@ -10,6 +10,8 @@ const riskSignals = require('../risk/riskSignalsService');
 const providerRegistry = require('./providerRegistryService');
 const adminUsers = require('./adminUsersService');
 const userSearch = require('./userSearchService');
+const manualSubscriptions = require('../billing/manualSubscriptionService');
+const entitlements = require('../billing/entitlementsService');
 const supportService = require('../support/supportService');
 const agents = require('../referrals/agentService');
 const referralCodes = require('../referrals/referralCodeService');
@@ -280,6 +282,35 @@ const listAdmins = asyncHandler(async (req, res) => {
   res.json({ admins: await adminUsers.listAdmins(req.user.id) });
 });
 
+// --- Manual subscriptions and feature overrides -------------------------
+// 201 for a change made now; 200 when an Idempotency-Key replayed an earlier one.
+const manualAction = (fn) =>
+  asyncHandler(async (req, res) => {
+    const { change, replayed } = await fn(req.params.workspaceId, req.body, req);
+    res.status(replayed ? 200 : 201).json({ change, replayed, ...(await manualSubscriptions.getForAdmin(req.params.workspaceId)) });
+  });
+
+const getManualSubscription = asyncHandler(async (req, res) => {
+  res.json(await manualSubscriptions.getForAdmin(req.params.workspaceId));
+});
+const activateSubscription = manualAction(manualSubscriptions.activate);
+const changeSubscriptionPlan = manualAction(manualSubscriptions.changePlan);
+const extendSubscription = manualAction(manualSubscriptions.extend);
+const endSubscription = manualAction(manualSubscriptions.endNow);
+
+const listWorkspaceFeatures = asyncHandler(async (req, res) => {
+  res.json(await entitlements.listForAdmin(req.params.workspaceId));
+});
+const addFeatureOverride = asyncHandler(async (req, res) => {
+  res.status(201).json({ override: await entitlements.addOverride(req.params.workspaceId, req.body, req) });
+});
+const updateFeatureOverride = asyncHandler(async (req, res) => {
+  res.json({ override: await entitlements.updateOverride(req.params.workspaceId, req.params.overrideId, req.body, req) });
+});
+const revokeFeatureOverride = asyncHandler(async (req, res) => {
+  res.json({ override: await entitlements.revokeOverride(req.params.workspaceId, req.params.overrideId, req.body, req) });
+});
+
 // --- Users (search) -------------------------------------------------------
 const searchUsers = asyncHandler(async (req, res) => {
   res.json(await userSearch.searchUsers(req.query));
@@ -408,6 +439,15 @@ module.exports = {
   listAdmins,
   searchUsers,
   getUser,
+  getManualSubscription,
+  activateSubscription,
+  changeSubscriptionPlan,
+  extendSubscription,
+  endSubscription,
+  listWorkspaceFeatures,
+  addFeatureOverride,
+  updateFeatureOverride,
+  revokeFeatureOverride,
   grantAdmin,
   updateAdmin,
   revokeAdmin,

@@ -186,7 +186,59 @@ const referralCodeBody = Joi.object({
   discountType: referralCodeFields.discountType.default('none'),
 });
 
+// --- Manual subscriptions and feature overrides (phase: billing/manual*) ---
+const manualNote = Joi.string().trim().min(3).max(1000).required();
+const manualDuration = Joi.object({
+  months: Joi.number().integer().min(1).max(60),
+  days: Joi.number().integer().min(1).max(1826),
+}).xor('months', 'days');
+const workspaceIdParams = Joi.object({ workspaceId: uuid.required() });
+const overrideParams = Joi.object({ workspaceId: uuid.required(), overrideId: uuid.required() });
+
+const manualSubscriptionSchemas = {
+  activateSubscription: {
+    params: workspaceIdParams,
+    body: Joi.object({
+      planId: uuid.required(),
+      startsAt: Joi.date().iso().optional(),
+      duration: manualDuration.optional(),
+      endsAt: Joi.date().iso().optional(),
+      billingCycle: Joi.string().valid('monthly', 'yearly').optional(),
+      note: manualNote,
+    }).xor('duration', 'endsAt'),
+  },
+  changeSubscriptionPlan: { params: workspaceIdParams, body: Joi.object({ planId: uuid.required(), note: manualNote }) },
+  extendSubscription: { params: workspaceIdParams, body: Joi.object({ duration: manualDuration.required(), note: manualNote }) },
+  endSubscription: { params: workspaceIdParams, body: Joi.object({ note: manualNote }) },
+  addFeatureOverride: {
+    params: workspaceIdParams,
+    body: Joi.object({
+      // Checked against billing/featureCatalog by the service (422 when unknown).
+      featureKey: Joi.string().trim().max(60).required(),
+      mode: Joi.string().valid('grant', 'deny').required(),
+      value: Joi.any().allow(null).optional(),
+      expiresAt: Joi.date().iso().allow(null).optional(),
+      reason: manualNote,
+    }),
+  },
+  updateFeatureOverride: {
+    params: overrideParams,
+    body: Joi.object({
+      mode: Joi.string().valid('grant', 'deny').optional(),
+      value: Joi.any().allow(null).optional(),
+      expiresAt: Joi.date().iso().allow(null).optional(),
+      reason: Joi.string().trim().min(3).max(1000).optional(),
+    }).min(1),
+  },
+  revokeFeatureOverride: {
+    params: overrideParams,
+    body: Joi.object({ reason: Joi.string().trim().max(1000).allow('', null).optional() }),
+  },
+};
+
 module.exports = {
+  ...manualSubscriptionSchemas,
+
   // One search box: name, username, email, id (whole or 8+ first characters),
   // or a store's name / slug / subdomain / id. Empty lists everyone.
   searchUsers: {
