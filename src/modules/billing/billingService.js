@@ -327,7 +327,11 @@ async function getWorkspaceBilling(workspaceId) {
 async function listWorkspacesOverview() {
   const workspaces = await db.Workspace.findAll({
     order: [['createdAt', 'ASC']],
-    include: [{ model: db.Subscription, as: 'subscription', include: [{ model: db.Plan, as: 'plan' }] }],
+    include: [
+      { model: db.Subscription, as: 'subscription', include: [{ model: db.Plan, as: 'plan' }] },
+      // Who owns it, so the console's store list can be searched by person too.
+      { model: db.User, as: 'owner', attributes: ['id', 'username', 'fullName', 'email'] },
+    ],
   });
 
   const counts = await db.Order.findAll({
@@ -364,6 +368,9 @@ async function listWorkspacesOverview() {
       suspendedAt: w.suspendedAt,
       billingPhase: lifecycle.phase,
       restricted: w.status === 'suspended' || (lifecycle.restricted && env.billing.restrictions === 'enforce'),
+      owner: w.owner
+        ? { id: w.owner.id, username: w.owner.username, fullName: w.owner.fullName, email: w.owner.email }
+        : null,
       // Legacy aliases — the EJS dashboard at /admin/dashboard reads these.
       workspaceId: w.id,
       workspaceName: w.name,
