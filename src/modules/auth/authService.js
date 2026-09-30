@@ -14,6 +14,8 @@ const notify = require('../notifications/notify');
 const googleClient = require('./googleClient');
 const otpService = require('../otp/otpService');
 const { normalizePhone } = require('../../core/utils/phone');
+const usernameService = require('../users/usernameService');
+const { isUsernameConflict } = require('../users/username');
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -41,14 +43,41 @@ async function createSession(user, req) {
   return { raw, session };
 }
 
-async function register({ email, password, fullName, phone }, req) {
+/**
+ * The account row, with its username. A chosen username that someone else
+ * holds — checked here, and again by the unique index for two sign-ups racing
+ * for it — is 409 USERNAME_TAKEN. With none given (a client from before
+ * usernames: the dashboard deployed before this API asks for one) the account
+ * gets one made from the email, as existing accounts did (migration 124).
+ */
+async function createAccount({ email, passwordHash, fullName, phone, username }) {
+  if (username) {
+    if (await usernameService.isTaken(username)) throw usernameService.takenError();
+    try {
+      return await db.User.create({ email, passwordHash, fullName, phone, username });
+    } catch (err) {
+      if (isUsernameConflict(err)) throw usernameService.takenError();
+      throw err;
+    }
+  }
+  for (let attempt = 0; ; attempt += 1) {
+    const generated = await usernameService.suggestFor(email);
+    try {
+      return await db.User.create({ email, passwordHash, fullName, phone, username: generated });
+    } catch (err) {
+      if (!isUsernameConflict(err) || attempt >= 4) throw err;
+    }
+  }
+}
+
+async function register({ email, password, fullName, phone, username }, req) {
   const existing = await db.User.findOne({ where: { email } });
   if (existing) {
     throw new ConflictError('An account with this email already exists', 'EMAIL_TAKEN');
   }
 
   const passwordHash = await hashPassword(password);
-  const user = await db.User.create({ email, passwordHash, fullName, phone });
+  const user = await createAccount({ email, passwordHash, fullName, phone, username });
 
   const rawToken = generateOpaqueToken();
   await db.VerificationToken.create({

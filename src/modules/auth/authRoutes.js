@@ -2,7 +2,7 @@
 
 const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
-const { authLimiter } = require('../../core/middleware/rateLimiters');
+const { authLimiter, usernameCheckLimiter } = require('../../core/middleware/rateLimiters');
 const controller = require('./authController');
 const schemas = require('./authValidation');
 
@@ -19,6 +19,10 @@ router.post('/logout', validate(schemas.logout), controller.logout);
 router.post('/sessions/revoke-all', ...controller.revokeAllSessions);
 router.get('/sessions', ...controller.listSessions);
 router.get('/me', ...controller.me);
+// Usernames: the sign-up form's live check (public, strict per-IP limit), and
+// choosing or changing one's own.
+router.get('/username-available', ...usernameCheckLimiter, validate(schemas.usernameAvailable), controller.usernameAvailable);
+router.patch('/me/username', authLimiter, validate(schemas.changeUsername), ...controller.changeUsername);
 router.post(
   '/password-reset/request',
   authLimiter,

@@ -9,6 +9,7 @@ const platformBlocklist = require('../risk/platformBlocklistService');
 const riskSignals = require('../risk/riskSignalsService');
 const providerRegistry = require('./providerRegistryService');
 const adminUsers = require('./adminUsersService');
+const userSearch = require('./userSearchService');
 const supportService = require('../support/supportService');
 const agents = require('../referrals/agentService');
 const referralCodes = require('../referrals/referralCodeService');
@@ -279,6 +280,15 @@ const listAdmins = asyncHandler(async (req, res) => {
   res.json({ admins: await adminUsers.listAdmins(req.user.id) });
 });
 
+// --- Users (search) -------------------------------------------------------
+const searchUsers = asyncHandler(async (req, res) => {
+  res.json(await userSearch.searchUsers(req.query));
+});
+
+const getUser = asyncHandler(async (req, res) => {
+  res.json({ user: await userSearch.getUser(req.params.userId) });
+});
+
 // 201 when the role was granted; 200 when the account already had that role.
 const grantAdmin = asyncHandler(async (req, res) => {
   const { admin, granted } = await adminUsers.grantAdmin(req.body, req);
@@ -396,6 +406,8 @@ module.exports = {
   checkGateway,
   listRoles,
   listAdmins,
+  searchUsers,
+  getUser,
   grantAdmin,
   updateAdmin,
   revokeAdmin,

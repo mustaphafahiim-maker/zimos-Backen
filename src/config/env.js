@@ -105,6 +105,10 @@ const env = {
     // shopper: a minute and an hour. See core/middleware/rateLimiters.js.
     suggestMinuteMax: parseInt(process.env.SUGGEST_RATE_LIMIT_PER_MINUTE || '60', 10),
     suggestHourMax: parseInt(process.env.SUGGEST_RATE_LIMIT_PER_HOUR || '1200', 10),
+    // "Is this username free?" (GET /auth/username-available), per IP: tight,
+    // so the endpoint cannot be used to list who has an account.
+    usernameCheckMinuteMax: parseInt(process.env.USERNAME_CHECK_RATE_LIMIT_PER_MINUTE || '20', 10),
+    usernameCheckHourMax: parseInt(process.env.USERNAME_CHECK_RATE_LIMIT_PER_HOUR || '200', 10),
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is

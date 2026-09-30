@@ -187,6 +187,17 @@ const referralCodeBody = Joi.object({
 });
 
 module.exports = {
+  // One search box: name, username, email, id (whole or 8+ first characters),
+  // or a store's name / slug / subdomain / id. Empty lists everyone.
+  searchUsers: {
+    query: Joi.object({
+      q: Joi.string().trim().max(200).allow('').default(''),
+      page: Joi.number().integer().min(1).max(10000).default(1),
+      limit: Joi.number().integer().min(1).max(50).default(25),
+    }),
+  },
+  userParams: { params: Joi.object({ userId: uuid.required() }) },
+
   createPlan: { body: planBody },
   updatePlan: { params: Joi.object({ planId: uuid.required() }), body: planBody },
   deletePlan: { params: Joi.object({ planId: uuid.required() }) },

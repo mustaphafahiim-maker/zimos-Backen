@@ -366,6 +366,34 @@ const uploadLimiter = createUploadLimiter({
 });
 
 /*
+ * "Is this username free?" (GET /auth/username-available) answers anyone,
+ * signed in or not — it is what the sign-up form asks while the person types.
+ * Walked systematically it would say which usernames exist, so it gets tight
+ * buckets of its own per connecting IP, by the minute and by the hour: enough
+ * for a person trying a few names, not for a list.
+ */
+function createUsernameCheckLimiter({ minuteMax, hourMax, skip: skipAll = () => false }) {
+  const ipKey = (req) => `username-check:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`;
+  const bucket = (windowMs, limit, prefix, standardHeaders) =>
+    rateLimit({
+      windowMs,
+      limit,
+      standardHeaders,
+      legacyHeaders: false,
+      skip: skipAll,
+      keyGenerator: (req) => `${prefix}:${ipKey(req)}`,
+      handler,
+    });
+  return [bucket(60 * 1000, minuteMax, 'm', true), bucket(60 * 60 * 1000, hourMax, 'h', false)];
+}
+
+const usernameCheckLimiter = createUsernameCheckLimiter({
+  minuteMax: env.rateLimit.usernameCheckMinuteMax,
+  hourMax: env.rateLimit.usernameCheckHourMax,
+  skip,
+});
+
+/*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
  * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
  * put all merchants in one bucket; each merchant's webhook token gets its own.
@@ -432,4 +460,6 @@ module.exports = {
   createSuggestLimiter,
   uploadLimiter,
   createUploadLimiter,
+  usernameCheckLimiter,
+  createUsernameCheckLimiter,
 };

@@ -113,6 +113,12 @@ router.post('/carriers/:code/health-check', can(P.PROVIDERS_VIEW), validate(sche
 router.get('/payment-gateways', can(P.PROVIDERS_VIEW), controller.listGateways);
 router.post('/payment-gateways/:code/health-check', can(P.PROVIDERS_VIEW), validate(schemas.providerCode), controller.checkGateway);
 
+// --- Users: search every account (userSearchService) ------------------------
+// The store list's permission: the people behind the stores are store data.
+// Agents never held it and still see only their own referrals (/my/*).
+router.get('/users', can(P.WORKSPACES_VIEW), validate(schemas.searchUsers), controller.searchUsers);
+router.get('/users/:userId', can(P.WORKSPACES_VIEW), validate(schemas.userParams), controller.getUser);
+
 // --- Platform users (roles and permissions) --------------------------------
 // A role and a permission set on an existing account: no invitations. Only a
 // creator may assign the creator role or change a creator's account; nobody
