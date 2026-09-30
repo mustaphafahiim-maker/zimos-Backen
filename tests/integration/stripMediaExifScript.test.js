@@ -60,4 +60,5 @@ it('reports in a dry run and rewrites only with --apply', async () => {
   expect((await sharp(rewritten).metadata()).exif).toBeUndefined();
   await asset.reload();
   expect(asset.sizeBytes).toBe(rewritten.length);
-});
+  // Two runs of the script, each a fresh Node process loading the models.
+}, 60000);
