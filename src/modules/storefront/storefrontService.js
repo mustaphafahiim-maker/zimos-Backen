@@ -6,6 +6,7 @@ const { normalizePhone } = require('../../core/utils/phone');
 const reviewService = require('../reviews/reviewService');
 const { resolveCheckoutSettings } = require('../checkout/checkoutSettings');
 const { resolveCatalogSettings } = require('./catalogSettings');
+const { presentStoreBump } = require('../checkout/orderBump');
 const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
 const productSearch = require('./productSearch');
 
@@ -83,6 +84,9 @@ async function getStorefront(workspaceId) {
     checkout: resolveCheckoutSettings(w),
     // The product listing's sidebar, filters and default sort.
     catalog: resolveCatalogSettings(w.settings),
+    // The "add to your order" card the store's checkout offers, or null
+    // (none set, or its offer is archived / out of stock).
+    orderBump: await presentStoreBump(w),
   };
 }
 

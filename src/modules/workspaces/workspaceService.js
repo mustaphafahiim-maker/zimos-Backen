@@ -20,6 +20,7 @@ const {
 const { recordAudit } = require('../audit/auditService');
 const notify = require('../notifications/notify');
 const billingService = require('../billing/billingService');
+const { assertBumpOfferUsable } = require('../checkout/orderBump');
 
 async function sendInviteEmail(workspace, email, role) {
   await notify.email({
@@ -133,6 +134,8 @@ const MERCHANT_SETTINGS_KEYS = [
   'confirmation_whatsapp_template',
   // Replaced whole, not merged: its filter list is ordered.
   'storefront_catalog',
+  // Replaced whole: { enabled, offer_id, title, description }.
+  'order_bump',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one
@@ -240,6 +243,12 @@ async function updateWorkspace({ workspaceId, patch }, req) {
     next.themeSettings = blob;
   }
   if (patch.settings !== undefined) {
+    // A bump that is switched on must name an offer that can be one (active,
+    // priced, asks the shopper nothing) in this workspace.
+    const bump = patch.settings && patch.settings.order_bump;
+    if (bump && bump.enabled) {
+      await assertBumpOfferUsable(workspaceId, bump.offer_id, 'settings.order_bump.offer_id');
+    }
     next.settings = applyMerchantSettings(workspace.settings, patch.settings);
     // Tier pricing weighs products without a weight at the default weight;
     // it can't be removed while tier pricing depends on it.

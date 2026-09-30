@@ -58,6 +58,11 @@ module.exports = {
         // Answers to the product's custom fields (see cartValidation.addItem).
         customizations: customizationsInputSchema.optional(),
       }).optional(),
+      // The shopper ticked the order bump. Only the offer is named: the server
+      // accepts it only when it is the bump this checkout offers (the store's,
+      // or the funnel checkout step's) and prices the line itself
+      // (checkout/orderBump.js).
+      orderBump: Joi.object({ offerId: uuid.required() }).optional(),
     }),
   },
 };

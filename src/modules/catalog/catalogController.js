@@ -78,6 +78,10 @@ const listOffers = asyncHandler(async (req, res) => {
   res.json({ offers: await service.listOffers(req.tenant.workspaceId, req.params.productId) });
 });
 
+const listWorkspaceOffers = asyncHandler(async (req, res) => {
+  res.json({ offers: await service.listWorkspaceOffers(req.tenant.workspaceId, req.query) });
+});
+
 const getOffer = asyncHandler(async (req, res) => {
   res.json({ offer: await service.getOffer(req.tenant.workspaceId, req.params.offerId) });
 });
@@ -159,6 +163,7 @@ module.exports = {
   deleteVariant,
   createOffer,
   listOffers,
+  listWorkspaceOffers,
   getOffer,
   updateOffer,
   deleteOffer,

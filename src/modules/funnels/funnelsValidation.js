@@ -81,6 +81,8 @@ const createStep = {
     name: Joi.string().min(1).max(200).required(),
     builderData: treeData.optional(),
     offerId: uuid.optional(),
+    // Checkout steps only: the order bump offered on the step's form.
+    bumpOfferId: uuid.allow(null).optional(),
     seo: seo.default({}),
   }),
 };
@@ -93,6 +95,7 @@ const updateStep = {
     name: Joi.string().min(1).max(200).optional(),
     builderData: treeData.optional(),
     offerId: uuid.allow(null).optional(),
+    bumpOfferId: uuid.allow(null).optional(),
     seo: seo.optional(),
   }).min(1),
 };

@@ -9,6 +9,8 @@ const slugify = require('../../core/utils/slugify');
 const inventoryService = require('../inventory/inventoryService');
 const { resolveProductShipping } = require('../shipping/shippingRules');
 const { MAX_COLLECTION_DEPTH, findTreeProblem } = require('./collectionTree');
+const { bumpProblem } = require('../checkout/orderBump');
+const { escapeLike } = require('../storefront/productSearch');
 
 const { Op } = db.Sequelize;
 
@@ -488,6 +490,66 @@ async function listOffers(workspaceId, productId) {
   });
 }
 
+/**
+ * Active offers of active products across the store, product name then offer
+ * name — for pickers such as the order bump's. Each says whether it can be a
+ * bump (`bumpProblem`, see checkout/orderBump.js) so the picker can explain
+ * the ones it greys out.
+ */
+async function listWorkspaceOffers(workspaceId, { q, limit = 50 } = {}) {
+  const where = { workspaceId, status: 'active' };
+  if (q) {
+    const pattern = `%${escapeLike(q)}%`;
+    where[Op.or] = [{ name: { [Op.iLike]: pattern } }, { '$product.name$': { [Op.iLike]: pattern } }];
+  }
+  // The page first (offer + its product only, so LIMIT counts offers), then
+  // the lines of just those offers.
+  const offers = await db.Offer.findAll({
+    where,
+    include: [
+      {
+        model: db.Product,
+        as: 'product',
+        where: { workspaceId, status: 'active' },
+        attributes: ['id', 'name', 'status', 'media', 'customFields'],
+      },
+    ],
+    order: [
+      [{ model: db.Product, as: 'product' }, 'name', 'ASC'],
+      ['name', 'ASC'],
+      ['id', 'ASC'],
+    ],
+    limit,
+  });
+  const lines = offers.length
+    ? await db.OfferVariant.findAll({
+        where: { offerId: offers.map((o) => o.id) },
+        include: [{ model: db.ProductVariant, as: 'variant', attributes: ['id', 'status'] }],
+        order: [
+          ['createdAt', 'ASC'],
+          ['id', 'ASC'],
+        ],
+      })
+    : [];
+  return offers.map((offer) => {
+    offer.lines = lines.filter((l) => l.offerId === offer.id);
+    const media = Array.isArray(offer.product.media) ? offer.product.media : [];
+    const image = media.find((m) => m && typeof m.url === 'string' && m.url);
+    return {
+      id: offer.id,
+      name: offer.name,
+      priceAmount: offer.priceAmount,
+      currency: offer.currency,
+      isDefault: offer.isDefault,
+      productId: offer.product.id,
+      productName: offer.product.name,
+      imageUrl: image ? image.url : null,
+      lines: offer.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+      bumpProblem: bumpProblem(offer),
+    };
+  });
+}
+
 async function getOffer(workspaceId, offerId) {
   const offer = await db.Offer.findOne({
     where: { id: offerId, workspaceId },
@@ -950,6 +1012,7 @@ module.exports = {
   deleteVariant,
   createOffer,
   listOffers,
+  listWorkspaceOffers,
   getOffer,
   updateOffer,
   deleteOffer,

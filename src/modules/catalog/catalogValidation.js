@@ -162,6 +162,15 @@ const offerList = {
   params: Joi.object({ workspaceId: uuid.required(), productId: uuid.required() }),
 };
 
+const workspaceOfferList = {
+  params: Joi.object({ workspaceId: uuid.required() }),
+  query: Joi.object({
+    // Matches the offer's or its product's name.
+    q: Joi.string().trim().max(100).allow('').optional(),
+    limit: Joi.number().integer().min(1).max(100).default(50),
+  }),
+};
+
 const offerGet = { params: offerParams };
 const offerDelete = { params: offerParams };
 
@@ -272,6 +281,7 @@ module.exports = {
   variantDelete,
   offer,
   offerList,
+  workspaceOfferList,
   offerGet,
   offerUpdate,
   offerDelete,

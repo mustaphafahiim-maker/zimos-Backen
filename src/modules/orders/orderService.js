@@ -25,6 +25,7 @@ const carrierShipmentService = require('../shipping/carrierShipmentService');
 const confirmationService = require('../cod/confirmationService');
 const { resolveCustomizations, attachUploads } = require('../catalog/customFields');
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
+const { orderBumpUnavailable } = require('../checkout/orderBump');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -255,7 +256,17 @@ async function createOrder(
     // reservations from a half-completed order.
     const pricedLines = [];
     for (const item of items) {
-      const line = await priceLine(workspaceId, item, transaction);
+      // The order bump line (checkout/orderBump.js) is added by the server
+      // only; staff and cart items never carry the flag. When its offer can
+      // no longer be sold, the shopper hears about the add-on, not a generic
+      // "not found" / "out of stock".
+      const isOrderBump = item.isOrderBump === true;
+      const bumpFailure = (err) =>
+        isOrderBump && (err instanceof NotFoundError || (err && err.code === 'INSUFFICIENT_STOCK')) ? orderBumpUnavailable() : err;
+      const line = await priceLine(workspaceId, item, transaction).catch((err) => {
+        throw bumpFailure(err);
+      });
+      line.isOrderBump = isOrderBump;
       // The shopper's answers to the product's custom fields, checked against
       // its current definition (catalog/customFields.js). Required fields are
       // enforced for the storefront checkout (customFields.enforceRequired);
@@ -275,17 +286,21 @@ async function createOrder(
       }
       pricedLines.push(line);
       for (const consumed of line.consumedInventory) {
-        await inventoryService.reserve(
-          {
-            workspaceId,
-            variantId: consumed.variantId,
-            quantity: consumed.quantity,
-            referenceType: 'order_pending',
-            referenceId: null, // filled in after the order row exists, see movement backfill below
-            actorUserId: req.user ? req.user.id : null,
-          },
-          transaction
-        );
+        await inventoryService
+          .reserve(
+            {
+              workspaceId,
+              variantId: consumed.variantId,
+              quantity: consumed.quantity,
+              referenceType: 'order_pending',
+              referenceId: null, // filled in after the order row exists, see movement backfill below
+              actorUserId: req.user ? req.user.id : null,
+            },
+            transaction
+          )
+          .catch((err) => {
+            throw bumpFailure(err);
+          });
       }
     }
 
@@ -390,6 +405,7 @@ async function createOrder(
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,
+            isOrderBump: line.isOrderBump,
           },
           { transaction }
         )

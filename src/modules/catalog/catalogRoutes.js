@@ -42,6 +42,8 @@ router.delete('/variants/:variantId', validate(schemas.variantDelete), canManage
 // --- Offers -------------------------------------------------------------
 router.post('/products/:productId/offers', validate(schemas.offer), canManage, controller.createOffer);
 router.get('/products/:productId/offers', validate(schemas.offerList), canView, controller.listOffers);
+// Every active offer in the store, for pickers (the order bump's).
+router.get('/offers', validate(schemas.workspaceOfferList), canView, controller.listWorkspaceOffers);
 router.get('/offers/:offerId', validate(schemas.offerGet), canView, controller.getOffer);
 router.patch('/offers/:offerId', validate(schemas.offerUpdate), canManage, controller.updateOffer);
 router.delete('/offers/:offerId', validate(schemas.offerDelete), canManage, controller.deleteOffer);

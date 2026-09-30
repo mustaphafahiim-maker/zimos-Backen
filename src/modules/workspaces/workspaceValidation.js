@@ -7,6 +7,7 @@ const { workspaceSlug, SLUG_LOOKUP_MAX } = require('../../core/utils/workspaceSl
 const { CHECKOUT_FIELD_MODES, CHECKOUT_NOTES_MODES } = require('../checkout/checkoutSettings');
 const { FRAUD_ACTIONS } = require('../fraud/fraudRules');
 const { catalogSettingsSchema } = require('../storefront/catalogSettings');
+const { orderBumpSettingsSchema } = require('../checkout/orderBump');
 
 const uuid = Joi.string().uuid();
 
@@ -56,6 +57,10 @@ module.exports = {
         // and the default sort (storefront/catalogSettings.js). Sent whole and
         // stored whole; `null` goes back to the defaults.
         storefront_catalog: catalogSettingsSchema.allow(null).optional(),
+        // The store checkout's order bump: which offer, and the card's title
+        // and text (checkout/orderBump.js). Sent whole and stored whole;
+        // `null` removes it.
+        order_bump: orderBumpSettingsSchema.allow(null).optional(),
         // Which optional checkout fields this store asks for. Key names track
         // the checkout request fields they govern — see
         // modules/checkout/checkoutSettings.js. Sub-keys merge, so a form that

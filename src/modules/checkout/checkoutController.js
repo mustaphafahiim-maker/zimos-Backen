@@ -9,6 +9,7 @@ const { assertRequiredCheckoutFields } = require('./checkoutSettings');
 const methodsService = require('../payments/paymentMethodsService');
 const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
+const { resolveOrderBumpItem } = require('./orderBump');
 
 /**
  * Guest checkout (no login). Runs the same orderService.createOrder as the
@@ -28,7 +29,7 @@ const online = require('../payments/onlinePaymentService');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, checkoutSessionId, paymentProvider, returnUrl, ...orderBody } = req.body;
+  const { item, checkoutSessionId, paymentProvider, returnUrl, orderBump, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -69,6 +70,12 @@ const checkout = asyncHandler(async (req, res) => {
       'Send an X-Cart-Token header, or a single `item` in the body for a "Buy Now" checkout',
       400
     );
+  }
+
+  // The ticked order bump becomes one more line of this order, built by the
+  // server from the configured offer (422 when it is not that offer).
+  if (orderBump) {
+    items = [...items, await resolveOrderBumpItem(workspace, { offerId: orderBump.offerId, funnelId: orderBody.funnelId })];
   }
 
   // Stock held by overdue unpaid online orders goes back first.
