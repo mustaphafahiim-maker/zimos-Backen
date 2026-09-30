@@ -185,9 +185,14 @@ module.exports = {
         updated_at: now,
       }))
     );
+
+    // Their version 2 (migration 123), which ran before these rows existed on
+    // a new database and so found nothing to add to.
+    await require('../migrations/123-add-templates-v2').up(queryInterface);
   },
 
   down: async (queryInterface, Sequelize) => {
+    await require('../migrations/123-add-templates-v2').down(queryInterface);
     const ids = TEMPLATES.map((t) => t.id);
     await queryInterface.bulkDelete('template_versions', { template_id: { [Sequelize.Op.in]: ids } });
     await queryInterface.bulkDelete('templates', { id: { [Sequelize.Op.in]: ids } });

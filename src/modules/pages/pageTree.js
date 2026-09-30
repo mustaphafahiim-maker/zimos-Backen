@@ -88,8 +88,11 @@ function isSafeUrl(value) {
 const check = {
   string: (max) => (v) => (typeof v === 'string' && v.length <= max ? null : `must be a string of at most ${max} characters`),
   url: (v) => (isSafeUrl(v) ? null : 'must be a http(s), mailto:, tel: or same-site URL'),
+  // "" is "not picked yet", as for URLs: the editor's presets start with an
+  // empty id (orbit_gallery.collectionId, product_3d.productId) and the
+  // storefront reads an empty one as "the whole catalogue" / "the newest".
   uuid: (v) =>
-    typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
+    typeof v === 'string' && (v === '' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v))
       ? null
       : 'must be a UUID',
   intRange: (min, max) => (v) =>
