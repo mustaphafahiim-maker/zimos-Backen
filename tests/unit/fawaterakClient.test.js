@@ -79,6 +79,13 @@ describe('webhook signatures', () => {
   });
 });
 
+describe('logged webhook URLs', () => {
+  it('never show the webhook token', () => {
+    const { redactUrl } = require('../../src/core/utils/redactUrl');
+    expect(redactUrl(`/api/v1/billing/fawaterak/${FAKE_CONFIG.webhookToken}/paid_json`)).toBe('/api/v1/billing/fawaterak/[redacted]/paid_json');
+  });
+});
+
 describe('config', () => {
   const base = { ...FAKE_CONFIG };
 

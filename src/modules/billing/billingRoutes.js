@@ -12,6 +12,10 @@ const router = Router();
 // Gateway webhook — no auth; the HMAC signature check is the gate.
 router.post('/webhook', controller.webhook);
 
+// Fawaterak's webhooks for online subscription payments — no auth; the path
+// token and Fawaterak's signature are the gate (billing/onlineBillingService).
+router.post('/fawaterak/:token/:route', controller.fawaterakWebhook);
+
 // Manual trial-expiry sweep (a scheduler can call this later).
 router.post(
   '/run-trial-check',

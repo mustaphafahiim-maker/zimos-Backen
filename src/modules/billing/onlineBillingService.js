@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const db = require('../../db/models');
 const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
@@ -10,6 +11,7 @@ const charges = require('./subscriptionChargeService');
 const fawaterakConfig = require('./fawaterak/config');
 const fawaterak = require('./fawaterak/client');
 const { toMajor, toMinor } = require('./fawaterak/amounts');
+const { verifyWebhook } = require('./fawaterak/signature');
 
 /**
  * A merchant paying their subscription charge online, through Zimos's
@@ -392,6 +394,209 @@ async function confirmAttempt(attempt, { retry = false, source }) {
   return settleConfirmed(attempt.id, verifyPaid(attempt, answer.data), { source });
 }
 
+// --------------------------------------------------------------- webhooks
+//
+// Fawaterak POSTs to /billing/fawaterak/:token/:route. The token (ours,
+// FAWATERAK_WEBHOOK_TOKEN) and the signature (FAWATERAK_HASH_KEY) are both
+// checked before anything is written; a verified webhook is kept in the inbox
+// once per event key, then acted on — and acting on it always means asking
+// getTransactionData (confirmAttempt). Its unsigned fields only ever pick
+// which attempt to ask about, or are kept for the record.
+
+// Our route names. Paid and failed end in `_json` so Fawaterak sends JSON.
+const WEBHOOK_ROUTES = { paid_json: 'paid', failed_json: 'failed', cancel: 'cancel', refund: 'refund' };
+
+// What is kept of each webhook: never a signature, the legacy api_key or the
+// customer's details.
+const STORED_FIELDS = {
+  paid: [
+    'transaction_key',
+    'transaction_id',
+    'payment_method',
+    'status',
+    'pay_load',
+    'paidAmount',
+    'paidCurrency',
+    'paidAt',
+    'referenceNumber',
+    'fees',
+    'cardDiscountAmount',
+  ],
+  failed: ['transaction_key', 'transaction_id', 'payment_method', 'pay_load', 'amount', 'paidCurrency', 'errorMessage'],
+  cancel: ['referenceId', 'status', 'paymentMethod', 'pay_load', 'transactionId', 'transactionKey'],
+  refund: ['transactionId', 'amount', 'currency', 'status', 'reason', 'approvedAt'],
+};
+
+const MAX_EVENT_TRIES = 10;
+
+function storablePayload(kind, body) {
+  const out = {};
+  for (const field of STORED_FIELDS[kind]) {
+    const value = body[field];
+    if (typeof value === 'string') out[field] = value.slice(0, 500);
+    else if (typeof value === 'number' && Number.isFinite(value)) out[field] = value;
+  }
+  return out;
+}
+
+/**
+ * The event's identity (from signed fields, plus a status limited to the
+ * documented values) and what identifies its attempt. Null for a body not
+ * acted on.
+ */
+function identify(kind, body) {
+  switch (kind) {
+    case 'paid':
+      if (!['paid', 'pending'].includes(body.status)) return null;
+      return { eventKey: `paid:${body.transaction_key}:${body.status}`, intentKey: String(body.transaction_key) };
+    case 'failed':
+      return { eventKey: `failed:${body.transaction_key}:${body.transaction_id}`, intentKey: String(body.transaction_key) };
+    case 'cancel':
+      if (!['EXPIRED', 'CANCELED'].includes(body.status)) return null;
+      // This signature covers referenceId and paymentMethod only: the
+      // transactionKey just says which attempt to ask Fawaterak about.
+      return {
+        eventKey: `cancel:${body.referenceId}:${body.status}`,
+        intentKey: typeof body.transactionKey === 'string' ? body.transactionKey : null,
+      };
+    case 'refund':
+      return { eventKey: `refund:${body.transactionId}:${body.amount}:${body.currency}`, transactionId: Number(body.transactionId) };
+    default:
+      return null;
+  }
+}
+
+function findAttempt(identity) {
+  if (identity.intentKey) {
+    return db.BillingPaymentAttempt.findOne({ where: { provider: PROVIDER, providerIntentKey: identity.intentKey.slice(0, 64) } });
+  }
+  if (Number.isSafeInteger(identity.transactionId) && identity.transactionId > 0) {
+    return db.BillingPaymentAttempt.findOne({ where: { provider: PROVIDER, providerTransactionId: identity.transactionId } });
+  }
+  return null;
+}
+
+/** Writes the event once per (provider, event key); a redelivery gets the existing row. */
+async function insertEvent(kind, eventKey, attempt, payload) {
+  const key = eventKey.slice(0, 200);
+  const [row] = await db.sequelize.query(
+    `INSERT INTO billing_gateway_events (id, provider, kind, event_key, attempt_id, payload, attempts, created_at, updated_at)
+     VALUES ($id, $provider, $kind, $eventKey, $attemptId, $payload::jsonb, 0, now(), now())
+     ON CONFLICT (provider, event_key) DO NOTHING
+     RETURNING id`,
+    {
+      bind: {
+        id: crypto.randomUUID(),
+        provider: PROVIDER,
+        kind,
+        eventKey: key,
+        attemptId: attempt ? attempt.id : null,
+        payload: JSON.stringify(payload),
+      },
+      type: db.Sequelize.QueryTypes.SELECT,
+    }
+  );
+  if (row) return { event: await db.BillingGatewayEvent.findByPk(row.id), created: true };
+  return { event: await db.BillingGatewayEvent.findOne({ where: { provider: PROVIDER, eventKey: key } }), created: false };
+}
+
+/** A failed or expired attempt: only one still in progress moves, and never the charge. */
+async function markNotPaid(attempt, status, reason) {
+  const [moved] = await db.BillingPaymentAttempt.update(
+    { status, failureReason: reason ? sanitizeGatewayMessage(reason).slice(0, 300) : null },
+    { where: { id: attempt.id, status: ['open', 'pending'] } }
+  );
+  return moved > 0;
+}
+
+/** A refund Fawaterak approved: recorded for a platform admin, nothing changed (refunds are handled by hand). */
+async function recordRefund(attempt, payload) {
+  await recordAudit({
+    workspaceId: attempt.workspaceId,
+    action: 'billing_payment.refund_reported',
+    entityType: 'BillingPaymentAttempt',
+    entityId: attempt.id,
+    metadata: {
+      billingInvoiceId: attempt.billingInvoiceId,
+      provider: PROVIDER,
+      amount: payload.amount,
+      currency: payload.currency,
+      approvedAt: payload.approvedAt || null,
+      reason: payload.reason ? String(payload.reason).slice(0, 300) : null,
+    },
+  });
+  logger.warn(
+    `billing payment attempt ${attempt.id}: Fawaterak reports a refund of ${payload.amount} ${payload.currency} ` +
+      `(invoice ${attempt.billingInvoiceId}). Nothing was changed; handle it by hand.`
+  );
+  return 'refund_recorded';
+}
+
+async function actOn(event, attempt) {
+  const { kind, payload } = event;
+  if (kind === 'refund') return recordRefund(attempt, payload);
+  const { outcome } = await confirmAttempt(attempt, { source: `webhook:${kind}` });
+  if (outcome !== 'not_paid') return outcome;
+  if (kind === 'paid') return payload.status === 'paid' ? 'not_confirmed' : 'pending';
+  if (kind === 'failed') return (await markNotPaid(attempt, 'failed', payload.errorMessage)) ? 'failed' : 'not_paid';
+  return (await markNotPaid(attempt, 'expired', `${payload.paymentMethod || 'reference'} ${String(payload.status).toLowerCase()}`)) ? 'expired' : 'not_paid';
+}
+
+/**
+ * Processes one stored event. A failure (Fawaterak unreachable) leaves it
+ * unprocessed with the error, for the sweep; the webhook is still answered
+ * 200, since the event is safely stored.
+ */
+async function processEvent(event) {
+  const [claimed] = await db.BillingGatewayEvent.update(
+    { attempts: db.sequelize.literal('attempts + 1') },
+    { where: { id: event.id, processedAt: null } }
+  );
+  if (!claimed) return { outcome: 'duplicate' };
+  try {
+    const attempt = event.attemptId ? await db.BillingPaymentAttempt.findByPk(event.attemptId) : null;
+    const outcome = attempt ? await actOn(event, attempt) : 'not_ours';
+    // Two deliveries racing both get here; the first to finish is recorded.
+    await db.BillingGatewayEvent.update({ processedAt: now(), outcome, error: null }, { where: { id: event.id, processedAt: null } });
+    return { outcome };
+  } catch (err) {
+    await db.BillingGatewayEvent.update({ error: reasonOf(err).slice(0, 500) }, { where: { id: event.id } });
+    logger.error(`billing gateway event ${event.id} (${event.kind}) could not be processed yet: ${reasonOf(err)}`);
+    return { outcome: 'deferred' };
+  }
+}
+
+function tokenMatches(given, expected) {
+  if (typeof given !== 'string' || !expected) return false;
+  const a = Buffer.from(given, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * One Fawaterak webhook. Resolves { status, outcome }: 404 for an unknown
+ * route or token (or nothing configured), 401 for a signature that doesn't
+ * verify — neither writes anything — otherwise 200.
+ */
+async function receiveWebhook(route, token, body) {
+  const kind = Object.prototype.hasOwnProperty.call(WEBHOOK_ROUTES, route) ? WEBHOOK_ROUTES[route] : null;
+  const config = kind ? fawaterakConfig.readyConfig() : null;
+  if (!kind || !config || !tokenMatches(token, config.webhookToken)) return { status: 404 };
+  if (!body || typeof body !== 'object' || !verifyWebhook(kind, body, config.hashKey)) {
+    logger.warn(`Fawaterak ${kind} webhook refused: its signature does not verify`);
+    return { status: 401 };
+  }
+
+  const identity = identify(kind, body);
+  if (!identity) return { status: 200, outcome: 'ignored' };
+  const attempt = await findAttempt(identity);
+  const { event, created } = await insertEvent(kind, identity.eventKey, attempt, storablePayload(kind, body));
+  if (!created && (event.processedAt || event.attempts >= MAX_EVENT_TRIES)) return { status: 200, outcome: 'duplicate' };
+  const { outcome } = await processEvent(event);
+  logger.info(`Fawaterak ${kind} webhook${attempt ? ` for billing payment attempt ${attempt.id}` : ''}: ${outcome}`);
+  return { status: 200, outcome };
+}
+
 // --------------------------------------------------------------- merchant
 
 /**
@@ -433,6 +638,8 @@ module.exports = {
   SETTLED,
   startPayment,
   confirmAttempt,
+  receiveWebhook,
+  processEvent,
   getPayment,
   onlinePaymentSummary,
   serializeForMerchant,

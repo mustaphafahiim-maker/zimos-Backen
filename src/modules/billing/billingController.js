@@ -19,6 +19,17 @@ const webhook = asyncHandler(async (req, res) => {
   res.json({ received: true, ...result });
 });
 
+// POST /api/v1/billing/fawaterak/:token/:route  — Fawaterak's webhooks
+// (paid_json, failed_json, cancel, refund). No auth: the path token and the
+// signature are checked before anything is written. A webhook only prompts
+// a getTransactionData check (billing/onlineBillingService).
+const fawaterakWebhook = asyncHandler(async (req, res) => {
+  const { status } = await onlineBilling.receiveWebhook(req.params.route, req.params.token, req.body);
+  if (status === 404) throw new AppError('NOT_FOUND', 'Not found', 404);
+  if (status === 401) throw new AppError('INVALID_SIGNATURE', 'Webhook signature verification failed', 401);
+  res.json({ status: 'ok' });
+});
+
 // POST /api/v1/billing/run-trial-check  — platform admin (manual for now).
 const runTrialCheck = asyncHandler(async (req, res) => {
   res.json(await service.expireStaleTrials());
@@ -72,6 +83,7 @@ const getOnlinePayment = asyncHandler(async (req, res) => {
 
 module.exports = {
   webhook,
+  fawaterakWebhook,
   startOnlinePayment,
   getOnlinePayment,
   runTrialCheck,
