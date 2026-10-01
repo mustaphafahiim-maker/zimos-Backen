@@ -18,6 +18,13 @@ module.exports = (sequelize, DataTypes) => {
       codFeeBp: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'cod_fee_bp' },
       features: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
+      // Limits (migration 126), checked when a store or a funnel is created
+      // (billing/entitlementsService). NULL = no limit.
+      maxStores: { type: DataTypes.INTEGER, allowNull: true, field: 'max_stores' },
+      maxFunnelsPerMonth: { type: DataTypes.INTEGER, allowNull: true, field: 'max_funnels_per_month' },
+      // Listed on the marketing site and offered at sign-up (GET /plans/public).
+      isPublic: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_public' },
+      displayOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'display_order' },
     },
     { tableName: 'plans' }
   );

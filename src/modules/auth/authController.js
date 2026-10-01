@@ -6,6 +6,7 @@ const { authenticate, authenticateAllowPending } = require('../../core/middlewar
 const { AppError } = require('../../core/errors/AppError');
 const env = require('../../config/env');
 const usernameService = require('../users/usernameService');
+const signupPolicy = require('./signupPolicy');
 
 const register = asyncHandler(async (req, res) => {
   const result = await authService.register(req.body, req);
@@ -26,6 +27,43 @@ const login = asyncHandler(async (req, res) => {
   const result = await authService.login(req.body, req);
   res.json(result);
 });
+
+// GET /auth/signup-options — public: what the sign-up form must ask for.
+const signupOptions = asyncHandler(async (req, res) => {
+  res.json(await signupPolicy.signupOptions());
+});
+
+// The verification token from sign-up (or a sign-in to an unconfirmed
+// account), as a Bearer token. It opens these two endpoints and nothing else.
+const authenticateVerification = asyncHandler(async (req, res, next) => {
+  const [scheme, token] = (req.headers.authorization || '').split(' ');
+  if (scheme !== 'Bearer' || !token) throw new AppError('VERIFICATION_TOKEN_INVALID', 'Sign in again', 401);
+  req.verificationUser = await signupPolicy.userForVerificationToken(token);
+  next();
+});
+
+const sendVerificationCode = [
+  authenticateVerification,
+  asyncHandler(async (req, res) => {
+    res.json(await authService.sendVerificationCode(req.verificationUser, req.body, req));
+  }),
+];
+
+const confirmVerificationCode = [
+  authenticateVerification,
+  asyncHandler(async (req, res) => {
+    res.json(await authService.confirmVerificationCode(req.verificationUser, req.body.code, req));
+  }),
+];
+
+// POST /auth/me/plan — the plan an account made through Google chooses.
+const choosePlan = [
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const user = await signupPolicy.choosePlan(req.user, req.body, req);
+    res.json({ user: user.toSafeJSON(), needsPlan: await signupPolicy.needsPlan(user) });
+  }),
+];
 
 const googleRedirect = asyncHandler(async (req, res) => {
   res.redirect(authService.getGoogleAuthUrl());
@@ -73,12 +111,15 @@ const listSessions = [
 
 // `suggestedUsername` only for an account with no username yet (made through
 // Google): the dashboard asks its owner to pick one, starting from this.
+// `needsPlan`: an account made through Google while a plan is required, that
+// has not chosen one — the dashboard asks for it before anything else.
 const me = [
   authenticate,
   asyncHandler(async (req, res) => {
     const user = req.user.toSafeJSON();
-    if (user.username) return res.json({ user });
-    return res.json({ user, suggestedUsername: await usernameService.suggestFor(user.email) });
+    const needsPlan = await signupPolicy.needsPlan(req.user);
+    if (user.username) return res.json({ user, needsPlan });
+    return res.json({ user, needsPlan, suggestedUsername: await usernameService.suggestFor(user.email) });
   }),
 ];
 
@@ -134,6 +175,10 @@ const resetPasswordSms = asyncHandler(async (req, res) => {
 
 module.exports = {
   register,
+  signupOptions,
+  sendVerificationCode,
+  confirmVerificationCode,
+  choosePlan,
   verifyEmail,
   resendVerification,
   login,

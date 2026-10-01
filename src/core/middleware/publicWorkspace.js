@@ -5,6 +5,7 @@ const db = require('../../db/models');
 const { AppError, NotFoundError } = require('../errors/AppError');
 const { isUuid, normalizeSlug } = require('../utils/workspaceSlug');
 const { accessFor } = require('../../modules/workspaces/workspaceAccessService');
+const { isStorePreviewRequest } = require('../security/storePreview');
 
 /**
  * Public storefront scoping (no membership check) — resolves the workspace
@@ -17,6 +18,12 @@ const { accessFor } = require('../../modules/workspaces/workspaceAccessService')
  * 423 STORE_UNAVAILABLE on every public route, with just enough about the
  * store (name, locale) for the storefront to draw its "unavailable" page. No
  * catalogue, cart, checkout or order data is served.
+ *
+ * A draft store (not subscribed yet, see workspaceAccessService) answers
+ * exactly as a store that does not exist — the same 404 — so nothing about
+ * it, not even that it exists, reaches the public. Staff previewing it with
+ * an X-Store-Preview token see its pages; `refuseDraftOrders` keeps them from
+ * ordering.
  */
 const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
   // A public store is addressed either by workspace UUID or by its slug, so
@@ -36,6 +43,10 @@ const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
   }
 
   const access = await accessFor(workspace.id, { workspace });
+  if (access.draft) {
+    if (!isStorePreviewRequest(req, workspace.id)) throw new NotFoundError('Workspace');
+    req.draftPreview = true;
+  }
   if (access.restricted) {
     throw new AppError('STORE_UNAVAILABLE', 'This store is currently unavailable.', 423, {
       store: {
@@ -52,4 +63,18 @@ const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
   next();
 });
 
-module.exports = { resolvePublicWorkspace };
+/**
+ * On the routes that place an order or record a shopper (checkout, the
+ * checkout autosave, a funnel step that can order): a draft store, reachable
+ * here only through a staff preview, sells nothing — 403
+ * SUBSCRIPTION_REQUIRED, as the dashboard's own guard answers.
+ */
+const refuseDraftOrders = asyncHandler(async (req, res, next) => {
+  if (req.draftPreview) {
+    const { subscriptionRequiredError } = require('../../modules/billing/goLiveService');
+    throw await subscriptionRequiredError(req.publicWorkspace.id);
+  }
+  next();
+});
+
+module.exports = { resolvePublicWorkspace, refuseDraftOrders };

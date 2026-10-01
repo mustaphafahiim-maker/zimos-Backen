@@ -2,7 +2,7 @@
 
 const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
-const { resolvePublicWorkspace } = require('../../core/middleware/publicWorkspace');
+const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const controller = require('./funnelsController');
 const schemas = require('./funnelsValidation');
 
@@ -17,6 +17,6 @@ router.post('/:funnelRef/sessions', validate(schemas.startSession), controller.s
 // Render data for the session's current step, from the published snapshot.
 router.get('/:funnelId/sessions/:sessionId/step', validate(schemas.sessionStep), controller.getSessionStep);
 // Produce an outcome for the current step and route to the next one.
-router.post('/:funnelId/sessions/:sessionId/advance', validate(schemas.advance), controller.advance);
+router.post('/:funnelId/sessions/:sessionId/advance', validate(schemas.advance), refuseDraftOrders, controller.advance);
 
 module.exports = router;

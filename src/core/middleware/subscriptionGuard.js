@@ -3,6 +3,7 @@
 const asyncHandler = require('express-async-handler');
 const { AppError } = require('../errors/AppError');
 const { accessFor } = require('../../modules/workspaces/workspaceAccessService');
+const { subscriptionRequiredError } = require('../../modules/billing/goLiveService');
 
 /**
  * The creation lock on a restricted store (see
@@ -41,4 +42,20 @@ const requireCreationAllowed = asyncHandler(async (req, res, next) => {
   next();
 });
 
-module.exports = { requireCreationAllowed };
+/**
+ * What a draft store may not do (REQUIRE_SUBSCRIPTION_TO_GO_LIVE, see
+ * workspaces/workspaceAccessService): publish its website or a funnel, take
+ * an order by hand, connect a custom domain, book a shipment. Refused with
+ * 403 SUBSCRIPTION_REQUIRED and what it takes to go live ({ draft, planId,
+ * planName, trial: { eligible, days } }), which the dashboard answers with
+ * its subscribe screen. Everything else — products, the editors, settings —
+ * stays open to a draft. With the flag off no store is a draft and this
+ * passes everything. Runs after `resolveTenant`.
+ */
+const requireLive = asyncHandler(async (req, res, next) => {
+  const access = await accessFor(req.tenant.workspaceId);
+  if (access.draft) throw await subscriptionRequiredError(req.tenant.workspaceId);
+  next();
+});
+
+module.exports = { requireCreationAllowed, requireLive };

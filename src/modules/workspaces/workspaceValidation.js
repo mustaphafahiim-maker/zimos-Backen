@@ -18,6 +18,12 @@ module.exports = {
       // An agent's referral code, attached to the workspace's subscription.
       // Optional; an unusable one refuses the whole creation (422).
       referralCode: Joi.string().trim().max(64).allow('', null).optional(),
+      // The plan for this store, one offered publicly (GET /plans/public).
+      // Read only while REQUIRE_PLAN_AT_SIGNUP is on; otherwise the store gets
+      // the default plan, as before. Without one, the first store takes the
+      // plan chosen at sign-up.
+      planId: uuid.allow(null).optional(),
+      billingCycle: Joi.string().valid('monthly', 'yearly').allow(null).optional(),
     }),
   },
   // Only the length is policed here: every other rule comes back as a `reason`

@@ -1,7 +1,9 @@
 'use strict';
 
 const db = require('../../db/models');
-const { ConflictError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
+const env = require('../../config/env');
+const { monthWindow } = require('../../core/utils/zonedMonth');
+const { AppError, ConflictError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { FEATURE_CATALOG, featureDefinition, planFeatureKeys } = require('./featureCatalog');
 
@@ -208,6 +210,182 @@ async function revokeOverride(workspaceId, overrideId, { reason = null } = {}, r
   });
 }
 
+// ---------------------------------------------------------------- limits
+
+/**
+ * Plan limits (migration 126), worked out here and nowhere else:
+ *
+ *   stores             how many stores one person may own. When they create
+ *                      one, the limit is the largest max_stores among the
+ *                      plans of their current stores and the plan chosen for
+ *                      the new one — NULL on any of them is no limit. A
+ *                      current store is one whose subscription has not ended
+ *                      (a draft counts: it is on its chosen plan). Every
+ *                      store they own counts towards the number, drafts
+ *                      included; a closed one does not. Their first store is
+ *                      never refused.
+ *   funnels_per_month  how many funnels a store may make in a calendar month
+ *                      in Africa/Cairo, created or duplicated, deleted ones
+ *                      included (funnel_creations), on its own plan.
+ *   draft_stores       while REQUIRE_SUBSCRIPTION_TO_GO_LIVE is on: someone
+ *                      with no store out of draft may hold at most
+ *                      DRAFT_STORES_PER_USER drafts.
+ *
+ * Limits only ever refuse a new store or funnel: nothing that exists is
+ * deleted or switched off when a plan changes or its limits drop, and a
+ * plan's new limits apply from the next creation. Each check and the insert
+ * it guards run in one transaction under an advisory lock on the owner (or
+ * the store), so two requests at once cannot both slip under the limit.
+ *
+ * Refusals are 403 PLAN_LIMIT_REACHED with { limit, max, used, … }.
+ */
+
+
+const LIMITS_TIME_ZONE = 'Africa/Cairo';
+// A closed store frees its place; a suspended one does not.
+const COUNTED_STORE_STATUSES = ['active', 'suspended'];
+
+function planLimitReached(details, message) {
+  return new AppError('PLAN_LIMIT_REACHED', message, 403, details);
+}
+
+/** Serialises creations for one key until the transaction ends. */
+async function advisoryLock(key, transaction) {
+  await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext($key))', { bind: { key }, transaction });
+}
+
+const draftsEnforced = () => env.signup.requireSubscription === true;
+
+/** A subscription still running now: not cancelled and inside its period, or a draft. */
+function isCurrent(subscription, now) {
+  if (!subscription) return false;
+  if (subscription.status === 'draft') return true;
+  if (subscription.status === 'cancelled') return false;
+  return new Date(subscription.currentPeriodEnd).getTime() > now.getTime();
+}
+
+/** The largest max_stores of `plans` (null = unlimited wins), and the plan it came from. */
+function largestStoreLimit(plans) {
+  let best = null;
+  for (const plan of plans) {
+    if (plan.maxStores === null || plan.maxStores === undefined) return { max: null, plan };
+    if (!best || plan.maxStores > best.max) best = { max: plan.maxStores, plan };
+  }
+  return best || { max: null, plan: null };
+}
+
+async function ownedStores(ownerUserId, transaction) {
+  return db.Workspace.findAll({
+    where: { ownerUserId, status: COUNTED_STORE_STATUSES },
+    attributes: ['id'],
+    include: [
+      {
+        model: db.Subscription,
+        as: 'subscription',
+        attributes: ['id', 'status', 'currentPeriodEnd', 'planId'],
+        include: [{ model: db.Plan, as: 'plan', attributes: ['id', 'name', 'maxStores'] }],
+      },
+    ],
+    transaction,
+  });
+}
+
+/** { used, max, planName } for `ownerUserId`, with `candidatePlan` counted as one of their plans. */
+async function storeAllowance(ownerUserId, candidatePlan, { now = new Date(), transaction } = {}) {
+  const stores = await ownedStores(ownerUserId, transaction);
+  const plans = stores
+    .map((w) => w.subscription)
+    .filter((s) => s && s.plan && isCurrent(s, now))
+    .map((s) => s.plan);
+  if (candidatePlan) plans.push(candidatePlan);
+  const { max, plan } = largestStoreLimit(plans);
+  const drafts = stores.filter((w) => w.subscription && w.subscription.status === 'draft').length;
+  return { used: stores.length, max, planName: plan ? plan.name : null, drafts, live: stores.length - drafts };
+}
+
+/**
+ * Inside the store-creation transaction, before the store is inserted:
+ * refuses a store past the owner's limit (and, with drafts on, a draft past
+ * DRAFT_STORES_PER_USER). Holds the owner's lock until the transaction ends.
+ */
+async function assertCanCreateStore(ownerUserId, chosenPlan, { transaction, now = new Date() }) {
+  await advisoryLock(`plan-limits:stores:${ownerUserId}`, transaction);
+  const allowance = await storeAllowance(ownerUserId, chosenPlan, { now, transaction });
+  if (allowance.used === 0) return allowance;
+
+  if (allowance.max !== null && allowance.used >= allowance.max) {
+    throw planLimitReached(
+      { limit: 'stores', max: allowance.max, used: allowance.used, planName: allowance.planName },
+      'Your plan does not allow another store'
+    );
+  }
+  if (draftsEnforced() && allowance.live === 0 && allowance.drafts >= env.signup.draftStoresPerUser) {
+    throw planLimitReached(
+      { limit: 'draft_stores', max: env.signup.draftStoresPerUser, used: allowance.drafts },
+      'Subscribe to one of your stores before starting another'
+    );
+  }
+  return allowance;
+}
+
+async function planOf(workspaceId, transaction) {
+  const subscription = await db.Subscription.findOne({
+    where: { workspaceId },
+    attributes: ['id', 'planId'],
+    include: [{ model: db.Plan, as: 'plan', attributes: ['id', 'name', 'maxStores', 'maxFunnelsPerMonth'] }],
+    transaction,
+  });
+  return subscription ? subscription.plan : null;
+}
+
+/** { used, max, resetsAt } for this store's funnels this Cairo month. */
+async function funnelAllowance(workspaceId, { now = new Date(), transaction, plan } = {}) {
+  const current = plan === undefined ? await planOf(workspaceId, transaction) : plan;
+  const { start, resetsAt } = monthWindow(now, LIMITS_TIME_ZONE);
+  const used = await db.FunnelCreation.count({
+    where: { workspaceId, createdAt: { [db.Sequelize.Op.gte]: start, [db.Sequelize.Op.lt]: resetsAt } },
+    transaction,
+  });
+  const max = current && current.maxFunnelsPerMonth !== null && current.maxFunnelsPerMonth !== undefined ? current.maxFunnelsPerMonth : null;
+  return { used, max, resetsAt };
+}
+
+/**
+ * Inside the funnel-creation transaction: refuses a funnel past the plan's
+ * monthly limit, otherwise records the creation (`funnelId` is the new
+ * funnel's, known before its insert). Holds the store's lock until the
+ * transaction ends.
+ */
+async function recordFunnelCreation(workspaceId, funnelId, source, { transaction, now = new Date() }) {
+  await advisoryLock(`plan-limits:funnels:${workspaceId}`, transaction);
+  const allowance = await funnelAllowance(workspaceId, { now, transaction });
+  if (allowance.max !== null && allowance.used >= allowance.max) {
+    throw planLimitReached(
+      { limit: 'funnels_per_month', max: allowance.max, used: allowance.used, resetsAt: allowance.resetsAt },
+      'Your plan does not allow another funnel this month'
+    );
+  }
+  await db.FunnelCreation.create({ workspaceId, funnelId, source }, { transaction });
+  return allowance;
+}
+
+/**
+ * What GET /workspaces/:id/billing (and the console's store page) show: this
+ * store's owner against their store limit — as if they created one more on
+ * this store's plan — and this store's funnels this month.
+ */
+async function getLimits(workspaceId, { now = new Date() } = {}) {
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'ownerUserId'] });
+  if (!workspace) throw new NotFoundError('Workspace');
+  const plan = await planOf(workspaceId);
+  const stores = await storeAllowance(workspace.ownerUserId, plan, { now });
+  const funnels = await funnelAllowance(workspaceId, { now, plan });
+  return {
+    stores: { used: stores.used, max: stores.max },
+    funnelsThisMonth: { used: funnels.used, max: funnels.max, resetsAt: funnels.resetsAt },
+  };
+}
+
 module.exports = {
   featureTable,
   effectiveFeatures,
@@ -216,4 +394,10 @@ module.exports = {
   addOverride,
   updateOverride,
   revokeOverride,
+  LIMITS_TIME_ZONE,
+  assertCanCreateStore,
+  recordFunnelCreation,
+  storeAllowance,
+  funnelAllowance,
+  getLimits,
 };

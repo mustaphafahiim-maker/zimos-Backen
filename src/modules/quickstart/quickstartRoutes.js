@@ -5,7 +5,7 @@ const validate = require('../../core/middleware/validate');
 const { authenticateFlexible } = require('../../core/middleware/authenticateFlexible');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
-const { requireCreationAllowed } = require('../../core/middleware/subscriptionGuard');
+const { requireCreationAllowed, requireLive } = require('../../core/middleware/subscriptionGuard');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./quickstartController');
 const schemas = require('./quickstartValidation');
@@ -25,12 +25,14 @@ router.use(authenticateFlexible, resolveTenant);
 router.get('/', validate(schemas.workspaceParam), requirePermission(PERMISSIONS.WEBSITE_EDIT), controller.showForm);
 
 // Add another product (regenerates + republishes the store page). Creates a
-// product, so it sits behind the same creation lock as the catalog.
+// product, so it sits behind the same creation lock as the catalog; publishes,
+// so a draft store cannot use it (the catalog adds products without publishing).
 router.post(
   '/',
   validate(schemas.provision),
   requirePermission(PERMISSIONS.WEBSITE_PUBLISH),
   requireCreationAllowed,
+  requireLive,
   controller.submitForm
 );
 

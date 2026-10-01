@@ -38,6 +38,16 @@ const env = require('../../config/env');
  *
  * `env.billing.restrictions` = 'warn' reports the phases but never restricts
  * for billing; a manual suspension is enforced regardless.
+ *
+ * Draft (REQUIRE_SUBSCRIPTION_TO_GO_LIVE): a store made while the flag is on
+ * starts with subscription status 'draft' and stays a draft until a trial or
+ * a paid subscription starts (billing/goLiveService). This is the one place a
+ * draft is recognised — `isDraftSubscription` — and the guards
+ * (core/middleware/subscriptionGuard.requireLive, publicWorkspace) ask here.
+ * A draft is not "restricted": it may be built, edited and previewed, only
+ * not published or sell. Its phase is 'draft' and it has no period to warn
+ * about. With the flag off again, a draft left from while it was on reads as
+ * the trial it would have had (its stored period is exactly that).
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -45,14 +55,31 @@ const EXPIRY_WARNING_DAYS = 3;
 const GRACE_DAYS = 1;
 const UNPAID = new Set(['past_due', 'cancelled', 'suspended']);
 
+/** A store not subscribed yet, while drafts are enforced. */
+function isDraftSubscription(subscription) {
+  return Boolean(subscription && subscription.status === 'draft' && env.signup.requireSubscription === true);
+}
+
 function billingLifecycle(subscription, now = new Date()) {
   if (!subscription) {
     return { phase: 'ok', status: null, storedStatus: null, periodEnd: null, restrictsAt: null, restricted: false };
   }
+  if (isDraftSubscription(subscription)) {
+    return {
+      phase: 'draft',
+      status: 'draft',
+      storedStatus: 'draft',
+      trialing: false,
+      periodEnd: null,
+      restrictsAt: null,
+      restricted: false,
+      draft: true,
+    };
+  }
+  const storedStatus = subscription.status === 'draft' ? 'trialing' : subscription.status;
   const periodEnd = new Date(subscription.currentPeriodEnd);
   const lapsed = now.getTime() > periodEnd.getTime();
-  const status =
-    lapsed && (subscription.status === 'trialing' || subscription.status === 'active') ? 'past_due' : subscription.status;
+  const status = lapsed && (storedStatus === 'trialing' || storedStatus === 'active') ? 'past_due' : storedStatus;
   const restrictsAt = new Date(periodEnd.getTime() + GRACE_DAYS * DAY_MS);
   const unpaid = UNPAID.has(status);
 
@@ -68,7 +95,7 @@ function billingLifecycle(subscription, now = new Date()) {
     // The status as it stands, counting a lapsed period as past_due.
     status,
     storedStatus: subscription.status,
-    trialing: subscription.status === 'trialing',
+    trialing: storedStatus === 'trialing',
     periodEnd,
     restrictsAt,
     restricted: phase === 'restricted',
@@ -104,6 +131,7 @@ async function accessFor(workspaceId, { now = new Date(), workspace, subscriptio
   return {
     restricted: reasons.length > 0,
     reasons,
+    draft: billing.phase === 'draft',
     billing: { ...billing, enforced },
     suspension: suspended ? { suspended: true, since: ws.suspendedAt || null } : { suspended: false, since: null },
   };
@@ -115,6 +143,8 @@ function serializeAccess(access) {
   return {
     restricted: access.restricted,
     reasons: access.reasons,
+    // Built but not published until subscribed (REQUIRE_SUBSCRIPTION_TO_GO_LIVE).
+    draft: Boolean(access.draft),
     billing: {
       phase: b.phase,
       status: b.status,
@@ -133,6 +163,7 @@ module.exports = {
   EXPIRY_WARNING_DAYS,
   GRACE_DAYS,
   billingLifecycle,
+  isDraftSubscription,
   accessFor,
   serializeAccess,
 };

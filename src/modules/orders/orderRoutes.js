@@ -6,6 +6,7 @@ const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { idempotent } = require('../../core/middleware/idempotency');
 const { PERMISSIONS } = require('../../core/security/permissions');
+const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const controller = require('./orderController');
 const schemas = require('./orderValidation');
 const returnController = require('../returns/returnController');
@@ -17,10 +18,12 @@ const carrierSchemas = require('../shipping/carrierValidation');
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
 
+// A draft store (not subscribed yet) takes no orders, by hand either.
 router.post(
   '/',
   validate(schemas.create),
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  requireLive,
   idempotent('order.create')(controller.create)
 );
 router.get('/', validate(schemas.list), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.list);
@@ -60,6 +63,7 @@ router.post(
   '/:orderId/shipments',
   validate(schemas.createShipment),
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  requireLive,
   controller.createShipment
 );
 router.patch(

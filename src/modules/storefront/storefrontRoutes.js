@@ -1,7 +1,7 @@
 'use strict';
 const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
-const { resolvePublicWorkspace } = require('../../core/middleware/publicWorkspace');
+const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
 const { trackingLimiter, suggestLimiter, uploadLimiter } = require('../../core/middleware/rateLimiters');
 const customerUploadController = require('../customerUploads/customerUploadController');
@@ -40,7 +40,7 @@ router.get('/orders/track', trackingLimiter, validate(schemas.track), controller
 
 // Checkout-form autosave for abandoned-checkout recovery. An upsert keyed on
 // the visitor, so a replay is harmless and it takes no Idempotency-Key.
-router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), checkoutSessionController.capture);
+router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), refuseDraftOrders, checkoutSessionController.capture);
 
 // Read-only: prices the shipping line the checkout would get.
 router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shippingQuote);
@@ -60,9 +60,11 @@ router.post(
   onlinePaymentController.shopperSwitchToCod
 );
 
+// A draft store, reachable here only through a staff preview, sells nothing.
 router.post(
   '/checkout',
   validate(checkoutSchemas.checkout),
+  refuseDraftOrders,
   idempotent('storefront.checkout')(checkoutController.checkout)
 );
 

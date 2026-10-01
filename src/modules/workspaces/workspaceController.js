@@ -3,10 +3,19 @@
 const asyncHandler = require('express-async-handler');
 const service = require('./workspaceService');
 const access = require('./workspaceAccessService');
+const goLive = require('../billing/goLiveService');
+const billingService = require('../billing/billingService');
+const { issueStorePreviewToken } = require('../../core/security/storePreview');
 
 const create = asyncHandler(async (req, res) => {
   const workspace = await service.createWorkspace(
-    { name: req.body.name, ownerUserId: req.user.id, referralCode: req.body.referralCode || null },
+    {
+      name: req.body.name,
+      ownerUserId: req.user.id,
+      referralCode: req.body.referralCode || null,
+      planId: req.body.planId || null,
+      billingCycle: req.body.billingCycle || null,
+    },
     req
   );
   res.status(201).json({ workspace });
@@ -75,13 +84,51 @@ const createRole = asyncHandler(async (req, res) => {
 });
 
 // GET /workspaces/:workspaceId/access — restriction state and billing phase.
+// A draft also names its plan and whether its trial can still be taken, for
+// the banner every member sees.
 const getAccess = asyncHandler(async (req, res) => {
-  res.json({ access: access.serializeAccess(await access.accessFor(req.tenant.workspaceId)) });
+  const state = await access.accessFor(req.tenant.workspaceId);
+  const body = access.serializeAccess(state);
+  if (state.draft) {
+    const { planId, planName, trial } = await goLive.draftDetails(req.tenant.workspaceId);
+    body.draftPlan = { planId, planName, trial };
+  }
+  res.json({ access: body });
+});
+
+// POST /workspaces/:workspaceId/start-trial — a draft's free trial, from now.
+// 201 when it started, 200 when this store's trial had already started.
+const startTrial = asyncHandler(async (req, res) => {
+  const { started } = await goLive.startTrial(req.tenant.workspaceId, req);
+  res.status(started ? 201 : 200).json({
+    billing: await billingService.getWorkspaceBilling(req.tenant.workspaceId),
+    access: access.serializeAccess(await access.accessFor(req.tenant.workspaceId)),
+    started,
+  });
+});
+
+// POST /workspaces/:workspaceId/activate-free-plan — a draft on a plan that costs nothing.
+const activateFreePlan = asyncHandler(async (req, res) => {
+  const { started } = await goLive.activateFreePlan(req.tenant.workspaceId, req);
+  res.status(started ? 201 : 200).json({
+    billing: await billingService.getWorkspaceBilling(req.tenant.workspaceId),
+    access: access.serializeAccess(await access.accessFor(req.tenant.workspaceId)),
+    started,
+  });
+});
+
+// POST /workspaces/:workspaceId/store-preview-token — lets staff see their own
+// store on the storefront before it is public (X-Store-Preview).
+const storePreviewToken = asyncHandler(async (req, res) => {
+  res.status(201).json(issueStorePreviewToken(req.tenant.workspaceId));
 });
 
 module.exports = {
   create,
   getAccess,
+  startTrial,
+  activateFreePlan,
+  storePreviewToken,
   list,
   checkSlug,
   updateWorkspace,

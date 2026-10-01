@@ -6,6 +6,7 @@ const { AppError, ConflictError, NotFoundError, ValidationError } = require('../
 const { recordAudit } = require('../audit/auditService');
 const access = require('../workspaces/workspaceAccessService');
 const { addMonths } = require('./planPricing');
+const entitlements = require('./entitlementsService');
 
 /**
  * A platform admin setting a store's subscription by hand
@@ -20,6 +21,11 @@ const { addMonths } = require('./planPricing');
  *                when it has already lapsed (a lapsed merchant's gap is not
  *                billed, as with free months);
  *   end_now      the period ends now.
+ *
+ * A draft store (REQUIRE_SUBSCRIPTION_TO_GO_LIVE, not subscribed yet) leaves
+ * draft on activate or extend, which write 'active'; its stored period is a
+ * placeholder, so extend counts from now. There is nothing for end_now to
+ * end on a draft.
  *
  * Each writes the store's one subscription row — the row the billing
  * lifecycle reads (workspaces/workspaceAccessService.billingLifecycle) — so
@@ -126,6 +132,7 @@ async function getForAdmin(workspaceId) {
   });
   if (!subscription) throw new NotFoundError('Subscription');
   const lifecycle = access.billingLifecycle(subscription, new Date());
+  const draft = access.isDraftSubscription(subscription);
   const history = await db.SubscriptionManualChange.findAll({
     where: { workspaceId },
     include: CHANGE_INCLUDE,
@@ -148,8 +155,13 @@ async function getForAdmin(workspaceId) {
       currentPeriodStart: subscription.currentPeriodStart,
       currentPeriodEnd: subscription.currentPeriodEnd,
       restrictsAt: lifecycle.restrictsAt,
-      source: await periodSource(subscription),
+      source: draft ? 'draft' : await periodSource(subscription),
+      // Made while REQUIRE_SUBSCRIPTION_TO_GO_LIVE was on and not subscribed
+      // yet: Activate takes it out of draft.
+      draft,
     },
+    // The owner's stores and this store's funnels this month, against the plan.
+    limits: await entitlements.getLimits(workspaceId),
     openCharge: openCharge ? openCharge.toJSON() : null,
     history: history.map(serializeChange),
   };
@@ -270,13 +282,14 @@ async function changePlan(workspaceId, body, req) {
 async function extend(workspaceId, body, req) {
   return runAction(workspaceId, 'extend', body, req, async (subscription) => {
     const now = new Date();
-    const from = new Date(Math.max(new Date(subscription.currentPeriodEnd).getTime(), now.getTime()));
+    const draft = subscription.status === 'draft';
+    const from = draft ? now : new Date(Math.max(new Date(subscription.currentPeriodEnd).getTime(), now.getTime()));
     const end = endFrom(from, body.duration);
     assertLength(from, end, 'duration');
     if ((end.getTime() - now.getTime()) / DAY_MS > MAX_DAYS) {
       throw new ValidationError([{ field: 'duration', message: 'A subscription cannot run more than 5 years ahead' }], 'A subscription cannot run more than 5 years ahead');
     }
-    const lapsed = new Date(subscription.currentPeriodEnd).getTime() < now.getTime();
+    const lapsed = draft || new Date(subscription.currentPeriodEnd).getTime() < now.getTime();
     return {
       ...(subscription.status === 'trialing' ? { graceUntil: null } : ACTIVE),
       ...(lapsed ? { currentPeriodStart: now } : {}),
@@ -288,6 +301,9 @@ async function extend(workspaceId, body, req) {
 async function endNow(workspaceId, body, req) {
   return runAction(workspaceId, 'end_now', body, req, async (subscription) => {
     const now = new Date();
+    if (subscription.status === 'draft') {
+      throw new AppError('SUBSCRIPTION_IS_DRAFT', 'This store has not been subscribed yet, so there is no period to end', 409);
+    }
     if (new Date(subscription.currentPeriodEnd).getTime() <= now.getTime()) {
       throw new AppError('SUBSCRIPTION_ALREADY_ENDED', 'This subscription period has already ended', 409);
     }

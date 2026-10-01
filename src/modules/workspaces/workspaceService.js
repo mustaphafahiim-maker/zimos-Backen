@@ -20,6 +20,9 @@ const {
 const { recordAudit } = require('../audit/auditService');
 const notify = require('../notifications/notify');
 const billingService = require('../billing/billingService');
+const entitlements = require('../billing/entitlementsService');
+const publicPlans = require('../billing/publicPlansService');
+const env = require('../../config/env');
 const { assertBumpOfferUsable } = require('../checkout/orderBump');
 
 async function sendInviteEmail(workspace, email, role) {
@@ -31,10 +34,45 @@ async function sendInviteEmail(workspace, email, role) {
   });
 }
 
-async function createWorkspace({ name, ownerUserId, referralCode = null }, req) {
+/**
+ * The plan a new store starts on. With REQUIRE_PLAN_AT_SIGNUP off it is the
+ * default plan (the cheapest active one), as it always was, whatever the
+ * request says. With it on: the plan the request names, which must be on
+ * offer; otherwise, for someone's first store, the plan they chose at
+ * sign-up; otherwise the default. An account made through Google that has
+ * still to choose a plan (auth/signupPolicy) must name one.
+ */
+async function planForNewStore({ ownerUserId, planId, billingCycle }, transaction) {
+  if (!env.signup.requirePlan) return { plan: await billingService.defaultPlan(transaction), billingCycle: 'monthly' };
+  if (planId) {
+    return { plan: await publicPlans.findOfferedPlan(planId, transaction), billingCycle: billingCycle || 'monthly' };
+  }
+  const owner = await db.User.findByPk(ownerUserId, {
+    attributes: ['id', 'selectedPlanId', 'selectedBillingCycle', 'requiresPlanSelection'],
+    transaction,
+  });
+  if (owner && owner.requiresPlanSelection && !owner.selectedPlanId && (await publicPlans.anyOffered(transaction))) {
+    throw new AppError('PLAN_REQUIRED', 'Choose a plan first', 422, [{ field: 'planId', message: 'Choose a plan' }]);
+  }
+  if (owner && owner.selectedPlanId && (await db.Workspace.count({ where: { ownerUserId }, transaction })) === 0) {
+    const chosen = await db.Plan.findByPk(owner.selectedPlanId, { transaction });
+    if (chosen && chosen.isActive) {
+      return { plan: chosen, billingCycle: billingCycle || owner.selectedBillingCycle || 'monthly' };
+    }
+  }
+  return { plan: await billingService.defaultPlan(transaction), billingCycle: billingCycle || 'monthly' };
+}
+
+async function createWorkspace({ name, ownerUserId, referralCode = null, planId = null, billingCycle = null }, req) {
   const baseSlug = toWorkspaceSlug(name);
 
   return db.sequelize.transaction(async (t) => {
+    // The plan first, then the owner's store limit for it (billing/
+    // entitlementsService), under a lock on the owner held until this
+    // transaction ends: two stores created at once cannot both pass.
+    const start = await planForNewStore({ ownerUserId, planId, billingCycle }, t);
+    await entitlements.assertCanCreateStore(ownerUserId, start.plan, { transaction: t });
+
     // Pick a slug that's free right now, then insert it. The pre-check keeps
     // the common "someone already took this store name" case tidy
     // (my-store, my-store-2, …). The retry loop around the insert covers the
@@ -100,8 +138,13 @@ async function createWorkspace({ name, ownerUserId, referralCode = null }, req) 
 
     await db.InvoiceCounter.create({ workspaceId: workspace.id, lastNumber: 0 }, { transaction: t });
 
-    // Every workspace starts on a trialing subscription (no card, no gateway).
-    await billingService.ensureSubscriptionForWorkspace(workspace.id, t);
+    // Every workspace starts on a trialing subscription (no card, no
+    // gateway) — or, while REQUIRE_SUBSCRIPTION_TO_GO_LIVE is on, as a draft.
+    await billingService.ensureSubscriptionForWorkspace(workspace.id, t, {
+      plan: start.plan,
+      billingCycle: start.billingCycle,
+      ownerUserId,
+    });
 
     await recordAudit({
       workspaceId: workspace.id,

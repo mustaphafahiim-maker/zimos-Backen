@@ -29,6 +29,14 @@ module.exports = (sequelize, DataTypes) => {
       emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
       phoneVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'phone_verified_at' },
       lastLoginAt: { type: DataTypes.DATE, allowNull: true, field: 'last_login_at' },
+      // The plan chosen at sign-up (migration 126), applied to the first store.
+      selectedPlanId: { type: DataTypes.UUID, allowNull: true, field: 'selected_plan_id' },
+      selectedBillingCycle: { type: DataTypes.STRING(10), allowNull: true, field: 'selected_billing_cycle' },
+      // A Google account made while a plan was required: it picks one before
+      // anything else (auth/signupPolicy). False for every earlier account.
+      requiresPlanSelection: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'requires_plan_selection' },
+      termsAcceptedAt: { type: DataTypes.DATE, allowNull: true, field: 'terms_accepted_at' },
+      termsVersion: { type: DataTypes.STRING(40), allowNull: true, field: 'terms_version' },
       // Platform-console access (migration 105). NULL role = no access. The
       // permission set is what every /admin route checks; the role is the
       // label and the template it was seeded from.

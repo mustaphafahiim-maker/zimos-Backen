@@ -2,13 +2,19 @@
 
 const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
-const { authLimiter, usernameCheckLimiter } = require('../../core/middleware/rateLimiters');
+const { authLimiter, usernameCheckLimiter, verifyCodeLimiter, publicPlansLimiter } = require('../../core/middleware/rateLimiters');
 const controller = require('./authController');
 const schemas = require('./authValidation');
 
 const router = Router();
 
 router.post('/register', authLimiter, validate(schemas.register), controller.register);
+// What the sign-up form must ask for right now (plan, terms, a code).
+router.get('/signup-options', publicPlansLimiter, controller.signupOptions);
+// Sign-up codes (REQUIRE_SIGNUP_VERIFICATION). The Bearer here is the
+// verification token from sign-up or sign-in, which nothing else accepts.
+router.post('/verify/send', verifyCodeLimiter, authLimiter, validate(schemas.verifySend), ...controller.sendVerificationCode);
+router.post('/verify/confirm', verifyCodeLimiter, authLimiter, validate(schemas.verifyConfirm), ...controller.confirmVerificationCode);
 router.post('/verify-email', authLimiter, validate(schemas.verifyEmail), controller.verifyEmail);
 router.post('/resend-verification', authLimiter, validate(schemas.resendVerification), controller.resendVerification);
 router.post('/login', authLimiter, validate(schemas.login), controller.login);
@@ -23,6 +29,7 @@ router.get('/me', ...controller.me);
 // choosing or changing one's own.
 router.get('/username-available', ...usernameCheckLimiter, validate(schemas.usernameAvailable), controller.usernameAvailable);
 router.patch('/me/username', authLimiter, validate(schemas.changeUsername), ...controller.changeUsername);
+router.post('/me/plan', authLimiter, validate(schemas.choosePlan), ...controller.choosePlan);
 router.post(
   '/password-reset/request',
   authLimiter,
