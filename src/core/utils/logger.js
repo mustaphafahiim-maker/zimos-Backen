@@ -38,6 +38,15 @@ const REDACT_KEYS = new Set([
   'hmac',
   'signature',
   'credentials',
+  // Fawaterak (billing/fawaterak): OAuth fields as the API names them, and
+  // the webhook signatures and legacy key field.
+  'clientSecret',
+  'client_secret',
+  'access_token',
+  'refresh_token',
+  'hashKey',
+  'transactionHashKey',
+  'api_key',
 ]);
 
 function redact(meta) {
