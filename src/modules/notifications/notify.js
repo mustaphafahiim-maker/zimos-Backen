@@ -7,11 +7,14 @@ const emailTemplates = require('./emailTemplates');
 const brevoEmailProvider = require('./brevoEmailProvider');
 const twilioSmsProvider = require('./twilioSmsProvider');
 
-// Minimal SMS bodies. OTP flows pass { code }; anything else falls back to a
-// terse template-name + data dump so nothing sends blank.
+// Minimal SMS bodies. OTP flows pass { code } (and, for the sign-up code,
+// { minutes, locale }); anything else falls back to a terse template-name +
+// data dump so nothing sends blank.
 function smsBody(template, data = {}) {
   if (data.code) {
-    return `Your Zimos verification code is ${data.code}. It expires in 5 minutes.`;
+    const minutes = Number(data.minutes) || 5;
+    if (data.locale === 'ar') return `رمز التحقق في Zimos: ${data.code}. صالح لمدة ${minutes} دقائق.`;
+    return `Your Zimos verification code is ${data.code}. It expires in ${minutes} minutes.`;
   }
   const extra = Object.entries(data)
     .map(([k, v]) => `${k}: ${v}`)
@@ -28,6 +31,14 @@ function smsBody(template, data = {}) {
 // count — is recorded in notification_logs; a failed send never throws up
 // to the caller, so the triggering action still succeeds.
 
+// What the console provider logs. A one-time code is a credential: in
+// production it never reaches a log line (it may in development and tests,
+// where the console is the only inbox).
+function loggable(data) {
+  if (!env.isProduction || !data || typeof data !== 'object' || !('code' in data)) return data;
+  return { ...data, code: '[REDACTED]' };
+}
+
 async function persist({ workspaceId, channel, provider, recipient, template, status, error, attempts }) {
   await db.NotificationLog.create({ workspaceId, channel, provider, recipient, template, status, error, attempts });
 }
@@ -41,7 +52,7 @@ async function sendEmail({ recipient, template, data, workspaceId = null }) {
   let attempts = 1;
   try {
     if (provider === 'console') {
-      logger.info(`[notification:email] ${template} -> ${recipient} :: ${subject}`, { data });
+      logger.info(`[notification:email] ${template} -> ${recipient} :: ${subject}`, { data: loggable(data) });
     } else if (provider === 'brevo') {
       const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text });
       attempts = sent.attempts || attempts;
@@ -65,7 +76,8 @@ async function sendChannel(channel, provider, { recipient, template, data, works
   let attempts = 1;
   try {
     if (provider === 'console') {
-      logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data });
+      // WhatsApp is logged exactly as before.
+      logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: channel === 'whatsapp' ? data : loggable(data) });
     } else if (channel === 'sms' && provider === 'twilio') {
       const sent = await twilioSmsProvider.sendSms({ to: recipient, body: smsBody(template, data) });
       attempts = sent.attempts || attempts;

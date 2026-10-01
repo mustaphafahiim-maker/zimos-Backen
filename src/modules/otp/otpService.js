@@ -18,6 +18,13 @@ const MAX_ATTEMPTS = 5;
 const hashCode = (code) => crypto.createHash('sha256').update(String(code)).digest('hex');
 const generateCode = () => String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
 
+/** Two hex digests compared in constant time (false when either is malformed). */
+function sameDigest(a, b) {
+  const x = Buffer.from(String(a), 'hex');
+  const y = Buffer.from(String(b), 'hex');
+  return x.length > 0 && x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
 async function generateAndSendOtp(rawPhone, purpose) {
   const phone = normalizePhone(rawPhone);
   if (!phone) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
@@ -59,7 +66,7 @@ async function verifyOtp(rawPhone, purpose, code) {
     throw new AppError('EXPIRED', 'That code has expired — request a new one', 422);
   }
 
-  if (otp.codeHash !== hashCode(code)) {
+  if (!sameDigest(otp.codeHash, hashCode(code))) {
     await otp.increment('attempts');
     throw new AppError('INVALID_CODE', 'That code is not valid', 422);
   }
@@ -68,4 +75,12 @@ async function verifyOtp(rawPhone, purpose, code) {
   return { verified: true, phone };
 }
 
-module.exports = { generateAndSendOtp, verifyOtp, CODE_TTL_MS, MAX_ATTEMPTS, MAX_SENDS_PER_WINDOW };
+module.exports = {
+  generateAndSendOtp,
+  verifyOtp,
+  generateCode,
+  sameDigest,
+  CODE_TTL_MS,
+  MAX_ATTEMPTS,
+  MAX_SENDS_PER_WINDOW,
+};
