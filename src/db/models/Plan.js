@@ -9,7 +9,8 @@ module.exports = (sequelize, DataTypes) => {
       name: { type: DataTypes.STRING(150), allowNull: false },
       monthlyPriceAmount: { type: DataTypes.BIGINT, allowNull: false, field: 'monthly_price_amount' },
       yearlyPriceAmount: { type: DataTypes.BIGINT, allowNull: false, field: 'yearly_price_amount' },
-      currency: { type: DataTypes.STRING(3), allowNull: false, defaultValue: 'USD' },
+      // EGP unless the plan says otherwise (migration 128; it was USD).
+      currency: { type: DataTypes.STRING(3), allowNull: false, defaultValue: 'EGP' },
       trialDays: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 14, field: 'trial_days' },
       // Soft quotas — enforced as warnings/upsell prompts, never as an order-intake blocker.
       softOrderQuota: { type: DataTypes.INTEGER, allowNull: true, field: 'soft_order_quota' },
