@@ -11,8 +11,10 @@ module.exports = (sequelize, DataTypes) => {
       externalSubscriptionId: { type: DataTypes.STRING(200), allowNull: true, field: 'external_subscription_id' },
       externalProvider: { type: DataTypes.STRING(50), allowNull: true, field: 'external_provider' },
       billingCycle: { type: DataTypes.ENUM('monthly', 'yearly'), allowNull: false, defaultValue: 'monthly', field: 'billing_cycle' },
+      // 'draft' (migration 127): made while REQUIRE_SUBSCRIPTION_TO_GO_LIVE is
+      // on and not subscribed yet (workspaces/workspaceAccessService).
       status: {
-        type: DataTypes.ENUM('trialing', 'active', 'past_due', 'suspended', 'cancelled'),
+        type: DataTypes.ENUM('trialing', 'active', 'past_due', 'suspended', 'cancelled', 'draft'),
         allowNull: false,
         defaultValue: 'trialing',
       },

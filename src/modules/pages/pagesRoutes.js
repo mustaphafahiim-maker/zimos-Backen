@@ -6,6 +6,7 @@ const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
+const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const controller = require('./pagesController');
 const schemas = require('./pagesValidation');
 
@@ -25,10 +26,12 @@ router.patch('/:websiteId', validate(schemas.updateWebsite), requirePermission(P
 router.delete('/:websiteId', validate(schemas.websiteIdParam), requirePermission(PERMISSIONS.WEBSITE_EDIT), controller.deleteWebsite);
 
 // --- publish / revisions / rollback ---
+// A draft store (not subscribed yet) edits freely but cannot publish.
 router.post(
   '/:websiteId/publish',
   validate(schemas.publish),
   requirePermission(PERMISSIONS.WEBSITE_PUBLISH),
+  requireLive,
   controller.publishWebsite
 );
 router.get(
@@ -41,6 +44,7 @@ router.post(
   '/:websiteId/revisions/:revisionId/rollback',
   validate(schemas.rollback),
   requirePermission(PERMISSIONS.WEBSITE_PUBLISH),
+  requireLive,
   controller.rollback
 );
 
