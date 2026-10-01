@@ -100,6 +100,18 @@ async function payableNow(invoice, transaction) {
   };
 }
 
+/** `payableNow`'s shape for a price frozen at checkout (see settlePaid). */
+async function frozenPayable(frozen, transaction) {
+  const pricedWith = frozen.referralCodeId ? await db.ReferralCode.findByPk(frozen.referralCodeId, { transaction }) : null;
+  const usable = usableCode(pricedWith);
+  return {
+    discountAmount: Number(frozen.discountAmount),
+    amount: Number(frozen.amount),
+    referralCodeId: usable ? usable.id : null,
+    codeLapsed: Boolean(frozen.referralCodeId) && !usable,
+  };
+}
+
 /**
  * Prices the next period and writes it as a pending invoice. A subscription
  * already holding a pending invoice gets that one back (`created: false`):
@@ -109,9 +121,11 @@ async function payableNow(invoice, transaction) {
  * paid charge, or a special-terms free-months window — while that is still
  * running; otherwise it starts now. So comped months are never billed. A
  * special-terms price override prices the charge and uses up one of its
- * charges. With `req` (the console action), a created charge is audited.
+ * charges. With `req`, a created charge is audited: as a platform-level entry
+ * for the console's action, in the workspace when `byMerchant` (the merchant
+ * pressing Pay, see onlineBillingService).
  */
-async function createCharge(workspaceId, { now = new Date(), req = null } = {}) {
+async function createCharge(workspaceId, { now = new Date(), req = null, byMerchant = false } = {}) {
   return db.sequelize.transaction(async (transaction) => {
     const subscription = await db.Subscription.findOne({
       where: { workspaceId },
@@ -157,6 +171,7 @@ async function createCharge(workspaceId, { now = new Date(), req = null } = {}) 
     );
     if (req) {
       await recordAudit({
+        workspaceId: byMerchant ? workspaceId : null,
         actorUserId: req.user.id,
         action: 'billing_invoice.create',
         entityType: 'BillingInvoice',
@@ -198,17 +213,24 @@ function chargeAuditState(invoice) {
  *     and, for a manual one, who recorded it and when;
  *   - makes the subscription active for the invoice's period;
  *   - writes the commission ledger row if a usable code is still on it.
+ *
+ * `frozen` is an online payment's price, fixed when the merchant pressed Pay
+ * (onlineBillingService): { discountAmount, amount, referralCodeId }. The
+ * charge is settled at that price even if the code has lapsed since — the
+ * merchant paid what they were shown. Whether the code still earns a
+ * commission is judged now, as for any payment: a lapsed code keeps its
+ * discount on the charge but is taken off it and earns nothing.
  */
 async function settlePaid(
   invoice,
-  { paidAt, amountPaid, externalReference, note, recordedByUserId, source },
+  { paidAt, amountPaid, externalReference, note, recordedByUserId, source, frozen = null },
   transaction
 ) {
   const earlierPaid = await db.BillingInvoice.count({
     where: { subscriptionId: invoice.subscriptionId, status: 'paid' },
     transaction,
   });
-  const payable = await payableNow(invoice, transaction);
+  const payable = frozen ? await frozenPayable(frozen, transaction) : await payableNow(invoice, transaction);
 
   await invoice.update(
     {
@@ -591,6 +613,7 @@ module.exports = {
   priceCharge,
   payableNow,
   createCharge,
+  settlePaid,
   markChargePaid,
   recordManualPayment,
   reverseManualPayment,

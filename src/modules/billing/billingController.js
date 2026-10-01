@@ -4,6 +4,7 @@ const asyncHandler = require('express-async-handler');
 const { AppError } = require('../../core/errors/AppError');
 const service = require('./billingService');
 const { verifyGatewaySignature } = require('./gatewaySignature');
+const onlineBilling = require('./onlineBillingService');
 
 // POST /api/v1/billing/webhook  — no auth; identity comes from the signature.
 // Verified against req.rawBody (the exact bytes the gateway signed), never the
@@ -56,8 +57,23 @@ const setBillingCycle = asyncHandler(async (req, res) => {
   res.json({ billing: await service.getWorkspaceBilling(req.tenant.workspaceId), changed });
 });
 
+// POST /api/v1/workspaces/:workspaceId/billing/payments  — the Pay button.
+// 201 with a new checkout; 200 when a second press gets the same one back.
+const startOnlinePayment = asyncHandler(async (req, res) => {
+  const { payment, reused } = await onlineBilling.startPayment(req.tenant.workspaceId, req.body, req);
+  res.status(reused ? 200 : 201).json({ payment, reused });
+});
+
+// GET /api/v1/workspaces/:workspaceId/billing/payments/:paymentId  — where
+// Fawaterak sends the merchant back; asks Fawaterak while it is in progress.
+const getOnlinePayment = asyncHandler(async (req, res) => {
+  res.json(await onlineBilling.getPayment(req.tenant.workspaceId, req.params.paymentId));
+});
+
 module.exports = {
   webhook,
+  startOnlinePayment,
+  getOnlinePayment,
   runTrialCheck,
   adminWorkspaces,
   adminDashboard,
