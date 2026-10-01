@@ -121,6 +121,33 @@ describe('platform admin — plans', () => {
     expect(await db.Plan.findByPk(planId)).toBeNull();
   });
 
+  it('prices a new plan sent without a currency in EGP', async () => {
+    const { H } = await setupAdmin();
+
+    const created = await request(app).post('/api/v1/admin/plans').set(H).send(PLAN_BODY).expect(201);
+    expect(created.body.plan.currency).toBe('EGP');
+    expect((await db.Plan.findByPk(created.body.plan.id)).currency).toBe('EGP');
+  });
+
+  it('keeps a plan sent in USD in USD, also when an edit leaves the currency out', async () => {
+    const { H } = await setupAdmin();
+
+    const created = await request(app)
+      .post('/api/v1/admin/plans')
+      .set(H)
+      .send({ ...PLAN_BODY, currency: 'USD' })
+      .expect(201);
+    expect(created.body.plan.currency).toBe('USD');
+
+    const updated = await request(app)
+      .patch(`/api/v1/admin/plans/${created.body.plan.id}`)
+      .set(H)
+      .send({ ...PLAN_BODY, name: 'Scale Plus' })
+      .expect(200);
+    expect(updated.body.plan.currency).toBe('USD');
+    expect((await db.Plan.findByPk(created.body.plan.id)).currency).toBe('USD');
+  });
+
   it('refuses a duplicate plan code', async () => {
     const { H } = await setupAdmin();
     await request(app).post('/api/v1/admin/plans').set(H).send(PLAN_BODY);
