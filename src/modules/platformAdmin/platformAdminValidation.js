@@ -29,13 +29,30 @@ const planBody = Joi.object({
   // a client that sends it is not refused.
   yearlyPrice: Joi.number().integer().min(0).optional(),
   currency: Joi.string().uppercase().length(3).optional(),
-  trialDays: Joi.number().integer().min(0).max(365).required(),
+  // 0 = no free trial.
+  trialDays: Joi.number().integer().min(0).max(90).required().messages({
+    'number.max': 'A free trial can be at most 90 days',
+    'number.min': 'Trial days cannot be negative',
+  }),
   // null = unlimited.
   orderQuota: Joi.number().integer().min(0).allow(null).default(null),
   transactionFeeBp: Joi.number().integer().min(0).max(10000).default(0),
   codFeeBp: Joi.number().integer().min(0).max(10000).default(0),
   features: Joi.array().items(Joi.string().max(60)).default([]),
   active: Joi.boolean().default(true),
+  // Limits and visibility (migration 126). Each is optional with no default:
+  // left out, a plan being edited keeps what it has (a console from before
+  // these fields saves plans without them) and a new plan gets the column
+  // default. null = unlimited.
+  maxStores: Joi.number().integer().min(1).max(100000).allow(null).optional().messages({
+    'number.min': 'Max stores must be at least 1, or unlimited',
+  }),
+  maxFunnelsPerMonth: Joi.number().integer().min(0).max(100000).allow(null).optional().messages({
+    'number.min': 'Max funnels per month cannot be negative',
+  }),
+  // Shown on the marketing site and offered at sign-up.
+  isPublic: Joi.boolean().optional(),
+  displayOrder: Joi.number().integer().min(0).max(10000).optional(),
 });
 
 const flagBody = Joi.object({
@@ -256,7 +273,7 @@ module.exports = {
 
   listSubscriptions: {
     query: Joi.object({
-      status: Joi.string().valid('trialing', 'active', 'past_due', 'suspended', 'cancelled').optional(),
+      status: Joi.string().valid('trialing', 'active', 'past_due', 'suspended', 'cancelled', 'draft').optional(),
     }),
   },
 

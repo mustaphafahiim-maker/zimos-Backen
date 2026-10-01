@@ -109,6 +109,12 @@ const env = {
     // so the endpoint cannot be used to list who has an account.
     usernameCheckMinuteMax: parseInt(process.env.USERNAME_CHECK_RATE_LIMIT_PER_MINUTE || '20', 10),
     usernameCheckHourMax: parseInt(process.env.USERNAME_CHECK_RATE_LIMIT_PER_HOUR || '200', 10),
+    // The public plan list (GET /plans/public), per IP per minute.
+    publicPlansMinuteMax: parseInt(process.env.PUBLIC_PLANS_RATE_LIMIT_PER_MINUTE || '60', 10),
+    // Sign-up codes (POST /auth/verify/send and /confirm), per IP per minute —
+    // on top of the per-address and per-account limits kept in the database
+    // (otp/verificationCodeService).
+    verifyMinuteMax: parseInt(process.env.VERIFY_RATE_LIMIT_PER_MINUTE || '10', 10),
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is
@@ -263,6 +269,37 @@ const env = {
           : process.env.NODE_ENV === 'production'
             ? 'warn'
             : 'enforce',
+  },
+
+  // Sign-up and go-live rules (modules/auth/signupPolicy.js). Three switches,
+  // all off unless set to exactly "true"; off is the behaviour from before
+  // they existed, so they can be turned on one at a time after the dashboard
+  // that understands them is deployed, and turned off again to go back:
+  //   requirePlan          a plan (and the terms) must be chosen at sign-up,
+  //                        while at least one plan is public;
+  //   requireVerification  a new email/password account signs in only after
+  //                        a 6-digit code sent to its email or phone;
+  //   requireSubscription  a new store starts as a draft: it can be built but
+  //                        not published or sell until a trial or a paid
+  //                        subscription starts.
+  // Under NODE_ENV=test they start off whatever the .env says; a test that
+  // needs one sets it on this object at runtime.
+  signup: {
+    requirePlan: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_PLAN_AT_SIGNUP === 'true',
+    requireVerification: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_SIGNUP_VERIFICATION === 'true',
+    requireSubscription: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_SUBSCRIPTION_TO_GO_LIVE === 'true',
+    // Draft stores one person may hold while none of their stores is live.
+    draftStoresPerUser: Math.max(1, parseInt(process.env.DRAFT_STORES_PER_USER || '1', 10) || 1),
+    // Country calling codes a verification SMS may go to (digits, no "+").
+    // Anything else is refused, so the SMS channel can't be pointed at premium
+    // numbers abroad. Unset: Egypt only.
+    smsCountryCodes: csvList(process.env.VERIFICATION_SMS_COUNTRY_CODES, '20').map((c) => c.replace(/^\+/, '')),
+    // How a merchant pays while there is no gateway, shown next to the
+    // subscribe button. Plain text; empty hides the block.
+    paymentInstructions: {
+      ar: (process.env.PAYMENT_INSTRUCTIONS_AR || '').trim(),
+      en: (process.env.PAYMENT_INSTRUCTIONS_EN || '').trim(),
+    },
   },
 
   // COD confirmation queue. A claim locks a task to one agent for this long;

@@ -9,6 +9,10 @@ const charges = require('./subscriptionChargeService');
 const { yearlyPriceFor, planPrice } = require('./planPricing');
 const env = require('../../config/env');
 const access = require('../workspaces/workspaceAccessService');
+const goLive = require('./goLiveService');
+const entitlements = require('./entitlementsService');
+
+const { planFeatureKeys, featureDefinition } = require('./featureCatalog');
 
 const Op = db.Sequelize.Op;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -77,6 +81,11 @@ const DEFAULT_PLANS = [
   // The annual price is always derived (billing/planPricing).
 ].map((p) => ({ ...p, yearlyPriceAmount: yearlyPriceFor(p.monthlyPriceAmount) }));
 
+/** The catalogue keys a plan lists (anything else in plans.features is dropped). */
+function publicFeatureKeys(features) {
+  return planFeatureKeys(features).filter((key) => featureDefinition(key));
+}
+
 /** Idempotently create the default plan set. Safe to call repeatedly. */
 async function seedDefaultPlans() {
   for (const p of DEFAULT_PLANS) {
@@ -95,26 +104,38 @@ async function defaultPlan(transaction) {
 }
 
 /**
- * Called inside the workspace-creation transaction. Creates a `trialing`
- * subscription — no card, no gateway call. Tolerates there being no plans yet
- * (planId stays null, 14-day fallback trial).
+ * Called inside the workspace-creation transaction. `plan` is the plan chosen
+ * for the store (workspaceService works it out); without one it is the
+ * cheapest active plan, as before plans could be chosen. Tolerates there
+ * being no plans yet (planId stays null, 14-day fallback trial).
+ *
+ * Flag off (REQUIRE_SUBSCRIPTION_TO_GO_LIVE): a `trialing` subscription from
+ * now, as always — no card, no gateway call. The trial is noted against the
+ * owner (plan_trials), which only matters if the flag is turned on later.
+ *
+ * Flag on: a `draft`. It can be built but not published until a trial or a
+ * paid subscription starts (billing/goLiveService). Its period is a
+ * placeholder the draft never reads: the trial the store would have had
+ * without the flag, so that turning the flag off again leaves it exactly as
+ * it would have been (workspaceAccessService reads a draft as trialing then).
  */
-async function ensureSubscriptionForWorkspace(workspaceId, transaction) {
+async function ensureSubscriptionForWorkspace(workspaceId, transaction, { plan: chosenPlan, billingCycle = 'monthly', ownerUserId } = {}) {
   const existing = await db.Subscription.findOne({ where: { workspaceId }, transaction });
   if (existing) return existing;
 
-  const plan = await defaultPlan(transaction);
+  const plan = chosenPlan || (await defaultPlan(transaction));
   const trialDays = plan ? plan.trialDays : 14;
   const now = new Date();
   const end = new Date(now.getTime() + trialDays * DAY_MS);
+  const draft = env.signup.requireSubscription === true;
 
-  return db.Subscription.create(
+  const subscription = await db.Subscription.create(
     {
       workspaceId,
       planId: plan ? plan.id : null,
-      billingCycle: 'monthly',
-      status: 'trialing',
-      trialEndsAt: end,
+      billingCycle,
+      status: draft ? 'draft' : 'trialing',
+      trialEndsAt: draft ? null : end,
       currentPeriodStart: now,
       currentPeriodEnd: end,
       externalProvider: null,
@@ -122,6 +143,10 @@ async function ensureSubscriptionForWorkspace(workspaceId, transaction) {
     },
     { transaction }
   );
+  if (!draft && plan && trialDays > 0 && ownerUserId) {
+    await goLive.recordTrial({ userId: ownerUserId, planId: plan.id, workspaceId, source: 'store_created', startedAt: now }, transaction);
+  }
+  return subscription;
 }
 
 /** Map a (already signature-verified) gateway webhook event onto a subscription. */
@@ -276,8 +301,10 @@ async function attachReferralCode(workspaceId, input, req) {
 
 /**
  * The merchant's billing summary: plan and status, the attached referral
- * code (the discount only — never the agent or the code's label) and a
- * preview of the next charge, priced by the same function as the real one.
+ * code (the discount only — never the agent or the code's label), a preview
+ * of the next charge priced by the same function as the real one, the plan's
+ * limits and what the store has used of them, and — for a draft — what it
+ * takes to go live (the trial, how to pay by hand).
  */
 async function getWorkspaceBilling(workspaceId) {
   const subscription = await db.Subscription.findOne({
@@ -296,6 +323,9 @@ async function getWorkspaceBilling(workspaceId) {
     nextCharge = pricing;
   }
 
+  const draft = access.isDraftSubscription(subscription);
+  const details = draft ? await goLive.draftDetails(workspaceId) : null;
+
   return {
     subscription: {
       status: subscription.status,
@@ -310,6 +340,11 @@ async function getWorkspaceBilling(workspaceId) {
             currency: plan.currency,
             monthlyPrice: planPrice(plan, 'monthly'),
             yearlyPrice: planPrice(plan, 'yearly'),
+            trialDays: plan.trialDays,
+            maxStores: plan.maxStores,
+            maxFunnelsPerMonth: plan.maxFunnelsPerMonth,
+            softOrderQuota: plan.softOrderQuota,
+            features: publicFeatureKeys(plan.features),
           }
         : null,
     },
@@ -322,7 +357,18 @@ async function getWorkspaceBilling(workspaceId) {
     nextCharge,
     // The store's features: its plan's, with any override a platform admin
     // set for it (billing/entitlementsService — the one place they are worked out).
-    features: await require('./entitlementsService').effectiveFeatures(workspaceId),
+    features: await entitlements.effectiveFeatures(workspaceId),
+    trialEndsAt: subscription.trialEndsAt,
+    limits: await entitlements.getLimits(workspaceId),
+    draft,
+    // Only while a draft: its trial, and how to pay by hand.
+    goLive: draft
+      ? {
+          trial: details.trial,
+          free: details.free,
+          paymentInstructions: goLive.paymentInstructions(),
+        }
+      : null,
   };
 }
 
@@ -370,6 +416,8 @@ async function listWorkspacesOverview() {
       suspended: w.status === 'suspended',
       suspendedAt: w.suspendedAt,
       billingPhase: lifecycle.phase,
+      // Made while REQUIRE_SUBSCRIPTION_TO_GO_LIVE was on and not subscribed yet.
+      draft: access.isDraftSubscription(sub),
       restricted: w.status === 'suspended' || (lifecycle.restricted && env.billing.restrictions === 'enforce'),
       owner: w.owner
         ? { id: w.owner.id, username: w.owner.username, fullName: w.owner.fullName, email: w.owner.email }
@@ -382,6 +430,8 @@ async function listWorkspacesOverview() {
 }
 
 module.exports = {
+  publicFeatureKeys,
+  defaultPlan,
   EVENT_STATUS_MAP,
   INVOICE_EVENTS,
   seedDefaultPlans,

@@ -5,6 +5,7 @@ const db = require('../../db/models');
 const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { planPrice, yearlyPriceFor } = require('../billing/planPricing');
+const publicPlans = require('../billing/publicPlansService');
 
 /**
  * Every write below is audited as a platform-level entry: workspace_id NULL,
@@ -57,6 +58,12 @@ function serializePlan(p) {
     codFeeBp: p.codFeeBp,
     features: featureList(p.features),
     active: p.isActive,
+    // Limits (null = unlimited), checked when a store or funnel is created.
+    maxStores: p.maxStores,
+    maxFunnelsPerMonth: p.maxFunnelsPerMonth,
+    // On the marketing site and at sign-up, in this order.
+    isPublic: p.isPublic,
+    displayOrder: p.displayOrder,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   };
@@ -189,8 +196,15 @@ async function savePlan(input, req) {
     isActive: input.active,
   };
   if (input.currency) fields.currency = input.currency;
+  // Sent: written (null clears a limit). Left out: kept as it is.
+  if (input.maxStores !== undefined) fields.maxStores = input.maxStores;
+  if (input.maxFunnelsPerMonth !== undefined) fields.maxFunnelsPerMonth = input.maxFunnelsPerMonth;
+  if (input.isPublic !== undefined) fields.isPublic = input.isPublic;
+  if (input.displayOrder !== undefined) fields.displayOrder = input.displayOrder;
 
-  return db.sequelize.transaction(async (transaction) => {
+  // New limits apply from the next store or funnel created; nothing that
+  // exists is touched. The public list drops its cached copy either way.
+  const saved = await db.sequelize.transaction(async (transaction) => {
     // `key` is unique — check first so a duplicate reads as a 409 with a useful
     // message instead of a raw constraint violation.
     const clash = await db.Plan.findOne({ where: { key: fields.key }, transaction });
@@ -211,6 +225,8 @@ async function savePlan(input, req) {
     await audit(req, { action: 'plan.create', entityType: 'Plan', entityId: created.id, after: auditState(created) }, transaction);
     return created;
   });
+  publicPlans.invalidate();
+  return saved;
 }
 
 async function deletePlan(planId, req) {
@@ -231,7 +247,7 @@ async function deletePlan(planId, req) {
     await plan.destroy({ transaction });
     await audit(req, { action: 'plan.delete', entityType: 'Plan', entityId: planId, before }, transaction);
     return { success: true };
-  });
+  }).finally(() => publicPlans.invalidate());
 }
 
 // -------------------------------------------------------------- subscriptions

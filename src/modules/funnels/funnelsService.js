@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { NotFoundError, ConflictError, ValidationError, AppError } = require('../../core/errors/AppError');
@@ -18,6 +19,7 @@ const {
 const { conditionProblem, pickNextEdge } = require('./funnelRouting');
 const { assertBumpOfferUsable, bumpProblem, presentBump } = require('../checkout/orderBump');
 const funnelOfferMerge = require('./funnelOfferMerge');
+const entitlements = require('../billing/entitlementsService');
 
 const Op = db.Sequelize.Op;
 
@@ -117,19 +119,31 @@ function toSnapshotEdges(edgeRows) {
 
 // --- funnels -----------------------------------------------------------
 
+/**
+ * A new funnel counts against the plan's funnels a month
+ * (billing/entitlementsService.recordFunnelCreation), in the same
+ * transaction as its insert: refused with 403 PLAN_LIMIT_REACHED past the
+ * limit, and recorded for good otherwise — deleting it later does not give
+ * the month's allowance back.
+ */
 async function createFunnel(workspaceId, data, req) {
   const subdomain = await ensureUniqueSubdomain(data.subdomain || data.name);
-  const funnel = await scoped(db.Funnel, workspaceId).create({ name: data.name, subdomain, status: 'draft' });
-  await recordAudit({
-    workspaceId,
-    actorUserId: req.user.id,
-    action: 'funnel.create',
-    entityType: 'Funnel',
-    entityId: funnel.id,
-    after: funnel.toJSON(),
-    req,
+  return db.sequelize.transaction(async (t) => {
+    const id = crypto.randomUUID();
+    await entitlements.recordFunnelCreation(workspaceId, id, 'create', { transaction: t });
+    const funnel = await scoped(db.Funnel, workspaceId).create({ id, name: data.name, subdomain, status: 'draft' }, { transaction: t });
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'funnel.create',
+      entityType: 'Funnel',
+      entityId: funnel.id,
+      after: funnel.toJSON(),
+      req,
+      transaction: t,
+    });
+    return funnel;
   });
-  return funnel;
 }
 
 async function listFunnels(workspaceId) {
@@ -205,8 +219,11 @@ async function duplicateFunnel(workspaceId, funnelId, data, req) {
       transaction: t,
     });
 
+    // A copy is a new funnel: it counts against the plan's funnels a month.
+    const id = crypto.randomUUID();
+    await entitlements.recordFunnelCreation(workspaceId, id, 'duplicate', { transaction: t });
     const funnel = await scoped(db.Funnel, workspaceId).create(
-      { name, subdomain, status: 'draft', publishedRevisionId: null },
+      { id, name, subdomain, status: 'draft', publishedRevisionId: null },
       { transaction: t }
     );
 

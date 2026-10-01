@@ -394,6 +394,28 @@ const usernameCheckLimiter = createUsernameCheckLimiter({
 });
 
 /*
+ * Two public, per-IP buckets of one minute each: the plan list the marketing
+ * site and the sign-up form read (GET /plans/public), and the sign-up code
+ * endpoints (POST /auth/verify/send, /auth/verify/confirm), whose real limits
+ * — per address, per account, per IP per hour and day — are counted in the
+ * database by otp/verificationCodeService so they hold across instances.
+ */
+function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}) {
+  return rateLimit({
+    windowMs: 60 * 1000,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`,
+    handler,
+  });
+}
+
+const publicPlansLimiter = createIpMinuteLimiter('public-plans', env.rateLimit.publicPlansMinuteMax, { skip });
+const verifyCodeLimiter = createIpMinuteLimiter('verify-code', env.rateLimit.verifyMinuteMax, { skip });
+
+/*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
  * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
  * put all merchants in one bucket; each merchant's webhook token gets its own.
@@ -462,4 +484,7 @@ module.exports = {
   createUploadLimiter,
   usernameCheckLimiter,
   createUsernameCheckLimiter,
+  publicPlansLimiter,
+  verifyCodeLimiter,
+  createIpMinuteLimiter,
 };

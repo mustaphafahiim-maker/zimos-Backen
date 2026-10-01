@@ -36,6 +36,7 @@ const funnelsPublicRoutes = require('./modules/funnels/funnelsPublicRoutes');
 const quickstartRoutes = require('./modules/quickstart/quickstartRoutes');
 const quickstartPublicRoutes = require('./modules/quickstart/quickstartPublicRoutes');
 const billingRoutes = require('./modules/billing/billingRoutes');
+const publicPlansRoutes = require('./modules/billing/publicPlansRoutes');
 const workspaceBillingRoutes = require('./modules/billing/workspaceBillingRoutes');
 const adminRoutes = require('./modules/billing/adminRoutes');
 const platformAdminRoutes = require('./modules/platformAdmin/platformAdminRoutes');
@@ -157,6 +158,8 @@ v1.use('/workspaces/:workspaceId/carriers', carrierRoutes);
 v1.use('/workspaces/:workspaceId/payments', onlinePaymentRoutes);
 v1.use('/workspaces/:workspaceId/analytics', analyticsRoutes);
 v1.use('/billing', billingRoutes);
+// The plans on offer — public, for the marketing site and the sign-up form.
+v1.use('/plans', publicPlansRoutes);
 // Courier status webhooks — public; the token in the path is the identity.
 v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
