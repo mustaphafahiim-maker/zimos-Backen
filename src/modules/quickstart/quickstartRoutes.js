@@ -26,11 +26,13 @@ router.get('/', validate(schemas.workspaceParam), requirePermission(PERMISSIONS.
 
 // Add another product (regenerates + republishes the store page). Creates a
 // product, so it sits behind the same creation lock as the catalog; publishes,
-// so a draft store cannot use it (the catalog adds products without publishing).
+// so a draft store cannot use it (the catalog adds products without publishing),
+// and an account whose email isn't confirmed is asked for its code on the form.
 router.post(
   '/',
-  validate(schemas.provision),
   requirePermission(PERMISSIONS.WEBSITE_PUBLISH),
+  controller.confirmBeforePublish,
+  validate(schemas.provision),
   requireCreationAllowed,
   requireLive,
   controller.submitForm
