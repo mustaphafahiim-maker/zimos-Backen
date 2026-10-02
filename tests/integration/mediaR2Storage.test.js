@@ -10,6 +10,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
   PutObjectCommand: jest.fn((input) => ({ __input: input })),
 }));
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -123,12 +124,20 @@ describe('media upload — R2 backend', () => {
 
 // Resolve env.storage in a clean child process, as a non-test (deploy) env —
 // dotenv reads the real .env but our explicit vars win (override is off).
+// The suite's test-only JWT secret is refused outside NODE_ENV=test, so the
+// child gets a random one.
 function resolveStorage(overrides) {
   const script =
     "const s = require('./src/config/env').storage; process.stdout.write('@@' + JSON.stringify({ provider: s.provider, publicUrl: s.r2.publicUrl }))";
   const out = execFileSync(process.execPath, ['-e', script], {
     cwd: path.resolve(__dirname, '../..'),
-    env: { ...process.env, NODE_ENV: 'production', DATABASE_URL: '', ...overrides },
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      DATABASE_URL: '',
+      JWT_ACCESS_SECRET: crypto.randomBytes(32).toString('hex'),
+      ...overrides,
+    },
   }).toString();
   return JSON.parse(out.slice(out.lastIndexOf('@@') + 2));
 }
