@@ -141,6 +141,11 @@ const env = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     authMax: parseInt(process.env.AUTH_RATE_LIMIT_MAX || '10', 10),
+    // Sign-in, sign-up, password reset and resend-verification, per IP alone,
+    // on top of authLimiter (whose key includes the email the caller sends,
+    // so a new email meant a new allowance). Sign-in counts failed attempts only.
+    authIpMax: parseInt(process.env.AUTH_IP_RATE_LIMIT_MAX || '50', 10),
+    authIpWindowMs: parseInt(process.env.AUTH_IP_RATE_LIMIT_WINDOW_MS || String(15 * 60 * 1000), 10),
     // Public storefront API only (see core/middleware/rateLimiters.js). Each
     // shopper still gets `max`; these are the ceilings per connecting IP — for
     // everyone sharing one IP (NAT, rotating cart tokens), and for our own

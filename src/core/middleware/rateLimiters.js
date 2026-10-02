@@ -437,6 +437,35 @@ function createPasswordResetLimiter({ hourMax, skip: skipAll = () => false }) {
 const passwordResetLimiter = createPasswordResetLimiter({ hourMax: env.rateLimit.passwordResetHourMax, skip });
 
 /*
+ * The second limit on the account endpoints, keyed on the IP alone. On top of
+ * authLimiter, not instead of it: authLimiter's key includes the email the
+ * caller sends, so a new email on each request meant a new allowance and only
+ * the general limit was left. Two counters per IP:
+ *   loginIpLimiter  POST /auth/login, failed attempts only
+ *                   (skipSuccessfulRequests: a sign-in that works, or that
+ *                   answers with a code step, isn't counted);
+ *   authIpLimiter   sign-up, password-reset request and resend-verification,
+ *                   every request.
+ * Everyone behind one IP (an office, a mobile carrier's NAT) shares them.
+ */
+function createAuthIpLimiter({ windowMs, max, failedOnly = false, prefix, skip: skipAll = () => false }) {
+  return rateLimit({
+    windowMs,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: failedOnly,
+    skip: skipAll,
+    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`,
+    handler,
+  });
+}
+
+const authIpOptions = { windowMs: env.rateLimit.authIpWindowMs, max: env.rateLimit.authIpMax, skip };
+const loginIpLimiter = createAuthIpLimiter({ ...authIpOptions, failedOnly: true, prefix: 'login-ip' });
+const authIpLimiter = createAuthIpLimiter({ ...authIpOptions, prefix: 'auth-ip' });
+
+/*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
  * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
  * put all merchants in one bucket; each merchant's webhook token gets its own.
@@ -510,4 +539,7 @@ module.exports = {
   createIpMinuteLimiter,
   passwordResetLimiter,
   createPasswordResetLimiter,
+  loginIpLimiter,
+  authIpLimiter,
+  createAuthIpLimiter,
 };
