@@ -44,10 +44,7 @@ const { verifyWebhook } = require('./fawaterak/signature');
 
 const PROVIDER = 'fawaterak';
 const ONLINE_CURRENCY = 'EGP';
-// A checkout is being made or can still be paid; one per charge at a time.
-const IN_PROGRESS = ['created', 'open', 'pending'];
-// Final: nothing changes these again.
-const SETTLED = ['paid', 'paid_duplicate', 'mismatch'];
+const { IN_PROGRESS, SETTLED } = db.BillingPaymentAttempt;
 // A second press within this window gets the same checkout back.
 const REPRESS_WINDOW_MS = 60 * 1000;
 // Used when createTransaction gives no expires_in (its own default due date).
@@ -631,6 +628,96 @@ async function onlinePaymentSummary(workspaceId, plan) {
   };
 }
 
+// ------------------------------------------------------------------ sweep
+//
+// For when a webhook never came, or came while Fawaterak couldn't be asked
+// (scripts/sweep-billing-payments.js, a cron service):
+//
+//   1. events     verified webhooks whose processing failed are processed again
+//   2. stuck      an attempt left 'created' (the process died while asking for
+//                 a checkout) becomes 'error': no one ever got its link
+//   3. ask        every attempt that could still be paid — in progress,
+//                 superseded, failed or expired, with a checkout link that
+//                 hasn't been expired for more than a day — is asked about,
+//                 often while young and less often as it ages; an unpaid one
+//                 past its link's expiry becomes 'expired'
+//
+// All of it goes through confirmAttempt / settleConfirmed, so a sweep racing
+// a webhook settles once.
+
+const EVENT_RETRY_AFTER_MS = 60 * 1000;
+const CREATED_STUCK_MS = 5 * 60 * 1000;
+// A younger attempt is left to its webhook.
+const LEAVE_TO_WEBHOOK_MS = 3 * 60 * 1000;
+const ASK_AFTER_EXPIRY_MS = 24 * 60 * 60 * 1000;
+const ASKED = ['open', 'pending', 'superseded', 'failed', 'expired'];
+
+/** How long to wait between two questions about an attempt this old. */
+function askEvery(ageMs) {
+  if (ageMs < 60 * 60 * 1000) return 5 * 60 * 1000;
+  if (ageMs < 24 * 60 * 60 * 1000) return 60 * 60 * 1000;
+  return 12 * 60 * 60 * 1000;
+}
+
+async function sweep({ limit = 50, at = now() } = {}) {
+  if (!fawaterakConfig.readyConfig()) return { skipped: 'not_configured' };
+  const { Op } = db.Sequelize;
+  const result = { events: 0, stuck: 0, asked: 0, settled: 0, expired: 0, errors: 0 };
+
+  const events = await db.BillingGatewayEvent.findAll({
+    where: {
+      processedAt: null,
+      attempts: { [Op.lt]: MAX_EVENT_TRIES },
+      createdAt: { [Op.lt]: new Date(at.getTime() - EVENT_RETRY_AFTER_MS) },
+    },
+    order: [['createdAt', 'ASC']],
+    limit,
+  });
+  for (const event of events) {
+    const { outcome } = await processEvent(event);
+    result.events += 1;
+    if (outcome === 'deferred') result.errors += 1;
+  }
+
+  [result.stuck] = await db.BillingPaymentAttempt.update(
+    { status: 'error', failureReason: 'The checkout was never received from Fawaterak.' },
+    { where: { status: 'created', createdAt: { [Op.lt]: new Date(at.getTime() - CREATED_STUCK_MS) } } }
+  );
+
+  const candidates = await db.BillingPaymentAttempt.findAll({
+    where: {
+      status: ASKED,
+      providerIntentKey: { [Op.ne]: null },
+      createdAt: { [Op.lt]: new Date(at.getTime() - LEAVE_TO_WEBHOOK_MS) },
+      [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: new Date(at.getTime() - ASK_AFTER_EXPIRY_MS) } }],
+    },
+    order: db.sequelize.literal('last_checked_at ASC NULLS FIRST'),
+    limit: limit * 5,
+  });
+  const due = candidates
+    .filter((a) => {
+      if (!a.lastCheckedAt) return true;
+      const age = at.getTime() - new Date(a.createdAt).getTime();
+      return at.getTime() - new Date(a.lastCheckedAt).getTime() >= askEvery(age);
+    })
+    .slice(0, limit);
+
+  for (const attempt of due) {
+    try {
+      const { outcome } = await confirmAttempt(attempt, { retry: true, source: 'sweep' });
+      result.asked += 1;
+      if (outcome === 'paid') result.settled += 1;
+      if (outcome === 'not_paid' && attempt.expiresAt && new Date(attempt.expiresAt) < at) {
+        if (await markNotPaid(attempt, 'expired', 'The checkout link expired unpaid.')) result.expired += 1;
+      }
+    } catch (err) {
+      result.errors += 1;
+      logger.warn(`billing payment attempt ${attempt.id}: the sweep could not ask Fawaterak: ${reasonOf(err)}`);
+    }
+  }
+  return result;
+}
+
 module.exports = {
   PROVIDER,
   ONLINE_CURRENCY,
@@ -640,6 +727,7 @@ module.exports = {
   confirmAttempt,
   receiveWebhook,
   processEvent,
+  sweep,
   getPayment,
   onlinePaymentSummary,
   serializeForMerchant,

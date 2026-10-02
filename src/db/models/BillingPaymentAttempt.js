@@ -42,6 +42,12 @@ module.exports = (sequelize, DataTypes) => {
     },
     { tableName: 'billing_payment_attempts' }
   );
+  // A checkout being made or still payable; one per charge at a time
+  // (billing_payment_attempts_one_in_progress_idx).
+  BillingPaymentAttempt.IN_PROGRESS = ['created', 'open', 'pending'];
+  // Final: nothing changes these again.
+  BillingPaymentAttempt.SETTLED = ['paid', 'paid_duplicate', 'mismatch'];
+
   BillingPaymentAttempt.associate = (models) => {
     BillingPaymentAttempt.belongsTo(models.BillingInvoice, { foreignKey: 'billingInvoiceId', as: 'invoice' });
     BillingPaymentAttempt.belongsTo(models.User, { foreignKey: 'createdByUserId', as: 'createdBy' });

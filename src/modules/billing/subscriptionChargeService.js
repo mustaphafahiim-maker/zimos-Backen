@@ -318,6 +318,11 @@ async function markChargePaid(invoiceId, { paidAt = new Date(), externalReferenc
  * way. Unlike the webhook it is not idempotent — paying a paid charge again is
  * a 409, because a person doing it twice is a mistake worth telling them
  * about. Audited as a platform-level entry.
+ *
+ * An online checkout still open for the charge (onlineBillingService) is
+ * superseded, so the merchant is no longer offered it. Fawaterak has no way
+ * to cancel the link itself: if it is paid anyway, that payment is caught as
+ * a duplicate and settles nothing.
  */
 async function recordManualPayment(invoiceId, { amountReceived, note, paidAt }, req) {
   return db.sequelize.transaction(async (transaction) => {
@@ -327,6 +332,10 @@ async function recordManualPayment(invoiceId, { amountReceived, note, paidAt }, 
       throw new ConflictError('This charge is already paid.', 'CHARGE_ALREADY_PAID');
     }
 
+    const [onlinePaymentsSuperseded] = await db.BillingPaymentAttempt.update(
+      { status: 'superseded' },
+      { where: { billingInvoiceId: invoice.id, status: db.BillingPaymentAttempt.IN_PROGRESS }, transaction }
+    );
     const before = chargeAuditState(invoice);
     const { commission, codeLapsed } = await settlePaid(
       invoice,
@@ -350,6 +359,7 @@ async function recordManualPayment(invoiceId, { amountReceived, note, paidAt }, 
         workspaceId: invoice.workspaceId,
         commissionId: commission ? commission.id : null,
         referralCodeLapsed: codeLapsed,
+        onlinePaymentsSuperseded,
       },
       req,
       transaction,
@@ -482,9 +492,45 @@ const CHARGE_INCLUDE = [
   { model: db.ReferralCode, as: 'referralCode', attributes: ['id', 'code'] },
   { model: db.User, as: 'recordedBy', attributes: ['id', 'fullName'] },
   { model: db.AgentCommission, as: 'commission', attributes: ['id', 'suggestedCommission', 'payoutStatus'] },
+  {
+    model: db.BillingPaymentAttempt,
+    as: 'onlinePayments',
+    include: [{ model: db.BillingGatewayEvent, as: 'events', where: { kind: 'refund' }, required: false }],
+  },
 ];
 
+/** An online checkout of the charge (onlineBillingService), for the console. */
+function serializeOnlinePayment(attempt) {
+  return {
+    id: attempt.id,
+    provider: attempt.provider,
+    // created | open | pending | paid | paid_duplicate | mismatch | failed |
+    // expired | superseded | error. paid_duplicate is money to refund by
+    // hand; mismatch is a payment that settled nothing, to decide on.
+    status: attempt.status,
+    amount: Number(attempt.amount),
+    currency: attempt.currency,
+    verifiedAmount: attempt.verifiedAmount == null ? null : Number(attempt.verifiedAmount),
+    verifiedCurrency: attempt.verifiedCurrency,
+    providerTransactionId: attempt.providerTransactionId == null ? null : Number(attempt.providerTransactionId),
+    paymentMethod: attempt.paymentMethod,
+    referenceNumber: attempt.referenceNumber,
+    failureReason: attempt.failureReason,
+    createdAt: attempt.createdAt,
+    paidAt: attempt.paidAt,
+    expiresAt: attempt.expiresAt,
+    // Refunds Fawaterak reported as approved; nothing was changed for them.
+    refundsReported: (attempt.events || []).map((e) => ({
+      amount: e.payload.amount === undefined ? null : String(e.payload.amount),
+      currency: e.payload.currency || null,
+      approvedAt: e.payload.approvedAt || null,
+      reportedAt: e.createdAt,
+    })),
+  };
+}
+
 function serializeCharge(invoice, payable = null) {
+  const online = [...(invoice.onlinePayments || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return {
     id: invoice.id,
     status: invoice.status,
@@ -524,6 +570,10 @@ function serializeCharge(invoice, payable = null) {
           codeLapsed: payable.codeLapsed,
         }
       : null,
+    // Online checkouts, newest first. While one is in progress the merchant
+    // may be paying it: recording a payment by hand supersedes it.
+    onlinePayments: online.map(serializeOnlinePayment),
+    onlinePaymentInProgress: online.some((a) => db.BillingPaymentAttempt.IN_PROGRESS.includes(a.status)),
     createdAt: invoice.createdAt,
   };
 }
