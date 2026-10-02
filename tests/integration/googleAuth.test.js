@@ -83,11 +83,13 @@ describe('Google OAuth login', () => {
     expect(all[0].id).toBe(first.id);
   });
 
-  it('Google login with an email matching an existing password account links instead of duplicating', async () => {
+  it('Google login with an email matching an existing confirmed password account links instead of duplicating', async () => {
     const reg = await request(app)
       .post('/api/v1/auth/register')
       .send({ email: 'existing@example.com', password: 'Passw0rd!123', fullName: 'Existing User' });
     expect(reg.status).toBe(201);
+    // Its owner confirmed the email: the password is theirs and stays.
+    await db.User.update({ emailVerifiedAt: new Date() }, { where: { email: 'existing@example.com' } });
 
     const before = await db.User.findOne({ where: { email: 'existing@example.com' } });
     expect(before.googleId).toBeNull();
@@ -109,6 +111,47 @@ describe('Google OAuth login', () => {
     expect(after[0].id).toBe(before.id);
     expect(after[0].googleId).toBe('g-3003');
     expect(after[0].passwordHash).toBe(before.passwordHash); // password still there — both methods now work
+  });
+
+  it('Google login on an unconfirmed password account with that email takes it over: no password, no old sessions', async () => {
+    // Anyone can sign up with an address they don't own; it stays unconfirmed.
+    const reg = await request(app)
+      .post('/api/v1/auth/register')
+      .send({ email: 'squatted@example.com', password: 'Passw0rd!123', fullName: 'Not The Owner' });
+    expect(reg.status).toBe(201);
+    const before = await db.User.findOne({ where: { email: 'squatted@example.com' } });
+    expect(before.emailVerifiedAt).toBeNull();
+    expect(before.phoneVerifiedAt).toBeNull();
+
+    // The address's owner signs in with Google.
+    googleClient.fetchProfile.mockResolvedValueOnce({
+      googleId: 'g-5005',
+      email: 'squatted@example.com',
+      emailVerified: true,
+      fullName: 'The Owner',
+    });
+    const res = await callback('code=takeover-code');
+    expect(res.status).toBe(302);
+    const q = query(res.headers.location);
+
+    const after = await db.User.findByPk(before.id);
+    expect(after.googleId).toBe('g-5005');
+    expect(after.passwordHash).toBeNull();
+    expect(after.emailVerifiedAt).not.toBeNull();
+    expect(await db.Session.count({ where: { userId: before.id, revokedAt: null } })).toBe(1); // the Google one
+
+    const audit = await db.AuditLog.findOne({ where: { action: 'user.link.google', entityId: before.id } });
+    expect(audit.metadata).toEqual({ unconfirmedAccount: true, passwordRemoved: true, sessionsRevoked: 1 });
+
+    // The owner's Google session works.
+    expect((await request(app).get('/api/v1/workspaces').set('Authorization', `Bearer ${q.accessToken}`)).status).toBe(200);
+
+    // The old password and the old refresh token don't.
+    const oldPassword = await request(app).post('/api/v1/auth/login').send({ identifier: 'squatted@example.com', password: 'Passw0rd!123' });
+    expect(oldPassword.status).toBe(401);
+    expect(oldPassword.body.error.code).toBe('INVALID_CREDENTIALS');
+    const oldRefresh = await request(app).post('/api/v1/auth/refresh').send({ refreshToken: reg.body.refreshToken });
+    expect(oldRefresh.status).toBe(401);
   });
 
   it('Google login on a pending_verification password account activates it and its tokens reach protected routes', async () => {
@@ -149,6 +192,8 @@ describe('Google OAuth login', () => {
     expect(after[0].googleId).toBe('g-4004');
     expect(after[0].status).toBe('active');
     expect(after[0].emailVerifiedAt).not.toBeNull();
+    // Never confirmed, so it may not have been the Google owner's: the password goes.
+    expect(after[0].passwordHash).toBeNull();
 
     // And the tokens from that Google login can immediately hit a protected route.
     const ws = await request(app)

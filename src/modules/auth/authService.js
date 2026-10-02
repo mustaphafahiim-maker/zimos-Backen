@@ -278,13 +278,39 @@ async function loginWithGoogle(code, req) {
   let user = await db.User.findOne({ where: { googleId: profile.googleId } });
   let action = 'user.login.google';
 
+  let linkMetadata = null;
   if (!user) {
     const byEmail = await db.User.findOne({ where: { email: profile.email } });
     if (byEmail) {
       // Google has already verified this email, so a still-`pending_verification`
       // password account gets activated here too — otherwise it stays stuck as
       // pending forever (Google login never goes through resend-verification).
-      await byEmail.update({ googleId: profile.googleId, status: 'active', emailVerifiedAt: new Date() });
+      //
+      // A password account that never confirmed its email or phone may not
+      // be this person's: anyone can sign up with an address they don't own.
+      // So its password goes and every session (each holds a refresh token)
+      // is ended: from here on only the Google owner signs in. An access
+      // token already issued runs until it expires. A confirmed account keeps
+      // its password.
+      const unconfirmed = !byEmail.emailVerifiedAt && !byEmail.phoneVerifiedAt;
+      await db.sequelize.transaction(async (transaction) => {
+        await byEmail.update(
+          {
+            googleId: profile.googleId,
+            status: 'active',
+            emailVerifiedAt: new Date(),
+            ...(unconfirmed ? { passwordHash: null } : {}),
+          },
+          { transaction }
+        );
+        if (unconfirmed) {
+          const [revoked] = await db.Session.update(
+            { revokedAt: new Date() },
+            { where: { userId: byEmail.id, revokedAt: null }, transaction }
+          );
+          linkMetadata = { unconfirmedAccount: true, passwordRemoved: true, sessionsRevoked: revoked };
+        }
+      });
       user = byEmail;
       action = 'user.link.google';
     } else {
@@ -307,7 +333,7 @@ async function loginWithGoogle(code, req) {
   }
 
   await user.update({ lastLoginAt: new Date() });
-  await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, req });
+  await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, metadata: linkMetadata, req });
 
   const tokens = await issueTokenPair(user, req);
   return { user: user.toSafeJSON(), ...tokens };
