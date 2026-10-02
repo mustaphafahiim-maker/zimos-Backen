@@ -60,16 +60,19 @@ router.post('/password-reset/confirm', authLimiter, validate(schemas.resetPasswo
 router.post('/verify-phone/request', authLimiter, validate(schemas.verifyPhoneRequest), ...controller.requestPhoneVerification);
 router.post('/verify-phone/confirm', authLimiter, validate(schemas.verifyPhoneConfirm), ...controller.confirmPhoneVerification);
 
-// Password reset by SMS (public, enumeration-safe).
+// Password reset by SMS (public, enumeration-safe). Closed unless
+// PASSWORD_RESET_SMS_ENABLED (authController's gates).
 router.post(
   '/password-reset/sms/request',
   authLimiter,
+  controller.smsResetRequestGate,
   validate(schemas.passwordResetSmsRequest),
   controller.requestPasswordResetSms
 );
 router.post(
   '/password-reset/sms/confirm',
   authLimiter,
+  controller.smsResetConfirmGate,
   validate(schemas.passwordResetSmsConfirm),
   controller.resetPasswordSms
 );

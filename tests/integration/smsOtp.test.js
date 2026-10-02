@@ -153,6 +153,14 @@ describe('phone verification during registration', () => {
 });
 
 describe('password reset by SMS', () => {
+  // Closed by default (PASSWORD_RESET_SMS_ENABLED); these tests are about it open.
+  beforeEach(() => {
+    env.passwordReset.smsEnabled = true;
+  });
+  afterEach(() => {
+    env.passwordReset.smsEnabled = false;
+  });
+
   it('request (enumeration-safe) + confirm resets the password', async () => {
     const { email, userId } = await registerAndActivate();
     // give the user a verified phone

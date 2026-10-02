@@ -1,23 +1,28 @@
 'use strict';
 
 // The public account and review endpoints: a per-IP limit on the account
-// endpoints that a new email doesn't get round, and review submission (which
-// trusts a phone number alone) kept closed behind a flag.
+// endpoints that a new email doesn't get round, and two public endpoints kept
+// closed behind flags until their identity checks are stronger — review
+// submission (a phone number alone) and password reset by SMS.
 
 const express = require('express');
 const {
   app,
   request,
   setupWorkspaceWithProduct,
+  registerAndActivate,
   confirmCodOrder,
 } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const env = require('../../src/config/env');
+const notify = require('../../src/modules/notifications/notify');
 const { createAuthIpLimiter } = require('../../src/core/middleware/rateLimiters');
 const { errorHandler } = require('../../src/core/middleware/errorHandler');
 
 afterEach(() => {
   env.reviews.publicSubmissionEnabled = false;
+  env.passwordReset.smsEnabled = false;
+  jest.restoreAllMocks();
 });
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
@@ -122,5 +127,42 @@ describe('public review submission (REVIEWS_PUBLIC_SUBMISSION_ENABLED)', () => {
     const list = await request(app).get(`/api/v1/workspaces/${s.workspace.id}/reviews`).set(bearer(s.auth.accessToken));
     expect(list.status).toBe(200);
     expect(list.body.reviews).toHaveLength(1);
+  });
+});
+
+describe('password reset by SMS (PASSWORD_RESET_SMS_ENABLED)', () => {
+  it('closed: the request answers the same for a verified number and an unknown one, and sends nothing', async () => {
+    const sms = jest.spyOn(notify, 'sms');
+    const { userId } = await registerAndActivate();
+    await db.User.update({ phone: '201010101011', phoneVerifiedAt: new Date() }, { where: { id: userId } });
+
+    const answers = [];
+    for (const phone of ['01010101011', '01099999999', '01010101011', '01010101011', '01010101011']) {
+      answers.push(await request(app).post('/api/v1/auth/password-reset/sms/request').send({ phone }));
+    }
+    for (const res of answers) {
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true });
+    }
+    expect(sms).not.toHaveBeenCalled();
+    expect(await db.OtpCode.count()).toBe(0);
+  });
+
+  it('closed: the confirmation answers as a wrong code does, whatever is sent', async () => {
+    for (const body of [{ phone: '01010101011', code: '123456', newPassword: 'NewPassw0rd!1' }, {}]) {
+      const res = await request(app).post('/api/v1/auth/password-reset/sms/confirm').send(body);
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatchObject({ code: 'INVALID_CODE', message: 'That code is not valid' });
+    }
+  });
+
+  it('open: a verified number gets its code', async () => {
+    env.passwordReset.smsEnabled = true;
+    const sms = jest.spyOn(notify, 'sms');
+    const { userId } = await registerAndActivate();
+    await db.User.update({ phone: '201010101012', phoneVerifiedAt: new Date() }, { where: { id: userId } });
+    const res = await request(app).post('/api/v1/auth/password-reset/sms/request').send({ phone: '01010101012' });
+    expect(res.body).toEqual({ success: true });
+    expect(sms).toHaveBeenCalledTimes(1);
   });
 });

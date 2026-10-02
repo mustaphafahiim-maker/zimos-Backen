@@ -184,8 +184,13 @@ const env = {
   // one sets it on this object at runtime.
   //   reviews.publicSubmissionEnabled  POST /store/:id/products/:productId/reviews
   //                                    (it trusts a phone number alone)
+  //   passwordReset.smsEnabled         POST /auth/password-reset/sms/request and
+  //                                    /confirm (the dashboard has no screen for it)
   reviews: {
     publicSubmissionEnabled: process.env.NODE_ENV !== 'test' && process.env.REVIEWS_PUBLIC_SUBMISSION_ENABLED === 'true',
+  },
+  passwordReset: {
+    smsEnabled: process.env.NODE_ENV !== 'test' && process.env.PASSWORD_RESET_SMS_ENABLED === 'true',
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is
