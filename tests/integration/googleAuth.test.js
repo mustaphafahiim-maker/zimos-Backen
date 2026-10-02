@@ -11,6 +11,8 @@ const googleClient = require('../../src/modules/auth/googleClient');
 const { app, request } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const env = require('../../src/config/env');
+const { hashPassword } = require('../../src/core/security/password');
+const { signAccessToken } = require('../../src/core/security/tokens');
 
 beforeEach(() => googleClient.fetchProfile.mockReset());
 
@@ -110,20 +112,20 @@ describe('Google OAuth login', () => {
   });
 
   it('Google login on a pending_verification password account activates it and its tokens reach protected routes', async () => {
-    // Registering leaves the account `pending_verification` with no verified email.
-    const reg = await request(app)
-      .post('/api/v1/auth/register')
-      .send({ email: 'pending-google@example.com', password: 'Passw0rd!123', fullName: 'Pending Person' });
-    expect(reg.status).toBe(201);
-
-    const before = await db.User.findOne({ where: { email: 'pending-google@example.com' } });
-    expect(before.status).toBe('pending_verification');
+    // An account from before soft confirmation, still `pending_verification`
+    // with no verified email (new sign-ups are active at once).
+    const before = await db.User.create({
+      email: 'pending-google@example.com',
+      passwordHash: await hashPassword('Passw0rd!123'),
+      fullName: 'Pending Person',
+      status: 'pending_verification',
+    });
     expect(before.emailVerifiedAt).toBeNull();
 
-    // While pending, the tokens from registration are locked out of protected routes.
+    // While pending, its tokens are locked out of protected routes.
     const lockedOut = await request(app)
       .get('/api/v1/workspaces')
-      .set('Authorization', `Bearer ${reg.body.accessToken}`);
+      .set('Authorization', `Bearer ${signAccessToken({ sub: before.id })}`);
     expect(lockedOut.status).toBe(401);
 
     // Now the same person signs in with Google using the same email address.

@@ -31,7 +31,7 @@ afterAll(() => {
 });
 
 describe('Brevo email adapter', () => {
-  it('registration sends the verification email through Brevo with the right payload', async () => {
+  it('registration sends the confirmation code through Brevo with the right payload', async () => {
     const email = uniqueEmail('brevo');
     const res = await request(app)
       .post('/api/v1/auth/register')
@@ -41,8 +41,8 @@ describe('Brevo email adapter', () => {
     expect(brevo.sendEmail).toHaveBeenCalledTimes(1);
     const arg = brevo.sendEmail.mock.calls[0][0];
     expect(arg.to).toBe(email);
-    expect(arg.subject).toMatch(/confirm your email/i);
-    expect(arg.html).toMatch(/\/verify-email\?token=[^"'\s]+/);
+    expect(arg.subject).toBe('رمز تأكيد حسابك في Zimos');
+    expect(arg.html).toMatch(/\b\d{6}\b/);
     expect(arg.html).toContain(emailTemplates.SPAM_FOOTER);
     expect(arg.text).toContain(emailTemplates.SPAM_FOOTER);
 

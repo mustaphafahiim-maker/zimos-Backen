@@ -1,6 +1,8 @@
 'use strict';
 
+const crypto = require('crypto');
 const db = require('../../db/models');
+const logger = require('../../core/utils/logger');
 const { hashPassword, verifyPassword } = require('../../core/security/password');
 const {
   signAccessToken,
@@ -73,10 +75,31 @@ async function createAccount({ email, passwordHash, fullName, phone, username, e
 }
 
 /**
+ * The 6-digit code that confirms a new account's email, sent at sign-up while
+ * sign-up codes are off. The account is already signed in, so nothing here
+ * may fail the sign-up: no email provider, a sending limit reached or a
+ * provider error just means no code went out — the dashboard's banner offers
+ * to send one.
+ */
+async function sendSignupCode(user, { locale, req }) {
+  if (!verificationCodes.emailReady()) return { sent: false };
+  try {
+    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+    return { sent: true, ...sent };
+  } catch (err) {
+    if (!(err instanceof AppError)) logger.error('Could not send the sign-up code', { userId: user.id, message: err.message });
+    return { sent: false };
+  }
+}
+
+/**
  * Email/password sign-up. The plan, terms and code rules are
- * auth/signupPolicy's; with every switch off this is the sign-up it always
- * was: the account is created pending, a confirmation link is emailed, and
- * tokens are returned.
+ * auth/signupPolicy's.
+ *
+ * With sign-up codes on (REQUIRE_SIGNUP_VERIFICATION), no tokens until the
+ * code is typed back. Off, the account is active and signed in at once, its
+ * email not confirmed yet: a code to confirm it is emailed, and until it is,
+ * starting a trial and publishing are refused (core/middleware/confirmedAccount).
  */
 async function register({ email, password, fullName, phone, username, planId, billingCycle, acceptTerms, locale }, req) {
   const existing = await db.User.findOne({ where: { email } });
@@ -97,32 +120,24 @@ async function register({ email, password, fullName, phone, username, planId, bi
   }
 
   const passwordHash = await hashPassword(password);
-  const user = await createAccount({ email, passwordHash, fullName, phone, username, extra });
+  const user = await createAccount({
+    email,
+    passwordHash,
+    fullName,
+    phone,
+    username,
+    extra: verifying ? extra : { ...extra, status: 'active' },
+  });
+  await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
 
   if (verifying) {
-    await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
     const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
     return signupPolicy.verificationResponse(user, sent);
   }
 
-  const rawToken = generateOpaqueToken();
-  await db.VerificationToken.create({
-    userId: user.id,
-    type: 'email_verification',
-    tokenHash: hashToken(rawToken),
-    expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
-  });
-
-  await notify.email({
-    recipient: user.email,
-    template: 'email_verification',
-    data: { token: rawToken, fullName: user.fullName },
-  });
-
-  await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
-
+  const emailCode = await sendSignupCode(user, { locale, req });
   const tokens = await issueTokenPair(user, req);
-  return { user: user.toSafeJSON(), ...tokens };
+  return { user: user.toSafeJSON(), ...tokens, emailCode };
 }
 
 async function verifyEmail(rawToken) {
@@ -180,12 +195,37 @@ async function resendVerificationEmail(email) {
   return { success: true };
 }
 
-async function login({ email, password, locale }, req) {
-  const user = await db.User.findOne({ where: { email } });
-  // Same error for "no such user" and "wrong password" — never reveal which
+/**
+ * The account a sign-in names: by email when what was typed has an "@" (a
+ * username never has one; users.email is case-insensitive), otherwise by
+ * username, which is stored lower-case.
+ */
+async function findForSignIn({ identifier, email }) {
+  const given = String(identifier || email || '').trim();
+  if (!given) return null;
+  if (given.includes('@')) return db.User.findOne({ where: { email: given } });
+  return db.User.findOne({
+    where: db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('username')), given.toLowerCase()),
+  });
+}
+
+// Compared against when no account matches, so "no such account" costs the
+// same bcrypt work as "wrong password" and the timing doesn't tell them apart.
+let dummyHash = null;
+const getDummyHash = () => {
+  if (!dummyHash) dummyHash = hashPassword(crypto.randomBytes(24).toString('hex'));
+  return dummyHash;
+};
+
+async function login({ identifier, email, password, locale }, req) {
+  const user = await findForSignIn({ identifier, email });
+  // Same error for "no such account" and "wrong password" — never reveal which
   // one it was, to avoid account enumeration via the login endpoint.
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
-    throw new AuthenticationError('Invalid email or password', 'INVALID_CREDENTIALS');
+  let passwordOk = false;
+  if (user && user.passwordHash) passwordOk = await verifyPassword(password, user.passwordHash);
+  else await verifyPassword(password, await getDummyHash());
+  if (!passwordOk) {
+    throw new AuthenticationError('Invalid sign-in details', 'INVALID_CREDENTIALS');
   }
   if (user.status === 'suspended') {
     throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
@@ -205,6 +245,10 @@ async function login({ email, password, locale }, req) {
       return signupPolicy.verificationResponse(user, sent);
     }
     if (user.status === 'pending_verification') await user.update({ status: 'active' });
+  } else if (user.status === 'pending_verification') {
+    // An account from when sign-up waited on the emailed link is let in now,
+    // as a new one would be; the dashboard asks it to confirm its email.
+    await user.update({ status: 'active' });
   }
 
   await user.update({ lastLoginAt: new Date() });
@@ -395,17 +439,12 @@ async function sendVerificationCode(user, { channel = 'email', locale }, req) {
   return { sent: true, ...sent };
 }
 
-/**
- * POST /auth/verify/confirm — the right code confirms the address it went to,
- * activates the account and signs it in at once.
- */
-async function confirmVerificationCode(user, code, req) {
-  assertUnconfirmed(user);
-  const { channel } = await verificationCodes.confirmCode(user, code, { req });
+/** The address a right code went to is confirmed, and the account active. */
+async function markConfirmed(user, channel, { signIn = false } = {}, req) {
   const now = new Date();
   await user.update({
     status: 'active',
-    lastLoginAt: now,
+    ...(signIn ? { lastLoginAt: now } : {}),
     ...(channel === 'sms' ? { phoneVerifiedAt: now, phone: normalizePhone(user.phone) || user.phone } : { emailVerifiedAt: now }),
   });
   await recordAudit({
@@ -416,8 +455,46 @@ async function confirmVerificationCode(user, code, req) {
     metadata: { channel },
     req,
   });
+}
+
+/**
+ * POST /auth/verify/confirm — the right code confirms the address it went to,
+ * activates the account and signs it in at once.
+ */
+async function confirmVerificationCode(user, code, req) {
+  assertUnconfirmed(user);
+  const { channel } = await verificationCodes.confirmCode(user, code, { req });
+  await markConfirmed(user, channel, { signIn: true }, req);
   const tokens = await issueTokenPair(user, req);
   return { user: user.toSafeJSON(), ...tokens };
+}
+
+// --- Confirming a signed-in account's email --------------------------------
+// An account signed in before confirming its email (sign-up codes off, or an
+// older account) confirms it with the same codes, limits included, from the
+// dashboard's banner. Confirmed by email or by phone counts, as everywhere
+// (signupPolicy.isVerified).
+
+function alreadyConfirmed() {
+  return new ConflictError('This account is already confirmed.', 'ALREADY_VERIFIED');
+}
+
+/** POST /auth/me/email/send-code */
+async function sendAccountCode(user, { locale } = {}, req) {
+  if (signupPolicy.isVerified(user)) throw alreadyConfirmed();
+  if (!verificationCodes.emailReady()) {
+    throw new AppError('EMAIL_UNAVAILABLE', 'Codes cannot be sent by email right now. Try again later.', 503);
+  }
+  const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+  return { sent: true, ...sent };
+}
+
+/** POST /auth/me/email/confirm — no new tokens: the session goes on as it is. */
+async function confirmAccountCode(user, code, req) {
+  if (signupPolicy.isVerified(user)) throw alreadyConfirmed();
+  const { channel } = await verificationCodes.confirmCode(user, code, { req });
+  await markConfirmed(user, channel, {}, req);
+  return { user: user.toSafeJSON(), confirmed: true };
 }
 
 // --- Phone verification (during/after registration) ----------------------
@@ -462,6 +539,8 @@ module.exports = {
   register,
   sendVerificationCode,
   confirmVerificationCode,
+  sendAccountCode,
+  confirmAccountCode,
   verifyEmail,
   resendVerificationEmail,
   login,

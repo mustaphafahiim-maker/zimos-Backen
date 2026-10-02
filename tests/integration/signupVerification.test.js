@@ -72,14 +72,21 @@ async function existingAccount() {
 }
 
 describe('with REQUIRE_SIGNUP_VERIFICATION off', () => {
-  it('signs up and in exactly as before — tokens back, a link emailed, no code', async () => {
+  it('signs up and in at once — tokens back, the account active, a code emailed to confirm it, no link', async () => {
     env.signup.requireVerification = false;
-    const res = await register();
+    const email = uniqueEmail('soft');
+    const res = await register({ email, locale: 'en' });
     expect(res.status).toBe(201);
     expect(res.body.accessToken).toBeTruthy();
     expect(res.body.verificationRequired).toBeUndefined();
-    expect(outbox.map((m) => m.template)).toEqual(['email_verification']);
-    expect(await db.VerificationCode.count()).toBe(0);
+    expect(res.body.user).toMatchObject({ status: 'active', emailVerifiedAt: null });
+    expect(res.body.emailCode).toMatchObject({ sent: true, target: `${email[0]}***@example.com` });
+    expect(outbox.map((m) => m.template)).toEqual(['signup_code']);
+    expect(await db.VerificationCode.count({ where: { userId: res.body.user.id } })).toBe(1);
+
+    const me = await request(app).get('/api/v1/auth/me').set(bearer(res.body.accessToken));
+    expect(me.status).toBe(200);
+    expect(me.body.confirmed).toBe(false);
   });
 });
 

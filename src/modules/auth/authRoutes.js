@@ -29,6 +29,10 @@ router.get('/me', ...controller.me);
 // choosing or changing one's own.
 router.get('/username-available', ...usernameCheckLimiter, validate(schemas.usernameAvailable), controller.usernameAvailable);
 router.patch('/me/username', authLimiter, validate(schemas.changeUsername), ...controller.changeUsername);
+// Confirming a signed-in account's email with a code (the dashboard's
+// banner): the sign-up codes' own limits, behind the same per-IP limiters.
+router.post('/me/email/send-code', verifyCodeLimiter, authLimiter, validate(schemas.meEmailSend), ...controller.sendEmailCode);
+router.post('/me/email/confirm', verifyCodeLimiter, authLimiter, validate(schemas.verifyConfirm), ...controller.confirmEmailCode);
 router.post('/me/plan', authLimiter, validate(schemas.choosePlan), ...controller.choosePlan);
 router.post(
   '/password-reset/request',

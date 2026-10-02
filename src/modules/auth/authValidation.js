@@ -71,10 +71,19 @@ module.exports = {
     body: Joi.object({ username: usernameSchema.required() }),
   },
   login: {
+    // `identifier` is the email or the username, as typed. `email` is what
+    // clients from before usernames send; one of the two is required.
     body: Joi.object({
-      email: joiEmail().max(255).required(),
+      identifier: Joi.string().trim().min(1).max(255),
+      email: joiEmail().max(255),
       password: Joi.string().required(),
       // The language of a sign-up code sent to an account not confirmed yet.
+      locale: Joi.string().valid('ar', 'en').optional(),
+    }).or('identifier', 'email'),
+  },
+  // POST /auth/me/email/send-code — a code to confirm a signed-in account's email.
+  meEmailSend: {
+    body: Joi.object({
       locale: Joi.string().valid('ar', 'en').optional(),
     }),
   },

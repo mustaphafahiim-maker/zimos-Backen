@@ -47,7 +47,7 @@ const templates = {
           `<p>Your code to confirm your Zimos account:</p>
 ${codeHtml}
 <p>It is valid for ${minutes} minutes and works once.</p>
-<p style="color:#6b7280">If you didn't ask for this code, ignore this email. Nobody can use your account without it.</p>`,
+<p style="color:#6b7280">If you didn't ask for this code, ignore this email.</p>`,
           `Your code to confirm your Zimos account: ${code}\n\nIt is valid for ${minutes} minutes and works once.\n\nIf you didn't ask for this code, ignore this email.`
         ),
       };
@@ -58,7 +58,7 @@ ${codeHtml}
         `<p>رمز تأكيد حسابك في Zimos:</p>
 ${codeHtml}
 <p>الرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.</p>
-<p style="color:#6b7280">إذا لم تطلب هذا الرمز فتجاهل هذه الرسالة، فلا يمكن لأحد استخدام حسابك من دونه.</p>`,
+<p style="color:#6b7280">إذا لم تطلب هذا الرمز فتجاهل هذه الرسالة.</p>`,
         `رمز تأكيد حسابك في Zimos: ${code}\n\nالرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.\n\nإذا لم تطلب هذا الرمز فتجاهل هذه الرسالة.`,
         { dir: 'rtl', arabicFooter: true }
       ),

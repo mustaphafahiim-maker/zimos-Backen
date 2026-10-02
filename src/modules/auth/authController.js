@@ -56,6 +56,21 @@ const confirmVerificationCode = [
   }),
 ];
 
+// A signed-in account confirming its email (the dashboard's banner).
+const sendEmailCode = [
+  authenticate,
+  asyncHandler(async (req, res) => {
+    res.json(await authService.sendAccountCode(req.user, req.body, req));
+  }),
+];
+
+const confirmEmailCode = [
+  authenticate,
+  asyncHandler(async (req, res) => {
+    res.json(await authService.confirmAccountCode(req.user, req.body.code, req));
+  }),
+];
+
 // POST /auth/me/plan — the plan an account made through Google chooses.
 const choosePlan = [
   authenticate,
@@ -113,13 +128,16 @@ const listSessions = [
 // Google): the dashboard asks its owner to pick one, starting from this.
 // `needsPlan`: an account made through Google while a plan is required, that
 // has not chosen one — the dashboard asks for it before anything else.
+// `confirmed`: its email (or phone) is confirmed; until it is, starting a
+// trial and publishing are refused and the dashboard shows its banner.
 const me = [
   authenticate,
   asyncHandler(async (req, res) => {
     const user = req.user.toSafeJSON();
     const needsPlan = await signupPolicy.needsPlan(req.user);
-    if (user.username) return res.json({ user, needsPlan });
-    return res.json({ user, needsPlan, suggestedUsername: await usernameService.suggestFor(user.email) });
+    const confirmed = signupPolicy.isVerified(req.user);
+    if (user.username) return res.json({ user, needsPlan, confirmed });
+    return res.json({ user, needsPlan, confirmed, suggestedUsername: await usernameService.suggestFor(user.email) });
   }),
 ];
 
@@ -178,6 +196,8 @@ module.exports = {
   signupOptions,
   sendVerificationCode,
   confirmVerificationCode,
+  sendEmailCode,
+  confirmEmailCode,
   choosePlan,
   verifyEmail,
   resendVerification,
