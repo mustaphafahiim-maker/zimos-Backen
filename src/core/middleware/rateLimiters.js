@@ -466,6 +466,34 @@ const loginIpLimiter = createAuthIpLimiter({ ...authIpOptions, failedOnly: true,
 const authIpLimiter = createAuthIpLimiter({ ...authIpOptions, prefix: 'auth-ip' });
 
 /*
+ * Per signed-in account, for a request that costs us something to keep: a
+ * payment proof stores an image that a person then has to review. Keyed on
+ * the account, not the IP — many merchants can share one IP — and mounted
+ * after `authenticate`; a request without a user falls back to its IP.
+ */
+const PAYMENT_PROOFS_PER_HOUR = 10;
+
+function createUserLimiter({ prefix, windowMs, max, skip: skipAll = () => false }) {
+  return rateLimit({
+    windowMs,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) =>
+      `${prefix}:${req.user && req.user.id ? `user:${req.user.id}` : ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`,
+    handler,
+  });
+}
+
+const paymentProofLimiter = createUserLimiter({
+  prefix: 'payment-proof',
+  windowMs: 60 * 60 * 1000,
+  max: PAYMENT_PROOFS_PER_HOUR,
+  skip,
+});
+
+/*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
  * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
  * put all merchants in one bucket; each merchant's webhook token gets its own.
@@ -542,4 +570,7 @@ module.exports = {
   loginIpLimiter,
   authIpLimiter,
   createAuthIpLimiter,
+  PAYMENT_PROOFS_PER_HOUR,
+  paymentProofLimiter,
+  createUserLimiter,
 };

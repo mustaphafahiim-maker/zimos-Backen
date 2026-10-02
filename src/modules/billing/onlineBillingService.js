@@ -12,6 +12,7 @@ const fawaterakConfig = require('./fawaterak/config');
 const { toMajor } = require('./fawaterak/amounts');
 const { verifyWebhook } = require('./fawaterak/signature');
 const gateways = require('./gateways/registry');
+const paymentMethods = require('./paymentMethodService');
 
 /**
  * A merchant paying their subscription charge online, through a gateway of
@@ -114,13 +115,26 @@ function serializeForMerchant(attempt) {
 // ------------------------------------------------------------ start a payment
 
 /**
+ * The gateway a Pay press goes through. Without `method`, Fawaterak, as
+ * before payment methods existed (what an older dashboard sends); with one,
+ * a gateway the merchant is offered: its payment_methods row enabled and its
+ * adapter configured (paymentMethodService), or 404.
+ */
+async function startingGateway(method) {
+  if (!method) return gateways.get(PROVIDER);
+  const adapter = await paymentMethods.offeredGateway(method);
+  if (!adapter) throw new AppError('PAYMENT_METHOD_NOT_AVAILABLE', 'This payment method is not available.', 404);
+  return adapter;
+}
+
+/**
  * The merchant's Pay button. Resolves { payment, reused }: `reused` when the
  * same checkout is handed back for a second press within a minute. An older
  * checkout still in progress is superseded (its link may still be paid: that
  * payment still settles the charge, or is caught as a duplicate).
  */
-async function startPayment(workspaceId, { lang } = {}, req) {
-  const adapter = gateways.get(PROVIDER);
+async function startPayment(workspaceId, { lang, method } = {}, req) {
+  const adapter = await startingGateway(method);
   adapter.assertCanStart();
 
   const subscription = await db.Subscription.findOne({ where: { workspaceId }, include: [{ model: db.Plan, as: 'plan' }] });
