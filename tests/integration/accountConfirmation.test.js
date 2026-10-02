@@ -99,6 +99,9 @@ describe('signing in with the email or the username', () => {
       expect(res.body.accessToken).toBeTruthy();
     }
     expect((await login({ email })).status).toBe(200);
+    // What the dashboard sends for an email, so an API from before
+    // identifier sign-in (which reads only `email`) also signs it in.
+    expect((await login({ identifier: email, email })).status).toBe(200);
   });
 
   it('gives the same answer for an unknown username, an unknown email and a wrong password', async () => {
