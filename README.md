@@ -363,6 +363,15 @@ recorded in `notification_logs` as `failed` with its `attempts` count and
 the triggering request still succeeds. Same provider pattern for
 `PAYMENTS_DEFAULT_PROVIDER` (`src/modules/payments/providers/`).
 
+**Closed by default:** `REVIEWS_PUBLIC_SUBMISSION_ENABLED` (shoppers submitting
+product reviews, which is checked against a phone number alone) and
+`PASSWORD_RESET_SMS_ENABLED` (password reset by SMS code) are off unless set to
+exactly `true`. Closed, the review endpoint answers 404 to every request and the
+SMS reset gives the same answer for any number without sending anything.
+`AUTH_IP_RATE_LIMIT_MAX` / `AUTH_IP_RATE_LIMIT_WINDOW_MS` (default 50 per 15
+minutes) cap sign-in failures, sign-up, password reset and resend-verification
+per IP, on top of the per-email `AUTH_RATE_LIMIT_MAX`.
+
 ### Image storage
 
 `STORAGE_PROVIDER` selects where `POST /api/v1/workspaces/:workspaceId/media`
@@ -417,7 +426,8 @@ and 3 sends per phone per 10 minutes. Two flows use it: phone verification
 right after registration (`POST /api/v1/auth/verify-phone/request` +
 `/confirm`, accepted for a still-`pending_verification` account) and
 password reset by SMS (`POST /api/v1/auth/password-reset/sms/request` +
-`/confirm`, enumeration-safe, only for a verified phone).
+`/confirm`, enumeration-safe, only for a verified phone, and closed unless
+`PASSWORD_RESET_SMS_ENABLED=true`).
 
 ### Google OAuth login
 
