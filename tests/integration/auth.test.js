@@ -152,6 +152,8 @@ describe('Authentication', () => {
       expect(knownRes.status).toBe(200);
       expect(unknownRes.status).toBe(200);
       expect(knownRes.body).toEqual(unknownRes.body);
+      // The known one's email goes out after the answer; let it finish here.
+      await require('../../src/modules/auth/authService').settlePasswordResets();
     });
 
     it('resets the password with a valid token and revokes existing sessions', async () => {

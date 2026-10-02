@@ -80,17 +80,35 @@ ${codeHtml}
     };
   },
 
+  // The reset link (auth/authService.requestPasswordReset), in the language
+  // the request was made in; Arabic unless it says en.
   password_reset(data = {}) {
     const url = link('/reset-password', data.token || '');
-    const name = data.fullName ? `Hi ${data.fullName},` : 'Hi,';
-    return {
-      subject: 'Reset your password',
-      ...wrap(
-        `<p>${name}</p>
-<p>We got a request to reset your password. This link is valid for one hour:</p>
+    const minutes = Number(data.minutes) || 30;
+    const fullName = data.fullName ? escapeHtml(data.fullName) : '';
+    if (data.locale === 'en') {
+      const name = fullName ? `Hi ${fullName},` : 'Hi,';
+      return {
+        subject: 'Reset your password',
+        ...wrap(
+          `<p>${name}</p>
+<p>We got a request to reset your Zimos password. This link is valid for ${minutes} minutes and works once:</p>
 <p><a href="${url}">Reset my password</a></p>
 <p>If you didn't ask for this, you can ignore this email — your password won't change.</p>`,
-        `${name}\n\nWe got a request to reset your password. This link is valid for one hour:\n${url}\n\nIf you didn't ask for this, you can ignore this email.`
+          `${name}\n\nWe got a request to reset your Zimos password. This link is valid for ${minutes} minutes and works once:\n${url}\n\nIf you didn't ask for this, you can ignore this email.`
+        ),
+      };
+    }
+    const name = fullName ? `مرحبًا ${fullName}،` : 'مرحبًا،';
+    return {
+      subject: 'إعادة تعيين كلمة المرور',
+      ...wrap(
+        `<p>${name}</p>
+<p>تلقّينا طلبًا لإعادة تعيين كلمة مرور حسابك في Zimos. هذا الرابط صالح لمدة ${minutes} دقيقة ولمرة واحدة فقط:</p>
+<p><a href="${url}">إعادة تعيين كلمة المرور</a></p>
+<p>إذا لم تطلب ذلك فتجاهل هذه الرسالة، ولن تتغير كلمة مرورك.</p>`,
+        `${name}\n\nتلقّينا طلبًا لإعادة تعيين كلمة مرور حسابك في Zimos. هذا الرابط صالح لمدة ${minutes} دقيقة ولمرة واحدة فقط:\n${url}\n\nإذا لم تطلب ذلك فتجاهل هذه الرسالة.`,
+        { dir: 'rtl', arabicFooter: true }
       ),
     };
   },

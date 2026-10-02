@@ -1,7 +1,9 @@
 'use strict';
 
 const crypto = require('crypto');
+const { Op } = require('sequelize');
 const db = require('../../db/models');
+const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
 const { hashPassword, verifyPassword } = require('../../core/security/password');
 const {
@@ -23,7 +25,10 @@ const verificationCodes = require('../otp/verificationCodeService');
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
+const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
+// Reset emails one account may get; past them a request still answers the
+// same, it just sends nothing.
+const PASSWORD_RESET_LIMITS = Object.freeze({ perHour: 3, perDay: 10 });
 
 function issueTokenPair(user, req) {
   const accessToken = signAccessToken({ sub: user.id });
@@ -425,45 +430,143 @@ async function listSessions(userId) {
   }));
 }
 
-async function requestPasswordReset(email) {
-  const user = await db.User.findOne({ where: { email } });
-  // Always behave the same way whether the account exists or not, so this
-  // endpoint can't be used to enumerate registered emails.
-  if (user) {
-    const rawToken = generateOpaqueToken();
-    await db.VerificationToken.create({
-      userId: user.id,
-      type: 'password_reset',
-      tokenHash: hashToken(rawToken),
-      expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
-    });
-    await notify.email({
-      recipient: user.email,
-      template: 'password_reset',
-      data: { token: rawToken, fullName: user.fullName },
-    });
+/**
+ * The password-reset link needs FRONTEND_URL in production (the localhost
+ * default would email a link nobody can open). Without it every request is
+ * refused alike, so the refusal says nothing about any address.
+ */
+function assertResetLinksConfigured() {
+  if (env.isProduction && !env.frontendUrlConfigured) {
+    logger.error('Password reset refused: FRONTEND_URL is not set, so the emailed link would not open');
+    throw new AppError('PASSWORD_RESET_UNAVAILABLE', 'Password reset is not available right now. Try again later.', 503);
   }
+}
+
+// Reset emails still being prepared or sent (see requestPasswordReset).
+const pendingResets = new Set();
+
+/** Resolves once every reset email started so far has been handled. For tests and shutdown. */
+function settlePasswordResets() {
+  return Promise.all([...pendingResets]);
+}
+
+/**
+ * POST /auth/password-reset/request. Answers at once and the same way for
+ * every address — registered or not, with or without a password (a Google
+ * account gets a link that sets one), within its limit or past it — so
+ * neither the answer nor its timing tells which. The lookup, the limit and
+ * the email happen after the answer.
+ */
+function requestPasswordReset(email, { locale } = {}) {
+  assertResetLinksConfigured();
+  const job = sendPasswordResetLink(email, { locale })
+    .catch((err) => logger.error('Could not send a password reset link', { message: err.message }))
+    .finally(() => pendingResets.delete(job));
+  pendingResets.add(job);
   return { success: true };
 }
 
-async function resetPassword(rawToken, newPassword) {
-  const tokenHash = hashToken(rawToken);
-  const record = await db.VerificationToken.findOne({ where: { tokenHash, type: 'password_reset' } });
-  if (!record || record.usedAt || record.expiresAt < new Date()) {
-    throw new AppError('INVALID_RESET_TOKEN', 'Password reset token is invalid or expired', 400);
+/**
+ * Emails a reset link to the account with this email, if there is one and it
+ * is within its limit: a random 32-byte token, stored only as its SHA-256,
+ * valid PASSWORD_RESET_TTL_MS, used once. A new link replaces the account's
+ * earlier ones.
+ */
+async function sendPasswordResetLink(email, { locale } = {}) {
+  const user = await db.User.findOne({ where: { email } });
+  if (!user) return;
+
+  const now = Date.now();
+  const since = (ms) => ({ userId: user.id, type: 'password_reset', createdAt: { [Op.gt]: new Date(now - ms) } });
+  const [lastHour, lastDay] = await Promise.all([
+    db.VerificationToken.count({ where: since(60 * 60 * 1000) }),
+    db.VerificationToken.count({ where: since(24 * 60 * 60 * 1000) }),
+  ]);
+  if (lastHour >= PASSWORD_RESET_LIMITS.perHour || lastDay >= PASSWORD_RESET_LIMITS.perDay) {
+    logger.info('Password reset link not sent: the account reached its limit', { userId: user.id });
+    return;
   }
-  const user = await db.User.findByPk(record.userId);
-  if (!user) throw new AppError('INVALID_RESET_TOKEN', 'Password reset token is invalid or expired', 400);
 
-  await user.update({ passwordHash: await hashPassword(newPassword) });
-  await record.update({ usedAt: new Date() });
-  // A password reset is a strong signal the account may have been
-  // compromised — revoke every existing session so old refresh tokens
-  // (possibly in an attacker's hands) stop working immediately.
-  await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
-  await recordAudit({ actorUserId: user.id, action: 'user.password_reset', entityType: 'User', entityId: user.id });
+  const rawToken = generateOpaqueToken();
+  await db.sequelize.transaction(async (transaction) => {
+    await db.VerificationToken.update(
+      { usedAt: new Date(now) },
+      { where: { userId: user.id, type: 'password_reset', usedAt: null }, transaction }
+    );
+    await db.VerificationToken.create(
+      {
+        userId: user.id,
+        type: 'password_reset',
+        tokenHash: hashToken(rawToken),
+        expiresAt: new Date(now + PASSWORD_RESET_TTL_MS),
+      },
+      { transaction }
+    );
+  });
+  await notify.email({
+    recipient: user.email,
+    template: 'password_reset',
+    data: { token: rawToken, fullName: user.fullName, minutes: PASSWORD_RESET_TTL_MS / 60000, locale: locale === 'en' ? 'en' : 'ar' },
+  });
+}
 
-  return { success: true };
+function invalidResetToken() {
+  return new AppError('INVALID_RESET_TOKEN', 'Password reset token is invalid or expired', 400);
+}
+
+/**
+ * POST /auth/password-reset/confirm. One transaction, the token row locked,
+ * so a link works once even when it is sent twice at the same moment. The
+ * password changes, every session (each holds a refresh token) ends, and the
+ * account's other open reset links stop working. The link reached the
+ * address's owner, so an email not confirmed yet counts as confirmed (and a
+ * pending account becomes active); the audit row says so.
+ */
+async function resetPassword(rawToken, newPassword, req) {
+  const tokenHash = hashToken(rawToken);
+  const passwordHash = await hashPassword(newPassword);
+  return db.sequelize.transaction(async (transaction) => {
+    const record = await db.VerificationToken.findOne({
+      where: { tokenHash, type: 'password_reset' },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) throw invalidResetToken();
+    const user = await db.User.findByPk(record.userId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!user) throw invalidResetToken();
+
+    const now = new Date();
+    const confirmsEmail = !user.emailVerifiedAt;
+    await user.update(
+      {
+        passwordHash,
+        ...(confirmsEmail ? { emailVerifiedAt: now } : {}),
+        ...(user.status === 'pending_verification' ? { status: 'active' } : {}),
+      },
+      { transaction }
+    );
+    await db.VerificationToken.update(
+      { usedAt: now },
+      { where: { userId: user.id, type: 'password_reset', usedAt: null }, transaction }
+    );
+    // A password reset is a strong signal the account may have been
+    // compromised — revoke every existing session so old refresh tokens
+    // (possibly in an attacker's hands) stop working immediately.
+    const [sessionsRevoked] = await db.Session.update(
+      { revokedAt: now },
+      { where: { userId: user.id, revokedAt: null }, transaction }
+    );
+    await recordAudit({
+      actorUserId: user.id,
+      action: 'user.password_reset',
+      entityType: 'User',
+      entityId: user.id,
+      metadata: { emailConfirmed: confirmsEmail, sessionsRevoked },
+      req,
+      transaction,
+    });
+    return { success: true };
+  });
 }
 
 // --- Sign-up codes (REQUIRE_SIGNUP_VERIFICATION) -------------------------
@@ -593,6 +696,7 @@ module.exports = {
   revokeAllSessions,
   listSessions,
   requestPasswordReset,
+  settlePasswordResets,
   resetPassword,
   requestPhoneVerification,
   confirmPhoneVerification,

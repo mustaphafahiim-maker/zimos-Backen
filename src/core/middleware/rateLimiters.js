@@ -416,6 +416,27 @@ const publicPlansLimiter = createIpMinuteLimiter('public-plans', env.rateLimit.p
 const verifyCodeLimiter = createIpMinuteLimiter('verify-code', env.rateLimit.verifyMinuteMax, { skip });
 
 /*
+ * Password reset requests, per IP per hour, keyed on the IP alone (unlike
+ * authLimiter, whose key includes the email the caller sends). It answers the
+ * same for every address, so a 429 says nothing about whether one is
+ * registered; the per-account limit lives in the database and is silent
+ * (auth/authService.requestPasswordReset).
+ */
+function createPasswordResetLimiter({ hourMax, skip: skipAll = () => false }) {
+  return rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: hourMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) => `password-reset:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`,
+    handler,
+  });
+}
+
+const passwordResetLimiter = createPasswordResetLimiter({ hourMax: env.rateLimit.passwordResetHourMax, skip });
+
+/*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
  * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
  * put all merchants in one bucket; each merchant's webhook token gets its own.
@@ -487,4 +508,6 @@ module.exports = {
   publicPlansLimiter,
   verifyCodeLimiter,
   createIpMinuteLimiter,
+  passwordResetLimiter,
+  createPasswordResetLimiter,
 };

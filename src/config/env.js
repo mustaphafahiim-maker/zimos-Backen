@@ -123,8 +123,12 @@ const env = {
     redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:4000/api/v1/auth/google/callback',
   },
 
-  // Where the Google callback sends the browser (with tokens in the query).
+  // Where the Google callback sends the browser (with tokens in the query),
+  // and the base of the links emailed to merchants (password reset, …).
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  // Whether FRONTEND_URL was set at all: in production the localhost default
+  // would email a link nobody can open, so password reset refuses without it.
+  frontendUrlConfigured: Boolean((process.env.FRONTEND_URL || '').trim()),
 
   cors: {
     origins: (process.env.CORS_ORIGINS || 'http://localhost:3000')
@@ -164,6 +168,9 @@ const env = {
     // on top of the per-address and per-account limits kept in the database
     // (otp/verificationCodeService).
     verifyMinuteMax: parseInt(process.env.VERIFY_RATE_LIMIT_PER_MINUTE || '10', 10),
+    // Password reset requests (POST /auth/password-reset/request), per IP per
+    // hour — on top of the per-account limit kept in the database (authService).
+    passwordResetHourMax: parseInt(process.env.PASSWORD_RESET_RATE_LIMIT_PER_HOUR || '10', 10),
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is

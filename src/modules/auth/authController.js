@@ -156,12 +156,12 @@ const changeUsername = [
 ];
 
 const requestPasswordReset = asyncHandler(async (req, res) => {
-  const result = await authService.requestPasswordReset(req.body.email);
+  const result = await authService.requestPasswordReset(req.body.email, { locale: req.body.locale });
   res.json(result);
 });
 
 const resetPassword = asyncHandler(async (req, res) => {
-  const result = await authService.resetPassword(req.body.token, req.body.newPassword);
+  const result = await authService.resetPassword(req.body.token, req.body.newPassword, req);
   res.json(result);
 });
 

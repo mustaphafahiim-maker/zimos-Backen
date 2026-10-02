@@ -56,8 +56,10 @@ describe('Brevo email adapter', () => {
     const { email } = await registerAndActivate();
     brevo.sendEmail.mockClear();
 
-    const res = await request(app).post('/api/v1/auth/password-reset/request').send({ email });
+    const res = await request(app).post('/api/v1/auth/password-reset/request').send({ email, locale: 'en' });
     expect(res.status).toBe(200);
+    // The link is emailed after the answer (the same answer for every address).
+    await require('../../src/modules/auth/authService').settlePasswordResets();
 
     expect(brevo.sendEmail).toHaveBeenCalledTimes(1);
     const arg = brevo.sendEmail.mock.calls[0][0];

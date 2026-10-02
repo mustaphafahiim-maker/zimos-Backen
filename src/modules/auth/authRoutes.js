@@ -2,7 +2,13 @@
 
 const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
-const { authLimiter, usernameCheckLimiter, verifyCodeLimiter, publicPlansLimiter } = require('../../core/middleware/rateLimiters');
+const {
+  authLimiter,
+  usernameCheckLimiter,
+  verifyCodeLimiter,
+  publicPlansLimiter,
+  passwordResetLimiter,
+} = require('../../core/middleware/rateLimiters');
 const controller = require('./authController');
 const schemas = require('./authValidation');
 
@@ -34,8 +40,11 @@ router.patch('/me/username', authLimiter, validate(schemas.changeUsername), ...c
 router.post('/me/email/send-code', verifyCodeLimiter, authLimiter, validate(schemas.meEmailSend), ...controller.sendEmailCode);
 router.post('/me/email/confirm', verifyCodeLimiter, authLimiter, validate(schemas.verifyConfirm), ...controller.confirmEmailCode);
 router.post('/me/plan', authLimiter, validate(schemas.choosePlan), ...controller.choosePlan);
+// Per IP per hour on its own key (authLimiter's includes the email sent);
+// the per-account limit is in the database and silent.
 router.post(
   '/password-reset/request',
+  passwordResetLimiter,
   authLimiter,
   validate(schemas.requestPasswordReset),
   controller.requestPasswordReset
