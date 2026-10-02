@@ -178,6 +178,16 @@ const env = {
     passwordResetHourMax: parseInt(process.env.PASSWORD_RESET_RATE_LIMIT_PER_HOUR || '10', 10),
   },
 
+  // Public endpoints that stay closed until their identity checks are
+  // stronger. Exactly "true" opens one. Under
+  // NODE_ENV=test they start off whatever the .env says; a test that needs
+  // one sets it on this object at runtime.
+  //   reviews.publicSubmissionEnabled  POST /store/:id/products/:productId/reviews
+  //                                    (it trusts a phone number alone)
+  reviews: {
+    publicSubmissionEnabled: process.env.NODE_ENV !== 'test' && process.env.REVIEWS_PUBLIC_SUBMISSION_ENABLED === 'true',
+  },
+
   // How the backend recognises our own Next.js storefront server. The secret is
   // sent server-to-server only (never to a browser); a request carrying it may
   // forward the shopper's IP for rate limiting. STOREFRONT_SERVER_IP

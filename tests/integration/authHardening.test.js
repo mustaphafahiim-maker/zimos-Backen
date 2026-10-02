@@ -1,11 +1,26 @@
 'use strict';
 
-// A per-IP limit on the account endpoints that a new email doesn't get round.
+// The public account and review endpoints: a per-IP limit on the account
+// endpoints that a new email doesn't get round, and review submission (which
+// trusts a phone number alone) kept closed behind a flag.
 
 const express = require('express');
-const { request } = require('../helpers/factories');
+const {
+  app,
+  request,
+  setupWorkspaceWithProduct,
+  confirmCodOrder,
+} = require('../helpers/factories');
+const db = require('../../src/db/models');
+const env = require('../../src/config/env');
 const { createAuthIpLimiter } = require('../../src/core/middleware/rateLimiters');
 const { errorHandler } = require('../../src/core/middleware/errorHandler');
+
+afterEach(() => {
+  env.reviews.publicSubmissionEnabled = false;
+});
+
+const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 
 describe('the per-IP limit on the account endpoints', () => {
   // Every limiter is skipped under NODE_ENV=test (rateLimiters' `skip`), so
@@ -43,5 +58,69 @@ describe('the per-IP limit on the account endpoints', () => {
       failures.push((await from(small, ip, { email: `guess${i}@example.com`, password: 'wrong' })).status);
     }
     expect(failures).toEqual([401, 401, 429]);
+  });
+});
+
+describe('public review submission (REVIEWS_PUBLIC_SUBMISSION_ENABLED)', () => {
+  const PHONE = '01000008888';
+
+  async function deliveredPurchase() {
+    const s = await setupWorkspaceWithProduct();
+    const order = await request(app)
+      .post(`/api/v1/workspaces/${s.workspace.id}/orders`)
+      .set(bearer(s.auth.accessToken))
+      .set('Idempotency-Key', `hard-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      .send({
+        items: [{ variantId: s.variant.id, quantity: 1 }],
+        contact: { fullName: 'Buyer', phone: PHONE },
+        shippingAddress: { country: 'EG', city: 'Cairo', addressLine: '1 St' },
+        paymentMethod: 'cod',
+      });
+    if (order.status !== 201) throw new Error(`order failed: ${order.status} ${JSON.stringify(order.body)}`);
+    const orderId = order.body.order.id;
+    await confirmCodOrder(s.auth.accessToken, s.workspace.id, orderId);
+    const ship = await request(app)
+      .post(`/api/v1/workspaces/${s.workspace.id}/orders/${orderId}/shipments`)
+      .set(bearer(s.auth.accessToken))
+      .send({ carrierCode: 'local-courier' });
+    await request(app)
+      .patch(`/api/v1/workspaces/${s.workspace.id}/orders/${orderId}/shipments/${ship.body.shipment.id}`)
+      .set(bearer(s.auth.accessToken))
+      .send({ status: 'delivered' })
+      .expect(200);
+    return s;
+  }
+  const submit = (workspaceId, productId, body) =>
+    request(app).post(`/api/v1/store/${workspaceId}/products/${productId}/reviews`).send(body);
+
+  it('closed: the same 404 for a buyer, a stranger, an unknown product and a malformed body, naming none of them', async () => {
+    const s = await deliveredPurchase();
+    const answers = await Promise.all([
+      submit(s.workspace.id, s.product.id, { phone: PHONE, rating: 5 }),
+      submit(s.workspace.id, s.product.id, { phone: '01000007777', rating: 5 }),
+      submit(s.workspace.id, '00000000-0000-4000-8000-000000000000', { phone: PHONE, rating: 5 }),
+      submit(s.workspace.id, s.product.id, { nonsense: true }),
+    ]);
+    for (const res of answers) {
+      expect(res.status).toBe(404);
+      expect(res.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Not found' });
+      const text = JSON.stringify(res.body);
+      expect(text).not.toContain(s.product.id);
+      expect(text).not.toContain(PHONE);
+    }
+    expect(await db.Review.count()).toBe(0);
+  });
+
+  it('open: works as before, and reading reviews never depended on the flag', async () => {
+    const s = await deliveredPurchase();
+    env.reviews.publicSubmissionEnabled = true;
+    expect((await submit(s.workspace.id, s.product.id, { phone: '01000007777', rating: 5 })).status).toBe(403);
+    const ok = await submit(s.workspace.id, s.product.id, { phone: PHONE, rating: 5 });
+    expect(ok.status).toBe(201);
+
+    env.reviews.publicSubmissionEnabled = false;
+    const list = await request(app).get(`/api/v1/workspaces/${s.workspace.id}/reviews`).set(bearer(s.auth.accessToken));
+    expect(list.status).toBe(200);
+    expect(list.body.reviews).toHaveLength(1);
   });
 });
