@@ -22,6 +22,7 @@ const notify = require('../notifications/notify');
 const billingService = require('../billing/billingService');
 const entitlements = require('../billing/entitlementsService');
 const publicPlans = require('../billing/publicPlansService');
+const { isVerified } = require('../auth/signupPolicy');
 const env = require('../../config/env');
 const { assertBumpOfferUsable } = require('../checkout/orderBump');
 
@@ -388,6 +389,15 @@ async function inviteMember({ workspaceId, email, roleId }, req) {
   const user = await db.User.findOne({ where: { email } });
 
   if (user) {
+    // An existing account becomes a member at once, so it must have confirmed
+    // its email: a new account is signed in before it does, and anyone can
+    // sign up with an address they don't own.
+    if (!isVerified(user)) {
+      throw new ConflictError(
+        "That person's account hasn't confirmed its email yet. Ask them to confirm it, then invite them again.",
+        'INVITEE_NOT_CONFIRMED'
+      );
+    }
     const existing = await db.Membership.findOne({ where: { workspaceId, userId: user.id } });
     if (existing) throw new ConflictError('User is already a member of this workspace', 'ALREADY_MEMBER');
   } else {

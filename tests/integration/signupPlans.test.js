@@ -65,7 +65,9 @@ describe('with REQUIRE_PLAN_AT_SIGNUP off', () => {
     expect(res.status).toBe(201);
     expect(res.body.accessToken).toBeTruthy();
     expect(res.body.user.selectedPlanId).toBeNull();
-    expect(res.body.user.status).toBe('pending_verification');
+    // Active at once, its email still to confirm (soft confirmation).
+    expect(res.body.user.status).toBe('active');
+    expect(res.body.user.emailVerifiedAt).toBeNull();
   });
 
   it('ignores a plan sent anyway: the first store gets the default plan', async () => {

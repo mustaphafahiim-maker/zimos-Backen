@@ -11,7 +11,10 @@ const verificationCodes = require('../otp/verificationCodeService');
 
 /**
  * What sign-up asks for, behind two of the three switches in config/env.js
- * (env.signup). Off, sign-up is exactly what it was.
+ * (env.signup). With both off, a new account is active and signed in at once,
+ * its email not confirmed yet: a code to confirm it is emailed, and the
+ * dashboard asks for it until it is (authService.register,
+ * core/middleware/confirmedAccount).
  *
  * REQUIRE_PLAN_AT_SIGNUP
  *   The terms (and refund and privacy policies) must be accepted — 422

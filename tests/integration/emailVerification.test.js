@@ -3,11 +3,16 @@
 // Email verification end to end: the POST /auth/verify-email endpoint that
 // flips a `pending_verification` account to `active`, and the
 // POST /auth/resend-verification endpoint that re-issues the token.
+//
+// New sign-ups no longer get a link (they are active at once and get a code,
+// see signupVerification.test.js); these endpoints stay for the accounts and
+// links from before, so the pending accounts here are made directly.
 
 const { app, request, uniqueEmail } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const notify = require('../../src/modules/notifications/notify');
 const env = require('../../src/config/env');
+const { hashPassword } = require('../../src/core/security/password');
 
 const ORIGINAL_PROVIDER = env.notifications.emailProvider;
 
@@ -28,12 +33,16 @@ const tokenFromEmail = (template) => {
   return call && call[0].data.token;
 };
 
+// An account from before soft confirmation, still pending, with its link.
 async function registerPending(email = uniqueEmail()) {
-  const res = await request(app)
-    .post('/api/v1/auth/register')
-    .send({ email, password: 'Passw0rd!123', fullName: 'Pending User' });
-  expect(res.status).toBe(201);
-  return { email, userId: res.body.user.id, token: tokenFromEmail('email_verification') };
+  const user = await db.User.create({
+    email,
+    passwordHash: await hashPassword('Passw0rd!123'),
+    fullName: 'Pending User',
+    status: 'pending_verification',
+  });
+  await request(app).post('/api/v1/auth/resend-verification').send({ email }).expect(200);
+  return { email, userId: user.id, token: tokenFromEmail('email_verification') };
 }
 
 describe('POST /auth/verify-email', () => {

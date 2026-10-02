@@ -4,15 +4,73 @@ const asyncHandler = require('express-async-handler');
 const { AppError } = require('../../core/errors/AppError');
 const service = require('./quickstartService');
 const { formatMoney } = require('./quickstartAdapter');
+const authService = require('../auth/authService');
+const { isVerified } = require('../auth/signupPolicy');
+const { maskEmail } = require('../otp/verificationCodeService');
 
 function basePath(req) {
   return req.originalUrl.split('?')[0];
 }
 function tokenOf(req) {
-  return (req.body && req.body.token) || req.query.token || '';
+  // `formToken`: the form's hidden token, kept by confirmBeforePublish before
+  // `validate` drops it from the body, so a re-shown form still signs in.
+  return (req.body && req.body.token) || req.query.token || req.formToken || '';
 }
 
 // --- merchant (authenticated) -------------------------------------------
+
+/**
+ * The form publishes, so an account whose email isn't confirmed yet
+ * (core/middleware/confirmedAccount) is asked for its code on the form
+ * itself, with what it typed kept: "Send me a code" (intent=send_code, under
+ * the codes' own limits) re-shows the form, and a code sent with the form
+ * confirms the account and publishes in the same submit. Runs before
+ * `validate`, which would drop the token and refuse the two extra fields.
+ */
+const confirmBeforePublish = asyncHandler(async (req, res, next) => {
+  const { verificationCode, intent, ...fields } = req.body || {};
+  const token = tokenOf(req);
+  req.formToken = token;
+  req.body = fields;
+  if (isVerified(req.user)) return next();
+
+  const show = (status, { error = null, notice = null } = {}) => {
+    const { token: _token, ...existing } = fields;
+    return res.status(status).render('merchant-form', {
+      title: 'Add a product',
+      actionUrl: basePath(req),
+      token,
+      existing,
+      error,
+      notice,
+      confirm: { email: maskEmail(req.user.email) },
+    });
+  };
+  const shown = (err) => {
+    if (err instanceof AppError && err.statusCode !== 500) return show(err.statusCode, { error: err.message });
+    throw err;
+  };
+
+  if (intent === 'send_code') {
+    try {
+      const sent = await authService.sendAccountCode(req.user, { locale: 'en' }, req);
+      return show(200, { notice: `We sent a 6-digit code to ${sent.target}. It is valid for 10 minutes.` });
+    } catch (err) {
+      return shown(err);
+    }
+  }
+  const code = String(verificationCode || '').trim();
+  if (code) {
+    if (!/^\d{6}$/.test(code)) return show(422, { error: 'The code is 6 digits.' });
+    try {
+      await authService.confirmAccountCode(req.user, code, req);
+    } catch (err) {
+      return shown(err);
+    }
+    return next();
+  }
+  return show(403, { error: 'Confirm your email address to publish. Send yourself a code, then enter it below.' });
+});
 
 const showForm = asyncHandler(async (req, res) => {
   const wid = req.tenant.workspaceId;
@@ -156,6 +214,7 @@ const renderThankYou = asyncHandler(async (req, res) => {
 
 module.exports = {
   showForm,
+  confirmBeforePublish,
   submitForm,
   submitBranding,
   patchBranding,

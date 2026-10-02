@@ -5,6 +5,7 @@ const validate = require('../../core/middleware/validate');
 const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission, requireAnyPermission } = require('../../core/middleware/rbac');
+const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./workspaceController');
 const schemas = require('./workspaceValidation');
@@ -40,6 +41,7 @@ router.post(
   validate(schemas.listMembers),
   resolveTenant,
   requirePermission(PERMISSIONS.BILLING_MANAGE),
+  requireConfirmedAccount,
   controller.startTrial
 );
 router.post(
