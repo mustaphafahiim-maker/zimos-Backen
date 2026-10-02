@@ -7,6 +7,16 @@
 
 const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace, confirmCodOrder } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const env = require('../../src/config/env');
+
+// Submitting is closed by default (REVIEWS_PUBLIC_SUBMISSION_ENABLED); these
+// tests are about it open. authHardening.test.js covers it closed.
+beforeEach(() => {
+  env.reviews.publicSubmissionEnabled = true;
+});
+afterEach(() => {
+  env.reviews.publicSubmissionEnabled = false;
+});
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 const PHONE = '01000009999';

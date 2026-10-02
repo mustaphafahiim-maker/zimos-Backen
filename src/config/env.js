@@ -141,6 +141,11 @@ const env = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     authMax: parseInt(process.env.AUTH_RATE_LIMIT_MAX || '10', 10),
+    // Sign-in, sign-up, password reset and resend-verification, per IP alone,
+    // on top of authLimiter (whose key includes the email the caller sends,
+    // so a new email meant a new allowance). Sign-in counts failed attempts only.
+    authIpMax: parseInt(process.env.AUTH_IP_RATE_LIMIT_MAX || '50', 10),
+    authIpWindowMs: parseInt(process.env.AUTH_IP_RATE_LIMIT_WINDOW_MS || String(15 * 60 * 1000), 10),
     // Public storefront API only (see core/middleware/rateLimiters.js). Each
     // shopper still gets `max`; these are the ceilings per connecting IP — for
     // everyone sharing one IP (NAT, rotating cart tokens), and for our own
@@ -171,6 +176,21 @@ const env = {
     // Password reset requests (POST /auth/password-reset/request), per IP per
     // hour — on top of the per-account limit kept in the database (authService).
     passwordResetHourMax: parseInt(process.env.PASSWORD_RESET_RATE_LIMIT_PER_HOUR || '10', 10),
+  },
+
+  // Public endpoints that stay closed until their identity checks are
+  // stronger. Exactly "true" opens one. Under
+  // NODE_ENV=test they start off whatever the .env says; a test that needs
+  // one sets it on this object at runtime.
+  //   reviews.publicSubmissionEnabled  POST /store/:id/products/:productId/reviews
+  //                                    (it trusts a phone number alone)
+  //   passwordReset.smsEnabled         POST /auth/password-reset/sms/request and
+  //                                    /confirm (the dashboard has no screen for it)
+  reviews: {
+    publicSubmissionEnabled: process.env.NODE_ENV !== 'test' && process.env.REVIEWS_PUBLIC_SUBMISSION_ENABLED === 'true',
+  },
+  passwordReset: {
+    smsEnabled: process.env.NODE_ENV !== 'test' && process.env.PASSWORD_RESET_SMS_ENABLED === 'true',
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is

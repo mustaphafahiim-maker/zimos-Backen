@@ -181,6 +181,21 @@ const confirmPhoneVerification = [
   }),
 ];
 
+// Password reset by SMS stays closed unless PASSWORD_RESET_SMS_ENABLED is
+// "true" (env.passwordReset): the dashboard has no screen for it, and its
+// sending limit could tell a verified number apart. Closed, the request
+// answers success for any number and sends nothing, as it does for a number
+// with no account; the confirmation answers as a wrong code does.
+function smsResetRequestGate(req, res, next) {
+  if (env.passwordReset.smsEnabled) return next();
+  return res.json({ success: true });
+}
+
+function smsResetConfirmGate(req, res, next) {
+  if (env.passwordReset.smsEnabled) return next();
+  return next(new AppError('INVALID_CODE', 'That code is not valid', 422));
+}
+
 const requestPasswordResetSms = asyncHandler(async (req, res) => {
   const result = await authService.requestPasswordResetSms(req.body.phone);
   res.json(result);
@@ -215,6 +230,8 @@ module.exports = {
   resetPassword,
   requestPhoneVerification,
   confirmPhoneVerification,
+  smsResetRequestGate,
+  smsResetConfirmGate,
   requestPasswordResetSms,
   resetPasswordSms,
 };

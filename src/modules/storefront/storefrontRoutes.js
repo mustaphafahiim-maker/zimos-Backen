@@ -26,7 +26,8 @@ router.get('/products', collectOptionFilters, validate(schemas.listProducts), co
 // Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
 router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
 router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getProduct);
-router.post('/products/:productId/reviews', validate(reviewSchemas.submit), reviewController.submit);
+// Closed unless REVIEWS_PUBLIC_SUBMISSION_ENABLED (reviewController.submissionGate).
+router.post('/products/:productId/reviews', reviewController.submissionGate, validate(reviewSchemas.submit), reviewController.submit);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 // A shopper's photo for a product's image field (customerUploads). Limited
 // before multer reads a byte; multer refuses anything over 15 MB mid-stream.

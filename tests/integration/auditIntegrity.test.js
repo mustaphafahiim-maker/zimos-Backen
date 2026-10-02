@@ -147,9 +147,15 @@ describe('audit logging on every new mutating endpoint', () => {
     await request(app).post(`/api/v1/workspaces/${workspace.id}/orders/${order2.id}/cancel`).set(H).send({ reason: 'audit' }).expect(200);
     expect((await auditRow('order.cancel', order2.id)).beforeState).not.toBeNull();
 
-    // reviews
-    await request(app).post(`/api/v1/store/${workspace.id}/products/${product.id}/reviews`)
-      .send({ phone: '01000012121', rating: 5 }).expect(201);
+    // reviews (public submission is closed by default: open it for this step)
+    const env = require('../../src/config/env');
+    env.reviews.publicSubmissionEnabled = true;
+    try {
+      await request(app).post(`/api/v1/store/${workspace.id}/products/${product.id}/reviews`)
+        .send({ phone: '01000012121', rating: 5 }).expect(201);
+    } finally {
+      env.reviews.publicSubmissionEnabled = false;
+    }
     const review = await db.Review.findOne({ where: { workspaceId: workspace.id } });
     expect(await auditRow('review.submit', review.id)).not.toBeNull();
     await request(app).patch(`/api/v1/workspaces/${workspace.id}/reviews/${review.id}`).set(H).send({ action: 'approve' }).expect(200);
