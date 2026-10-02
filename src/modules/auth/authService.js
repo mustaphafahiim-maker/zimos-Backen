@@ -258,6 +258,19 @@ async function login({ identifier, email, password, locale }, req) {
   return { user: user.toSafeJSON(), ...tokens };
 }
 
+/**
+ * What a Google sign-in answers an account that may not sign in: the same as
+ * a password sign-in (login), ACCOUNT_SUSPENDED for a suspended account.
+ * users.status is an ENUM of active, pending_verification and suspended;
+ * anything else would be refused as not active, as authenticate and refresh
+ * refuse it.
+ */
+function assertMaySignIn(user) {
+  if (user.status === 'active' || user.status === 'pending_verification') return;
+  if (user.status === 'suspended') throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
+  throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');
+}
+
 /** URL to send the browser to for Google's consent screen. */
 function getGoogleAuthUrl() {
   return googleClient.getAuthUrl();
@@ -282,6 +295,11 @@ async function loginWithGoogle(code, req) {
   if (!user) {
     const byEmail = await db.User.findOne({ where: { email: profile.email } });
     if (byEmail) {
+      // Only an active or a pending account is linked. Any other status
+      // (suspended) is left exactly as it is — no Google link, no password
+      // or session change — and refused as a password sign-in refuses it:
+      // signing in with Google must not lift a suspension.
+      assertMaySignIn(byEmail);
       // Google has already verified this email, so a still-`pending_verification`
       // password account gets activated here too — otherwise it stays stuck as
       // pending forever (Google login never goes through resend-verification).
@@ -297,7 +315,7 @@ async function loginWithGoogle(code, req) {
         await byEmail.update(
           {
             googleId: profile.googleId,
-            status: 'active',
+            ...(byEmail.status === 'pending_verification' ? { status: 'active' } : {}),
             emailVerifiedAt: new Date(),
             ...(unconfirmed ? { passwordHash: null } : {}),
           },
@@ -328,9 +346,7 @@ async function loginWithGoogle(code, req) {
     }
   }
 
-  if (user.status === 'suspended') {
-    throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
-  }
+  assertMaySignIn(user);
 
   await user.update({ lastLoginAt: new Date() });
   await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, metadata: linkMetadata, req });

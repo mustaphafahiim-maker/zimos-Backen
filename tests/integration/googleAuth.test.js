@@ -210,3 +210,80 @@ describe('Google OAuth login', () => {
     expect(await db.User.count()).toBe(0);
   });
 });
+
+describe("Google sign-in and the account's status", () => {
+  const PASSWORD = 'Passw0rd!123';
+  const authService = require('../../src/modules/auth/authService');
+
+  async function account(email, fields) {
+    const user = await db.User.create({ email, passwordHash: await hashPassword(PASSWORD), fullName: 'Status Person', ...fields });
+    // A session from before, to see that nothing touches it.
+    await db.Session.create({
+      userId: user.id,
+      refreshTokenHash: require('crypto').randomBytes(32).toString('hex'),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+    return user;
+  }
+  const googleProfile = (googleId, email) =>
+    googleClient.fetchProfile.mockResolvedValue({ googleId, email, emailVerified: true, fullName: 'Status Person' });
+
+  it('a suspended account not linked to Google is refused and left exactly as it was', async () => {
+    const before = await account('suspended@example.com', { status: 'suspended' });
+    googleProfile('g-6006', 'suspended@example.com');
+
+    const res = await callback('code=suspended-code');
+    expect(res.status).toBe(302);
+    const q = query(res.headers.location);
+    expect(q.error).toBe('ACCOUNT_SUSPENDED');
+    expect(q.accessToken).toBeNull();
+
+    const after = await db.User.findByPk(before.id);
+    expect(after.status).toBe('suspended');
+    expect(after.googleId).toBeNull();
+    expect(after.passwordHash).toBe(before.passwordHash);
+    expect(after.emailVerifiedAt).toBeNull();
+    expect(await db.Session.count({ where: { userId: before.id, revokedAt: null } })).toBe(1);
+    expect(await db.AuditLog.count({ where: { action: 'user.link.google', entityId: before.id } })).toBe(0);
+
+    // The same refusal as a password sign-in: same code, same message.
+    const byPassword = await request(app).post('/api/v1/auth/login').send({ identifier: 'suspended@example.com', password: PASSWORD });
+    expect(byPassword.status).toBe(401);
+    await expect(authService.loginWithGoogle('suspended-code', null)).rejects.toMatchObject({
+      code: byPassword.body.error.code,
+      message: byPassword.body.error.message,
+    });
+    expect(byPassword.body.error.code).toBe('ACCOUNT_SUSPENDED');
+  });
+
+  it('a suspended account already linked to Google is refused too', async () => {
+    const before = await account('suspended-linked@example.com', { status: 'suspended', googleId: 'g-7007', emailVerifiedAt: new Date() });
+    googleProfile('g-7007', 'suspended-linked@example.com');
+
+    const res = await callback('code=suspended-linked-code');
+    expect(query(res.headers.location).error).toBe('ACCOUNT_SUSPENDED');
+    expect((await db.User.findByPk(before.id)).status).toBe('suspended');
+    expect(await db.Session.count({ where: { userId: before.id } })).toBe(1); // no new session
+  });
+
+  it('a pending account is activated and linked, as before', async () => {
+    const before = await account('pending-status@example.com', { status: 'pending_verification' });
+    googleProfile('g-8008', 'pending-status@example.com');
+
+    const q = query((await callback('code=pending-status-code')).headers.location);
+    expect(q.accessToken).toBeTruthy();
+    const after = await db.User.findByPk(before.id);
+    expect(after).toMatchObject({ status: 'active', googleId: 'g-8008' });
+  });
+
+  it('an active account is linked and signed in, still active', async () => {
+    const before = await account('active-status@example.com', { status: 'active', emailVerifiedAt: new Date() });
+    googleProfile('g-9009', 'active-status@example.com');
+
+    const q = query((await callback('code=active-status-code')).headers.location);
+    expect(q.accessToken).toBeTruthy();
+    const after = await db.User.findByPk(before.id);
+    expect(after).toMatchObject({ status: 'active', googleId: 'g-9009' });
+    expect(after.passwordHash).toBe(before.passwordHash); // confirmed: keeps its password
+  });
+});
