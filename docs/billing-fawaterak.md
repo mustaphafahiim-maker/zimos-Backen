@@ -24,7 +24,8 @@ gateways in `src/modules/payments`.
    - `POST /api/v3/createTransaction` without `payment_method_id` gives a hosted
      checkout link for exactly that amount, in EGP.
 2. The merchant pays on Fawaterak's page and is sent back to
-   `{FRONTEND_URL}/settings?payment=<attemptId>&workspace=<id>`. The page reads
+   `{FRONTEND_URL}/settings?payment=<attemptId>&workspace=<id>&result=<success|fail|pending|back>`
+   (`result` only words the page's message). The page reads
    `GET /api/v1/workspaces/:id/billing/payments/:attemptId`, which asks Fawaterak
    while the payment is in progress. The redirect itself proves nothing.
 3. Fawaterak's webhook arrives. Its signature is checked, but **the paid

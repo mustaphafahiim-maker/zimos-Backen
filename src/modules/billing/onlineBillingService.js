@@ -74,10 +74,13 @@ function webhookUrl(config, kind) {
 /**
  * Where Fawaterak sends the merchant back: the dashboard, which then asks us.
  * It names the store, since the dashboard's current store is whichever was
- * picked last in that browser.
+ * picked last in that browser. `result` says which of Fawaterak's redirects
+ * it was (success, fail, pending, back): the page words its message with it,
+ * and nothing else ever reads it — the payment's state comes from us.
  */
-function returnUrl(attempt) {
-  return `${env.frontendUrl.replace(/\/+$/, '')}/settings?payment=${attempt.id}&workspace=${attempt.workspaceId}`;
+function returnUrl(attempt, result) {
+  const base = env.frontendUrl.replace(/\/+$/, '');
+  return `${base}/settings?payment=${attempt.id}&workspace=${attempt.workspaceId}&result=${result}`;
 }
 
 function itemName(plan, billingCycle) {
@@ -90,7 +93,6 @@ function transactionRequest(config, attempt, { plan, billingCycle, user, lang })
   const total = toMajor(attempt.amount);
   const [first, ...rest] = String(user.fullName || '').trim().split(/\s+/).filter(Boolean);
   const firstName = (first || 'ZIMOS').slice(0, 60);
-  const back = returnUrl(attempt);
   return {
     cartTotal: total,
     currency: attempt.currency,
@@ -102,10 +104,10 @@ function transactionRequest(config, attempt, { plan, billingCycle, user, lang })
     cartItems: [{ name: itemName(plan, billingCycle), price: total, quantity: 1 }],
     pay_load: { attemptId: attempt.id, billingInvoiceId: attempt.billingInvoiceId, workspaceId: attempt.workspaceId },
     redirectionUrls: {
-      successUrl: back,
-      failUrl: back,
-      pendingUrl: back,
-      backUrl: back,
+      successUrl: returnUrl(attempt, 'success'),
+      failUrl: returnUrl(attempt, 'fail'),
+      pendingUrl: returnUrl(attempt, 'pending'),
+      backUrl: returnUrl(attempt, 'back'),
       webhookUrl: webhookUrl(config, 'paid_json'),
     },
     sendEmail: false,
