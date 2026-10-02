@@ -269,6 +269,38 @@ const env = {
           : process.env.NODE_ENV === 'production'
             ? 'warn'
             : 'enforce',
+
+    // Paying a subscription charge online through Fawaterak
+    // (billing/onlineBillingService). ONLINE_BILLING_ENABLED lets a merchant
+    // start a payment; it is off unless set to exactly "true". Webhooks and
+    // the sweep settle attempts that already exist whenever the keys are set,
+    // flag or not: that money moved. Recording a payment by hand works
+    // either way.
+    online: {
+      enabled: process.env.NODE_ENV !== 'test' && process.env.ONLINE_BILLING_ENABLED === 'true',
+    },
+
+    // Zimos's own Fawaterak account (billing/fawaterak). All secrets except
+    // `env`, `baseUrl` and `tokenUrl`, none with a fallback. Under
+    // NODE_ENV=test nothing here is read from the environment: a test sets
+    // fake values on this object at runtime, so a dev .env holding staging
+    // keys can never reach the suite.
+    //   env           staging | live — picks the documented base URL
+    //   baseUrl       optional override of that URL (https)
+    //   tokenUrl      optional; default {baseUrl}/oauth/token, same origin only
+    //   clientId / clientSecret   the OAuth client (dashboard → Integrations)
+    //   hashKey       the dashboard's "HASH API key": the key Fawaterak's
+    //                 webhook signatures are made with
+    //   webhookToken  ours, random: a path segment of our webhook URLs
+    fawaterak: {
+      env: process.env.NODE_ENV === 'test' ? 'staging' : (process.env.FAWATERAK_ENV || 'staging').trim().toLowerCase(),
+      baseUrl: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_BASE_URL || '').trim(),
+      tokenUrl: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_TOKEN_URL || '').trim(),
+      clientId: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_CLIENT_ID || '').trim(),
+      clientSecret: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_CLIENT_SECRET || '').trim(),
+      hashKey: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_HASH_KEY || '').trim(),
+      webhookToken: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_WEBHOOK_TOKEN || '').trim(),
+    },
   },
 
   // Sign-up and go-live rules (modules/auth/signupPolicy.js). Three switches,

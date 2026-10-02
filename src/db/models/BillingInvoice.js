@@ -76,6 +76,8 @@ module.exports = (sequelize, DataTypes) => {
     BillingInvoice.belongsTo(models.ReferralCode, { foreignKey: 'referralCodeId', as: 'referralCode' });
     BillingInvoice.belongsTo(models.User, { foreignKey: 'recordedByUserId', as: 'recordedBy' });
     BillingInvoice.belongsTo(models.SubscriptionTerm, { foreignKey: 'specialTermsId', as: 'specialTerms' });
+    // Checkouts started for this charge (migration 129).
+    BillingInvoice.hasMany(models.BillingPaymentAttempt, { foreignKey: 'billingInvoiceId', as: 'onlinePayments' });
     // The live ledger row; a reversed payment leaves a voided one behind.
     BillingInvoice.hasOne(models.AgentCommission, {
       foreignKey: 'billingInvoiceId',

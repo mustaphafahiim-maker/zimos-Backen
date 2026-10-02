@@ -17,5 +17,9 @@ router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.BILLING_MA
 router.get('/', controller.getWorkspaceBilling);
 router.patch('/', validate(schemas.setBillingCycle), controller.setBillingCycle);
 router.post('/referral-code', validate(schemas.attachReferralCode), controller.attachReferralCode);
+// Paying the charge online (billing/onlineBillingService), when
+// ONLINE_BILLING_ENABLED is on and the plan is priced in EGP.
+router.post('/payments', validate(schemas.startOnlinePayment), controller.startOnlinePayment);
+router.get('/payments/:paymentId', validate(schemas.getOnlinePayment), controller.getOnlinePayment);
 
 module.exports = router;

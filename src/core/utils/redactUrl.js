@@ -2,13 +2,14 @@
 
 /**
  * A request URL safe to log: gateway signatures in the query string and the
- * per-merchant webhook tokens in callback paths are replaced with
- * "[redacted]". Anyone holding a callback URL's token and a valid signature
- * could replay it, so neither belongs in a log.
+ * webhook tokens in callback paths (per merchant, and the billing gateway's
+ * FAWATERAK_WEBHOOK_TOKEN) are replaced with "[redacted]". Anyone holding a
+ * callback URL's token and a valid signature could replay it, so neither
+ * belongs in a log.
  */
 
 const SECRET_PARAMS = new Set(['hmac', 'signature', 'sig', 'x-signature', 'token', 'secret']);
-const WEBHOOK_PATH = /(\/webhooks\/(?:payments|carriers)\/[^/?#]+\/)[^/?#]+/i;
+const WEBHOOK_PATH = /(\/(?:webhooks\/(?:payments|carriers)\/[^/?#]+|billing\/fawaterak)\/)[^/?#]+/i;
 
 function redactUrl(url) {
   if (typeof url !== 'string' || !url) return url;

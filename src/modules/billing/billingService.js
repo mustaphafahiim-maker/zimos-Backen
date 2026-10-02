@@ -11,6 +11,7 @@ const env = require('../../config/env');
 const access = require('../workspaces/workspaceAccessService');
 const goLive = require('./goLiveService');
 const entitlements = require('./entitlementsService');
+const onlineBilling = require('./onlineBillingService');
 
 const { planFeatureKeys, featureDefinition } = require('./featureCatalog');
 
@@ -361,6 +362,9 @@ async function getWorkspaceBilling(workspaceId) {
     trialEndsAt: subscription.trialEndsAt,
     limits: await entitlements.getLimits(workspaceId),
     draft,
+    // Whether the Pay button can be offered (ONLINE_BILLING_ENABLED, an EGP
+    // plan), and the latest online payment, whatever its state.
+    onlinePayment: await onlineBilling.onlinePaymentSummary(workspaceId, plan),
     // Only while a draft: its trial, and how to pay by hand.
     goLive: draft
       ? {
