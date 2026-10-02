@@ -114,7 +114,7 @@ can exceed the safe-integer range) — `money.js` coerces this on the way in.
 
 ```bash
 npm install
-cp .env.example .env        # edit JWT secrets etc. for anything beyond local dev
+cp .env.example .env        # then set JWT_ACCESS_SECRET and DB_PASSWORD: no defaults, the app won't start without them
 createdb zimos_dev
 createdb zimos_test  # only needed to run the test suite
 npm run migrate
@@ -183,6 +183,11 @@ docker compose up --build
 Runs Postgres + the API, running migrations automatically on boot. Seed data
 is not applied automatically — run
 `docker compose exec api npx sequelize-cli db:seed:all` if you want it.
+`DB_PASSWORD` and `JWT_ACCESS_SECRET` come from your shell or from `.env`
+next to `docker-compose.yml`; compose refuses to start while either is
+missing, and the API (run with `NODE_ENV=production`) also refuses a
+`JWT_ACCESS_SECRET` shorter than 32 characters. An existing `zimos_pgdata`
+volume keeps the password it was created with.
 
 ### Tests
 
@@ -466,5 +471,6 @@ real payment-retry scheduling.
 - A shipping carrier API (Bosta, Aramex, etc.) for `src/modules/shipping/`
   waybill creation (only rate *pricing* is implemented; carrier integration
   is a documented extension point, not yet built)
-- Production JWT secrets (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`) —
-  generate with e.g. `openssl rand -hex 32`
+- A production `JWT_ACCESS_SECRET`, at least 32 characters (the app refuses
+  to start without one) — generate with
+  `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
