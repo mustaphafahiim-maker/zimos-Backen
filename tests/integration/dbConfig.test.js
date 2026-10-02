@@ -4,6 +4,7 @@
 // separate DB_* vars otherwise, and never let it hijack the test database.
 
 const path = require('path');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { parseDbUrl } = require('../../src/config/parseDbUrl');
 
@@ -42,12 +43,13 @@ describe('parseDbUrl', () => {
 });
 
 // Run config resolution in a clean child process so nothing here touches the
-// module cache or process.env of the running suite.
+// module cache or process.env of the running suite. The suite's test-only JWT
+// secret is refused outside NODE_ENV=test, so the child gets a random one.
 function resolveDb(envOverrides) {
   const script = "process.stdout.write('\\n@@' + JSON.stringify(require('./src/config/env').db))";
   const out = execFileSync(process.execPath, ['-e', script], {
     cwd: path.resolve(__dirname, '../..'),
-    env: { ...process.env, DATABASE_URL: '', ...envOverrides },
+    env: { ...process.env, DATABASE_URL: '', JWT_ACCESS_SECRET: crypto.randomBytes(32).toString('hex'), ...envOverrides },
   }).toString();
   // dotenv prints a banner to stdout; our payload is prefixed with @@.
   return JSON.parse(out.slice(out.lastIndexOf('@@') + 2));

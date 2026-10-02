@@ -6,6 +6,8 @@ node_modules/
 .env.local
 .env.*.local
 .env.*
+# The template: variable names and comments only, never a value
+!.env.example
 # Logs
 *.log
 npm-debug.log*

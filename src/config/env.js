@@ -25,6 +25,54 @@ if (storefrontProxySecret && storefrontProxySecret.length < 32) {
   throw new Error('STOREFRONT_PROXY_SECRET must be at least 32 characters (generate one with `openssl rand -hex 32`)');
 }
 
+// The secrets the app cannot run without come from the environment and from
+// nowhere else: the code holds no fallback value for them, in any environment.
+//   production   missing, or JWT_ACCESS_SECRET shorter than 32 characters:
+//                refuse to start
+//   development  missing: refuse to start (set it in .env, see .env.example)
+//   test         the suite sets its own test-only values before anything
+//                loads (tests/helpers/testEnv.js); DB_PASSWORD is the local
+//                test database's own, from .env
+// A value starting with TEST_ONLY_PREFIX is the suite's, and is refused outside
+// NODE_ENV=test, so one copied into a real .env can never sign anything. The
+// errors name the variable, never its value.
+const MIN_SECRET_LENGTH = 32;
+const TEST_ONLY_PREFIX = 'test-only-';
+const GENERATE_SECRET = `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`;
+const runningEnv = process.env.NODE_ENV || 'development';
+const setItIn = runningEnv === 'production' ? 'the environment' : '.env (see .env.example)';
+const isBlank = (value) => typeof value !== 'string' || value.trim() === '';
+const secretProblems = [];
+
+// Signs access tokens, and keys every HMAC derived from it: store and payment
+// preview tokens, sign-up verification tokens and codes, and shoppers' photo
+// links while UPLOAD_URL_SECRET is unset.
+const jwtAccessSecret = process.env.JWT_ACCESS_SECRET;
+if (isBlank(jwtAccessSecret)) {
+  secretProblems.push(
+    runningEnv === 'test'
+      ? 'JWT_ACCESS_SECRET is not set: under NODE_ENV=test it comes from tests/helpers/testEnv.js (jest setupFiles), never .env'
+      : `JWT_ACCESS_SECRET is not set: set it in ${setItIn}. Generate one with: ${GENERATE_SECRET}`
+  );
+} else if (runningEnv !== 'test' && jwtAccessSecret.startsWith(TEST_ONLY_PREFIX)) {
+  secretProblems.push(`JWT_ACCESS_SECRET holds the test suite's value: set a real one in ${setItIn}. Generate one with: ${GENERATE_SECRET}`);
+} else if (runningEnv === 'production' && jwtAccessSecret.length < MIN_SECRET_LENGTH) {
+  secretProblems.push(
+    `JWT_ACCESS_SECRET is shorter than ${MIN_SECRET_LENGTH} characters, which production refuses. Generate one with: ${GENERATE_SECRET}`
+  );
+}
+
+// From DATABASE_URL or DB_PASSWORD. Not held to MIN_SECRET_LENGTH: the
+// database issues it, we don't.
+const dbPassword = (dbUrl && dbUrl.password) || process.env.DB_PASSWORD;
+if (isBlank(dbPassword)) {
+  secretProblems.push(`DB_PASSWORD is not set: set it in ${setItIn}, or give DATABASE_URL a password`);
+}
+
+if (secretProblems.length > 0) {
+  throw new Error(`Refusing to start (NODE_ENV=${runningEnv}):\n  - ${secretProblems.join('\n  - ')}`);
+}
+
 // A comma-separated env var as a list of lower-cased, trimmed entries. Unset
 // uses the fallback; set but empty is an empty list. Under NODE_ENV=test the
 // fallback always wins, so a dev .env can't change what the suite sees.
@@ -55,15 +103,16 @@ const env = {
         ? process.env.DB_NAME_TEST || 'zimos_test'
         : (dbUrl && dbUrl.name) || required('DB_NAME', 'zimos_dev'),
     user: (dbUrl && dbUrl.user) || process.env.DB_USER || 'postgres',
-    password: (dbUrl && dbUrl.password) || process.env.DB_PASSWORD || 'postgres',
+    password: dbPassword,
     ssl: dbUrl ? dbUrl.ssl || process.env.DB_SSL === 'true' : process.env.DB_SSL === 'true',
     poolMax: parseInt(process.env.DB_POOL_MAX || '10', 10),
     poolMin: parseInt(process.env.DB_POOL_MIN || '0', 10),
   },
 
+  // Refresh tokens are random strings stored hashed (core/security/tokens.js),
+  // so nothing signs with a refresh secret: JWT_REFRESH_SECRET is not read.
   jwt: {
-    accessSecret: required('JWT_ACCESS_SECRET', 'dev_only_access_secret_change_me_32chars'),
-    refreshSecret: required('JWT_REFRESH_SECRET', 'dev_only_refresh_secret_change_me_32chars'),
+    accessSecret: jwtAccessSecret,
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },
