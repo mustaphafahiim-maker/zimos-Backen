@@ -71,9 +71,13 @@ function webhookUrl(config, kind) {
   return `${env.appUrl.replace(/\/+$/, '')}/api/${env.apiVersion}/billing/fawaterak/${config.webhookToken}/${kind}`;
 }
 
-/** Where Fawaterak sends the merchant back: the dashboard, which then asks us. */
+/**
+ * Where Fawaterak sends the merchant back: the dashboard, which then asks us.
+ * It names the store, since the dashboard's current store is whichever was
+ * picked last in that browser.
+ */
 function returnUrl(attempt) {
-  return `${env.frontendUrl.replace(/\/+$/, '')}/settings?payment=${attempt.id}`;
+  return `${env.frontendUrl.replace(/\/+$/, '')}/settings?payment=${attempt.id}&workspace=${attempt.workspaceId}`;
 }
 
 function itemName(plan, billingCycle) {

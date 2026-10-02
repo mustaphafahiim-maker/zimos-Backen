@@ -121,7 +121,7 @@ describe('starting an online payment', () => {
       cartItems: [{ name: 'ZIMOS Basic (monthly)', price: 299, quantity: 1 }],
       pay_load: { attemptId, billingInvoiceId: invoice.id, workspaceId: m.wid },
       redirectionUrls: {
-        successUrl: expect.stringMatching(new RegExp(`/settings\\?payment=${attemptId}$`)),
+        successUrl: expect.stringMatching(new RegExp(`/settings\\?payment=${attemptId}&workspace=${m.wid}$`)),
         failUrl: expect.any(String),
         pendingUrl: expect.any(String),
         backUrl: expect.any(String),
