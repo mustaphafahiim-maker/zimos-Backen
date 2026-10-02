@@ -4,9 +4,11 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Secrets come from the shell or from .env next to this file (see
+    # .env.example); compose refuses to start while one is missing.
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env (see .env.example)}"
       POSTGRES_DB: zimos_dev
     ports:
       - "5432:5432"
@@ -24,6 +26,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # NODE_ENV=production: the app also refuses a JWT_ACCESS_SECRET shorter
+    # than 32 characters.
     environment:
       NODE_ENV: production
       PORT: 4000
@@ -31,9 +35,8 @@ services:
       DB_PORT: 5432
       DB_NAME: zimos_dev
       DB_USER: postgres
-      DB_PASSWORD: postgres
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change_me_access_secret_min_32_chars}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me_refresh_secret_min_32_chars}
+      DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env (see .env.example)}"
+      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env, at least 32 characters (see .env.example)}"
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
       - "4000:4000"
