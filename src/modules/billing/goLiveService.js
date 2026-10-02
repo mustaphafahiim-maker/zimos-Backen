@@ -6,6 +6,7 @@ const env = require('../../config/env');
 const { AppError, ConflictError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { planPrice } = require('./planPricing');
+const publicPlans = require('./publicPlansService');
 
 /**
  * Taking a draft store live (REQUIRE_SUBSCRIPTION_TO_GO_LIVE). A draft is a
@@ -13,9 +14,11 @@ const { planPrice } = require('./planPricing');
  * workspaces/workspaceAccessService, where that is recognised); it leaves
  * draft the moment anything writes a running status:
  *
- *   start-trial        the plan's free trial, once per plan per person
- *                      (plan_trials, unique on user + plan): trialing from
- *                      now for trial_days. The trial clock starts here, not
+ *   start-trial        a free trial, once per account (the store's owner):
+ *                      any row in plan_trials for the owner, on any plan,
+ *                      means it was used. On the store's plan or another
+ *                      offered one (`planId`): trialing from now for that
+ *                      plan's trial_days. The trial clock starts here, not
  *                      at sign-up, so no trial day is spent while building.
  *   activate-free-plan a plan that costs nothing on the store's billing
  *                      cycle: active straight away, for FREE_PLAN_YEARS.
@@ -36,12 +39,25 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // its period is simply long.
 const FREE_PLAN_YEARS = 100;
 
-/** Whether `userId` may still start `plan`'s trial: { eligible, days, reason? }. */
+/**
+ * Whether the account `userId` has had its free trial: any row in
+ * plan_trials, on any plan — a trial started here, the trial a store got when
+ * it was created with drafts off, or the backfill (migration 126).
+ */
+async function accountTrialUsed(userId, transaction) {
+  return Boolean(await db.PlanTrial.findOne({ where: { userId }, attributes: ['id'], transaction }));
+}
+
+/** Whether `userId` may still start a trial of `plan`: { eligible, days, reason? }. */
 async function trialEligibility(userId, plan, transaction) {
   const days = plan ? plan.trialDays : 0;
   if (!plan || !(days > 0)) return { eligible: false, days: days || 0, reason: 'no_trial' };
-  const earlier = await db.PlanTrial.findOne({ where: { userId, planId: plan.id }, attributes: ['id'], transaction });
-  return earlier ? { eligible: false, days, reason: 'used' } : { eligible: true, days };
+  return (await accountTrialUsed(userId, transaction)) ? { eligible: false, days, reason: 'used' } : { eligible: true, days };
+}
+
+/** Serialises trial starts for one account until the transaction ends. */
+async function lockAccountTrials(userId, transaction) {
+  await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext($key))', { bind: { key: `trial:${userId}` }, transaction });
 }
 
 /**
@@ -119,16 +135,24 @@ function notADraft() {
   return new ConflictError('This store is already subscribed', 'NOT_A_DRAFT');
 }
 
-/** POST /workspaces/:id/start-trial */
-async function startTrial(workspaceId, req) {
+/**
+ * POST /workspaces/:id/start-trial — from draft only. `planId` (optional) is
+ * the plan to try: the store's own, or another one on offer (never a private
+ * plan); the store moves to it. Trials of one account are serialised on an
+ * advisory lock, so two of its stores (or two plans) racing get one trial
+ * between them.
+ */
+async function startTrial(workspaceId, req, { planId = null } = {}) {
   return db.sequelize.transaction(async (transaction) => {
-    const { subscription, workspace, plan } = await lockedDraft(workspaceId, transaction);
+    const { subscription, workspace, plan: current } = await lockedDraft(workspaceId, transaction);
     if (subscription.status !== 'draft') {
       const own = await db.PlanTrial.findOne({ where: { workspaceId, source: 'start_trial' }, attributes: ['id'], transaction });
       if (own && subscription.status === 'trialing') return { subscription, started: false };
       throw notADraft();
     }
+    const plan = planId && (!current || planId !== current.id) ? await publicPlans.findOfferedPlan(planId, transaction) : current;
     if (!plan) throw new ConflictError('This store has no plan to try', 'NO_PLAN');
+    await lockAccountTrials(workspace.ownerUserId, transaction);
 
     const trial = await trialEligibility(workspace.ownerUserId, plan, transaction);
     const refused = (reason) =>
@@ -146,9 +170,17 @@ async function startTrial(workspaceId, req) {
     );
     if (!recorded) throw refused('used');
 
-    const before = subscriptionState(subscription);
+    const before = { ...subscriptionState(subscription), planId: subscription.planId };
     await subscription.update(
-      { status: 'trialing', trialEndsAt: end, currentPeriodStart: now, currentPeriodEnd: end, graceUntil: null, cancelAtPeriodEnd: false },
+      {
+        planId: plan.id,
+        status: 'trialing',
+        trialEndsAt: end,
+        currentPeriodStart: now,
+        currentPeriodEnd: end,
+        graceUntil: null,
+        cancelAtPeriodEnd: false,
+      },
       { transaction }
     );
     await recordAudit({
@@ -158,7 +190,7 @@ async function startTrial(workspaceId, req) {
       entityType: 'Subscription',
       entityId: subscription.id,
       before,
-      after: subscriptionState(subscription),
+      after: { ...subscriptionState(subscription), planId: plan.id },
       metadata: { planId: plan.id, days: trial.days },
       req,
       transaction,
@@ -251,6 +283,7 @@ function paymentInstructions() {
 
 module.exports = {
   FREE_PLAN_YEARS,
+  accountTrialUsed,
   trialEligibility,
   recordTrial,
   draftDetails,

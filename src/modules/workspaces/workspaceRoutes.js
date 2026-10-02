@@ -38,7 +38,7 @@ router.get('/:workspaceId/access', validate(schemas.listMembers), resolveTenant,
 // a plan that costs nothing. Whoever manages the store's billing.
 router.post(
   '/:workspaceId/start-trial',
-  validate(schemas.listMembers),
+  validate(schemas.startTrial),
   resolveTenant,
   requirePermission(PERMISSIONS.BILLING_MANAGE),
   requireConfirmedAccount,
