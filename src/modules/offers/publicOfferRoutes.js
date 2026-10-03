@@ -71,4 +71,23 @@ router.get(
   asyncHandler(async (req, res) => res.json({ exitDownsell: await rules.publicExitDownsell(req.publicWorkspace) }))
 );
 
+// What a coupon would take off these items (discounts/couponExtras.js): the code box and ?coupon= links.
+router.post(
+  '/coupon-preview',
+  validate({
+    params: Joi.object({ workspaceId }),
+    body: Joi.object({
+      code: Joi.string().trim().min(1).max(100).required(),
+      items: Joi.array()
+        .items(Joi.object({ variantId: uuid.required(), offerId: uuid.optional(), quantity: Joi.number().integer().min(1).max(1000).default(1) }))
+        .min(1)
+        .max(50)
+        .required(),
+    }),
+  }),
+  asyncHandler(async (req, res) =>
+    res.json({ coupon: await require('../discounts/couponExtras').previewCode(ws(req), req.body.code, req.body.items) })
+  )
+);
+
 module.exports = router;
