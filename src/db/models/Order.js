@@ -80,6 +80,11 @@ module.exports = (sequelize, DataTypes) => {
       // the order came from, the merchant's labels, whether anyone opened it,
       // a test order (kept out of sales figures and pixels), and the archive.
       source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'store' },
+      // SPEC §13.3/§13.4 (migration 213, modules/marketing): first/last touch,
+      // the visitor's stats before buying, and when Purchase was reported.
+      attribution: { type: DataTypes.JSONB, allowNull: true },
+      sessionStats: { type: DataTypes.JSONB, allowNull: true, field: 'session_stats' },
+      purchaseEventSentAt: { type: DataTypes.DATE, allowNull: true, field: 'purchase_event_sent_at' },
       tags: { type: DataTypes.ARRAY(DataTypes.TEXT), allowNull: false, defaultValue: [] },
       isSeen: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_seen' },
       seenAt: { type: DataTypes.DATE, allowNull: true, field: 'seen_at' },

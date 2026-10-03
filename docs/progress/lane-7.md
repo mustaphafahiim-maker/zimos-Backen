@@ -11,9 +11,9 @@
   6. Bosta webhook re-fetch: already in the merged code (`capabilities.webhookRefetch`), nothing to do.
   7. storefront security headers + CSP in `next.config.ts` — headers seen on :3207.
   8. phones masked in the customers and orders lists without `customers.reveal_sensitive` (`core/utils/phoneMask.js`).
+- [x] 3. Public API (§16.2) — backend + dashboard — 41 operations under `/api/public/v1` (and still `/api/v1/public`): products (+ stock by SKU), categories, customers, discounts, shipping areas (+ bulk price update), webhooks, analytics summary, order create / status / notes / tracking; the 20 scopes with `requireScope`; `Api-Key` header; `X-RateLimit-*` headers; `docs/public-openapi.json` served at `/public-docs`. Checked on :4107 with three real keys (full, read-only, update-only): every route answered, an API order got source `api`, a read-only key got 403 on writes, an update-only key could not cancel. Dashboard: the new-key dialog picks access per kind of data (`ApiKeyAccessPicker.tsx`) — typechecked only, not seen in a browser.
 
 ## Next
-- [ ] 3. Public API (§16.2): products, categories, customers, discounts, shipping areas, order create/notes/tracking, scopes, rate-limit headers, public OpenAPI
 - [ ] 4. Webhooks (§16.1): remaining topics, per-endpoint filter, auto-disable after 3 days, resend order to webhook
 - [ ] 5. App install link (§16.3); apps catalogue and `AppsPage` (§16.6); `DropshipProvider` interface + sandbox + README
 - [ ] 6. Team (§17.1): invite dialog with section checkboxes, `fulfillment` role; sessions screen; two-factor on login; activity log screen; support access grant (§17.2)
@@ -30,6 +30,10 @@
 - 2026-10-03 Migration numbers used: 285.
 - 2026-10-03 Refresh cookie is on by default outside production and **opt-in in production** (`AUTH_REFRESH_COOKIE=true`): it needs the dashboard and the API on the same site (app.x + api.x), and a cross-site deploy would sign merchants out on every reload. The dashboard handles both modes by itself (it stores a refresh token only if the server still sends one). Turn it on in production once the domains are in place.
 - 2026-10-03 The cookie is named per app (`X-Zimos-App`: dashboard `zimos_rt`, admin `zimos_rt_admin`) so the two do not share a session on one API host. Refreshes are serialised across tabs with the Web Locks API, because the token rotates and a reused one revokes every session.
+- 2026-10-03 Public API routes reuse the dashboard's validation schemas and controllers (`publicResourceRoutes.js`), so resource shapes are the internal ones (documented in the OpenAPI file); orders keep Ziad's public serializer. Categories are the dashboard's collections under the name integrations expect.
+- 2026-10-03 Role permissions cannot tell create from update from delete, so routes check the scope by name too; the old `orders:write` stays valid as create+update+delete.
+- 2026-10-03 "Shipping areas" = shipping zones with their rates; the bulk PATCH takes `{ rates: [{ rateId, …rate fields }] }`, all or nothing.
+- 2026-10-03 Two small edits in lane 1's order files: `sourceFor` checks the API key before the user (API orders were being recorded as `manual`), and the list accepts `updatedSince` / `productId`.
 - 2026-10-03 Only the owner role has `customers.reveal_sensitive` today, so managers and order operators now see masked phones in lists (full number on the order/customer page). System roles were not changed.
 - 2026-10-03 Storefront CSP allows inline and any https script (pixels, tag managers and merchant custom code need it) and closes object-src, base-uri and http scripts; `STOREFRONT_FRAME_ANCESTORS` narrows who may frame a store (unset: anyone, so dashboard previews keep working).
 
@@ -40,4 +44,4 @@
 - Browser checks: the preview tool allows 5 dev servers per folder and the other lanes hold 4, so this lane can run one server at a time (API *or* dashboard, not both). Dashboard screens are typechecked and their API calls exercised from node; nothing was seen in a browser yet. The storefront CSP was only seen as headers, not with a store page loaded under it.
 
 ## Handoff
-Branch `lane-7` in both repos. Item 1 landed. Manual-check helpers are not in the repo (they lived in the chat's scratchpad): log in as demo@zimos.test on :4107 and query `zimos_lane_7` with `pg`.
+Branch `lane-7` in both repos. Items 1–3 landed. Manual-check helpers are not in the repo (they lived in the chat's scratchpad): log in as demo@zimos.test on :4107 and query `zimos_lane_7` with `pg`.

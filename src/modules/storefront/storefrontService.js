@@ -97,6 +97,8 @@ async function getStorefront(workspaceId) {
     storeInfo: publicStoreInfo(w.settings),
     legal: publicLegalIndex(w.settings),
     navPages: await publicNavPages(w.id),
+    // Collections flagged "show in header" (catalog → collections).
+    headerCollections: await headerCollections(w.id),
     // general, social, floatingWhatsapp, seo (storefront/generalSettings.js).
     ...publicGeneralSettings(w.settings),
     // The product listing's sidebar, filters and default sort.
@@ -120,15 +122,37 @@ async function publicTracking(workspaceId) {
     const key = legacyKey[p.platform];
     if (key && p.scope.type === 'all' && !tracking[key]) tracking[key] = p.pixelId;
   }
-  return { tracking, trackingPixels };
+  // on_order | on_confirmed | on_delivered — the browser pixel only reports
+  // Purchase itself with on_order (marketing/purchaseTiming.js).
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['settings'] });
+  const purchaseEventTiming = require('../marketing/purchaseTiming').timingOf(workspace && workspace.settings);
+  return { tracking, trackingPixels, purchaseEventTiming };
 }
 
-const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl'];
+const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl', 'showInHeader'];
 
-/** The store's collections as a flat list, in the merchant's order; `parentId` builds the tree. */
+/** The collections the merchant put in the header menu, in their order. */
+async function headerCollections(workspaceId) {
+  const rows = await db.Collection.findAll({
+    where: { workspaceId, showInHeader: true, hidden: false },
+    attributes: ['id', 'name', 'slug'],
+    order: [
+      ['position', 'ASC'],
+      ['name', 'ASC'],
+      ['id', 'ASC'],
+    ],
+    limit: 12,
+  });
+  return rows.map((row) => ({ id: row.id, name: row.name, slug: row.slug }));
+}
+
+/**
+ * The store's collections as a flat list, in the merchant's order; `parentId`
+ * builds the tree. A hidden collection is left out (its own link still opens).
+ */
 async function listCollections(workspaceId) {
   return db.Collection.findAll({
-    where: { workspaceId },
+    where: { workspaceId, hidden: false },
     attributes: PUBLIC_COLLECTION_FIELDS,
     order: [
       ['position', 'ASC'],

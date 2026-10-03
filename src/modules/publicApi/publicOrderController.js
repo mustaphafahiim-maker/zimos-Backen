@@ -14,6 +14,23 @@ const me = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * The list filters under the names integrations expect (SPEC §16.2), mapped
+ * onto the dashboard's: status → stage, created_from/created_to → from/to,
+ * updated_since → updatedSince, product_id → productId.
+ */
+const ALIASES = { status: 'stage', created_from: 'from', created_to: 'to', updated_since: 'updatedSince', product_id: 'productId' };
+function listAliases(req, res, next) {
+  const query = { ...req.query };
+  for (const [alias, name] of Object.entries(ALIASES)) {
+    if (query[alias] !== undefined && query[name] === undefined) query[name] = query[alias];
+    delete query[alias];
+  }
+  // Express 5: req.query is a getter, so it is redefined rather than assigned.
+  Object.defineProperty(req, 'query', { value: query, writable: true, configurable: true, enumerable: true });
+  next();
+}
+
 const list = asyncHandler(async (req, res) => res.json(await service.listOrders(wid(req), req.query)));
 
 const get = asyncHandler(async (req, res) => res.json({ order: await service.getOrder(wid(req), req.params.orderId) }));
@@ -49,4 +66,4 @@ const codCollected = asyncHandler(async (req, res) =>
   res.json({ order: await service.markCodCollected(wid(req), req.params.orderId, req) })
 );
 
-module.exports = { me, list, get, getByNumber, listShipments, confirmation, cancel, createShipment, updateShipment, codCollected };
+module.exports = { listAliases, me, list, get, getByNumber, listShipments, confirmation, cancel, createShipment, updateShipment, codCollected };
