@@ -13,6 +13,7 @@ const schemas = require('./analyticsValidation');
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.ANALYTICS_VIEW));
 
+router.get('/overview', validate(schemas.overview), controller.overview);
 router.get('/summary', validate(schemas.summary), controller.summary);
 router.get('/funnels', validate(schemas.funnels), controller.funnels);
 router.get('/funnels/:funnelId', validate(schemas.funnelDetail), controller.funnelDetail);
