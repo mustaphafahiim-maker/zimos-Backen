@@ -1,6 +1,8 @@
 'use strict';
 const Joi = require('joi');
 const uuid = Joi.string().uuid();
+const entryType = Joi.string().valid('phone', 'ip', 'email', 'device', 'name_address');
+const entryScope = Joi.string().valid('orders', 'otp', 'visit');
 
 module.exports = {
   listFlagged: {
@@ -13,13 +15,41 @@ module.exports = {
     }),
   },
   approve: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }) },
-  listBlocklist: { params: Joi.object({ workspaceId: uuid.required() }) },
+  listBlocklist: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    query: Joi.object({
+      type: entryType.optional(),
+      scope: entryScope.optional(),
+      q: Joi.string().trim().min(1).max(100).optional(),
+      limit: Joi.number().integer().min(1).max(200).default(50),
+      // The last entry id of the previous page (its nextCursor).
+      cursor: uuid.optional(),
+    }),
+  },
   block: {
     params: Joi.object({ workspaceId: uuid.required() }),
     body: Joi.object({
-      phone: Joi.string().trim().min(1).max(32).required(),
-      reason: Joi.string().trim().min(2).max(300).required(),
+      type: entryType.default('phone'),
+      // The identifier itself; "phone" is the older name for a phone value.
+      value: Joi.string().trim().min(1).max(255).optional(),
+      phone: Joi.string().trim().min(1).max(32).optional(),
+      // type = name_address only.
+      name: Joi.string().trim().min(1).max(200).optional(),
+      address: Joi.string().trim().min(1).max(500).optional(),
+      scope: entryScope.optional(),
+      scopes: Joi.array().items(entryScope).min(1).max(3).unique().optional(),
+      reason: Joi.string().trim().min(2).max(300).allow(null, '').optional(),
       fullName: Joi.string().trim().max(200).allow(null, '').optional(),
+    }),
+  },
+  unblock: { params: Joi.object({ workspaceId: uuid.required(), entryId: uuid.required() }) },
+  importBlocklist: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({
+      csv: Joi.string().min(1).max(1500000).required(),
+      type: entryType.default('phone'),
+      scope: entryScope.default('orders'),
+      reason: Joi.string().trim().max(300).allow(null, '').optional(),
     }),
   },
 };

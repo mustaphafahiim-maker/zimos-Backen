@@ -67,6 +67,8 @@ async function applyBlacklist(customer, { isBlacklisted, reason }, req, transact
   if (!isBlacklisted) updates.blacklistedAt = null;
   else if (!customer.isBlacklisted || !customer.blacklistedAt) updates.blacklistedAt = new Date();
   await customer.update(updates, transaction ? { transaction } : undefined);
+  // The store blocklist (blocked_entries) carries the same fact as a phone entry.
+  await require('../fraud/blockedEntries').syncFromCustomer(customer, { isBlacklisted, reason }, req, transaction);
 
   await recordAudit({
     workspaceId: customer.workspaceId,

@@ -8,6 +8,7 @@ const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
+const blockedEntries = require('../fraud/blockedEntries');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -254,6 +255,29 @@ async function createOrder(
 
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
+    // The store's blocked_entries (scope orders). The IP is the shopper's only
+    // on a storefront order; a staff order carries the staff member's.
+    const blockedEntry = await blockedEntries.findMatch(
+      workspaceId,
+      'orders',
+      {
+        phoneNormalized: customer.phoneNormalized,
+        email: contact.email,
+        ip: req && !req.user ? req.ip : null,
+        deviceId: payload.deviceId,
+        fullName: contact.fullName,
+        addressLine: shippingAddress && shippingAddress.addressLine,
+      },
+      transaction
+    );
+    if (blockedEntry && !riskFlags.includes('blacklisted_customer')) riskFlags.push('blacklisted_customer');
+    // A phone blocked before it ever ordered: its customer row exists only now.
+    if (blockedEntry && blockedEntry.type === 'phone' && !customer.isBlacklisted) {
+      await customer.update(
+        { isBlacklisted: true, blacklistReason: blockedEntry.reason, blacklistedAt: blockedEntry.createdAt },
+        { transaction }
+      );
+    }
 
     // Before any inventory is touched, so a refusal has nothing to undo but
     // the customer lookup.
@@ -264,6 +288,7 @@ async function createOrder(
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
         transaction,
         onlinePayment: Boolean(awaitingPayment),
+        blockedEntry,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
