@@ -41,6 +41,28 @@ const SCOPES = Object.freeze({
   'orders:read': [PERMISSIONS.ORDERS_VIEW],
   // Writing an order's status means reading it back too.
   'orders:write': [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.ORDERS_CONFIRM],
+  // The finer scopes of SPEC §16.2. Role permissions do not tell "create"
+  // from "delete", so the routes also check the scope by name
+  // (apiKeyAuth.requireScope); orders:write stays as all three in one.
+  'orders:create': [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ORDERS_MANAGE],
+  'orders:update': [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.ORDERS_CONFIRM],
+  'orders:delete': [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ORDERS_MANAGE],
+  'products:read': [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.INVENTORY_VIEW],
+  'products:create': [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE],
+  'products:update': [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE, PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.INVENTORY_MANAGE],
+  'products:delete': [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE],
+  'categories:read': [PERMISSIONS.PRODUCTS_VIEW],
+  'categories:create': [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE],
+  'categories:update': [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE],
+  'categories:delete': [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE],
+  // Full phone numbers only when the key's creator may see them too.
+  'customers:read': [PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.CUSTOMERS_REVEAL_SENSITIVE],
+  'discounts:read': [PERMISSIONS.DISCOUNTS_MANAGE],
+  'discounts:write': [PERMISSIONS.DISCOUNTS_MANAGE],
+  'shipping_areas:read': [PERMISSIONS.SHIPPING_MANAGE],
+  'shipping_areas:write': [PERMISSIONS.SHIPPING_MANAGE],
+  'webhooks:write': [PERMISSIONS.WEBHOOKS_MANAGE],
+  'analytics:read': [PERMISSIONS.ANALYTICS_VIEW],
 });
 const SCOPE_NAMES = Object.keys(SCOPES);
 

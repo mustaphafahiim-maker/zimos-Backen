@@ -33,6 +33,9 @@ const search = {
   carrier: Joi.string().trim().min(1).max(100).optional(),
   seen: Joi.boolean().optional(),
   test: Joi.boolean().optional(),
+  // For integrations that sync (public API): changed since, and containing a product.
+  updatedSince: Joi.date().iso().optional(),
+  productId: Joi.string().uuid().optional(),
   riskLevel: Joi.string().valid('low', 'moderate', 'high').optional(),
 };
 
@@ -117,6 +120,17 @@ module.exports = {
     }).min(1),
   },
   listTags: { params: Joi.object({ workspaceId: uuid.required() }) },
+  // GET /:orderId/neighbors — the list's own filters, search and sort.
+  neighbors: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    query: Joi.object({
+      sort: Joi.string()
+        .valid(...ORDER_SORT_KEYS)
+        .default(DEFAULT_ORDER_SORT),
+      stage: Joi.string().valid(...STAGES).optional(),
+      ...search,
+    }),
+  },
   addNote: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
     body: Joi.object({

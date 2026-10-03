@@ -367,3 +367,43 @@ with `POST /orders/{id}/confirmation`.
 Missed something while your server was down? Webhooks are retried for two
 days, and `GET /orders?stage=ready_to_ship` always tells you where things
 stand.
+
+
+## More than orders
+
+The same key reaches the rest of the store when it has the scope for it. The
+full reference — every path, field and error — is the OpenAPI description
+served at `/public-docs` (JSON at `/public-docs.json`, source
+`docs/public-openapi.json`, rebuilt with `node scripts/build-public-openapi.js`).
+
+The API answers under `/api/public/v1` and, as before, under `/api/v1/public`.
+The key may also be sent in an `Api-Key` header.
+
+| Scope | Lets the key |
+| --- | --- |
+| `orders:read` | list and read orders, notes and shipments |
+| `orders:create` | `POST /orders` (recorded with source `api`) |
+| `orders:update` | change the stage, record confirmation, add notes, tracking and shipments, mark cash collected |
+| `orders:delete` | cancel an order |
+| `orders:write` | create + update + delete in one (the original write scope) |
+| `products:read` \| `create` \| `update` \| `delete` | products and variants; `products:update` also sets stock by SKU |
+| `categories:read` \| `create` \| `update` \| `delete` | categories (collections) |
+| `customers:read` | customers; phones in full only if the key's creator may see them |
+| `discounts:read` \| `discounts:write` | discount codes |
+| `shipping_areas:read` \| `shipping_areas:write` | shipping areas and a bulk price update |
+| `webhooks:write` | register and remove webhook endpoints |
+| `analytics:read` | the sales summary |
+
+A scope never gives a key more than the teammate who created it may do. Every
+answer carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
+`X-RateLimit-Reset`.
+
+Order list filters: `status`, `created_from`, `created_to`, `updated_since`,
+`product_id`, plus the dashboard's own (`q`, `paymentMethod`, `source`, …).
+
+```bash
+# stock from a warehouse system that only knows the SKU
+curl -X PATCH https://api.example.com/api/public/v1/products/sku/TSHIRT-RED-M/stock \
+  -H "Authorization: Bearer zk_…" -H "Content-Type: application/json" \
+  -d '{"stock": 25}'
+```

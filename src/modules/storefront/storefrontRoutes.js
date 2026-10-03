@@ -18,12 +18,16 @@ const checkoutSessionSchemas = require('../checkoutSessions/checkoutSessionValid
 const onlinePaymentController = require('../payments/onlinePaymentController');
 const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
 const botProtection = require('../risk/botProtection');
+const checkoutOtp = require('../risk/checkoutOtp');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
 // What the checkout form needs to pass the bot guard (a fresh time token).
 router.get('/checkout/guard', botProtection.guardConfig);
+// The code-entry step of a checkout that answered 428 OTP_REQUIRED.
+router.post('/checkout/otp/verify', checkoutOtp.verify);
+router.post('/checkout/otp/resend', checkoutOtp.resend);
 
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
 router.get('/policies/:key', validate(schemas.getPolicy), controller.getPolicy);
@@ -53,6 +57,14 @@ router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shipp
 
 // The payment methods the checkout offers (COD only while online payments
 // are off). A valid X-Store-Preview header adds test-mode gateway methods.
+// Whether a cash-on-delivery order by this phone needs a deposit first (payments/manualTransferService.js).
+router.post(
+  '/deposit-quote',
+  validate({ params: onlinePaymentSchemas.storeMethods.params, body: require('joi').object({ phone: require('joi').string().max(32).allow('', null) }) }),
+  require('express-async-handler')(async (req, res) =>
+    res.json({ deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, req.body || {}) })
+  )
+);
 router.get('/payment-methods', validate(onlinePaymentSchemas.storeMethods), onlinePaymentController.storefrontMethods);
 
 // An unpaid online order, for the shopper holding its X-Payment-Token (given
@@ -73,6 +85,8 @@ router.post(
   // Honeypot, time token, optional challenge — modules/risk/botProtection.
   botProtection.guardCheckout,
   refuseDraftOrders,
+  // Phone verification, when the store asks for it — modules/risk/checkoutOtp.
+  checkoutOtp.guardCheckout,
   idempotent('storefront.checkout')(checkoutController.checkout)
 );
 
