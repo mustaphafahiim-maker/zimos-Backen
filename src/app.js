@@ -200,6 +200,8 @@ v1.use('/admin', platformAdminRoutes);
 // Orders and their statuses for merchants' own integrations; see
 // docs/public-api.md. Outbound webhooks are sent by modules/webhooks.
 v1.use('/public', publicApiRoutes);
+// The same API under the path the spec and other platforms' docs use.
+app.use('/api/public/v1', publicApiRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
@@ -222,6 +224,12 @@ app.use('/shop/:workspaceId', quickstartPublicRoutes);
 const openapiSpec = require('../docs/openapi.json');
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec));
 app.get('/docs.json', (req, res) => res.json(openapiSpec));
+// The public API (modules/publicApi) has its own description, for merchants'
+// developers and partners: docs/public-openapi.json, written by
+// scripts/build-public-openapi.js.
+const publicOpenapiSpec = require('../docs/public-openapi.json');
+app.use('/public-docs', swaggerUi.serveFiles(publicOpenapiSpec), swaggerUi.setup(publicOpenapiSpec, { customSiteTitle: 'ZIMOS Public API' }));
+app.get('/public-docs.json', (req, res) => res.json(publicOpenapiSpec));
 
 app.use(notFoundHandler);
 app.use(errorHandler);

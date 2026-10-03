@@ -4,7 +4,7 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
-const { authenticateApiKey, apiKeyLimiter } = require('../apiKeys/apiKeyAuth');
+const { authenticateApiKey, apiKeyLimiter, requireScope } = require('../apiKeys/apiKeyAuth');
 const controller = require('./publicOrderController');
 const schemas = require('./publicOrderValidation');
 
@@ -21,7 +21,10 @@ const manage = requirePermission(PERMISSIONS.ORDERS_MANAGE);
 
 router.get('/me', controller.me);
 
-router.get('/orders', validate(schemas.list), read, controller.list);
+// The scope by name as well: orders.manage alone does not tell an update from a cancel.
+const update = requireScope('orders:update', 'orders:write');
+
+router.get('/orders', controller.listAliases, validate(schemas.list), read, controller.list);
 // Before '/orders/:orderId', or "by-number" would be read as an order id.
 router.get('/orders/by-number/:orderNumber', validate(schemas.byNumber), read, controller.getByNumber);
 router.get('/orders/:orderId', validate(schemas.get), read, controller.get);
@@ -30,12 +33,17 @@ router.get('/orders/:orderId/shipments', validate(schemas.get), read, controller
 router.post(
   '/orders/:orderId/confirmation',
   validate(schemas.confirmation),
+  update,
   requirePermission(PERMISSIONS.ORDERS_CONFIRM),
   controller.confirmation
 );
-router.post('/orders/:orderId/cancel', validate(schemas.cancel), manage, controller.cancel);
-router.post('/orders/:orderId/shipments', validate(schemas.createShipment), manage, controller.createShipment);
-router.patch('/orders/:orderId/shipments/:shipmentId', validate(schemas.updateShipment), manage, controller.updateShipment);
-router.post('/orders/:orderId/cod-collected', validate(schemas.get), manage, controller.codCollected);
+router.post('/orders/:orderId/cancel', requireScope('orders:delete', 'orders:write'), validate(schemas.cancel), manage, controller.cancel);
+router.post('/orders/:orderId/shipments', update, validate(schemas.createShipment), manage, controller.createShipment);
+router.patch('/orders/:orderId/shipments/:shipmentId', update, validate(schemas.updateShipment), manage, controller.updateShipment);
+router.post('/orders/:orderId/cod-collected', update, validate(schemas.get), manage, controller.codCollected);
+
+// Products, categories, customers, discounts, shipping areas, webhooks, and
+// creating orders / notes / tracking (SPEC §16.2).
+router.use(require('./publicResourceRoutes'));
 
 module.exports = router;

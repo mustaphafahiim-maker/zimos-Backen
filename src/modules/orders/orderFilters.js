@@ -10,7 +10,7 @@
  * how a merchant "deletes" an order.
  */
 function applyOrderFilters(conditions, bind, query = {}) {
-  const { archived = 'exclude', tag, source, paymentMethod, governorate, carrier, seen, test } = query;
+  const { archived = 'exclude', tag, source, paymentMethod, governorate, carrier, seen, test, updatedSince, productId } = query;
 
   if (archived === 'only') conditions.push('o.archived_at IS NOT NULL');
   else if (archived !== 'include') conditions.push('o.archived_at IS NULL');
@@ -41,6 +41,17 @@ function applyOrderFilters(conditions, bind, query = {}) {
   }
   if (seen !== undefined && seen !== null) conditions.push(seen ? 'o.is_seen' : 'NOT o.is_seen');
   if (test !== undefined && test !== null) conditions.push(test ? 'o.is_test' : 'NOT o.is_test');
+  if (updatedSince) {
+    conditions.push('o.updated_at >= $filterUpdatedSince');
+    bind.filterUpdatedSince = updatedSince;
+  }
+  if (productId) {
+    conditions.push(
+      `EXISTS (SELECT 1 FROM order_items fi JOIN product_variants fv ON fv.id = fi.variant_id
+                WHERE fi.order_id = o.id AND fv.product_id = $filterProductId)`
+    );
+    bind.filterProductId = productId;
+  }
 }
 
 module.exports = { applyOrderFilters };
