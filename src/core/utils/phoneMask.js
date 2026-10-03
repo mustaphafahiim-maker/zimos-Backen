@@ -17,7 +17,7 @@ function maskPhone(phone) {
   return value.slice(0, keepStart) + '*'.repeat(Math.max(4, value.length - keepStart - keepEnd)) + value.slice(-keepEnd);
 }
 
-const PHONE_KEYS = new Set(['phone', 'alternatePhone', 'phoneE164', 'customerPhone']);
+const PHONE_KEYS = new Set(['phone', 'alternatePhone', 'phoneNormalized', 'phoneRaw', 'phoneE164', 'customerPhone']);
 
 /** A JSON-ready copy of `value` with every phone field masked, at any depth. */
 function maskPhonesDeep(value) {

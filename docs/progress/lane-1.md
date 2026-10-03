@@ -2,7 +2,7 @@
 
 ## Done
 - [x] 1. `order_status_history` + transition guards — backend cd915b8 / frontend 17a6f60 — checked on :4101/:5201: a COD order walked new → follow up → new → ready → shipped → failed → out → delivered → returned through `PATCH /orders/:id/status`; `delivered → shipped` and a manual shipment patch `delivered → in_transit` both answer 409 `INVALID_STATUS_TRANSITION`; cancel + reopen; history rows carry actor and reason; the order page's "Change status" dialog and "Status history" card in Arabic and English.
-- [x] 2. Order fields (§4.2) + `order_notes` — migration 136 — checked on :4101: new order gets `source` (manual from the dashboard), `PATCH /orders/:id/meta` sets/adds/removes tags, test, seen, archive; `GET /orders/tags`; notes add/list/delete; list + pipeline + export accept `tag, source, paymentMethod, governorate, carrier, seen, test, archived` and hide archived orders by default; on :3201 the tracking page shows the public note and not the internal one.
+- [x] 2. Order fields (§4.2) + `order_notes` — migration 136 — backend 9336878 / frontend caad549 — checked on :4101: new order gets `source` (manual from the dashboard), `PATCH /orders/:id/meta` sets/adds/removes tags, test, seen, archive; `GET /orders/tags`; notes add/list/delete; list + pipeline + export accept `tag, source, paymentMethod, governorate, carrier, seen, test, archived` and hide archived orders by default; on :3201 the tracking page shows the public note and not the internal one.
 
 ## Next
 - [ ] 3. Order page (§4.4): notes card, tags, full timeline endpoint (`/orders/:id/timeline`), previous/next (`/neighbors`), copy customer link, archive, cancel reasons list, mark seen on open.
@@ -32,5 +32,8 @@
 ## Handoff
 - Branch `lane-1` in both worktrees; everything listed under Done is merged into `origin/zimos-additions`.
 - Migrations used: 135, 136. Next free: 137.
-- Scratch helpers (not in the repo) were in the session scratchpad; recreate as needed: log in as `demo@zimos.test` against `http://localhost:4101/api/v1`, workspace from `GET /workspaces`.
-- The lane database has a handful of demo COD orders created through `POST /orders`.
+- Item 3 starts from: the backend already has `GET/POST/DELETE /orders/:id/notes`, `PATCH /orders/:id/meta` (tags, isSeen, isTest, archived), `GET /orders/tags`, `GET /orders/:id/status-history`; the api-client has them in `endpoints/orders.ts` (`ordersMeta(order)` reads the fields off an Order). Still to build: `GET /orders/:id/timeline` (status history + audit_logs of the order and its shipments + automation_runs + webhook_deliveries), `GET /orders/:id/neighbors` (same filters as the list: `applySearchAndDates` + `orderFilters.applyOrderFilters` + `orderSort`), a cancel-reasons list in the cancel dialog, and the UI: notes card, tags editor, timeline card (replaces `StatusHistorySection`), prev/next arrows, copy customer tracking link, archive button, mark seen on open.
+- Item 4: the backend filters are done (`orders/orderFilters.js`); left is the list UI (filter bar, saved views, column chooser, page size 25/50/100).
+- Dev servers: at most 5 per folder across all lanes — stop the dashboard before starting the storefront. The demo user's username is already set in `zimos_lane_1`.
+- Never put backticks inside a double-quoted `node -e "..."` in Git Bash (they run as commands and hang); write the script to a file. `git merge` needs `--no-edit`.
+- Scratch helpers are not in the repo: log in as `demo@zimos.test` on `http://localhost:4101/api/v1`, workspace from `GET /workspaces`, orders through `POST /workspaces/:id/orders` with an `Idempotency-Key` header.
