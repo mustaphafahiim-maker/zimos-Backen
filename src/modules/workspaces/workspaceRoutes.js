@@ -7,6 +7,7 @@ const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission, requireAnyPermission } = require('../../core/middleware/rbac');
 const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
 const { PERMISSIONS } = require('../../core/security/permissions');
+const { requirePlanFeature } = require('../billing/planFeatureGate');
 const controller = require('./workspaceController');
 const schemas = require('./workspaceValidation');
 
@@ -83,11 +84,14 @@ router.get(
   requirePermission(PERMISSIONS.USERS_MANAGE),
   controller.listPendingInvites
 );
+// A new invite needs staff_accounts while PLAN_FEATURE_ENFORCEMENT is on
+// (billing/planFeatureGate); members already in, and their roles, are untouched.
 router.post(
   '/:workspaceId/members',
   validate(schemas.invite),
   resolveTenant,
   requirePermission(PERMISSIONS.USERS_MANAGE),
+  requirePlanFeature('staff_accounts'),
   controller.inviteMember
 );
 router.post(

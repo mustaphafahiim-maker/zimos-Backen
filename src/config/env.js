@@ -255,6 +255,16 @@ const env = {
     enabled: process.env.NODE_ENV !== 'test' && process.env.WALLET_ENABLED === 'true',
   },
 
+  // Plan features as a gate (billing/planFeatureGate): adding a custom domain,
+  // inviting a team member and the web analytics are refused (403
+  // PLAN_FEATURE_REQUIRED) for a store whose features (plan + console
+  // overrides) lack the key. Off unless exactly "true"; off, nothing is
+  // refused for a missing feature, as before. Under NODE_ENV=test it starts
+  // off whatever the .env says; a test that needs it sets it here.
+  planFeatures: {
+    enforcement: process.env.NODE_ENV !== 'test' && process.env.PLAN_FEATURE_ENFORCEMENT === 'true',
+  },
+
   // Account settings (auth/accountService). Changing the phone number by an
   // SMS code is off unless exactly "true": off, a request is answered the
   // same way and nothing is sent or changed.

@@ -27,7 +27,8 @@ const suspension = require('./workspaceSuspensionService');
 
 // --- Plans ---------------------------------------------------------------
 const listPlans = asyncHandler(async (req, res) => {
-  res.json({ plans: await service.listPlans() });
+  // { plans, featureCatalog }
+  res.json(await service.listPlans());
 });
 
 const createPlan = asyncHandler(async (req, res) => {

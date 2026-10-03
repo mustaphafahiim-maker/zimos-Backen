@@ -6,6 +6,7 @@ const { NotFoundError, ConflictError, AppError } = require('../../core/errors/Ap
 const { recordAudit } = require('../audit/auditService');
 const { planPrice, yearlyPriceFor } = require('../billing/planPricing');
 const publicPlans = require('../billing/publicPlansService');
+const { catalogForAdmin, featureDefinition, isAvailableFeature } = require('../billing/featureCatalog');
 
 /**
  * Every write below is audited as a platform-level entry: workspace_id NULL,
@@ -177,9 +178,38 @@ function aggregateMrr(rows) {
 
 // ---------------------------------------------------------------------- plans
 
+/**
+ * Every plan, in the order the pricing page lists them (display order, then
+ * price, then name — publicPlansService.PLAN_ORDER), with the feature
+ * catalogue the editor ticks from: each key's names and whether it can be
+ * added to a plan (billing/featureCatalog).
+ */
 async function listPlans() {
-  const plans = await db.Plan.findAll({ order: [['monthlyPriceAmount', 'ASC']] });
-  return plans.map(serializePlan);
+  const plans = await db.Plan.findAll({ order: publicPlans.PLAN_ORDER });
+  return { plans: plans.map(serializePlan), featureCatalog: catalogForAdmin() };
+}
+
+/**
+ * A feature a plan didn't list before must exist today (catalogue
+ * `available`); one the plan already lists may stay, so an older plan still
+ * saves as it is. 422 PLAN_FEATURE_NOT_AVAILABLE names each refused key.
+ */
+function assertFeaturesAllowed(features, previous) {
+  const had = new Set(previous);
+  const refused = [...new Set(features)].filter((key) => !had.has(key) && !isAvailableFeature(key));
+  if (refused.length === 0) return;
+  throw new AppError(
+    'PLAN_FEATURE_NOT_AVAILABLE',
+    `Not available yet, so it can't be added to a plan: ${refused
+      .map((key) => (featureDefinition(key) ? featureDefinition(key).label.en : key))
+      .join(', ')}`,
+    422,
+    refused.map((key) => ({
+      field: 'features',
+      key,
+      message: featureDefinition(key) ? `"${featureDefinition(key).label.en}" isn't available yet` : `"${key}" isn't a feature`,
+    }))
+  );
 }
 
 async function savePlan(input, req) {
@@ -234,6 +264,7 @@ async function savePlan(input, req) {
       const plan = await db.Plan.findByPk(input.id, { transaction, lock: transaction.LOCK.UPDATE });
       if (!plan) throw new NotFoundError('Plan');
       assertFeeAllowed(plan);
+      assertFeaturesAllowed(fields.features, featureList(plan.features));
       const before = auditState(serializePlan(plan));
       await plan.update(fields, { transaction });
       const after = serializePlan(plan);
@@ -241,6 +272,7 @@ async function savePlan(input, req) {
       return after;
     }
     assertFeeAllowed(null);
+    assertFeaturesAllowed(fields.features, []);
     const created = serializePlan(await db.Plan.create(fields, { transaction }));
     await audit(req, { action: 'plan.create', entityType: 'Plan', entityId: created.id, after: auditState(created) }, transaction);
     return created;
