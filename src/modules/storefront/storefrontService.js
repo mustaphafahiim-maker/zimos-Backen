@@ -62,7 +62,8 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
   });
   if (!product) throw new NotFoundError('Product');
 
-  const { rating, reviews } = await reviewService.publicRatingFor(workspaceId, product.id);
+  // Approved reviews with author, photos and the verified-buyer flag.
+  const { rating, reviews } = await require('../reviews/manualReviews').publicReviews(workspaceId, product.id);
   return { ...toPublicProduct(product), rating, reviews };
 }
 
