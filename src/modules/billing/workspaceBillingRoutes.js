@@ -35,8 +35,9 @@ router.post('/plan', validate(schemas.changePlan), controller.changePlan);
 // ONLINE_BILLING_ENABLED is on and the plan is priced in EGP.
 router.post('/payments', validate(schemas.startOnlinePayment), controller.startOnlinePayment);
 router.get('/payments/:paymentId', validate(schemas.getOnlinePayment), controller.getOnlinePayment);
-// The ways to pay (billing/paymentMethodService), the charge to pay now,
-// and a manual transfer's proof (billing/paymentProofService).
+// The ways to pay (billing/paymentMethodService), the charge to pay now
+// (nothing written), and a manual transfer's proof, which writes the charge
+// when sent for `next` (billing/paymentProofService).
 router.get('/payment-methods', payments.listPaymentMethods);
 router.post('/invoices/open', payments.openInvoice);
 router.post(
