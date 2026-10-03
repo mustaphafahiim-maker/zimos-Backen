@@ -59,6 +59,10 @@ module.exports = (sequelize, DataTypes) => {
       discountsSnapshot: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'discounts_snapshot' },
       notes: { type: DataTypes.TEXT, allowNull: true },
       riskFlags: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [], field: 'risk_flags' },
+      // The shopper's IP, its country and their browser (storefront orders only) — migration 161.
+      ipAddress: { type: DataTypes.STRING(45), allowNull: true, field: 'ip_address' },
+      ipCountry: { type: DataTypes.STRING(2), allowNull: true, field: 'ip_country' },
+      userAgent: { type: DataTypes.STRING(400), allowNull: true, field: 'user_agent' },
       idempotencyKey: { type: DataTypes.STRING(200), allowNull: true, field: 'idempotency_key' },
       // Set when a merchant cancels the order directly (distinct from a COD
       // confirmation rejection, though both land on confirmationState 'rejected').
@@ -67,6 +71,15 @@ module.exports = (sequelize, DataTypes) => {
       // Links an appended-order (e.g. COD upsell that couldn't be merged
       // because the waybill was already created) back to the original order.
       linkedFromOrderId: { type: DataTypes.UUID, allowNull: true, field: 'linked_from_order_id' },
+      // SPEC §4.2 (migration 136, modules/orders/orderMetaService.js): where
+      // the order came from, the merchant's labels, whether anyone opened it,
+      // a test order (kept out of sales figures and pixels), and the archive.
+      source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'store' },
+      tags: { type: DataTypes.ARRAY(DataTypes.TEXT), allowNull: false, defaultValue: [] },
+      isSeen: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_seen' },
+      seenAt: { type: DataTypes.DATE, allowNull: true, field: 'seen_at' },
+      isTest: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_test' },
+      archivedAt: { type: DataTypes.DATE, allowNull: true, field: 'archived_at' },
       // Weight snapshot taken at checkout — see migration 097.
       totalWeightGrams: { type: DataTypes.INTEGER, allowNull: true, field: 'total_weight_grams' },
       weightTierSnapshot: { type: DataTypes.JSONB, allowNull: true, field: 'weight_tier_snapshot' },
@@ -115,6 +128,7 @@ module.exports = (sequelize, DataTypes) => {
     Order.hasMany(models.Refund, { foreignKey: 'orderId', as: 'refunds' });
     Order.hasMany(models.Shipment, { foreignKey: 'orderId', as: 'shipments' });
     Order.hasMany(models.ConfirmationTask, { foreignKey: 'orderId', as: 'confirmationTasks' });
+    Order.hasMany(models.OrderNote, { foreignKey: 'orderId', as: 'orderNotes' });
   };
 
   return Order;
