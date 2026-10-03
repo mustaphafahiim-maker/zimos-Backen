@@ -17,9 +17,11 @@ the API. Not a lane: no migrations, no new routes.
   otherwise.
 - [x] Body-parser errors keep their status: 400 `INVALID_JSON`, 413
   `PAYLOAD_TOO_LARGE`, 415 `UNSUPPORTED_MEDIA_TYPE` (was 500).
+- [x] Campaigns removed (owner, 2026-10-03): WhatsApp campaigns gone from backend and dashboard; STOP still withdraws marketing consent (`whatsapp/optOut.js`). "Ad campaigns" kept as "Ad spend" under Profit, because the P&L subtracts it. SPEC §10.10, §14.4, §21, §22 and LANES lane 4 item 9 updated in both repos.
 
 ## Decisions
 
+- The `whatsapp_campaigns` and `whatsapp_campaign_recipients` tables (migration 218) are left in place: migrations are additive only. The owner can drop them later.
 - Any new query inside an open transaction passes `{ transaction }`. A query
   without it takes a second pooled connection while the first is held, and a
   burst of requests then starves the pool.

@@ -842,9 +842,9 @@ The `discounts` module in ZIMOS is stronger than both (percentage, fixed, free s
 - Subscription form in the footer or a popup: name, mobile, email, in exchange for an optional coupon. Creates a contact of type `lead` (section 18) with `marketingConsent=true`.
 - Settings: placement, required fields, coupon, delay, text.
 
-### 10.10 Web notifications for customers (Web push) [EO] — P2
+### 10.10 Web notifications for customers (Web push) — removed
 
-Permission request in the store → push campaigns from the dashboard (title, body, image, link, audience). VAPID + Service Worker in the store.
+Removed by the project owner on 2026-10-03: no push campaigns to customers (section 21).
 
 ### 10.11 Offers screen (`OffersPage.tsx`)
 
@@ -1034,7 +1034,7 @@ An advertising merchant chooses the platform that sends clean, non-duplicated ev
 
 ## 14. WhatsApp, Notifications and Emails
 
-**Scope boundary:** In scope: the step-based automation engine and ready-made templates, WhatsApp button confirmation on the existing webhook, the inbox, campaigns, email templates, merchant notifications, the tracking page. All of them run on the existing channels (Cloud API, Twilio, Brevo) or on the existing `console` channel, which logs to `notification_logs`. Out of scope: Embedded Signup, the shared ZIMOS number, a new SMS provider, email sending-domain verification, and push via FCM/APNs.
+**Scope boundary:** In scope: the step-based automation engine and ready-made templates, WhatsApp button confirmation on the existing webhook, the inbox, email templates, merchant notifications, the tracking page. All of them run on the existing channels (Cloud API, Twilio, Brevo) or on the existing `console` channel, which logs to `notification_logs`. Out of scope: Embedded Signup, the shared ZIMOS number, a new SMS provider, email sending-domain verification, and push via FCM/APNs.
 
 The backend has the official WhatsApp integration (Cloud API, signed webhook, conversations, messages) and an automations engine that sends a single template on 7 events. All the frontends run on the mock.
 
@@ -1083,12 +1083,9 @@ Unofficial QR-based WhatsApp (which EO calls "WhatsApp v2" and "Whatsapp Marketi
 - The 24-hour window: after it, replies are template-only (Meta rule), and the UI makes this clear.
 - The bot (`WaBotPage.tsx`) → section 19.
 
-### 14.4 WhatsApp Campaigns (Broadcast) [EO]
+### 14.4 WhatsApp Campaigns (Broadcast) — removed
 
-- Audience: a segment (section 18) or an Excel upload (name, number) — **only those with `marketingConsent`**.
-- An approved marketing template, variables, scheduling, a daily cap (to protect number quality), automatic pause if the number's rating drops.
-- The word "Cancel" or "STOP" removes consent automatically.
-- Report: sent, delivered, read, replies, resulting orders (via the campaign's coupon or UTM).
+Removed by the project owner on 2026-10-03, together with every other broadcast campaign (section 21). WhatsApp messages go out only from automations on order and checkout events (14.2, 6.4). A customer who replies "STOP" (or an Arabic form of it) still loses `marketingConsent`.
 
 ### 14.5 Order Emails [LF Lightmail / Order Email Updates]
 
@@ -1331,7 +1328,7 @@ These features serve sellers of digital products, courses, or subscriptions more
 
 - The existing `Customer` becomes a "contact" with `type`: `customer` (has an order) or `lead` (subscriber only). + `tags[]` (`segments[]` exists; we unify them), `source`, `lastOrderAt`, `totalSpent`.
 - **Tags from pages** [LF]: any submit or purchase button in the builder can add a tag to the customer (e.g. "interested-in-course").
-- **Segments**: dynamic rules (include/exclude tags, number of orders, total spend, last order more than X days ago, governorate, bought a specific product, delivery rate, marketing consent) evaluated at time of use. `segments` table (`name`, `rules` jsonb). Used in WhatsApp campaigns (14.4) and syncing with email tools.
+- **Segments**: dynamic rules (include/exclude tags, number of orders, total spend, last order more than X days ago, governorate, bought a specific product, delivery rate, marketing consent) evaluated at time of use. `segments` table (`name`, `rules` jsonb). Used by automations and syncing with email tools.
 - **Form data** [LF "Contact Form Data"]: every submit from a `form` element is stored in `form_submissions` and emits `contact_form.submitted`, and it has its own screen and permission.
 - Contacts screen: "All" and "Segments" tabs, search, filters, export, customer page (orders, tags, forms, conversations, delivery rate). The existing `CustomersPage.tsx` is extended.
 
@@ -1444,7 +1441,7 @@ The implementing agent must not build anything from this table, even if it exist
 | AI-generated reviews | LF | Fake reviews with names of people who do not exist | Automatic review request after delivery + import of the merchant's real reviews (7.7) |
 | Sales notification with made-up names or products | EO (the merchant writes the names) | Same reason | Notification from real orders only (10.7) |
 | Unofficial WhatsApp via QR (WhatsApp Web session) | EO (WhatsApp v2, Whatsapp Marketing) | Violates WhatsApp's terms and exposes merchants' numbers to bans, and EO itself suspended OTP more than once because of it | Official WhatsApp with the merchant's number or ZIMOS's shared number (14.1) |
-| WhatsApp campaigns to uploaded numbers without consent | EO | Spam and burns the numbers | Campaigns only to those with marketing consent (14.4) |
+| Campaigns of any kind: WhatsApp broadcast (14.4), customer web push (10.10), SMS or email blasts | EO | Removed by the project owner on 2026-10-03 | Automations on order and checkout events (14.2, 6.4). Ad spend per ad campaign (15.4) stays: it is reporting, not sending |
 
 If the project owner decides to bring back any item, the decision is written here with the date before any work.
 
@@ -1505,7 +1502,7 @@ Phase 0 is the starting point, and each Gate between two phases is a condition t
 - [ ] Funnel settings, country-based routing, languages (9.7, 8.10)
 - [ ] Multi-currency code on `sandbox` rates (11.5)
 - [ ] Funnel analytics + Live View + Sales Attribution (9.9, 15.2, 15.3)
-- [ ] Contacts, segments, forms, and campaigns (18.4, 14.4)
+- [ ] Contacts, segments, and forms (18.4)
 - [ ] Order email templates on the existing Brevo (14.5) and digital products (18.2)
 - [ ] AI P1 on the `sandbox` provider: product, funnel, translation, policies (section 19)
 - [ ] ⌘K search, setup guide (18.6)
@@ -1520,7 +1517,7 @@ Phase 0 is the starting point, and each Gate between two phases is a condition t
 - [ ] App install link and the app store (16.3, 16.6)
 - [ ] Subscriptions and courses on `sandbox` adapters (18.1, 18.3)
 - [ ] Customer service bot, creatives, AI store building on the `sandbox` provider (19.2, 19.3)
-- [ ] Interactive catalog, web push screen, services marketplace (7.9, 10.10, 20.5)
+- [ ] Interactive catalog, services marketplace (7.9, 20.5)
 
 ### What Is Outside the Implementing Agent's Scope
 
