@@ -167,6 +167,8 @@ v1.use('/workspaces/:workspaceId/tax-rates', taxRoutes);
 v1.use('/workspaces/:workspaceId/websites', pagesRoutes);
 v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
+// Code customizations: the merchant's own HTML/CSS/JS slots (website.publish).
+v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').router);
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
@@ -182,6 +184,7 @@ v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
+v1.use('/workspaces/:workspaceId/manual-transfers', require('./modules/payments/manualTransferRoutes'));
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
 v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
@@ -209,9 +212,12 @@ v1.use('/admin', platformAdminRoutes);
 // Orders and their statuses for merchants' own integrations; see
 // docs/public-api.md. Outbound webhooks are sent by modules/webhooks.
 v1.use('/public', publicApiRoutes);
+// The same API under the path the spec and other platforms' docs use.
+app.use('/api/public/v1', publicApiRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
+v1.use('/store/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').publicRouter);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
 // Storefront visit tracking (page views, cart, checkout, purchase).
 v1.use('/store/:workspaceId/events', eventsPublicRoutes);
@@ -232,6 +238,12 @@ app.use('/shop/:workspaceId', quickstartPublicRoutes);
 const openapiSpec = require('../docs/openapi.json');
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec));
 app.get('/docs.json', (req, res) => res.json(openapiSpec));
+// The public API (modules/publicApi) has its own description, for merchants'
+// developers and partners: docs/public-openapi.json, written by
+// scripts/build-public-openapi.js.
+const publicOpenapiSpec = require('../docs/public-openapi.json');
+app.use('/public-docs', swaggerUi.serveFiles(publicOpenapiSpec), swaggerUi.setup(publicOpenapiSpec, { customSiteTitle: 'ZIMOS Public API' }));
+app.get('/public-docs.json', (req, res) => res.json(publicOpenapiSpec));
 
 app.use(notFoundHandler);
 app.use(errorHandler);

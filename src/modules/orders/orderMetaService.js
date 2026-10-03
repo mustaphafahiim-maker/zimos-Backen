@@ -35,8 +35,9 @@ function normalizeTags(tags) {
  * an API key → api, a funnel id → funnel, anything else is the store.
  */
 function sourceFor(req, { funnelId } = {}) {
-  if (req && req.user) return 'manual';
+  // A key first: its request also carries the teammate the key acts as.
   if (req && req.apiKey) return 'api';
+  if (req && req.user) return 'manual';
   return funnelId ? 'funnel' : 'store';
 }
 

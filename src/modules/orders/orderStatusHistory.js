@@ -59,7 +59,7 @@ async function sync(workspaceId, orderId, { transaction = null, actorType = 'sys
   const from = last ? last.toStatus : null;
   if (from === current) return null;
   if (guard && from) guard(from, current);
-  return db.OrderStatusHistory.create(
+  const row = await db.OrderStatusHistory.create(
     {
       workspaceId,
       orderId,
@@ -71,6 +71,9 @@ async function sync(workspaceId, orderId, { transaction = null, actorType = 'sys
     },
     transaction ? { transaction } : undefined
   );
+  // Lane 2: the platform-wide delivery numbers follow every stage move (never throws).
+  await require('../risk/networkStats').onStageMove(workspaceId, orderId, current, transaction);
+  return row;
 }
 
 /** An order's history, oldest first, each row carrying its actor's name. */
