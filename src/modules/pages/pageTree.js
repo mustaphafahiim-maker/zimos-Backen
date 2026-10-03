@@ -60,9 +60,37 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'order_summary',
   'upsell_accept_button',
   'upsell_decline_link',
+  // SPEC §9.4: one block per item of a product's list (features, FAQs, …).
+  'repeater',
 ]);
 
 const MAX_NODES = 10000;
+
+// --- data binding (SPEC §9.4) --------------------------------------------
+// `props.bindings = { <propKey>: '<source>' }`: the storefront fills that prop
+// from live data instead of the text typed in the editor, so one page works
+// for any product. Sources are a closed list — a binding is a name, never an
+// expression.
+const BINDING_SOURCE =
+  /^(?:product\.(?:title|description|price|compare_at|special_offer_text|images\[[0-9]\])|store\.(?:name|phone|email|address)|legal\.(?:refund_policy|privacy_policy|terms_of_service))$/;
+const REPEATER_SOURCES = ['product.cms.features', 'product.cms.testimonials', 'product.cms.faqs', 'product.reviews'];
+
+function validateBindings(bindings, field, errors) {
+  if (!isPlainObject(bindings)) {
+    errors.push({ field, message: '"bindings" must be an object of prop name → data source' });
+    return;
+  }
+  const entries = Object.entries(bindings);
+  if (entries.length > 20) errors.push({ field, message: 'At most 20 bindings per element' });
+  for (const [key, source] of entries) {
+    if (source === null || source === '') continue; // unbound
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) {
+      errors.push({ field: `${field}.${key}`, message: 'A binding is keyed by a prop name' });
+    } else if (typeof source !== 'string' || !BINDING_SOURCE.test(source)) {
+      errors.push({ field: `${field}.${key}`, message: `Unknown data source "${String(source).slice(0, 60)}"` });
+    }
+  }
+}
 const MAX_COLUMN_SPAN = 12;
 
 function isPlainObject(v) {
@@ -151,6 +179,13 @@ function validateProps(props, rules, field, errors) {
 }
 
 const ELEMENT_PROP_RULES = {
+  repeater: {
+    title: check.string(300),
+    source: check.oneOf(...REPEATER_SOURCES),
+    layout: check.oneOf('list', 'grid'),
+    limit: check.intRange(1, 24),
+    productId: check.uuid,
+  },
   // --- SPEC §9.3 builder elements ---------------------------------------
   text_link: { text: check.string(300), href: check.url, newTab: check.bool },
   tabs: {
@@ -249,6 +284,9 @@ function validateElement(el, field, errors, counter) {
     errors.push({ field: `${field}.props`, message: '"props" must be an object when present' });
   } else if (isPlainObject(el.props) && ELEMENT_PROP_RULES[el.type]) {
     validateProps(el.props, ELEMENT_PROP_RULES[el.type], `${field}.props`, errors);
+  }
+  if (isPlainObject(el.props) && el.props.bindings !== undefined && el.props.bindings !== null) {
+    validateBindings(el.props.bindings, `${field}.props.bindings`, errors);
   }
   if (el.settings !== undefined && !isPlainObject(el.settings)) {
     errors.push({ field: `${field}.settings`, message: '"settings" must be an object when present' });
@@ -357,6 +395,12 @@ function validatePageTree(data, { requireContent = false, label = 'page' } = {})
     errors.push({ field: 'data.globalStyles', message: '"globalStyles" must be an object when present' });
   } else if (data.globalStyles !== undefined) {
     errors.push(...namedStyleProblems(data.globalStyles, 'data.globalStyles'));
+  }
+
+  // The page's product: what product bindings and product elements with no
+  // product of their own read from (SPEC §9.4). "" means not chosen.
+  if (data.productId !== undefined && data.productId !== null && check.uuid(data.productId)) {
+    errors.push({ field: 'data.productId', message: '"productId" must be a UUID' });
   }
 
   const sections = data.sections;
