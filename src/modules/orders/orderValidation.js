@@ -78,8 +78,45 @@ module.exports = {
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
       notes: Joi.string().max(2000).allow('').optional(),
+      // Staff may set the shipping themselves (minor units); omitted, it is calculated.
+      shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
     }),
   },
+  // POST /manual/preview — the same body, priced and not saved; the customer may still be blank.
+  manualPreview: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({
+      items: Joi.array()
+        .items(
+          Joi.object({
+            variantId: uuid.required(),
+            offerId: uuid.optional(),
+            quantity: Joi.number().integer().min(1).required(),
+          })
+        )
+        .min(1)
+        .required(),
+      contact: Joi.object({ fullName: Joi.string().max(200).allow(''), phone: Joi.string().max(32).allow('') })
+        .unknown(true)
+        .optional(),
+      shippingAddress: Joi.object({
+        country: Joi.string().length(2).required(),
+        province: Joi.string().max(100).allow(null, '').optional(),
+        city: Joi.string().max(100).allow('').optional(),
+        addressLine: Joi.string().max(500).allow('').optional(),
+      })
+        .unknown(true)
+        .optional(),
+      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').default('cod'),
+      discountCode: Joi.string().max(100).optional(),
+      shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
+    }),
+  },
+  manualCustomer: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    query: Joi.object({ phone: Joi.string().trim().min(6).max(32).required() }),
+  },
+  manualOptions: { params: Joi.object({ workspaceId: uuid.required() }) },
   get: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }) },
   cancel: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
