@@ -369,9 +369,9 @@ async function applyOutcome(task, order, { outcome, notes, rejectionReason, sour
   );
 
   await setConfirmationState(workspaceId, order.id, outcome, req, transaction);
-  if (outcome === 'confirmed' || outcome === 'rejected') {
-    await require('../../core/outbox/outbox').record(transaction, `order.${outcome}`, { workspaceId, orderId: order.id });
-  }
+  // order.confirmed / order.rejected / order.unreachable / order.postponed — the
+  // last two drive the "we tried to reach you" automations.
+  await require('../../core/outbox/outbox').record(transaction, `order.${outcome}`, { workspaceId, orderId: order.id });
 
   if (outcome === 'rejected') {
     // Release (not commit) the reservation — stock returns to available,

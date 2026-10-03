@@ -282,6 +282,9 @@ async function recordPaymentTransaction(account, tx) {
       },
       { where: { id: attempt.id, status: OPEN_ATTEMPT } }
     );
+    // Drives the "payment failed + try again" automation (the order stays
+    // open for a retry or a switch to cash on delivery).
+    if (n) await require('../../core/outbox/outbox').record(null, 'order.payment_failed', { workspaceId: attempt.workspaceId, orderId: attempt.orderId, paymentId: attempt.id });
     return { outcome: n ? 'failed' : 'ignored_failed', ...ids };
   }
 

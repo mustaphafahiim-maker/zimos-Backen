@@ -51,7 +51,7 @@ const TEMPLATES = Object.freeze({
     body: 'مرحبًا {{customer_name}}،\n\nلاحظنا أنك لم تكمل طلبك من {{store_name}}. ما زال محفوظًا، ويمكنك إكماله من هنا:\n{{recovery_link}}',
   },
   digital_delivery: {
-    event: 'digital.delivered',
+    event: 'order.digital_delivered',
     subject: 'منتجك الرقمي من {{store_name}} جاهز',
     body: 'مرحبًا {{customer_name}}،\n\nشكرًا لطلبك رقم {{order_number}}. يمكنك الوصول إلى مشترياتك الرقمية من هنا:\n{{order_link}}',
   },

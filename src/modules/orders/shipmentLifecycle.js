@@ -24,6 +24,7 @@ function automationTrigger(fromStatus, toStatus) {
   if (!toStatus || toStatus === fromStatus) return null;
   if (toStatus === 'delivered') return 'order.delivered';
   if (toStatus === 'out_for_delivery') return 'order.out_for_delivery';
+  if (toStatus === 'returned') return 'order.returned';
   if (SHIPMENT_IN_MOTION.includes(toStatus) && !SHIPMENT_IN_MOTION.includes(fromStatus)) return 'order.shipped';
   return null;
 }

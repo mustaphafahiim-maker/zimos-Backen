@@ -24,7 +24,9 @@ const DEFAULT_TIMING = 'on_order';
 
 // The outbox event that makes an order reportable under each timing.
 const TRIGGER_OF = { on_order: 'order.created', on_confirmed: 'order.confirmed', on_delivered: 'order.delivered' };
-const TRIGGERS = Object.values(TRIGGER_OF);
+// order.paid: an order paid online is not a purchase when it is created, only
+// once its payment lands (see isDue).
+const TRIGGERS = [...Object.values(TRIGGER_OF), 'order.paid'];
 
 const timingOf = (settings) => (settings && TIMINGS.includes(settings.purchase_event_timing) ? settings.purchase_event_timing : DEFAULT_TIMING);
 
@@ -32,9 +34,16 @@ const timingOf = (settings) => (settings && TIMINGS.includes(settings.purchase_e
  * Whether this event is the one to report the order's Purchase on. An order
  * that is created already confirmed (paid online, or a store with automatic
  * confirmation) never gets an `order.confirmed` event, so `on_confirmed`
- * also accepts its creation.
+ * also accepts its creation. An order paid online is reported when its payment
+ * lands (`order.paid`) under on_order, and under on_confirmed once confirmed;
+ * a cash-on-delivery order is never reported on `order.paid` (its settlement
+ * can come weeks after the sale).
  */
 function isDue(timing, trigger, order) {
+  if (trigger === 'order.paid') {
+    if (order.paymentMethod === 'cod') return false;
+    return timing === 'on_order' || (timing === 'on_confirmed' && order.confirmationState === 'confirmed');
+  }
   if (TRIGGER_OF[timing] === trigger) return true;
   return timing === 'on_confirmed' && trigger === 'order.created' && order.confirmationState === 'confirmed';
 }
