@@ -111,6 +111,21 @@ ${codeHtml}
     };
   },
 
+  // An automation's email step (modules/automations): the merchant's own
+  // subject and text, to their customer, signed with the store's name.
+  automation_message(data = {}) {
+    const subject = String(data.subject || data.storeName || '');
+    const paragraphs = String(data.body || '')
+      .split(/\n{2,}/)
+      .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br />')}</p>`)
+      .join('\n');
+    const signature = data.storeName ? `<p style="color:#6b7280">${escapeHtml(data.storeName)}</p>` : '';
+    return {
+      subject,
+      ...wrap(`${paragraphs}\n${signature}`, [data.body, data.storeName].filter(Boolean).join('\n\n'), { dir: 'rtl', arabicFooter: true }),
+    };
+  },
+
   // A merchant notification sent by email (merchantNotificationService): the
   // same title and body the dashboard bell shows, with a link to the page.
   merchant_notification(data = {}) {

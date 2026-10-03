@@ -15,6 +15,8 @@ module.exports = (sequelize, DataTypes) => {
       conditions: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
       actions: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
+      // The ready-made template this rule was created from, if any (automationTemplates.js).
+      templateKey: { type: DataTypes.STRING(60), allowNull: true, field: 'template_key' },
     },
     { tableName: 'automation_rules', indexes: [{ fields: ['workspace_id', 'trigger'] }] }
   );
