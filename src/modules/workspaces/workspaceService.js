@@ -186,6 +186,10 @@ const MERCHANT_SETTINGS_KEYS = [
   'tracking_pixels',
   // Replaced whole: the thank-you page (storefront/thankYouPage.js).
   'thank_you_page',
+  // Replaced whole: store details + short policies, and the legal policies
+  // (storefront/storeInfo.js).
+  'store_info',
+  'legal',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one
