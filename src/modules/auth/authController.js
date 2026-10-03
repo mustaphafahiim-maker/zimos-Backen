@@ -76,6 +76,12 @@ const googleCallback = asyncHandler(async (req, res) => {
 
   try {
     const { accessToken, refreshToken } = await authService.loginWithGoogle(req.query.code, req);
+    // No token in the URL (history, logs, Referer): the refresh token goes
+    // into the httpOnly cookie and the dashboard asks for an access token.
+    if (env.authCookie.enabled) {
+      require('./refreshCookie').set(req, res, refreshToken);
+      return back({ status: 'ok' });
+    }
     return back({ accessToken, refreshToken });
   } catch (err) {
     if (err instanceof AppError) return back({ error: err.code || 'GOOGLE_LOGIN_FAILED' });

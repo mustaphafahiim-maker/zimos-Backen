@@ -3,7 +3,8 @@
 const db = require('../../db/models');
 const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
-const serverPixelsService = require('./serverPixelsService');
+const trackingPixelService = require('./trackingPixelService');
+const pixelEventLog = require('./pixelEventLog');
 const metaCapi = require('./pixelProviders/metaCapi');
 const tiktokCapi = require('./pixelProviders/tiktokCapi');
 const snapchatCapi = require('./pixelProviders/snapchatCapi');
@@ -60,14 +61,20 @@ function isGa4MeasurementId(id) {
 async function run(workspaceId, trigger, orderId) {
   if (trigger !== 'order.created') return [];
 
-  const order = await db.Order.findOne({ where: { id: orderId, workspaceId } });
+  const order = await db.Order.findOne({
+    where: { id: orderId, workspaceId },
+    include: [{ model: db.OrderItem, as: 'items', attributes: ['productId'], required: false }],
+  });
   if (!order) return [];
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug', 'settings'] });
-  const integration = await serverPixelsService.getIntegration(workspaceId);
-  if (!integration) return [];
-
-  const secrets = serverPixelsService.secretsOf(integration);
-  const pixels = (workspace && workspace.settings && workspace.settings.tracking_pixels) || {};
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug'] });
+  // Since migration 211 the pixels are rows of tracking_pixels, each with its
+  // own token and scope (trackingPixelService.js): the order goes to every
+  // active CAPI pixel whose scope covers its funnel or one of its products.
+  const targets = await trackingPixelService.serverPixelsFor(workspaceId, {
+    funnelId: order.funnelId,
+    productIds: [...new Set((order.items || []).map((i) => i.productId).filter(Boolean))],
+  });
+  if (targets.length === 0) return [];
   // The order's own id, used as the event id on every platform, so a
   // matching browser-side eventID (see apps/storefront/src/lib/track.ts) and
   // this server-side event dedup into one conversion instead of two.
@@ -83,31 +90,34 @@ async function run(workspaceId, trigger, orderId) {
   // order.contactSnapshot is still sent, which is what each platform
   // actually matches the conversion on.
 
-  const jobs = [];
-  if (pixels.meta && secrets.metaAccessToken) {
-    jobs.push(['meta', () => metaCapi.sendPurchase({ pixelId: pixels.meta, secrets, order, eventId, eventSourceUrl })]);
-  }
-  if (pixels.tiktok && secrets.tiktokAccessToken) {
-    jobs.push(['tiktok', () => tiktokCapi.sendPurchase({ pixelCode: pixels.tiktok, secrets, order, eventId, eventSourceUrl })]);
-  }
-  if (pixels.snapchat && secrets.snapchatAccessToken) {
-    jobs.push(['snapchat', () => snapchatCapi.sendPurchase({ pixelId: pixels.snapchat, secrets, order, eventId, eventSourceUrl })]);
-  }
-  if (pixels.google_tag && isGa4MeasurementId(pixels.google_tag) && secrets.googleApiSecret) {
-    jobs.push(['google', () => googleMp.sendPurchase({ measurementId: pixels.google_tag, secrets, order, eventId })]);
-  }
+  // The providers keep their original signature (a `secrets` blob with one
+  // named key per platform); each pixel's own token is handed to them in that
+  // shape. Several pixels of one platform get the same event id.
+  const SENDERS = {
+    meta: ({ pixel, token }) =>
+      metaCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { metaAccessToken: token, metaTestEventCode: pixel.testEventCode || undefined }, order, eventId, eventSourceUrl }),
+    tiktok: ({ pixel, token }) => tiktokCapi.sendPurchase({ pixelCode: pixel.pixelId, secrets: { tiktokAccessToken: token }, order, eventId, eventSourceUrl }),
+    snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl }),
+    google: ({ pixel, token }) =>
+      isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId }) : null,
+  };
 
   const results = [];
-  for (const [platform, send] of jobs) {
+  for (const target of targets) {
+    const { pixel } = target;
+    const platform = pixel.platform;
+    if (!SENDERS[platform]) continue;
     try {
-      const result = await send();
-      logger.info(`[pixelEvents] ${platform} purchase sent`, { workspaceId, orderId, platform, eventId });
-      await serverPixelsService.recordSendResult(workspaceId, platform, { ok: true });
-      results.push({ platform, ok: true, result });
+      const result = await SENDERS[platform](target);
+      logger.info(`[pixelEvents] ${platform} purchase sent`, { workspaceId, orderId, platform, pixelId: pixel.pixelId, eventId });
+      await trackingPixelService.recordSendResult(pixel, { ok: true });
+      await pixelEventLog.record({ pixel, eventName: 'purchase', eventId, orderId, ok: true });
+      results.push({ platform, pixelId: pixel.pixelId, ok: true, result });
     } catch (err) {
-      logger.error(`[pixelEvents] ${platform} purchase failed: ${err.message}`, { workspaceId, orderId, platform, eventId, code: err.code });
-      await serverPixelsService.recordSendResult(workspaceId, platform, { ok: false, error: err.message });
-      results.push({ platform, ok: false, error: err.message });
+      logger.error(`[pixelEvents] ${platform} purchase failed: ${err.message}`, { workspaceId, orderId, platform, pixelId: pixel.pixelId, eventId, code: err.code });
+      await trackingPixelService.recordSendResult(pixel, { ok: false, error: err.message });
+      await pixelEventLog.record({ pixel, eventName: 'purchase', eventId, orderId, ok: false, error: err.message });
+      results.push({ platform, pixelId: pixel.pixelId, ok: false, error: err.message });
     }
   }
   return results;

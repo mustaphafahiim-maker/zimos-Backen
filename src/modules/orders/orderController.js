@@ -4,6 +4,7 @@ const service = require('./orderService');
 const confirmationService = require('../cod/confirmationService');
 const stageChange = require('./orderStageChange');
 const statusHistory = require('./orderStatusHistory');
+const orderMeta = require('./orderMetaService');
 
 const create = asyncHandler(async (req, res) => {
   const { order, items } = await service.createOrder(req.tenant.workspaceId, req.body, req);
@@ -17,7 +18,8 @@ const get = asyncHandler(async (req, res) => {
 
 const list = asyncHandler(async (req, res) => {
   const result = await service.listOrders(req.tenant.workspaceId, req.query);
-  res.json(result);
+  // Phones in the list are masked for roles without customers.reveal_sensitive.
+  res.json(require('../../core/utils/phoneMask').forViewer(req, result));
 });
 
 const pipeline = asyncHandler(async (req, res) => {
@@ -45,6 +47,28 @@ const listStatusHistory = asyncHandler(async (req, res) => {
   // 404 for an order of another workspace, before any history is read.
   await service.getOrderRef(req.tenant.workspaceId, req.params.orderId);
   res.json({ history: await statusHistory.listForOrder(req.tenant.workspaceId, req.params.orderId) });
+});
+
+const updateMeta = asyncHandler(async (req, res) => {
+  res.json({ order: await orderMeta.updateMeta(req.tenant.workspaceId, req.params.orderId, req.body, req) });
+});
+
+const listTags = asyncHandler(async (req, res) => {
+  res.json({ tags: await orderMeta.listTags(req.tenant.workspaceId) });
+});
+
+const listNotes = asyncHandler(async (req, res) => {
+  res.json({ notes: await orderMeta.listNotes(req.tenant.workspaceId, req.params.orderId) });
+});
+
+const addNote = asyncHandler(async (req, res) => {
+  const note = await orderMeta.addNote(req.tenant.workspaceId, req.params.orderId, req.body, req);
+  res.status(201).json({ note });
+});
+
+const deleteNote = asyncHandler(async (req, res) => {
+  await orderMeta.deleteNote(req.tenant.workspaceId, req.params.orderId, req.params.noteId, req);
+  res.status(204).end();
 });
 
 const update = asyncHandler(async (req, res) => {
@@ -81,6 +105,11 @@ module.exports = {
   confirm,
   changeStatus,
   listStatusHistory,
+  updateMeta,
+  listTags,
+  listNotes,
+  addNote,
+  deleteNote,
   update,
   listShipments,
   createShipment,

@@ -100,4 +100,4 @@ async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAg
   return { eventsReceived: json && json.events_received, fbtraceId: json && json.fbtrace_id };
 }
 
-module.exports = { PROVIDER, sendPurchase, sha256 };
+module.exports = { PROVIDER, sendPurchase, sha256, call };

@@ -1,10 +1,10 @@
 # Lane 1 — Orders and fulfilment
 
 ## Done
-- [x] 1. `order_status_history` + transition guards — checked on :4101/:5201: a COD order walked new → follow up → new → ready → shipped → failed → out → delivered → returned through `PATCH /orders/:id/status`; `delivered → shipped` and a manual shipment patch `delivered → in_transit` both answer 409 `INVALID_STATUS_TRANSITION`; cancel + reopen; history rows carry actor and reason; the order page's "Change status" dialog and "Status history" card in Arabic and English.
+- [x] 1. `order_status_history` + transition guards — backend cd915b8 / frontend 17a6f60 — checked on :4101/:5201: a COD order walked new → follow up → new → ready → shipped → failed → out → delivered → returned through `PATCH /orders/:id/status`; `delivered → shipped` and a manual shipment patch `delivered → in_transit` both answer 409 `INVALID_STATUS_TRANSITION`; cancel + reopen; history rows carry actor and reason; the order page's "Change status" dialog and "Status history" card in Arabic and English.
+- [x] 2. Order fields (§4.2) + `order_notes` — migration 136 — checked on :4101: new order gets `source` (manual from the dashboard), `PATCH /orders/:id/meta` sets/adds/removes tags, test, seen, archive; `GET /orders/tags`; notes add/list/delete; list + pipeline + export accept `tag, source, paymentMethod, governorate, carrier, seen, test, archived` and hide archived orders by default; on :3201 the tracking page shows the public note and not the internal one.
 
 ## Next
-- [ ] 2. Order fields (§4.2): `source`, `tags`, `isSeen`/`seenAt`, `isTest`, `archivedAt`; `order_notes` with internal/public visibility.
 - [ ] 3. Order page (§4.4): notes card, tags, full timeline endpoint (`/orders/:id/timeline`), previous/next (`/neighbors`), copy customer link, archive, cancel reasons list, mark seen on open.
 - [ ] 4. Orders list (§4.3): tag/source/payment/governorate/courier/seen filters, saved views, column chooser, page size.
 - [ ] 5. Bulk actions (`POST /orders/bulk`): set stage where allowed, add/remove tag, archive, print waybills, book courier.
@@ -21,12 +21,16 @@
 - 2026-10-03 "Set stage" runs the existing operation that produces the stage (confirm from order page, confirmation outcome, shipment status, cancel) so stock, queue, courier and automations stay in step. A shipping stage on an order with no shipment creates a manual shipment (`carrierCode` from the request, default `manual`).
 - 2026-10-03 Un-cancel ("reopen") re-reserves stock (409 `INSUFFICIENT_STOCK` if gone), clears the cancellation, sets confirmation back to pending and reopens the COD task; the request targets `pending_confirmation` and a prepaid order lands in `awaiting_payment` / `ready_to_ship`.
 - 2026-10-03 `awaiting_payment → ready_to_ship` is not a manual move: payments are recorded by the gateway or the payments card.
+- 2026-10-03 `isTest` is set when a storefront order carries a valid `X-Store-Preview` token (staff previewing their store) or by hand; test orders send no ad pixel and are excluded by `countsAsSaleSql`. `source`: staff → manual, API key → api, funnel id → funnel, follow-on funnel order → upsell, else store.
+- 2026-10-03 One endpoint for tags/seen/test/archive (`PATCH /orders/:id/meta`) instead of four; a body of only `isSeen` needs `orders.view`, the rest `orders.manage`. Marking seen does not touch `updated_at` and is not audited.
+- 2026-10-03 The list filters of item 4 were built with item 2 in `orders/orderFilters.js` (shared by list, counts, export). Archive = hidden from lists unless `archived=only|include`; nothing is deleted.
+- 2026-10-03 Storefront strings for lane-1 additions live beside their component (`TrackOrderNotes.tsx`), not in the shared `lib/i18n.ts`.
 - 2026-10-03 Frontend: lane-1 API calls live in `packages/api-client/src/endpoints/orders.ts`; lane-1 error wording in `pages/orders/orderErrors.ts` (the shared `ApiErrorCode` union is not extended).
 
 ## Blocked
 
 ## Handoff
 - Branch `lane-1` in both worktrees; everything listed under Done is merged into `origin/zimos-additions`.
-- Migrations used: 135. Next free: 136.
+- Migrations used: 135, 136. Next free: 137.
 - Scratch helpers (not in the repo) were in the session scratchpad; recreate as needed: log in as `demo@zimos.test` against `http://localhost:4101/api/v1`, workspace from `GET /workspaces`.
 - The lane database has a handful of demo COD orders created through `POST /orders`.

@@ -93,4 +93,4 @@ async function sendPurchase({ pixelCode, secrets, order, eventId, clientIp, user
   return { requestId: json && json.request_id };
 }
 
-module.exports = { PROVIDER, sendPurchase, sha256 };
+module.exports = { PROVIDER, sendPurchase, sha256, call };

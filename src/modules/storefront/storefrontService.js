@@ -5,10 +5,14 @@ const { NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const reviewService = require('../reviews/reviewService');
 const { resolveCheckoutSettings } = require('../checkout/checkoutSettings');
+const { resolveThankYouPage } = require('./thankYouPage');
+const { publicStoreInfo, publicLegalIndex } = require('./storeInfo');
+const { publicNavPages } = require('../pages/pageFlags');
 const { resolveCatalogSettings } = require('./catalogSettings');
 const { presentStoreBump } = require('../checkout/orderBump');
 const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
 const productSearch = require('./productSearch');
+const { notHiddenSql } = require('../catalog/productPage');
 
 /**
  * Public (no-auth) storefront queries: only status='active' rows, and only
@@ -35,7 +39,8 @@ async function listProducts(workspaceId, query = {}) {
   if (wantsListing(query)) return productSearch.searchProducts(workspaceId, query);
 
   const { collectionId, tag, limit = 24, cursor } = query;
-  const where = { workspaceId, status: 'active' };
+  // A hidden product opens by its link only (page_settings.hidden).
+  const where = { workspaceId, status: 'active', [db.Sequelize.Op.and]: [db.sequelize.literal(notHiddenSql('"Product"'))] };
   if (cursor) where.id = { [db.Sequelize.Op.gt]: cursor };
   if (tag) where.tags = { [db.Sequelize.Op.contains]: [tag] };
 
@@ -59,7 +64,8 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
   });
   if (!product) throw new NotFoundError('Product');
 
-  const { rating, reviews } = await reviewService.publicRatingFor(workspaceId, product.id);
+  // Approved reviews with author, photos and the verified-buyer flag.
+  const { rating, reviews } = await require('../reviews/manualReviews').publicReviews(workspaceId, product.id);
   return { ...toPublicProduct(product), rating, reviews };
 }
 
@@ -82,24 +88,36 @@ async function getStorefront(workspaceId) {
     // fully populated — an unconfigured store gets the defaults, which are
     // what the checkout already enforced before this existed.
     checkout: resolveCheckoutSettings(w),
+    // What the thank-you page shows after an order (settings.thank_you_page).
+    thankYou: resolveThankYouPage(w.settings),
+    // Contact details and trust cards (null while switched off), which legal
+    // policies exist (GET /store/:ws/policies/:key serves each), and the
+    // pages the merchant put in the header or footer.
+    storeInfo: publicStoreInfo(w.settings),
+    legal: publicLegalIndex(w.settings),
+    navPages: await publicNavPages(w.id),
     // The product listing's sidebar, filters and default sort.
     catalog: resolveCatalogSettings(w.settings),
     // The "add to your order" card the store's checkout offers, or null
     // (none set, or its offer is archived / out of stock).
     orderBump: await presentStoreBump(w),
     // The browser ad-pixel IDs; the rest of settings stays private.
-    tracking: publicTrackingPixels(w.settings),
+    ...(await publicTracking(w.id)),
   };
 }
 
-function publicTrackingPixels(settings) {
-  const pixels = (settings && settings.tracking_pixels) || {};
+// The browser pixels (tracking_pixels table, marketing/trackingPixelService):
+// `trackingPixels` is the full list with each pixel's scope; `tracking` keeps
+// the older one-ID-per-platform shape (the first store-wide pixel of each).
+async function publicTracking(workspaceId) {
+  const trackingPixels = await require('../marketing/trackingPixelService').publicPixels(workspaceId);
+  const legacyKey = { meta: 'meta', tiktok: 'tiktok', snapchat: 'snapchat', google: 'googleTag' };
   const tracking = {};
-  if (pixels.meta) tracking.meta = pixels.meta;
-  if (pixels.tiktok) tracking.tiktok = pixels.tiktok;
-  if (pixels.snapchat) tracking.snapchat = pixels.snapchat;
-  if (pixels.google_tag) tracking.googleTag = pixels.google_tag;
-  return tracking;
+  for (const p of trackingPixels) {
+    const key = legacyKey[p.platform];
+    if (key && p.scope.type === 'all' && !tracking[key]) tracking[key] = p.pixelId;
+  }
+  return { tracking, trackingPixels };
 }
 
 const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl'];
@@ -233,6 +251,8 @@ async function trackOrder(workspaceId, phone, orderNumber) {
     shippingAmount: String(order.shippingAmount),
     totalAmount: String(order.totalAmount),
     currency: order.currency,
+    // What the store wrote for the customer (order notes marked public).
+    notes: await require('../orders/orderMetaService').publicNotes(order.id),
   };
 }
 

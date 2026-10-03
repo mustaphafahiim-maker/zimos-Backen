@@ -902,7 +902,7 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
     // shares that order's customer and often its variant, so duplicate_order
     // would flag (or refuse) every upsell. The original order already went
     // through the storefront rules.
-    { transaction, skipFraudRules: true }
+    { transaction, skipFraudRules: true, source: 'upsell' }
   );
   return { order, originalId: original.id };
 }

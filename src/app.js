@@ -59,11 +59,13 @@ const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
 const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
 const automationRoutes = require('./modules/automations/automationRoutes');
 const settlementRoutes = require('./modules/settlements/settlementRoutes');
+const profitRoutes = require('./modules/profit/profitRoutes');
 const serverPixelsRoutes = require('./modules/marketing/serverPixelsRoutes');
 const apiKeyRoutes = require('./modules/apiKeys/apiKeyRoutes');
 const webhookRoutes = require('./modules/webhooks/webhookRoutes');
 const publicApiRoutes = require('./modules/publicApi/publicApiRoutes');
 const merchantNotificationRoutes = require('./modules/notifications/merchantNotificationRoutes');
+const trackingPixelRoutes = require('./modules/marketing/trackingPixelRoutes');
 
 const app = express();
 
@@ -174,10 +176,12 @@ v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
 v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
+v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
 v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
+v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 // WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
 // body proves the sender.
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
