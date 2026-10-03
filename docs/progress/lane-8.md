@@ -18,7 +18,7 @@
 - 2026-10-03 Segment rules are one flat object, all keys ANDed (see `segmentRules.js`). `contactService.resolveSegment(workspaceId, segmentId)` is the entry point for senders (lane 4 campaigns): consenting, non-blacklisted contacts only by default.
 - 2026-10-03 A contact is keyed on phone (existing model), so a form submit with an email but no phone is kept in `form_submissions` without creating a contact.
 - 2026-10-03 The tags a page form adds are read by the server from the published page (`elementId` + `pagePath`), never taken from the request. Forms inside funnel steps are stored but add no tags yet.
-- 2026-10-03 `contact_form.submitted` goes through `core/events/outbox` when lane 7 lands it (looked up at call time); until then it is a no-op.
+- 2026-10-03 `contact_form.submitted` is written with lane 7's `outbox.record` in the submit's own transaction (payload: `submissionId`, `customerId`, `formName`). No consumer is registered for it yet.
 - 2026-10-03 New permission `form_submissions.view` (owner, workspace manager). Export needs `customers.reveal_sensitive`.
 - 2026-10-03 The storefront `form` element now has four fixed fields (name, phone, email, message) plus an optional consent box; custom field definitions wait for lane 5's form inputs. `/customers` is now the Contacts screen (the old `CustomersPage.tsx` was replaced); the customer page keeps its URL.
 

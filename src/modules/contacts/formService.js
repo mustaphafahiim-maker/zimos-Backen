@@ -2,7 +2,7 @@
 
 const db = require('../../db/models');
 const { Op } = require('sequelize');
-const logger = require('../../core/utils/logger');
+const outbox = require('../../core/outbox/outbox');
 const { normalizePhone } = require('../../core/utils/phone');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { AppError } = require('../../core/errors/AppError');
@@ -80,26 +80,21 @@ async function publishedForm(workspaceId, pagePath, elementId) {
 }
 
 /**
- * `contact_form.submitted`. Until the outbox of lane 7 is on the trunk this
- * is the one place the event leaves from; it runs after the row is committed
- * and never fails the shopper's request.
+ * `contact_form.submitted`, written to the outbox in the submit's own
+ * transaction. outbox.record never fails the business action.
  */
-function emitSubmitted(submission) {
-  setImmediate(() => {
-    try {
-      const outbox = require('../../core/events/outbox');
-      Promise.resolve(
-        outbox.record(null, 'contact_form.submitted', {
-          workspaceId: submission.workspaceId,
-          submissionId: submission.id,
-          customerId: submission.customerId,
-          formName: submission.formName,
-        })
-      ).catch((err) => logger.error(`[contacts] contact_form.submitted failed: ${err.message}`));
-    } catch (err) {
-      if (err.code !== 'MODULE_NOT_FOUND') logger.error(`[contacts] contact_form.submitted failed: ${err.message}`);
-    }
-  });
+function recordSubmitted(transaction, submission) {
+  return outbox.record(
+    transaction,
+    'contact_form.submitted',
+    {
+      workspaceId: submission.workspaceId,
+      submissionId: submission.id,
+      customerId: submission.customerId,
+      formName: submission.formName,
+    },
+    { aggregateType: 'FormSubmission', aggregateId: submission.id }
+  );
 }
 
 async function submit(workspaceId, body, req) {
@@ -119,7 +114,7 @@ async function submit(workspaceId, body, req) {
   const tags = form ? form.tags : [];
   const consent = Boolean(body.marketingConsent);
 
-  const submission = await db.sequelize.transaction(async (transaction) => {
+  await db.sequelize.transaction(async (transaction) => {
     let customer = null;
     if (phoneNormalized) {
       const [row, created] = await db.Customer.findOrCreate({
@@ -139,7 +134,7 @@ async function submit(workspaceId, body, req) {
         if (Object.keys(updates).length) await row.update(updates, { transaction });
       }
     }
-    return db.FormSubmission.create(
+    const created = await db.FormSubmission.create(
       {
         workspaceId,
         customerId: customer ? customer.id : null,
@@ -157,9 +152,10 @@ async function submit(workspaceId, body, req) {
       },
       { transaction }
     );
+    await recordSubmitted(transaction, created);
+    return created;
   });
 
-  emitSubmitted(submission);
   return { ok: true };
 }
 
