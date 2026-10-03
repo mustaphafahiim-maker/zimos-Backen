@@ -29,6 +29,7 @@ const { presentOrderItems } = require('../customerUploads/customerUploadService'
 const { orderBumpUnavailable } = require('../checkout/orderBump');
 const automationEngine = require('../automations/automationEngine');
 const pixelEvents = require('../marketing/pixelEvents');
+const { effectiveVariantPrice } = require('../catalog/productPage');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -100,7 +101,9 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     };
   }
 
-  const lineTotal = variant.priceAmount * quantity;
+  // A countdown offer that has ended sells at the full price (catalog/productPage.js).
+  const unitPriceAmount = effectiveVariantPrice(variant, variant.product).priceAmount;
+  const lineTotal = unitPriceAmount * quantity;
   return {
     productId: variant.productId,
     productName: variant.product.name,
@@ -110,7 +113,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     offerId: null,
     offerName: null,
     quantity,
-    unitPriceAmount: variant.priceAmount,
+    unitPriceAmount,
     unitCostAmount: variant.costAmount,
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
