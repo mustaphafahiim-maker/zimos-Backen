@@ -1,6 +1,7 @@
 'use strict';
 
 const { ValidationError } = require('../../core/errors/AppError');
+const { validateElementStyle, namedStyleProblems } = require('./elementStyle');
 
 /**
  * Pages are stored as a structured JSON tree, never raw HTML. Shape:
@@ -251,6 +252,9 @@ function validateElement(el, field, errors, counter) {
   }
   if (el.settings !== undefined && !isPlainObject(el.settings)) {
     errors.push({ field: `${field}.settings`, message: '"settings" must be an object when present' });
+  } else if (isPlainObject(el.settings)) {
+    // The element's own look, per device, and its named style (elementStyle.js).
+    validateElementStyle(el.settings, `${field}.settings`, errors);
   }
 }
 
@@ -351,6 +355,8 @@ function validatePageTree(data, { requireContent = false, label = 'page' } = {})
   }
   if (data.globalStyles !== undefined && !isPlainObject(data.globalStyles)) {
     errors.push({ field: 'data.globalStyles', message: '"globalStyles" must be an object when present' });
+  } else if (data.globalStyles !== undefined) {
+    errors.push(...namedStyleProblems(data.globalStyles, 'data.globalStyles'));
   }
 
   const sections = data.sections;
