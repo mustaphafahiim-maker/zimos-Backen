@@ -7,8 +7,6 @@ const logger = require('./core/utils/logger');
 const { describeStorage, r2ConfigError } = require('./modules/media/storage');
 const { logRollout: logCarrierRollout } = require('./modules/shipping/carriers');
 const { imageProcessingStatus } = require('./modules/media/imageProcessing');
-const { startUploadSweep } = require('./modules/customerUploads/customerUploadService');
-const { startAdsSync } = require('./modules/profit/adsSyncJob');
 const signupPolicy = require('./modules/auth/signupPolicy');
 const { releaseDraftsWhenOff } = require('./modules/billing/goLiveService');
 const webhookWorker = require('./modules/webhooks/webhookWorker');
@@ -38,14 +36,8 @@ async function start() {
   // metadata, so a missing native binary must be visible at boot.
   logger.info(`Image processing: ${imageProcessingStatus()}`);
 
-  // Shoppers' photos no order took are deleted after CUSTOMER_UPLOAD_TTL_HOURS.
-  startUploadSweep();
-
-  // ads.sync_spend: hourly pull of ad spend from connected ad accounts.
-  startAdsSync();
-
-  // fx.refresh: exchange rates, at start-up when missing or stale and then daily.
-  require('./modules/currencies/currencyRoutes').startFxRefresh();
+  // The upload sweep, ads.sync_spend and fx.update_rates are queue schedules
+  // (each module's jobs.js), run once by the worker, not a timer per process.
 
   // And for couriers: which adapters this process actually switched on, from
   // CARRIERS_ENABLED / CARRIERS_BETA / CARRIERS_BETA_WORKSPACES as parsed.
