@@ -15,6 +15,7 @@ const {
   storeSeoSchema,
 } = require('../storefront/generalSettings');
 const { FRAUD_ACTIONS, PHONE_VALIDATION_MODES } = require('../fraud/fraudRules');
+const { settingsSchema: checkoutOtpSettingsSchema } = require('../risk/checkoutOtp');
 
 // A fraud rule is stored as its bare value (the older shape) or as { value, action }.
 const fraudAction = Joi.string().valid(...FRAUD_ACTIONS);
@@ -145,6 +146,8 @@ module.exports = {
           // Checkout bot guard (risk/botProtection): on/off, and the invisible challenge.
           bot_protection: Joi.boolean().allow(null).optional(),
           bot_captcha: Joi.boolean().allow(null).optional(),
+          // Phone verification at checkout (risk/checkoutOtp). Sent whole.
+          checkout_otp: checkoutOtpSettingsSchema.allow(null).optional(),
           // Visitors from these countries do not see the store at all (risk/visitorGate).
           blocked_countries: Joi.array().items(Joi.string().length(2).uppercase()).max(250).unique().allow(null).optional(),
           min_network_delivery_rate: fraudRule(Joi.number().integer().min(1).max(100)),

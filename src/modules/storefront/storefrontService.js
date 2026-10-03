@@ -67,7 +67,16 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
 
   // Approved reviews with author, photos and the verified-buyer flag.
   const { rating, reviews } = await require('../reviews/manualReviews').publicReviews(workspaceId, product.id);
-  return { ...toPublicProduct(product), rating, reviews };
+  const publicProduct = toPublicProduct(product);
+  // The product's quantity bundle, every tier priced for every variant (null when it has none).
+  const bundlePricing = require('../bundles/bundlePricing');
+  const bundle = (await bundlePricing.bundlesForProducts(workspaceId, [product.id])).get(product.id);
+  return {
+    ...publicProduct,
+    bundle: bundle ? bundlePricing.presentBundle(bundle, publicProduct.variants) : null,
+    rating,
+    reviews,
+  };
 }
 
 /** Public store metadata: branding + the opaque themeSettings blob. */
@@ -101,6 +110,11 @@ async function getStorefront(workspaceId) {
     headerCollections: await headerCollections(w.id),
     // general, social, floatingWhatsapp, seo (storefront/generalSettings.js).
     ...publicGeneralSettings(w.settings),
+    // "Powered by ZIMOS" stays unless the store's plan removes it
+    // (Plan.features.remove_branding). A failed lookup keeps the branding.
+    removeBranding: await require('../billing/entitlementsService')
+      .hasFeature(w.id, 'remove_branding')
+      .catch(() => false),
     // The product listing's sidebar, filters and default sort.
     catalog: resolveCatalogSettings(w.settings),
     // The "add to your order" card the store's checkout offers, or null

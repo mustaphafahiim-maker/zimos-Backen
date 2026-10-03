@@ -7,6 +7,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./fraudController');
 const schemas = require('./fraudValidation');
+const networkController = require('../risk/networkController');
 
 // The blocklist is blocked_entries (./blockedEntries.js). PATCH /customers/:customerId/blacklist
 // still works and writes the same (phone, orders) entry.
@@ -34,5 +35,7 @@ router.delete(
   requirePermission(PERMISSIONS.CUSTOMERS_MANAGE),
   controller.unblock
 );
+
+router.post('/network-scores', validate(schemas.networkScores), requirePermission(PERMISSIONS.ORDERS_VIEW), networkController.scores);
 
 module.exports = router;

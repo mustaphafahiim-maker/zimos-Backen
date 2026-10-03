@@ -22,6 +22,7 @@ const inventoryRoutes = require('./modules/inventory/inventoryRoutes');
 const customerRoutes = require('./modules/customers/customerRoutes');
 const contactRoutes = require('./modules/contacts/contactRoutes');
 const storesRoutes = require('./modules/stores/storesRoutes');
+const dashboardRoutes = require('./modules/dashboard/dashboardRoutes');
 const orderRoutes = require('./modules/orders/orderRoutes');
 const returnRoutes = require('./modules/returns/returnRoutes');
 const confirmationRoutes = require('./modules/cod/confirmationRoutes');
@@ -155,16 +156,20 @@ v1.use('/workspaces/:workspaceId/customers', customerRoutes);
 v1.use('/workspaces/:workspaceId/contacts', contactRoutes.staff);
 v1.use('/workspaces/:workspaceId/duplicate', storesRoutes.duplicate);
 v1.use('/me/stores', storesRoutes.me);
+v1.use('/workspaces/:workspaceId', dashboardRoutes);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
 v1.use('/workspaces/:workspaceId/confirmation-tasks', confirmationRoutes);
 v1.use('/workspaces/:workspaceId', paymentRoutes);
 v1.use('/workspaces/:workspaceId/discounts', discountRoutes);
+v1.use('/workspaces/:workspaceId/bundles', require('./modules/bundles/bundleRoutes'));
 v1.use('/workspaces/:workspaceId/shipping', shippingRoutes);
 v1.use('/workspaces/:workspaceId/tax-rates', taxRoutes);
 v1.use('/workspaces/:workspaceId/websites', pagesRoutes);
 v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
+// Code customizations: the merchant's own HTML/CSS/JS slots (website.publish).
+v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').router);
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
@@ -212,7 +217,11 @@ v1.use('/public', publicApiRoutes);
 app.use('/api/public/v1', publicApiRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
+// Which store a custom domain belongs to — before the :workspaceId routes,
+// which would otherwise read "resolve-host" as a store.
+v1.use('/store/resolve-host', require('./modules/domains/domainSettings').publicRouter);
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
+v1.use('/store/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').publicRouter);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
 // Storefront visit tracking (page views, cart, checkout, purchase).
 v1.use('/store/:workspaceId/events', eventsPublicRoutes);

@@ -11,6 +11,8 @@ const fraudRules = require('../fraud/fraudRules');
 const blockedEntries = require('../fraud/blockedEntries');
 const visitorGate = require('../risk/visitorGate');
 const riskService = require('../risk/riskService');
+const networkStats = require('../risk/networkStats');
+const checkoutOtp = require('../risk/checkoutOtp');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -34,6 +36,7 @@ const outbox = require('../../core/outbox/outbox');
 const orderMeta = require('./orderMetaService');
 const { applyOrderFilters } = require('./orderFilters');
 const { effectiveVariantPrice } = require('../catalog/productPage');
+const { applyBundleTiers } = require('../bundles/bundlePricing');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -299,6 +302,8 @@ async function createOrder(
     // the customer lookup.
     // Risk score and data quality of a storefront order (risk/riskService):
     // a marker only, unless the store's high_risk rule acts on it.
+    // The customer's platform-wide delivery numbers; null unless the store has the feature.
+    const network = evaluateFraudRules ? await networkStats.forPhone(workspaceId, customer.phoneNormalized, transaction) : null;
     const risk = evaluateFraudRules
       ? await riskService.score(
           { contact, shippingAddress },
@@ -307,13 +312,14 @@ async function createOrder(
             country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale'], transaction })),
             visitor,
             secondsOnPage: req && typeof req.secondsOnPage === 'number' ? req.secondsOnPage : null,
+            network,
             transaction,
           }
         )
       : null;
 
     if (evaluateFraudRules) {
-      const { flags: ruleFlags } = await fraudRules.evaluateStorefrontOrder({
+      const { flags: ruleFlags, requireOtp } = await fraudRules.evaluateStorefrontOrder({
         workspaceId,
         customer,
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
@@ -325,8 +331,11 @@ async function createOrder(
         phone: contact.phone,
         visitor,
         riskLevel: risk.level,
+        network,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
+      // A rule (or the store's "verify risky orders") wants the phone verified first — risk/checkoutOtp.
+      if (checkoutOtp.needsOtp(req, { requireOtp, riskLevel: risk.level, flags: ruleFlags })) throw new checkoutOtp.NeedsOtp();
     }
 
     // Price every line and consume/reserve inventory for it. Consuming
@@ -383,6 +392,10 @@ async function createOrder(
       }
     }
 
+    // Quantity bundles (modules/bundles): lowers the totals of the lines they
+    // cover, before anything else looks at the subtotal.
+    const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
+
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     const productIds = pricedLines.map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
@@ -404,6 +417,8 @@ async function createOrder(
       discountRecord = evaluation.discount;
       discountsSnapshot = [{ code: discountCode, type: evaluation.discount.type, amount: discountAmount }];
     }
+    // Kept apart from the coupon: the bundle's saving is already in the line totals.
+    discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
     // Always priced, even without an address (amount 0 then): the weight
     // and tier are stored on the order either way.
@@ -496,6 +511,7 @@ async function createOrder(
             quantity: line.quantity,
             unitPriceAmount: line.unitPriceAmount,
             unitCostAmount: line.unitCostAmount,
+            lineDiscountAmount: line.lineDiscountAmount || 0,
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,
@@ -562,6 +578,8 @@ async function createOrder(
     return await (outerTransaction ? run(outerTransaction) : db.sequelize.transaction(run));
   } catch (err) {
     if (err instanceof fraudRules.OrderRejectedError) await recordRefusal(workspaceId, err.refusal, req);
+    // Nothing was saved; the shopper is sent a code and asked for it.
+    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone);
     throw err;
   }
 }
@@ -1227,6 +1245,7 @@ module.exports = {
   addLineToOpenOrder,
   getOrder,
   getOrderRef,
+  applySearchAndDates,
   listOrders,
   orderPipeline,
   resolveCursor,

@@ -130,6 +130,7 @@ async function deleteDomain(workspaceId, domainId, req) {
   const domain = await db.Domain.findOne({ where: { id: domainId, workspaceId } });
   if (!domain) throw new NotFoundError('Domain');
   const before = domain.toJSON();
+  await require('./domainSettings').revokeCertificate(domain);
   await domain.destroy();
 
   await recordAudit({
