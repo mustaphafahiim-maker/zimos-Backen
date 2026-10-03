@@ -39,6 +39,7 @@ const billingRoutes = require('./modules/billing/billingRoutes');
 const publicPlansRoutes = require('./modules/billing/publicPlansRoutes');
 const workspaceBillingRoutes = require('./modules/billing/workspaceBillingRoutes');
 const adminRoutes = require('./modules/billing/adminRoutes');
+const paymentAdminRoutes = require('./modules/billing/paymentAdminRoutes');
 const platformAdminRoutes = require('./modules/platformAdmin/platformAdminRoutes');
 const domainsRoutes = require('./modules/domains/domainsRoutes');
 const mediaRoutes = require('./modules/media/mediaRoutes');
@@ -166,6 +167,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
 v1.use('/admin', adminRoutes);
+// Payment methods and transfer proofs (billing/paymentAdminRoutes).
+v1.use('/admin', paymentAdminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.
 v1.use('/admin', platformAdminRoutes);
@@ -181,6 +184,9 @@ v1.use('/store/:workspaceId/cart', cartRoutes);
 // The signed, short-lived link to a shopper's photo that staff open from an
 // order (customerUploads/uploadLinks.js). The signature is the credential.
 v1.get('/customer-uploads/:uploadId', require('./modules/customerUploads/customerUploadController').readSigned);
+// The signed, short-lived link to a payment proof's screenshot that a
+// platform admin opens (billing/proofLinks.js). The signature is the credential.
+v1.get('/payment-proofs/:proofId/image', require('./modules/billing/paymentController').readProofImage);
 
 app.use(`/api/${env.apiVersion}`, v1);
 

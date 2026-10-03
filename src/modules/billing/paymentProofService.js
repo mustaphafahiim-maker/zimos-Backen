@@ -1,0 +1,454 @@
+'use strict';
+
+const crypto = require('crypto');
+const db = require('../../db/models');
+const logger = require('../../core/utils/logger');
+const { AppError, ConflictError, NotFoundError } = require('../../core/errors/AppError');
+const { normalizePhone } = require('../../core/utils/phone');
+const { recordAudit } = require('../audit/auditService');
+const { getStorage } = require('../media/storage');
+const { processCustomerImage } = require('../media/imageProcessing');
+const { ACCEPTED_IMAGE_TYPES } = require('../customerUploads/customerUploadService');
+const charges = require('./subscriptionChargeService');
+const paymentMethods = require('./paymentMethodService');
+const { serializeInvoice } = require('./merchantPlansService');
+const { signedProofImageUrl } = require('./proofLinks');
+
+/**
+ * A merchant's proof of a manual transfer (InstaPay, a mobile wallet) and a
+ * platform admin's review of it (payment_proofs, migration 130).
+ *
+ *   send     POST /workspaces/:id/billing/invoices/:invoiceId/payment-proofs
+ *            (billing.manage): the method (an enabled manual one), the
+ *            sender's Egyptian mobile number and the screenshot (JPEG, PNG
+ *            or WebP by its bytes, at most PROOF_MAX_BYTES, re-encoded
+ *            without its metadata and stored privately). The amount is the
+ *            server's: the charge's amount payable now, frozen with its
+ *            discount and code — the merchant never sends one. One image is
+ *            never accepted twice (its SHA-256 is unique), one proof waits
+ *            per charge, and at most MAX_OPEN_PER_WORKSPACE per store.
+ *   review   the console (payments.record): the image through a signed
+ *            five-minute link. Approving takes the amount that arrived; for
+ *            a charge it must be exactly the amount asked, and the charge is
+ *            settled through settlePaid — the path every payment takes — at
+ *            the frozen price. Anything else is not settled: the proof is
+ *            rejected with a note. Approving twice changes nothing.
+ */
+
+const PROOF_MAX_BYTES = 8 * 1024 * 1024;
+const MAX_OPEN_PER_WORKSPACE = 3;
+// An Egyptian mobile number after normalizePhone: 20, then 10, 11, 12 or 15, then 8 digits.
+const EGYPT_MOBILE = /^201[0125]\d{8}$/;
+
+const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
+
+function maskPhone(phone) {
+  const local = String(phone).startsWith('20') ? `0${String(phone).slice(2)}` : String(phone);
+  return `${local.slice(0, 3)}*****${local.slice(-3)}`;
+}
+
+function isUniqueClash(err, name) {
+  return Boolean(err && err.name === 'SequelizeUniqueConstraintError' && err.parent && err.parent.constraint === name);
+}
+
+const duplicateImage = () =>
+  new ConflictError('This screenshot was already sent. Send the screenshot of this transfer.', 'PROOF_IMAGE_DUPLICATE');
+const alreadyOpen = () =>
+  new ConflictError('A proof for this charge is already waiting for review.', 'PROOF_ALREADY_OPEN');
+
+// ------------------------------------------------------------ serialize
+
+function serializeForMerchant(proof, method = proof.method) {
+  return {
+    id: proof.id,
+    purpose: proof.purpose,
+    invoiceId: proof.billingInvoiceId,
+    method: method ? { code: method.code, label: { ar: method.labelAr, en: method.labelEn } } : { code: proof.methodCode, label: null },
+    senderPhone: proof.senderPhone,
+    amount: Number(proof.requestedAmount),
+    currency: proof.currency,
+    status: proof.status,
+    // Only a rejection's note is the merchant's to read.
+    reviewNote: proof.status === 'rejected' ? proof.reviewNote : null,
+    createdAt: proof.createdAt,
+    reviewedAt: proof.reviewedAt,
+  };
+}
+
+// ------------------------------------------------------------- merchant
+
+/**
+ * POST /workspaces/:id/billing/invoices/open — the charge to pay now: the
+ * one already open, or the next period's, priced and written as the online
+ * Pay button does (createCharge). Only while some way to pay it is offered,
+ * so a store is never handed a charge it has no way to settle. Its amount is
+ * what it comes to if paid now.
+ */
+async function openInvoice(workspaceId, req) {
+  const subscription = await db.Subscription.findOne({ where: { workspaceId }, include: [{ model: db.Plan, as: 'plan' }] });
+  if (!subscription) throw new NotFoundError('Subscription');
+  const currency = subscription.plan ? subscription.plan.currency : null;
+  if (!(await paymentMethods.anyOffered(currency))) {
+    throw new ConflictError('There is no way to pay online or by transfer right now. Contact support.', 'NO_PAYMENT_METHOD');
+  }
+  const { invoice, created } = await charges.createCharge(workspaceId, { req, byMerchant: true });
+  const payable = await charges.payableNow(invoice);
+  return {
+    invoice: { ...serializeInvoice(invoice), discountAmount: payable.discountAmount, amountDue: payable.amount },
+    created,
+  };
+}
+
+/** Checks the method, the number and the file; resolves what is needed to store it. */
+async function readSubmission({ methodCode, senderPhone, file }) {
+  const method = await paymentMethods.offeredManual(methodCode);
+  if (!method) {
+    throw new AppError('PAYMENT_METHOD_NOT_AVAILABLE', 'Choose one of the payment methods offered.', 422, [
+      { field: 'methodCode', message: 'not offered' },
+    ]);
+  }
+  const phone = normalizePhone(senderPhone);
+  if (!phone || !EGYPT_MOBILE.test(phone)) {
+    throw new AppError('INVALID_SENDER_PHONE', 'Enter the Egyptian mobile number the money was sent from.', 422, [
+      { field: 'senderPhone', message: 'must be an Egyptian mobile number' },
+    ]);
+  }
+  if (!file || !file.buffer || file.buffer.length === 0) {
+    throw new AppError('NO_FILE', 'Attach the screenshot of the transfer (field name "file").', 422);
+  }
+  if (!ACCEPTED_IMAGE_TYPES.some((type) => type.match(file.buffer))) {
+    throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'The screenshot must be a JPEG, PNG or WebP image.', 415);
+  }
+  const imageSha256 = sha256(file.buffer);
+  if (await db.PaymentProof.count({ where: { imageSha256 } })) throw duplicateImage();
+  return { method, phone, imageSha256 };
+}
+
+/**
+ * Stores the screenshot (re-encoded without its metadata) and runs `write`
+ * with its details; the stored object is removed again if `write` fails.
+ */
+async function withStoredImage(workspaceId, file, write) {
+  const processed = await processCustomerImage(file.buffer);
+  const key = `payment-proofs/${workspaceId}/${crypto.randomUUID()}.${processed.ext}`;
+  await getStorage().putPrivate({ key, buffer: processed.buffer, contentType: processed.mime });
+  try {
+    return await write({ imageKey: key, imageMime: processed.mime, imageBytes: processed.buffer.length });
+  } catch (err) {
+    await getStorage()
+      .removePrivate(key)
+      .catch(() => {});
+    throw err;
+  }
+}
+
+/** Inside a transaction: the store's waiting proofs, counted with its subscription row locked. */
+async function assertRoomForAnother(workspaceId, transaction) {
+  await db.Subscription.findOne({ where: { workspaceId }, attributes: ['id'], transaction, lock: transaction.LOCK.UPDATE });
+  const open = await db.PaymentProof.count({ where: { workspaceId, status: 'pending' }, transaction });
+  if (open >= MAX_OPEN_PER_WORKSPACE) {
+    throw new ConflictError(
+      `At most ${MAX_OPEN_PER_WORKSPACE} proofs can wait for review at a time. Wait for one to be reviewed.`,
+      'TOO_MANY_OPEN_PROOFS'
+    );
+  }
+}
+
+async function createRow(fields, transaction) {
+  try {
+    return await db.PaymentProof.create(fields, { transaction });
+  } catch (err) {
+    if (isUniqueClash(err, 'payment_proofs_image_sha256_key')) throw duplicateImage();
+    if (isUniqueClash(err, 'payment_proofs_one_pending_per_invoice_idx')) throw alreadyOpen();
+    throw err;
+  }
+}
+
+/**
+ * POST /workspaces/:id/billing/invoices/:invoiceId/payment-proofs. Another
+ * store's charge, or one that doesn't exist, is a 404 alike.
+ */
+async function submitForInvoice(workspaceId, invoiceId, { methodCode, senderPhone, file }, req) {
+  const invoice = await db.BillingInvoice.findOne({ where: { id: invoiceId, workspaceId } });
+  if (!invoice) throw new NotFoundError('Charge');
+  if (invoice.status !== 'pending') throw new ConflictError('This charge is not waiting for payment.', 'CHARGE_NOT_PENDING');
+  if (invoice.currency !== paymentMethods.MANUAL_CURRENCY) {
+    throw new ConflictError(
+      `A transfer can only pay a charge in ${paymentMethods.MANUAL_CURRENCY}. Contact support to pay this one.`,
+      'MANUAL_PAYMENT_CURRENCY_UNSUPPORTED'
+    );
+  }
+  const { method, phone, imageSha256 } = await readSubmission({ methodCode, senderPhone, file });
+
+  const proof = await withStoredImage(workspaceId, file, (image) =>
+    db.sequelize.transaction(async (transaction) => {
+      await assertRoomForAnother(workspaceId, transaction);
+      const locked = await db.BillingInvoice.findByPk(invoice.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (locked.status !== 'pending') throw new ConflictError('This charge is not waiting for payment.', 'CHARGE_NOT_PENDING');
+      if (await db.PaymentProof.count({ where: { billingInvoiceId: locked.id, status: 'pending' }, transaction })) throw alreadyOpen();
+
+      const payable = await charges.payableNow(locked, transaction);
+      if (!(payable.amount > 0)) throw new ConflictError('Nothing is due on this charge.', 'NOTHING_TO_PAY');
+      const row = await createRow(
+        {
+          workspaceId,
+          purpose: 'invoice',
+          billingInvoiceId: locked.id,
+          paymentMethodId: method.id,
+          methodCode: method.code,
+          receivingNumber: method.accountNumber,
+          senderPhone: phone,
+          currency: locked.currency,
+          requestedAmount: payable.amount,
+          grossAmount: payable.grossAmount,
+          discountAmount: payable.discountAmount,
+          referralCodeId: payable.referralCodeId,
+          submittedByUserId: req.user.id,
+          imageSha256,
+          ...image,
+        },
+        transaction
+      );
+      await recordAudit({
+        workspaceId,
+        actorUserId: req.user.id,
+        action: 'payment_proof.submit',
+        entityType: 'PaymentProof',
+        entityId: row.id,
+        after: { status: row.status, amount: payable.amount, currency: locked.currency },
+        metadata: { billingInvoiceId: locked.id, method: method.code, senderPhone: maskPhone(phone) },
+        req,
+        transaction,
+      });
+      return row;
+    })
+  );
+  return serializeForMerchant(proof, method);
+}
+
+/** GET /workspaces/:id/billing/payment-proofs — the store's latest proofs, newest first. */
+async function listForWorkspace(workspaceId, { limit = 20 } = {}) {
+  const rows = await db.PaymentProof.findAll({
+    where: { workspaceId },
+    include: [{ model: db.PaymentMethod, as: 'method' }],
+    order: [
+      ['createdAt', 'DESC'],
+      ['id', 'DESC'],
+    ],
+    limit: Math.min(Math.max(1, limit), 50),
+  });
+  return { proofs: rows.map(serializeForMerchant) };
+}
+
+// -------------------------------------------------------------- console
+
+const ADMIN_INCLUDE = [
+  { model: db.Workspace, as: 'workspace', attributes: ['id', 'name', 'slug'] },
+  { model: db.PaymentMethod, as: 'method' },
+  { model: db.User, as: 'reviewedBy', attributes: ['id', 'fullName'] },
+  { model: db.User, as: 'submittedBy', attributes: ['id', 'fullName', 'email'] },
+];
+
+function serializeForAdmin(proof) {
+  return {
+    id: proof.id,
+    purpose: proof.purpose,
+    workspace: proof.workspace ? { id: proof.workspace.id, name: proof.workspace.name, slug: proof.workspace.slug } : { id: proof.workspaceId },
+    invoiceId: proof.billingInvoiceId,
+    method: {
+      code: proof.methodCode,
+      labelAr: proof.method ? proof.method.labelAr : null,
+      labelEn: proof.method ? proof.method.labelEn : null,
+    },
+    receivingNumber: proof.receivingNumber,
+    senderPhone: proof.senderPhone,
+    requestedAmount: Number(proof.requestedAmount),
+    receivedAmount: proof.receivedAmount == null ? null : Number(proof.receivedAmount),
+    currency: proof.currency,
+    status: proof.status,
+    reviewNote: proof.reviewNote,
+    reviewedBy: proof.reviewedBy ? { id: proof.reviewedBy.id, fullName: proof.reviewedBy.fullName } : null,
+    reviewedAt: proof.reviewedAt,
+    submittedBy: proof.submittedBy ? { id: proof.submittedBy.id, fullName: proof.submittedBy.fullName, email: proof.submittedBy.email } : null,
+    createdAt: proof.createdAt,
+  };
+}
+
+/** GET /admin/payment-proofs?status=&page=&pageSize= — waiting ones oldest first, the rest newest first. */
+async function listQueue({ status = 'pending', page = 1, pageSize = 20 } = {}) {
+  const size = Math.min(Math.max(1, pageSize), 50);
+  const where = status === 'all' ? {} : { status };
+  const { rows, count } = await db.PaymentProof.findAndCountAll({
+    where,
+    include: ADMIN_INCLUDE,
+    order: [
+      ['createdAt', status === 'pending' ? 'ASC' : 'DESC'],
+      ['id', 'ASC'],
+    ],
+    limit: size,
+    offset: (Math.max(1, page) - 1) * size,
+    distinct: true,
+  });
+  return { proofs: rows.map(serializeForAdmin), page: Math.max(1, page), pageSize: size, total: count };
+}
+
+/**
+ * GET /admin/payment-proofs/:id — the proof, its charge as it stands, what
+ * would stop an approval, and the image through a signed five-minute link.
+ */
+async function getForReview(proofId) {
+  const proof = await db.PaymentProof.findByPk(proofId, { include: ADMIN_INCLUDE });
+  if (!proof) throw new NotFoundError('Payment proof');
+  const invoice = proof.billingInvoiceId ? await db.BillingInvoice.findByPk(proof.billingInvoiceId) : null;
+  const image = signedProofImageUrl(proof.id);
+  const blockers = [];
+  if (invoice && proof.status === 'pending') {
+    if (invoice.status === 'paid') blockers.push('CHARGE_ALREADY_PAID');
+    if (Number(invoice.grossAmount) !== Number(proof.grossAmount)) blockers.push('CHARGE_REPRICED');
+  }
+  return {
+    proof: serializeForAdmin(proof),
+    invoice: invoice
+      ? {
+          id: invoice.id,
+          status: invoice.status,
+          amountDue: Number(invoice.amount),
+          currency: invoice.currency,
+          periodStart: invoice.periodStart,
+          periodEnd: invoice.periodEnd,
+          paidAt: invoice.paidAt,
+        }
+      : null,
+    // Why approving would be refused now; empty when it can go through.
+    approvalBlockers: blockers,
+    image: { url: image.url, expiresAt: image.expiresAt, mime: proof.imageMime },
+  };
+}
+
+/** The proof's image bytes for the signed link (null when it is gone). */
+async function readImage(proofId) {
+  const proof = await db.PaymentProof.findByPk(proofId, { attributes: ['id', 'imageKey', 'imageMime'] });
+  if (!proof) return null;
+  const stored = await getStorage().getPrivate(proof.imageKey);
+  return stored ? { buffer: stored.buffer, mime: proof.imageMime } : null;
+}
+
+/**
+ * POST /admin/payment-proofs/:id/approve { receivedAmount }. Locks the
+ * charge, then the proof (the order every payment path takes). A charge is
+ * settled only when the amount received is exactly the amount asked, the
+ * charge is still unpaid and hasn't been re-priced since; otherwise the
+ * proof stays waiting and the reviewer rejects it with a note. A proof
+ * already approved is answered as it is (`alreadyApproved`): nothing again.
+ */
+async function approve(proofId, { receivedAmount }, req) {
+  const result = await db.sequelize.transaction(async (transaction) => {
+    const head = await db.PaymentProof.findByPk(proofId, { attributes: ['id', 'billingInvoiceId'], transaction });
+    if (!head) throw new NotFoundError('Payment proof');
+    const invoice = head.billingInvoiceId
+      ? await db.BillingInvoice.findByPk(head.billingInvoiceId, { transaction, lock: transaction.LOCK.UPDATE })
+      : null;
+    const proof = await db.PaymentProof.findByPk(proofId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (proof.status === 'approved') return { proof, alreadyApproved: true };
+    if (proof.status === 'rejected') throw new ConflictError('This proof was rejected.', 'PROOF_ALREADY_REVIEWED');
+
+    const requested = Number(proof.requestedAmount);
+    if (receivedAmount !== requested) {
+      throw new AppError(
+        'RECEIVED_AMOUNT_MISMATCH',
+        'A charge is settled only by exactly its amount. Reject this proof with a note instead.',
+        422,
+        { requestedAmount: requested, receivedAmount, currency: proof.currency }
+      );
+    }
+    if (invoice.status === 'paid') {
+      throw new ConflictError(
+        'This charge is already paid. Reject this proof with a note; if the money arrived, refund it by hand.',
+        'CHARGE_ALREADY_PAID'
+      );
+    }
+    if (Number(invoice.grossAmount) !== Number(proof.grossAmount)) {
+      throw new ConflictError('The charge was re-priced after this proof was sent. Reject it with a note.', 'CHARGE_REPRICED');
+    }
+
+    // An online checkout still open for the charge can no longer pay it.
+    const [onlinePaymentsSuperseded] = await db.BillingPaymentAttempt.update(
+      { status: 'superseded' },
+      { where: { billingInvoiceId: invoice.id, status: db.BillingPaymentAttempt.IN_PROGRESS }, transaction }
+    );
+    const { commission, codeLapsed } = await charges.settlePaid(
+      invoice,
+      {
+        paidAt: new Date(),
+        amountPaid: receivedAmount,
+        externalReference: `proof:${proof.id}`,
+        note: `Transfer (${proof.methodCode}) checked from proof ${proof.id}`,
+        recordedByUserId: req.user.id,
+        source: 'manual',
+        frozen: { discountAmount: proof.discountAmount, amount: proof.requestedAmount, referralCodeId: proof.referralCodeId },
+      },
+      transaction
+    );
+    await proof.update({ status: 'approved', receivedAmount, reviewedByUserId: req.user.id, reviewedAt: new Date() }, { transaction });
+    await recordAudit({
+      actorUserId: req.user.id,
+      action: 'payment_proof.approve',
+      entityType: 'PaymentProof',
+      entityId: proof.id,
+      before: { status: 'pending' },
+      after: { status: 'approved', receivedAmount },
+      metadata: {
+        workspaceId: proof.workspaceId,
+        billingInvoiceId: invoice.id,
+        requestedAmount: requested,
+        currency: proof.currency,
+        commissionId: commission ? commission.id : null,
+        referralCodeLapsed: codeLapsed,
+        onlinePaymentsSuperseded,
+      },
+      req,
+      transaction,
+    });
+    return { proof, alreadyApproved: false };
+  });
+  if (!result.alreadyApproved) logger.info(`payment proof ${proofId} approved: charge settled`);
+  return { ...(await getForReview(proofId)), alreadyApproved: result.alreadyApproved };
+}
+
+/** POST /admin/payment-proofs/:id/reject { note } — the note is required and shown to the merchant. */
+async function reject(proofId, { note }, req) {
+  const alreadyRejected = await db.sequelize.transaction(async (transaction) => {
+    const proof = await db.PaymentProof.findByPk(proofId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!proof) throw new NotFoundError('Payment proof');
+    if (proof.status === 'approved') throw new ConflictError('This proof was approved: the charge is paid.', 'PROOF_ALREADY_REVIEWED');
+    if (proof.status === 'rejected') return true;
+    await proof.update({ status: 'rejected', reviewNote: note, reviewedByUserId: req.user.id, reviewedAt: new Date() }, { transaction });
+    await recordAudit({
+      actorUserId: req.user.id,
+      action: 'payment_proof.reject',
+      entityType: 'PaymentProof',
+      entityId: proof.id,
+      before: { status: 'pending' },
+      after: { status: 'rejected', reviewNote: note },
+      metadata: { workspaceId: proof.workspaceId, billingInvoiceId: proof.billingInvoiceId },
+      req,
+      transaction,
+    });
+    return false;
+  });
+  return { ...(await getForReview(proofId)), alreadyRejected };
+}
+
+module.exports = {
+  PROOF_MAX_BYTES,
+  MAX_OPEN_PER_WORKSPACE,
+  EGYPT_MOBILE,
+  openInvoice,
+  submitForInvoice,
+  listForWorkspace,
+  listQueue,
+  getForReview,
+  readImage,
+  approve,
+  reject,
+};

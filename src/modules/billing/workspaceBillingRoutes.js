@@ -8,7 +8,8 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./billingController');
 const schemas = require('./billingValidation');
-const { createIpMinuteLimiter } = require('../../core/middleware/rateLimiters');
+const { createIpMinuteLimiter, paymentProofLimiter } = require('../../core/middleware/rateLimiters');
+const payments = require('./paymentController');
 const env = require('../../config/env');
 
 // Trying referral codes is limited per IP, so codes can't be walked.
@@ -33,5 +34,17 @@ router.post('/plan', validate(schemas.changePlan), controller.changePlan);
 // ONLINE_BILLING_ENABLED is on and the plan is priced in EGP.
 router.post('/payments', validate(schemas.startOnlinePayment), controller.startOnlinePayment);
 router.get('/payments/:paymentId', validate(schemas.getOnlinePayment), controller.getOnlinePayment);
+// The ways to pay (billing/paymentMethodService), the charge to pay now,
+// and a manual transfer's proof (billing/paymentProofService).
+router.get('/payment-methods', payments.listPaymentMethods);
+router.post('/invoices/open', payments.openInvoice);
+router.post(
+  '/invoices/:invoiceId/payment-proofs',
+  paymentProofLimiter,
+  payments.acceptProofFile,
+  validate(schemas.submitInvoiceProof),
+  payments.submitInvoiceProof
+);
+router.get('/payment-proofs', payments.listPaymentProofs);
 
 module.exports = router;

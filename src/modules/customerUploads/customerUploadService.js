@@ -192,6 +192,8 @@ async function presentOrderItems(workspaceId, items) {
 }
 
 module.exports = {
+  // The photo types accepted from shoppers, by their bytes (payment proofs use them too).
+  ACCEPTED_IMAGE_TYPES: ACCEPTED,
   readVisitorId,
   createUpload,
   sweepExpiredUploads,
