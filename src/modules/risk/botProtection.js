@@ -113,6 +113,8 @@ async function assertHuman(req, workspace, body) {
  */
 const guardCheckout = asyncHandler(async (req, res, next) => {
   const body = req.body || {};
+  // The device id rides with the guard's fields; it is kept on the request, not in the order body.
+  req.deviceId = typeof body.deviceId === 'string' && body.deviceId.trim().length >= 8 ? body.deviceId.trim().slice(0, 128) : null;
   const age = tokenAge(body.botToken, req.publicWorkspace.id);
   try {
     await assertHuman(req, req.publicWorkspace, body);
@@ -131,6 +133,7 @@ const guardCheckout = asyncHandler(async (req, res, next) => {
   delete body[HONEYPOT_FIELD];
   delete body.botToken;
   delete body.captchaToken;
+  delete body.deviceId;
   next();
 });
 
