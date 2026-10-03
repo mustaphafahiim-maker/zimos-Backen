@@ -47,6 +47,23 @@ const attribution = Joi.object({
   }).optional(),
 });
 
+const touchField = Joi.string().max(500).allow('');
+const touch = Joi.object({
+  source: touchField,
+  medium: touchField,
+  campaign: touchField,
+  content: touchField,
+  term: touchField,
+  fbclid: touchField,
+  ttclid: touchField,
+  gclid: touchField,
+  scCid: touchField,
+  ref: touchField,
+  referrer: touchField,
+  landingPage: touchField,
+  at: touchField,
+});
+
 module.exports = {
   EVENT_NAMES,
   ingest: {
@@ -58,6 +75,9 @@ module.exports = {
       language: Joi.string().max(35).optional(),
       hostname: Joi.string().max(100).optional(),
       attribution: attribution.optional(),
+      // The 30-day first/last touch cookie (SPEC §13.4), copied onto an order
+      // by marketing/orderAttribution.js when its purchase event arrives.
+      touches: Joi.object({ first: touch, last: touch }).optional(),
       // Browser ids the ad platforms match server events on (their own
       // cookies / click ids) and the products viewed this visit, for
       // product-scoped pixels. Used only by marketing/browserEventRelay.js.

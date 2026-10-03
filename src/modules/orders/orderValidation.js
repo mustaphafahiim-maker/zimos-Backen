@@ -36,6 +36,7 @@ const search = {
   // For integrations that sync (public API): changed since, and containing a product.
   updatedSince: Joi.date().iso().optional(),
   productId: Joi.string().uuid().optional(),
+  riskLevel: Joi.string().valid('low', 'moderate', 'high').optional(),
 };
 
 const tagList = Joi.array().items(Joi.string().trim().min(1).max(40)).max(20);

@@ -23,6 +23,9 @@ module.exports = (sequelize, DataTypes) => {
       // Set and cleared only by customerService.applyBlacklist.
       blacklistedAt: { type: DataTypes.DATE, allowNull: true, field: 'blacklisted_at' },
       segments: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
+      // Contact labels and first source (migration 310, modules/contacts).
+      tags: { type: DataTypes.ARRAY(DataTypes.STRING(60)), allowNull: false, defaultValue: [] },
+      source: { type: DataTypes.STRING(20), allowNull: true },
       reliabilityScore: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100, field: 'reliability_score' },
       // Denormalized rolling counters, maintained by the orders module when
       // confirmation/fulfillment outcomes are recorded.

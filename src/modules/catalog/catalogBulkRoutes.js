@@ -19,6 +19,9 @@ const bulk = require('./catalogBulk');
 const router = Router({ mergeParams: true });
 const canManage = requirePermission(PERMISSIONS.PRODUCTS_MANAGE);
 
+// Import and export (importExport/routes.js): /products/export.json, /products/import, /imports.
+router.use(require('./importExport/routes'));
+
 const uuid = Joi.string().uuid();
 const money = Joi.number().integer().min(0).max(100000000000);
 

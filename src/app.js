@@ -20,6 +20,7 @@ const workspaceRoutes = require('./modules/workspaces/workspaceRoutes');
 const catalogRoutes = require('./modules/catalog/catalogRoutes');
 const inventoryRoutes = require('./modules/inventory/inventoryRoutes');
 const customerRoutes = require('./modules/customers/customerRoutes');
+const contactRoutes = require('./modules/contacts/contactRoutes');
 const orderRoutes = require('./modules/orders/orderRoutes');
 const returnRoutes = require('./modules/returns/returnRoutes');
 const confirmationRoutes = require('./modules/cod/confirmationRoutes');
@@ -150,6 +151,7 @@ v1.use('/workspaces', workspaceRoutes);
 v1.use('/workspaces/:workspaceId/catalog', catalogRoutes);
 v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
+v1.use('/workspaces/:workspaceId/contacts', contactRoutes.staff);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
 v1.use('/workspaces/:workspaceId/confirmation-tasks', confirmationRoutes);
@@ -191,6 +193,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
+// The sandbox gateway's hosted payment page — only where that gateway is registered.
+if (require('./modules/payments/gateways').isGateway('sandbox')) v1.use('/sandbox-pay', require('./modules/payments/sandboxPayRoutes'));
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.
@@ -208,6 +212,7 @@ v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
 // Storefront visit tracking (page views, cart, checkout, purchase).
 v1.use('/store/:workspaceId/events', eventsPublicRoutes);
+v1.use('/store/:workspaceId/forms', contactRoutes.store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 

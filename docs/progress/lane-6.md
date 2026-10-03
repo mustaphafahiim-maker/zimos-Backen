@@ -5,6 +5,7 @@
 - [x] 2. Sales attribution (§15.3): `GET /analytics/attribution` (group by source/medium/campaign/content, UTM and funnel filters, delivered column, spend/ROAS when ad spend exists) and `/analytics/attribution` page — checked on :5206 with seeded UTM traffic.
 - [x] 3. Real profit (§15.4): migrations 260–261 (`product_economics`, `ad_spend_daily`), `modules/profit` (P&L actual/projected by day/product/campaign with max CPA, economics defaults + per-product overrides, ad spend manual + CSV import with error report, campaigns report, `ads.sync_spend` hourly job on the sandbox adapter + README), permission `profit.manage`; pages `/profit`, `/profit/costs`, `/ads` — checked on :4106 / :5206 (import of 42 rows with 2 rejected, P&L, campaigns).
 - [x] 4. Settlements (§15.5): migration 262 (`cod_settlements.statement_report`), `POST /settlements/statement/match` (dry run) and `/statement/import` (draft settlement from the matching rows, report saved), `GET /settlements/held` (per courier, by age), `GET /settlements/:id/statement-report`; settlements page got the held-by-couriers table and the import dialog — checked on :4106 / :5206 with a 6-row statement (3 ok, 1 amount mismatch, 1 duplicate, 1 not found).
+- [~] 5a. Payments contract: `payments/gateways/README.md` + the `sandbox` gateway (`gateways/sandbox.js`, hosted approve/decline page `sandboxPayRoutes.js` at `/api/v1/sandbox-pay`) — checked on :4106 through the public store API: checkout by card → hosted page → approve → return → order paid; decline → attempt failed. (5b manual transfer and 5c deposits still open.)
 
 ## Next
 - [ ] 5. Payments: gateway adapter README + `sandbox` gateway; manual transfer with receipt image and confirm/reject (§11.3); deposits.
@@ -28,8 +29,14 @@
 - 2026-10-03 Ad spend CSV is sent as text in a JSON body (`{ csv }`), no multipart; amounts are in the store currency.
 - 2026-10-03 `/analytics/pnl` (the spec's path) redirects 307 to `/profit/pnl`. The old gross-profit `ProfitPage.tsx` is left in place but `/profit` now renders `RealProfitPage`.
 - 2026-10-03 Courier statements are imported as CSV (Excel → Save as CSV): neither repo has an xlsx library and adding one was not worth a dependency. A row claiming more than the order is due is capped at the due amount; the difference stays in the saved report.
+- 2026-10-03 The sandbox gateway is always `test` mode (only visible in the store preview) and registered only when NODE_ENV is not production or `PAYMENTS_SANDBOX_GATEWAY=true`. The lane `.env` sets `PAYMENTS_ONLINE_ENABLED=true` and a local `GATEWAY_CREDENTIALS_KEY` to exercise it.
 
 ## Blocked
 
 ## Handoff
-Items 1–4 landed. Scratch helpers used for checking (not in the repo): a seed script that fills `zimos_lane_6` with ~135 `L6-` orders, sessions and events over 21 days, plus imported ad spend. Next is item 5 (payments: adapter README + sandbox gateway, manual transfer with receipt, deposits). Migrations used: 260–262.
+Items 1–4 landed (migrations used: 260–262). Scratch helpers used for checking are not in the repo.
+
+Item 5 is in progress, in three commits (1 is landed):
+1. `payments/gateways/README.md` (the adapter contract as paymob.js/kashier.js implement it) + `gateways/sandbox.js` registered in `gateways/index.js` only outside production or with `PAYMENTS_SANDBOX_GATEWAY=true`; its hosted page is a small HTML approve/decline page served by the backend that redirects to returnUrl with an HMAC-signed query (parseRedirect) — no network.
+2. Manual transfer (§11.3): methods in `workspace.settings.manual_transfer_methods` [{id,name,instructions,requireReceipt,requireSender,enabled}], offered to the storefront as provider `manual` / method `bank_transfer`; checkout accepts `bank_transfer` with `transfer: {methodId, receiptUploadId, senderReference}`; the order is created like a staff bank-transfer order (completed at once, no paymentExpiresAt so the sweep never cancels it) plus a Payment (providerCode `manual`, status initialized) carrying the receipt (migration 263: payments.receipt_upload_id, sender_reference, manual_method_name, reviewed_by_user_id, reviewed_at). Merchant: POST /orders/:orderId/manual-payments/:paymentId/confirm|reject from PaymentsSection. Receipt reuses customerUploads (signed URL to view).
+3. Deposits: `settings.deposit_rule` {enabled, amountType shipping|fixed, fixedAmount, appliesTo all|risky, maxReliabilityScore}; storefront asks POST /store/:ws/deposit-quote before submit; a COD order with a deposit gets a manual Payment for the deposit; confirming it sets partially_paid and the rest stays COD (settlements already use total − amountPaid).
