@@ -3,6 +3,7 @@ const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
 const { workspaceRef } = require('../../core/utils/workspaceSlug');
 const { customizationsInputSchema } = require('../catalog/customFields');
+const { formFieldsBodySchema } = require('./checkoutForm');
 
 const contact = Joi.object({
   fullName: Joi.string().max(200).required(),
@@ -14,8 +15,10 @@ const contact = Joi.object({
 const address = Joi.object({
   country: Joi.string().length(2).required(),
   province: Joi.string().max(100).allow(null, '').optional(),
-  city: Joi.string().max(100).required(),
-  addressLine: Joi.string().max(500).required(),
+  // Required unless the store's purchase form switched them off — enforced
+  // per store in checkoutForm.assertCheckoutForm.
+  city: Joi.string().max(100).allow(null, '').optional(),
+  addressLine: Joi.string().max(500).allow(null, '').optional(),
   postalCode: Joi.string().max(20).allow(null, '').optional(),
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
@@ -63,6 +66,9 @@ module.exports = {
       // or the funnel checkout step's) and prices the line itself
       // (checkout/orderBump.js).
       orderBump: Joi.object({ offerId: uuid.required() }).optional(),
+      // Answers to the purchase-form fields with no column of their own
+      // (sa_national_address, custom_1…5) — checkout/checkoutForm.js.
+      formFields: formFieldsBodySchema,
     }),
   },
 };

@@ -5,6 +5,7 @@ const { NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const reviewService = require('../reviews/reviewService');
 const { resolveCheckoutSettings } = require('../checkout/checkoutSettings');
+const { resolveThankYouPage } = require('./thankYouPage');
 const { resolveCatalogSettings } = require('./catalogSettings');
 const { presentStoreBump } = require('../checkout/orderBump');
 const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
@@ -82,6 +83,8 @@ async function getStorefront(workspaceId) {
     // fully populated — an unconfigured store gets the defaults, which are
     // what the checkout already enforced before this existed.
     checkout: resolveCheckoutSettings(w),
+    // What the thank-you page shows after an order (settings.thank_you_page).
+    thankYou: resolveThankYouPage(w.settings),
     // The product listing's sidebar, filters and default sort.
     catalog: resolveCatalogSettings(w.settings),
     // The "add to your order" card the store's checkout offers, or null
