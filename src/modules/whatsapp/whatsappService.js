@@ -236,8 +236,8 @@ async function handleWebhook(workspaceId, payload) {
         });
         // A tap on "Confirm order" / "Cancel" confirms or cancels the order (quickReplyConfirmation.js).
         await require('./quickReplyConfirmation').enqueue(workspaceId, msg, phoneNormalized);
-        // A reply to a campaign is counted, and STOP withdraws marketing consent (campaignService.js).
-        await require('./campaignService').handleInbound(workspaceId, msg, phoneNormalized);
+        // STOP withdraws marketing consent (optOut.js).
+        await require('./optOut').handleInbound(workspaceId, msg, phoneNormalized);
         inboxEvents.publish(workspaceId, { conversationId: conversation.id, reason: 'message_in' });
         result.messages += 1;
       }

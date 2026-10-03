@@ -6,8 +6,8 @@ const { AppError } = require('../../core/errors/AppError');
 
 /**
  * The sandbox WhatsApp adapter (SPEC §0): the same three calls as
- * whatsappCloud.js, answered locally with no network, so messages,
- * automations and campaigns can be exercised end to end without a Meta
+ * whatsappCloud.js, answered locally with no network, so messages and
+ * automations can be exercised end to end without a Meta
  * account.
  *
  * A store uses it by connecting WhatsApp with the phone number id `sandbox`

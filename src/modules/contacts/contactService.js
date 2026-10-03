@@ -378,7 +378,7 @@ async function previewSegment(workspaceId, rules) {
 }
 
 /**
- * The contacts of a segment, for senders (WhatsApp campaigns, email sync):
+ * The contacts of a segment, for senders (automations, email sync):
  * `{ id, phoneNormalized, fullName, email, marketingConsent }[]`.
  */
 async function resolveSegment(workspaceId, segmentId, { consentingOnly = true, limit = EXPORT_LIMIT } = {}) {
