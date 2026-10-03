@@ -12,7 +12,8 @@ const statusHistory = require('./orderStatusHistory');
  * GET /orders/:id/timeline — everything that happened to one order, in one
  * list, newest first (SPEC §4.4 card 11): its moves between stages, what
  * staff did to it and its shipments (the audit log), the notes written on
- * it, the automation messages sent for it and the webhooks delivered for it.
+ * it, the automation messages sent for it, the webhooks delivered for it and
+ * what the courier reported for its shipments (shipment_events).
  *
  * Read-only and assembled per request from the tables that already record
  * these things; nothing is copied into a timeline table.
@@ -59,7 +60,7 @@ async function timeline(workspaceId, orderId) {
   const shipments = await db.Shipment.findAll({ where: { workspaceId, orderId }, attributes: ['id'] });
   const shipmentIds = shipments.map((s) => s.id);
 
-  const [history, audits, notes, runs, deliveries] = await Promise.all([
+  const [history, audits, notes, runs, deliveries, courier] = await Promise.all([
     statusHistory.listForOrder(workspaceId, orderId),
     db.sequelize.query(
       `SELECT a.id, a.action, a.entity_type, a.actor_user_id, a.before_state, a.after_state, a.metadata, a.created_at,
@@ -90,6 +91,7 @@ async function timeline(workspaceId, orderId) {
         LIMIT 100`,
       { replacements: { workspaceId, needle: `%${orderId}%` }, type: QueryTypes.SELECT }
     ),
+    require('../shipping/shipmentEvents').listForOrder(workspaceId, orderId),
   ]);
 
   const events = [];
@@ -148,6 +150,17 @@ async function timeline(workspaceId, orderId) {
       at: d.created_at,
       actor: { type: 'system', name: null },
       data: { eventType: d.event_type, status: d.status, attempts: d.attempt_count, responseStatus: d.last_response_status },
+    });
+  }
+
+  // What the courier reported, state by state (shipment_events).
+  for (const c of courier) {
+    events.push({
+      id: `courier:${c.id}`,
+      type: 'courier',
+      at: c.occurredAt,
+      actor: { type: 'carrier', name: null },
+      data: { carrierCode: c.carrierCode, status: c.status, carrierStatusCode: c.carrierStatusCode, description: c.description, shipmentId: c.shipmentId },
     });
   }
 

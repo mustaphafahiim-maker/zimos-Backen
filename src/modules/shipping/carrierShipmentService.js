@@ -519,6 +519,10 @@ async function applyCarrierStatus(workspaceId, shipmentId, result, { trigger }) 
         trigger: flagTrigger,
       });
     }
+    // The courier's history (shipment_events): every move of its own state.
+    if (stateMoved) {
+      await require('./shipmentEvents').record(shipment, { status: finalStatus, carrierStatus: carrierState, trigger }, transaction);
+    }
     if (decision !== 'apply') {
       if (decision === 'blocked') {
         logger.info('Carrier status ignored: shipment is already final', {

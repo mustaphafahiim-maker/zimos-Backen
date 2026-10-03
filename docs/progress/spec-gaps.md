@@ -45,7 +45,7 @@ the numbers **400–449** (no lane owns them).
   behind `AUTH_REFRESH_COOKIE=true` — an owner setting, because the cookie only
   works once the dashboard and the API share a site (app.x + api.x). Nothing to
   code; turn it on with the deploy.
-- [ ] 10. Shipping data: `geo_regions` seed (Egypt + North Coast + districts,
+- [ ] 10. Shipping data (10a shipment_events done): `geo_regions` seed (Egypt + North Coast + districts,
   Saudi regions), `carrier_region_map` (stored, editable), `shipment_events`
   timeline, per-carrier-account `autoCreateShipmentOn` / inspection / courier
   notes; bulk ship shows ready vs missing-mapping and retries failures.
