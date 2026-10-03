@@ -444,7 +444,10 @@ async function publishWebsite(workspaceId, websiteId, userId, note, req) {
         path: p.path,
         title: p.title,
         pageType: p.pageType,
-        data: p.draftData,
+        // Linked sections are frozen with the saved section's current content.
+        data: await require('../savedSections/savedSectionsService').resolveLinkedSections(workspaceId, p.draftData, {
+          transaction: t,
+        }),
         seo: p.seo,
       });
     }
