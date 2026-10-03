@@ -17,6 +17,9 @@ module.exports = (sequelize, DataTypes) => {
       status: { type: DataTypes.STRING(20), allowNull: false },
       error: { type: DataTypes.STRING(500), allowNull: true },
       sentByUserId: { type: DataTypes.UUID, allowNull: true, field: 'sent_by_user_id' },
+      // The order an outbound message was about (migration 215), so a
+      // quick-reply to it can confirm or cancel that order.
+      orderId: { type: DataTypes.UUID, allowNull: true, field: 'order_id' },
     },
     { tableName: 'whatsapp_messages', indexes: [{ fields: ['conversation_id', 'created_at'] }] }
   );
