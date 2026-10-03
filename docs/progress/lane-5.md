@@ -3,9 +3,9 @@
 ## Done
 - [x] 1. Checkout form builder (§8.6) + thank-you page settings (§8.7) — checked by driving the real API on `zimos_lane_5` (defaults, PATCH, bad key → 422, required custom field, wrong choice, discount code while switched off, order without city, `checkoutFields` on the order, reset); storefront `tsc --noEmit` and dashboard `tsc -b` clean. The two screens were **not** opened in a browser: `preview_start` refused ("Maximum 5 dev servers per folder", all five held by other lanes).
 - [x] 2. Store info and policies (§8.3, §8.5) + page flags — checked on the real API on `zimos_lane_5`: `store_info` and `legal` saved and read back publicly, `{{store.*}}` variables filled in `GET /store/:ws/policies/:key`, unwritten/unknown policy → 404; a published check site: `showInHeader`/`showInFooter` put the page in `navPages`, `isActive:false` → public page 404 and out of `navPages`, back on → 200, bad flag type → 422. Typechecks clean. Screens not opened in a browser (same preview limit).
+- [x] 3. General settings (§8.8) and store SEO (§8.9) — checked on the real API on `zimos_lane_5`: `general`, `social_links`, `floating_whatsapp`, `store_seo` saved and read back publicly; `javascript:` link, bad phone, bad verification code, 3-letter country → 422; WhatsApp button off → `null`; title template without `%s` → ignored; `GET /store/:ws/sitemap` lists home, listing, products, the published active page and the written policy. Typechecks clean. Storefront pieces (favicon/meta, floating button, footer social row, `sitemap.xml`, `robots.txt`, product JSON-LD) and the General/SEO tabs not opened in a browser (same preview limit).
 
 ## Next
-- [ ] 3. General settings (§8.8): favicon, social links, floating WhatsApp button; store SEO, `sitemap.xml`, `robots.txt`, product JSON-LD (§8.9).
 - [ ] 4. Custom code slots (§8.4) stored outside the page tree, served only on the store domain.
 - [ ] 5. Domains (§8.11): dashboard screen, `resolve-host` in `proxy.ts`, `sslStatus` + `certificateProvider` interface with a sandbox adapter, home funnel.
 - [ ] 6. Builder elements in batches (§9.3).
@@ -29,10 +29,13 @@
 - 2026-10-03 Page flags are live switches on `website_pages` (migration 236), not part of the published snapshot: they apply without a publish. Home (`/`) is never listed in `navPages` and cannot be switched off from the screen.
 - 2026-10-03 When `store_info` is on and has cards, the product page shows them in place of the generic trust row.
 - 2026-10-03 PATCH bodies strip unknown keys (project convention), so an unknown key inside `legal` is ignored, not refused.
-- 2026-10-03 `auto_select_region` / `auto_select_variant` are stored and exposed; the storefront does not read them yet (item 3).
+- 2026-10-03 `auto_select_region` is honoured by the checkout page. `auto_select_variant` is stored and exposed but the product page still pre-selects the first available variant: switching that off needs a "choose an option" state in lane 3's `ProductLanding`, left for them.
+- 2026-10-03 General settings live in four settings blobs (`general`, `social_links`, `floating_whatsapp`, `store_seo`), no new columns: `faviconUrl` and `country` are in `settings.general`. Favicon and share image are pasted as links (media library link), not uploaded from this screen.
+- 2026-10-03 Sitemap: the backend lists the paths (`GET /store/:ws/sitemap`), the storefront renders `sitemap.xml` / `robots.txt` per store; `proxy.ts` rewrites those two files to the store on a store host. Collections are not listed (they have no address of their own). Social links render as lettered round links, not brand logos.
+- 2026-10-03 Bot protection, quantity limit and per-phone limit from the §8.8 table belong to lane 2 (`fraud_rules`); announcement bar, colours, fonts and logo already exist in the website editor — not repeated here.
 
 ## Blocked
 - Browser verification of dashboard/storefront screens — the preview tool allows 5 dev servers per folder and other lanes hold them. Retry `preview_start lane-5-*` at the start of each turn.
 
 ## Handoff
-Branch `lane-5` in both worktrees, landed on `zimos-additions` after item 2. Migration range 235–259: 235 and 236 used. The lane database has a published "Lane 5 check site" (pages `/` and `/about-us`) made for checking page flags. API client module: `packages/api-client/src/endpoints/storeDesign.ts`. To check an API without a dev server, boot `src/app.js` on port 0 from a one-off node script in the backend worktree (the app is exported from `src/app.js`).
+Branch `lane-5` in both worktrees, landed on `zimos-additions` after item 3. Migration range 235–259: 235 and 236 used (item 3 needed none). The lane database has a published "Lane 5 check site" (pages `/` and `/about-us`) made for checking page flags. API client module: `packages/api-client/src/endpoints/storeDesign.ts`. To check an API without a dev server, boot `src/app.js` on port 0 from a one-off node script in the backend worktree (the app is exported from `src/app.js`).

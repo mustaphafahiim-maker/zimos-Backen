@@ -4,6 +4,7 @@ const db = require('../../db/models');
 const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
 const trackingPixelService = require('./trackingPixelService');
+const pixelEventLog = require('./pixelEventLog');
 const metaCapi = require('./pixelProviders/metaCapi');
 const tiktokCapi = require('./pixelProviders/tiktokCapi');
 const snapchatCapi = require('./pixelProviders/snapchatCapi');
@@ -110,10 +111,12 @@ async function run(workspaceId, trigger, orderId) {
       const result = await SENDERS[platform](target);
       logger.info(`[pixelEvents] ${platform} purchase sent`, { workspaceId, orderId, platform, pixelId: pixel.pixelId, eventId });
       await trackingPixelService.recordSendResult(pixel, { ok: true });
+      await pixelEventLog.record({ pixel, eventName: 'purchase', eventId, orderId, ok: true });
       results.push({ platform, pixelId: pixel.pixelId, ok: true, result });
     } catch (err) {
       logger.error(`[pixelEvents] ${platform} purchase failed: ${err.message}`, { workspaceId, orderId, platform, pixelId: pixel.pixelId, eventId, code: err.code });
       await trackingPixelService.recordSendResult(pixel, { ok: false, error: err.message });
+      await pixelEventLog.record({ pixel, eventName: 'purchase', eventId, orderId, ok: false, error: err.message });
       results.push({ platform, pixelId: pixel.pixelId, ok: false, error: err.message });
     }
   }

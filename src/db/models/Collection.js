@@ -17,6 +17,9 @@ module.exports = (sequelize, DataTypes) => {
       // Order among siblings: lowest first, then by name.
       position: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       imageUrl: { type: DataTypes.STRING(1000), allowNull: true, field: 'image_url' },
+      // Migration 188: in the store's header menu / left out of every public list.
+      showInHeader: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'show_in_header' },
+      hidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     },
     {
       tableName: 'collections',

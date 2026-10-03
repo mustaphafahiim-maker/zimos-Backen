@@ -2,6 +2,8 @@
 
 const asyncHandler = require('express-async-handler');
 const service = require('./trackingPixelService');
+const pixelEventLog = require('./pixelEventLog');
+const browserEventRelay = require('./browserEventRelay');
 
 const wid = (req) => req.tenant.workspaceId;
 
@@ -15,4 +17,8 @@ const update = asyncHandler(async (req, res) =>
 
 const remove = asyncHandler(async (req, res) => res.json(await service.remove(wid(req), req.params.pixelId, req)));
 
-module.exports = { list, create, update, remove };
+const events = asyncHandler(async (req, res) => res.json(await pixelEventLog.list(wid(req), req.query)));
+
+const sendTest = asyncHandler(async (req, res) => res.json(await browserEventRelay.sendTest(wid(req), req.params.pixelId, req)));
+
+module.exports = { list, create, update, remove, events, sendTest };

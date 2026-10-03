@@ -82,7 +82,7 @@ async function claim(limit) {
                LIMIT :limit
                FOR UPDATE SKIP LOCKED)
   RETURNING j.id, j.queue, j.name, j.payload, j.attempts, j.max_attempts AS "maxAttempts", j.workspace_id AS "workspaceId"`,
-    { replacements: { worker: WORKER_ID, queues, limit }, type: QueryTypes.SELECT }
+    { replacements: { worker: WORKER_ID, queues, limit }, type: QueryTypes.SELECT, logging: false }
   );
 }
 
@@ -139,7 +139,7 @@ async function releaseStale() {
   await db.sequelize.query(
     `UPDATE queue_jobs SET status = 'pending', locked_at = NULL, locked_by = NULL, updated_at = NOW()
       WHERE status = 'active' AND locked_at < NOW() - (:staleMs * INTERVAL '1 millisecond')`,
-    { replacements: { staleMs: STALE_LOCK_MS } }
+    { replacements: { staleMs: STALE_LOCK_MS }, logging: false }
   );
 }
 
@@ -176,7 +176,7 @@ async function runSchedule(name) {
         SET next_run_at = NOW() + (every_ms * INTERVAL '1 millisecond'), last_run_at = NOW(), updated_at = NOW()
       WHERE name = :name AND next_run_at <= NOW()
   RETURNING name`,
-    { replacements: { name }, type: QueryTypes.SELECT }
+    { replacements: { name }, type: QueryTypes.SELECT, logging: false }
   );
   if (claimed.length === 0) return;
   const started = Date.now();
