@@ -36,7 +36,9 @@ const storefrontMethods = asyncHandler(async (req, res) => {
   // Gateway methods and cash on delivery, then the store's manual transfer methods.
   const offered = await methods.storefrontMethods(req.publicWorkspace, { preview });
   const manual = require('./manualTransferService');
-  res.json({ methods: [...offered, ...manual.storefrontMethods(req.publicWorkspace)], preview });
+  // Narrowed to the funnel's own list, each with its fee or discount (paymentRulesService).
+  const all = [...offered, ...manual.storefrontMethods(req.publicWorkspace)];
+  res.json({ methods: require('./paymentRulesService').forStorefront(req.publicWorkspace, all, req.query.funnelId), preview });
 });
 
 const shopperStatus = asyncHandler(async (req, res) => {

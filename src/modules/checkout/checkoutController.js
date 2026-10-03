@@ -1,6 +1,7 @@
 'use strict';
 const asyncHandler = require('express-async-handler');
 const manualCheckout = require('./manualCheckout');
+const paymentRules = require('../payments/paymentRulesService');
 const env = require('../../config/env');
 const cartService = require('../cart/cartService');
 const orderService = require('../orders/orderService');
@@ -44,6 +45,7 @@ const checkout = asyncHandler(async (req, res) => {
   // here, before any cart work; it is not an online (gateway) payment.
   const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
   const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
+  if (orderBody.paymentMethod === 'cod') paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: 'cod' });
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -52,6 +54,7 @@ const checkout = asyncHandler(async (req, res) => {
   let prepared = null;
   if (isOnline) {
     prepared = await online.prepareOnlineCheckout(workspace, { ...orderBody, paymentProvider, returnUrl }, req);
+    paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: `${prepared.method.provider}:${prepared.method.method}` });
   } else if (env.payments.onlineEnabled && orderBody.paymentMethod === 'cod') {
     // The merchant may have switched cash on delivery off.
     await methodsService.resolveStorefrontMethod(workspace, { paymentMethod: 'cod' }, {

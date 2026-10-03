@@ -1,0 +1,160 @@
+'use strict';
+
+const crypto = require('crypto');
+const db = require('../../db/models');
+const { subscribes } = require('./webhookEvents');
+const { matchesFilter } = require('./webhookFilter');
+const { DOMAIN_TO_TOPIC } = require('./webhookTopics');
+
+/**
+ * Turns a domain event (core/outbox) into webhook deliveries: one row in
+ * webhook_deliveries per endpoint that listens to the topic and whose filter
+ * lets it through. The dispatcher (webhookDispatcher.js) sends them, with the
+ * retries and the history every delivery gets.
+ */
+
+// Required lazily: the public order serializer pulls in the orders module.
+const orders = () => require('../orders/orderService');
+const serializers = () => require('../publicApi/publicOrderSerializer');
+
+async function orderSubject(workspaceId, orderId) {
+  const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'funnelId'] });
+  if (!order) return null;
+  const rows = await db.sequelize.query(
+    `SELECT DISTINCT v.product_id AS "productId"
+       FROM order_items i JOIN product_variants v ON v.id = i.variant_id
+      WHERE i.order_id = :orderId`,
+    { replacements: { orderId }, type: db.Sequelize.QueryTypes.SELECT }
+  );
+  return { funnelId: order.funnelId, productIds: rows.map((r) => r.productId) };
+}
+
+async function orderData(workspaceId, orderId) {
+  return serializers().serializeOrder(await orders().getOrder(workspaceId, orderId));
+}
+
+/** What a topic sends and what it is about. Null = the thing is gone; send nothing. */
+async function build(topic, event) {
+  const { workspaceId, payload } = event;
+  const [aggregate] = topic.split('.');
+
+  if (aggregate === 'order') {
+    const subject = await orderSubject(workspaceId, payload.orderId);
+    if (!subject) return null;
+    const { orderId, workspaceId: _ws, ...extra } = payload;
+    return { subject, data: { order: await orderData(workspaceId, payload.orderId), ...extra } };
+  }
+
+  if (aggregate === 'shipment') {
+    const shipment = await db.Shipment.findOne({ where: { id: payload.shipmentId, workspaceId } });
+    if (!shipment) return null;
+    const subject = (await orderSubject(workspaceId, shipment.orderId)) || {};
+    return {
+      subject,
+      data: {
+        orderId: shipment.orderId,
+        old_status: payload.oldStatus || null,
+        new_status: payload.newStatus || shipment.status,
+        shipment: serializers().serializeShipment(shipment),
+      },
+    };
+  }
+
+  if (aggregate === 'product') {
+    const product = await db.Product.findOne({
+      where: { id: payload.productId, workspaceId },
+      include: [{ model: db.ProductVariant, as: 'variants', required: false }],
+      paranoid: false,
+    });
+    const data = product ? { product: product.toJSON() } : { product: { id: payload.productId } };
+    return { subject: { productIds: [payload.productId] }, data };
+  }
+
+  if (aggregate === 'funnel') {
+    const funnel = await db.Funnel.findOne({ where: { id: payload.funnelId, workspaceId }, attributes: ['id', 'name', 'slug', 'status'] });
+    if (!funnel) return null;
+    return { subject: { funnelId: funnel.id }, data: { funnel: funnel.toJSON() } };
+  }
+
+  if (aggregate === 'customer' && payload.customerId) {
+    const customer = await db.Customer.findOne({ where: { id: payload.customerId, workspaceId } });
+    if (!customer) return null;
+    return { subject: {}, data: { customer: customer.toJSON() } };
+  }
+
+  // checkout.*, lead.created, contact_form.submitted: what the event recorded.
+  return { subject: { funnelId: payload.funnelId || null, productIds: payload.productIds || [] }, data: payload };
+}
+
+/**
+ * Queues `topic` for every listening endpoint of the workspace. `eventId` is
+ * stable for one occurrence, so a retried job adds nothing twice (unique per
+ * endpoint + event id). Returns how many deliveries were created.
+ */
+async function fanOut(workspaceId, topic, { eventId, data, subject = {}, endpointId = null, occurredAt = new Date() }) {
+  const where = { workspaceId, isActive: true };
+  if (endpointId) where.id = endpointId;
+  const endpoints = await db.WebhookEndpoint.findAll({ where });
+  const now = new Date();
+  const rows = endpoints
+    .filter((endpoint) => subscribes(endpoint, topic) && matchesFilter(endpoint, subject))
+    .map((endpoint) => ({
+      workspaceId,
+      endpointId: endpoint.id,
+      eventId,
+      eventType: topic,
+      payload: { id: eventId, type: topic, createdAt: new Date(occurredAt).toISOString(), workspaceId, data },
+      status: 'pending',
+      attemptCount: 0,
+      nextAttemptAt: now,
+    }));
+  if (rows.length === 0) return 0;
+  await db.WebhookDelivery.bulkCreate(rows, { ignoreDuplicates: true });
+  return rows.length;
+}
+
+/** The outbox consumer: a domain event → its webhook topic, if it has one. */
+async function handleDomainEvent(event) {
+  const topic = DOMAIN_TO_TOPIC[event.type];
+  if (!topic || !event.workspaceId) return 0;
+  // Cheap way out for the many stores with no endpoint at all.
+  const any = await db.WebhookEndpoint.findOne({ where: { workspaceId: event.workspaceId, isActive: true }, attributes: ['id'] });
+  if (!any) return 0;
+  const built = await build(topic, event);
+  if (!built) return 0;
+  return fanOut(event.workspaceId, topic, {
+    eventId: `${topic}:${event.id || crypto.randomUUID()}`,
+    data: built.data,
+    subject: built.subject,
+    occurredAt: event.occurredAt,
+  });
+}
+
+/**
+ * "Resend to webhook": the orders as they are now, sent again as
+ * `order.created` with `resent: true`, to one endpoint or to every endpoint
+ * that listens to new orders. A fresh event id each time, so a receiver that
+ * dedupes on it takes the copy.
+ */
+async function resendOrders(workspaceId, orderIds, { endpointId = null } = {}) {
+  let deliveries = 0;
+  const missing = [];
+  for (const orderId of orderIds) {
+    const subject = await orderSubject(workspaceId, orderId);
+    if (!subject) {
+      missing.push(orderId);
+      continue;
+    }
+    deliveries += await fanOut(workspaceId, 'order.created', {
+      eventId: `order.created:${orderId}:resend:${crypto.randomUUID()}`,
+      data: { order: await orderData(workspaceId, orderId), resent: true },
+      // A resend is an explicit request: the endpoint's filter is not applied
+      // when the merchant named the endpoint.
+      subject: endpointId ? {} : subject,
+      endpointId,
+    });
+  }
+  return { orders: orderIds.length - missing.length, deliveries, missing };
+}
+
+module.exports = { fanOut, handleDomainEvent, resendOrders, orderSubject };

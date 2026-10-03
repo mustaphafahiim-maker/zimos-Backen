@@ -2,6 +2,7 @@
 const asyncHandler = require('express-async-handler');
 const service = require('./fraudService');
 const blockedEntries = require('./blockedEntries');
+const protectionActions = require('./protectionActions');
 
 const listFlagged = asyncHandler(async (req, res) =>
   res.json(await service.listFlaggedOrders(req.tenant.workspaceId, req.query))
@@ -29,4 +30,9 @@ const importBlocklist = asyncHandler(async (req, res) =>
   res.json(await blockedEntries.importCsv(req.tenant.workspaceId, req.body, req))
 );
 
-module.exports = { listFlagged, approve, listBlocklist, block, unblock, importBlocklist };
+const blockAndCancel = asyncHandler(async (req, res) =>
+  res.json(await protectionActions.blockAndCancel(req.tenant.workspaceId, req.params.orderId, req.body || {}, req))
+);
+const stats = asyncHandler(async (req, res) => res.json(await protectionActions.stats(req.tenant.workspaceId, req.query)));
+
+module.exports = { listFlagged, approve, listBlocklist, block, unblock, importBlocklist, blockAndCancel, stats };
