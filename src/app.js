@@ -199,6 +199,9 @@ v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
 // Lane 7: the app store, the app install link and dropshipping providers.
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
+// Lane 7: the simple invite (sections → permissions) and support access.
+v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
+v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
 v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
