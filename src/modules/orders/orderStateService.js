@@ -150,6 +150,8 @@ async function setFinancialState(workspaceId, orderId, state, req, transaction) 
     transaction,
   });
   await trackStage(workspaceId, order.id, { req, transaction });
+  // Digital lines are delivered the moment the order is paid (modules/digital).
+  if (state === 'paid' && before !== 'paid') await require('../digital/digitalService').onOrderPaid(workspaceId, order.id, transaction);
   return order;
 }
 

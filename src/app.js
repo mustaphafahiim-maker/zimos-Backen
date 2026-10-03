@@ -23,6 +23,7 @@ const customerRoutes = require('./modules/customers/customerRoutes');
 const contactRoutes = require('./modules/contacts/contactRoutes');
 const storesRoutes = require('./modules/stores/storesRoutes');
 const dashboardRoutes = require('./modules/dashboard/dashboardRoutes');
+const digitalRoutes = require('./modules/digital/digitalRoutes');
 const orderRoutes = require('./modules/orders/orderRoutes');
 const returnRoutes = require('./modules/returns/returnRoutes');
 const confirmationRoutes = require('./modules/cod/confirmationRoutes');
@@ -156,6 +157,7 @@ v1.use('/workspaces/:workspaceId/customers', customerRoutes);
 v1.use('/workspaces/:workspaceId/contacts', contactRoutes.staff);
 v1.use('/workspaces/:workspaceId/duplicate', storesRoutes.duplicate);
 v1.use('/me/stores', storesRoutes.me);
+v1.use('/workspaces/:workspaceId/digital', digitalRoutes.staff);
 v1.use('/workspaces/:workspaceId', dashboardRoutes);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
@@ -230,6 +232,7 @@ v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
 // Storefront visit tracking (page views, cart, checkout, purchase).
 v1.use('/store/:workspaceId/events', eventsPublicRoutes);
 v1.use('/store/:workspaceId/forms', contactRoutes.store);
+v1.use('/store/:workspaceId/downloads', digitalRoutes.store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 
