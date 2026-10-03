@@ -98,7 +98,8 @@ async function seedDefaultPlans() {
 /** The plan a brand-new workspace starts its trial on: cheapest active plan. */
 async function defaultPlan(transaction) {
   return db.Plan.findOne({
-    where: { isActive: true },
+    // Never the pay-per-order plan (no monthly price, a fee per order).
+    where: { isActive: true, perOrderFeeAmount: 0 },
     order: [['monthlyPriceAmount', 'ASC']],
     ...(transaction ? { transaction } : {}),
   });
