@@ -74,4 +74,19 @@ router.put(
   asyncHandler(async (req, res) => res.json({ exitDownsell: await rules.saveExitDownsell(ws(req), req.body, req) }))
 );
 
+// The store's minimum order amount (discounts/couponExtras.js).
+const couponExtras = require('../discounts/couponExtras');
+router.get(
+  '/order-rules',
+  validate({ params: wsParams }),
+  canView,
+  asyncHandler(async (req, res) => res.json({ orderRules: await couponExtras.getOrderRules(ws(req)) }))
+);
+router.put(
+  '/order-rules',
+  validate({ params: wsParams, body: couponExtras.schemas.orderRules }),
+  canManage,
+  asyncHandler(async (req, res) => res.json({ orderRules: await couponExtras.saveOrderRules(ws(req), req.body, req) }))
+);
+
 module.exports = router;

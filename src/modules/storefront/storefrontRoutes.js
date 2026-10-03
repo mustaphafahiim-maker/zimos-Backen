@@ -68,6 +68,14 @@ router.post(
     res.json({ deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, req.body || {}) })
   )
 );
+// Display currencies and their rates — for showing converted prices only (currencies/fxService.js).
+router.get(
+  '/currencies',
+  validate({ params: onlinePaymentSchemas.storeMethods.params }),
+  require('express-async-handler')(async (req, res) =>
+    res.json({ currencies: await require('../currencies/fxService').getForStorefront(req.publicWorkspace) })
+  )
+);
 router.get('/payment-methods', validate(onlinePaymentSchemas.storeMethods), onlinePaymentController.storefrontMethods);
 
 // An unpaid online order, for the shopper holding its X-Payment-Token (given

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const paymentRules = require('../payments/paymentRulesService');
+const fxService = require('../currencies/fxService');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
@@ -418,6 +419,19 @@ async function createOrder(
       discountRecord = evaluation.discount;
       discountsSnapshot = [{ code: discountCode, type: evaluation.discount.type, amount: discountAmount }];
     }
+    const couponExtras = require('../discounts/couponExtras');
+    if (!discountCode) {
+      // No code typed: the store's best automatic discount, when one applies.
+      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
+      if (automatic) {
+        discountAmount = automatic.amount;
+        discountRecord = automatic.discount;
+        discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
+      }
+    }
+    // The store's minimum order amount binds shoppers, not staff typing an
+    // order in, and not an add-on order that follows another one.
+    if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
@@ -463,6 +477,7 @@ async function createOrder(
         totalAmount,
         paymentAdjustmentAmount: paymentAdjustment.amount,
         paymentAdjustmentLabel: paymentAdjustment.label,
+        ...(await fxService.baseFieldsFor(workspaceId, { currency: pricedLines[0].currency, totalAmount }, transaction)),
         contactSnapshot: contact,
         shippingAddressSnapshot: shippingAddress || null,
         discountsSnapshot,
@@ -727,6 +742,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       totalAmount,
       paymentAdjustmentAmount: paymentAdjustment.amount,
       paymentAdjustmentLabel: paymentAdjustment.label,
+      ...(await fxService.baseFieldsFor(workspaceId, { currency: order.currency, totalAmount }, transaction)),
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,

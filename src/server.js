@@ -44,6 +44,9 @@ async function start() {
   // ads.sync_spend: hourly pull of ad spend from connected ad accounts.
   startAdsSync();
 
+  // fx.refresh: exchange rates, at start-up when missing or stale and then daily.
+  require('./modules/currencies/currencyRoutes').startFxRefresh();
+
   // And for couriers: which adapters this process actually switched on, from
   // CARRIERS_ENABLED / CARRIERS_BETA / CARRIERS_BETA_WORKSPACES as parsed.
   await logCarrierRollout(logger);
