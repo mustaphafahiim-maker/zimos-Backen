@@ -284,7 +284,7 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req }, transa
       funnelId,
     },
     { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
-    { transaction, skipFraudRules: true, shippingOverride: { amount: 0 } }
+    { transaction, skipFraudRules: true, shippingOverride: { amount: 0 }, source: 'upsell' }
   );
   await db.Order.update({ linkedFromOrderId: order.id }, { where: { id: followOn.id, workspaceId }, transaction });
   await db.FunnelOfferAcceptance.create(

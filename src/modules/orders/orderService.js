@@ -29,6 +29,9 @@ const { resolveCustomizations, attachUploads } = require('../catalog/customField
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { orderBumpUnavailable } = require('../checkout/orderBump');
 const outbox = require('../../core/outbox/outbox');
+const orderMeta = require('./orderMetaService');
+const { applyOrderFilters } = require('./orderFilters');
+const { effectiveVariantPrice } = require('../catalog/productPage');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -100,7 +103,9 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     };
   }
 
-  const lineTotal = variant.priceAmount * quantity;
+  // A countdown offer that has ended sells at the full price (catalog/productPage.js).
+  const unitPriceAmount = effectiveVariantPrice(variant, variant.product).priceAmount;
+  const lineTotal = unitPriceAmount * quantity;
   return {
     productId: variant.productId,
     productName: variant.product.name,
@@ -110,7 +115,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     offerId: null,
     offerName: null,
     quantity,
-    unitPriceAmount: variant.priceAmount,
+    unitPriceAmount,
     unitCostAmount: variant.costAmount,
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
@@ -223,6 +228,7 @@ async function createOrder(
     customFields = {},
     confirmationAvailableAt = null,
     shippingOverride = null,
+    source = null,
   } = {}
 ) {
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
@@ -232,6 +238,10 @@ async function createOrder(
   }
 
   const evaluateFraudRules = !req.user && !skipFraudRules;
+  // SPEC §4.2: where the order came from, and whether it is the merchant
+  // trying their own store (kept out of sales figures and ad pixels).
+  const orderSource = source || orderMeta.sourceFor(req, { funnelId });
+  const isTest = orderMeta.isTestRequest(req, workspaceId);
 
   const run = async (transaction) => {
     // Chosen now so the reservations below can name the order they hold stock
@@ -252,6 +262,10 @@ async function createOrder(
     );
     if (platformBlock) throw platformBlocklist.rejection(customer.id, platformBlock);
 
+    // The shopper's own IP and browser: a staff order carries the staff member's.
+    const visitorIp = req && !req.user ? blockedEntries.normalizeIp(req.ip) : null;
+    const visitorAgent = req && !req.user && req.headers ? req.headers['user-agent'] : null;
+
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
     // The store's blocked_entries (scope orders). The IP is the shopper's only
@@ -262,7 +276,7 @@ async function createOrder(
       {
         phoneNormalized: customer.phoneNormalized,
         email: contact.email,
-        ip: req && !req.user ? req.ip : null,
+        ip: visitorIp,
         deviceId: payload.deviceId,
         fullName: contact.fullName,
         addressLine: shippingAddress && shippingAddress.addressLine,
@@ -281,13 +295,17 @@ async function createOrder(
     // Before any inventory is touched, so a refusal has nothing to undo but
     // the customer lookup.
     if (evaluateFraudRules) {
-      const ruleFlags = await fraudRules.evaluateStorefrontOrder({
+      const { flags: ruleFlags } = await fraudRules.evaluateStorefrontOrder({
         workspaceId,
         customer,
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
         transaction,
         onlinePayment: Boolean(awaitingPayment),
         blockedEntry,
+        items,
+        paymentMethod,
+        phone: contact.phone,
+        visitor: { ip: visitorIp },
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
@@ -411,6 +429,13 @@ async function createOrder(
         discountsSnapshot,
         notes: notes || null,
         riskFlags,
+        ipAddress: visitorIp,
+        userAgent: visitorAgent ? String(visitorAgent).slice(0, 400) : null,
+        source: orderSource,
+        isTest,
+        // An order staff typed in themselves is not news to them.
+        isSeen: Boolean(req.user),
+        seenAt: req.user ? new Date() : null,
         totalWeightGrams: shipping.weightGrams,
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
@@ -498,7 +523,7 @@ async function createOrder(
     // conversions run after commit and never fail the order. An order waiting
     // for its online payment is not a purchase yet, so it sends no conversion.
     // They hang off the order.created event in the outbox (see each module's jobs.js).
-    await outbox.record(transaction, 'order.created', { workspaceId, orderId: order.id, awaitingPayment: Boolean(awaitingPayment) });
+    await outbox.record(transaction, 'order.created', { workspaceId, orderId: order.id, awaitingPayment: Boolean(awaitingPayment), isTest: Boolean(isTest) });
 
     return { order, items: orderItems };
   };
@@ -906,10 +931,11 @@ async function paymentProviders(orders) {
  */
 async function listOrders(
   workspaceId,
-  { limit = 50, cursor, sort: sortKey, confirmationState, financialState, fulfillmentState, stage, q, from, to } = {}
+  { limit = 50, cursor, sort: sortKey, confirmationState, financialState, fulfillmentState, stage, q, from, to, ...filters } = {}
 ) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId, limit: limit + 1 };
+  applyOrderFilters(conditions, bind, filters);
   const sort = orderSort(sortKey);
 
   if (confirmationState) {
@@ -967,9 +993,10 @@ async function listOrders(
  * at zero, so the client renders a stable row of tabs instead of tabs that
  * appear and vanish as orders move.
  */
-async function orderPipeline(workspaceId, { q, from, to } = {}) {
+async function orderPipeline(workspaceId, { q, from, to, ...filters } = {}) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId };
+  applyOrderFilters(conditions, bind, filters);
   applySearchAndDates(conditions, bind, { q, from, to });
 
   const rows = await db.sequelize.query(

@@ -93,7 +93,9 @@ function unpaidPrepaidSql(alias) {
  * page is not revenue.
  */
 function countsAsSaleSql(alias) {
-  return `NOT ${unpaidPrepaidSql(alias)}`;
+  const p = alias ? `${alias}.` : '';
+  // A test order (the merchant trying their own store) is never a sale.
+  return `(NOT ${unpaidPrepaidSql(alias)} AND NOT ${p}is_test)`;
 }
 
 const STAGE_SQL = `CASE
