@@ -36,6 +36,15 @@ router.get('/pipeline', validate(schemas.pipeline), requirePermission(PERMISSION
 // '/:orderId' for the same reason as '/pipeline'.
 router.get('/export/columns', validate(exportSchemas.columns), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.columns);
 router.get('/export', validate(exportSchemas.exportCsv), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.exportCsv);
+// One action over many orders; the answer reports each order on its own.
+// Shipping needs a live store, like the single-order shipment route.
+router.post(
+  '/bulk',
+  validate(schemas.bulk),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  (req, res, next) => (req.body.action === 'ship' ? requireLive(req, res, next) : next()),
+  controller.bulk
+);
 // Every tag in use, for the tag picker and the list's tag filter.
 router.get('/tags', validate(schemas.listTags), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.listTags);
 router.get('/:orderId', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.get);
