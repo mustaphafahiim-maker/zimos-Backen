@@ -12,6 +12,10 @@ module.exports = (sequelize, DataTypes) => {
       // sent | skipped | failed
       status: { type: DataTypes.STRING(20), allowNull: false },
       detail: { type: DataTypes.STRING(500), allowNull: true },
+      // Which step of which execution this row is about (migration 214).
+      executionId: { type: DataTypes.UUID, allowNull: true, field: 'execution_id' },
+      stepIndex: { type: DataTypes.INTEGER, allowNull: true, field: 'step_index' },
+      stepType: { type: DataTypes.STRING(30), allowNull: true, field: 'step_type' },
     },
     { tableName: 'automation_runs', updatedAt: false, indexes: [{ fields: ['workspace_id', 'created_at'] }] }
   );

@@ -5,6 +5,7 @@ const asyncHandler = require('express-async-handler');
 const env = require('../../config/env');
 const { OrderRejectedError } = require('../fraud/fraudRules');
 const captcha = require('./captcha');
+const { recordAudit } = require('../audit/auditService');
 const visitorGate = require('./visitorGate');
 
 /**
@@ -117,6 +118,13 @@ const guardCheckout = asyncHandler(async (req, res, next) => {
     await assertHuman(req, req.publicWorkspace, body);
   } catch (err) {
     req.checkoutRefusal = err.refusal;
+    await recordAudit({
+      workspaceId: req.publicWorkspace.id,
+      action: 'order.blocked',
+      entityType: 'Checkout',
+      after: { flags: err.refusal ? err.refusal.flags : [] },
+      req,
+    }).catch(() => {});
     throw err;
   }
   req.secondsOnPage = age === null ? null : Math.round(age / 1000);

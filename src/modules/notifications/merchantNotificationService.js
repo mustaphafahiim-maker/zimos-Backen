@@ -35,6 +35,8 @@ const TYPES = Object.freeze({
   'integration.failed': { permission: PERMISSIONS.WORKSPACE_MANAGE, defaults: { inApp: true, email: true } },
   'export.ready': { permission: null, defaults: { inApp: true, email: false } },
   announcement: { permission: null, defaults: { inApp: true, email: false } },
+  // An automation's "notify the team" step (modules/automations).
+  automation: { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 
