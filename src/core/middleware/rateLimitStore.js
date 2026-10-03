@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const logger = require('../utils/logger');
 
 /**
@@ -35,6 +36,22 @@ function resolve() {
   }
 }
 
+/**
+ * Commands for the store. With the offline queue off, a command sent before
+ * ioredis has connected fails at once, and each limiter loads its Lua scripts
+ * the moment it is created, at boot. rate-limit-redis keeps that failed
+ * SCRIPT LOAD and every later hit fails on it, so passOnStoreError would let
+ * every request through, unlimited, for the life of the process. Answering
+ * SCRIPT LOAD with the script's SHA1 (what Redis itself returns) avoids that:
+ * the first EVALSHA gets NOSCRIPT and the store loads the script for real.
+ */
+function sendCommand(...args) {
+  if (client.status !== 'ready' && String(args[0]).toUpperCase() === 'SCRIPT' && String(args[1]).toUpperCase() === 'LOAD') {
+    return Promise.resolve(crypto.createHash('sha1').update(String(args[2])).digest('hex'));
+  }
+  return client.call(...args);
+}
+
 /** Wraps express-rate-limit so every limiter created through it gets the shared store. */
 function withSharedStore(rateLimit) {
   return (options = {}) => {
@@ -43,7 +60,7 @@ function withSharedStore(rateLimit) {
     counter += 1;
     return rateLimit({
       ...options,
-      store: new RedisStore({ prefix: `rl:${counter}:`, sendCommand: (...args) => client.call(...args) }),
+      store: new RedisStore({ prefix: `rl:${counter}:`, sendCommand }),
       // Redis down must not take the API down with it.
       passOnStoreError: true,
     });
