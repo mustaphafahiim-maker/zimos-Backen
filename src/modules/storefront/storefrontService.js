@@ -233,6 +233,8 @@ async function trackOrder(workspaceId, phone, orderNumber) {
     shippingAmount: String(order.shippingAmount),
     totalAmount: String(order.totalAmount),
     currency: order.currency,
+    // What the store wrote for the customer (order notes marked public).
+    notes: await require('../orders/orderMetaService').publicNotes(order.id),
   };
 }
 
