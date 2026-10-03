@@ -126,6 +126,13 @@ const SYSTEM_ROLES = Object.freeze({
     name: 'Confirmation Agent',
     permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ORDERS_CONFIRM, PERMISSIONS.CUSTOMERS_VIEW],
   },
+  // Shipping and printing only (SPEC §17.1): sees orders, books couriers,
+  // prints waybills — cannot confirm, cancel, refund or see customers' lists.
+  fulfillment: {
+    key: 'fulfillment',
+    name: 'Fulfillment',
+    permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.SHIPPING_MANAGE, PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.PRODUCTS_VIEW],
+  },
   accountant: {
     key: 'accountant',
     name: 'Accountant',
@@ -141,4 +148,24 @@ const SYSTEM_ROLES = Object.freeze({
   },
 });
 
-module.exports = { PERMISSIONS, ALL_PERMISSIONS, SYSTEM_ROLES };
+/**
+ * The invite dialog's sections (SPEC §17.1): each checkbox a merchant ticks
+ * for a teammate stands for a group of permissions. The dialog's "Advanced"
+ * view shows the permissions themselves.
+ */
+const ACCESS_SECTIONS = Object.freeze([
+  { key: 'orders', permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.ORDERS_CONFIRM, PERMISSIONS.REFUNDS_MANAGE] },
+  { key: 'shipping', permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.SHIPPING_MANAGE] },
+  { key: 'products', permissions: [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE, PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.INVENTORY_MANAGE] },
+  { key: 'customers', permissions: [PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.CUSTOMERS_MANAGE, PERMISSIONS.FORM_SUBMISSIONS_VIEW] },
+  { key: 'discounts', permissions: [PERMISSIONS.DISCOUNTS_MANAGE] },
+  { key: 'store', permissions: [PERMISSIONS.WEBSITE_EDIT, PERMISSIONS.WEBSITE_PUBLISH, PERMISSIONS.TEMPLATE_MANAGE, PERMISSIONS.DOMAIN_MANAGE] },
+  { key: 'funnels', permissions: [PERMISSIONS.FUNNELS_MANAGE, PERMISSIONS.FUNNELS_PUBLISH] },
+  { key: 'analytics', permissions: [PERMISSIONS.ANALYTICS_VIEW] },
+  { key: 'finance', permissions: [PERMISSIONS.FINANCIAL_REPORTS_VIEW, PERMISSIONS.PROFIT_MANAGE, PERMISSIONS.TAX_MANAGE] },
+  { key: 'messaging', permissions: [PERMISSIONS.AUTOMATIONS_MANAGE] },
+  { key: 'apps', permissions: [PERMISSIONS.APPS_MANAGE, PERMISSIONS.API_KEYS_MANAGE, PERMISSIONS.WEBHOOKS_MANAGE] },
+  { key: 'settings', permissions: [PERMISSIONS.WORKSPACE_MANAGE, PERMISSIONS.USERS_MANAGE, PERMISSIONS.ROLES_MANAGE, PERMISSIONS.AUDIT_LOG_VIEW] },
+]);
+
+module.exports = { PERMISSIONS, ALL_PERMISSIONS, SYSTEM_ROLES, ACCESS_SECTIONS };

@@ -16,8 +16,8 @@
 - [x] 5. Apps — backend + dashboard — `apps` / `workspace_apps` (migration 287), catalogue of 14 apps in 8 categories (`modules/apps/appCatalogue.js`, no prices in code), install/uninstall, `requireApp(key)`; the install link `/install-app?...` (preview → approve → key with the asked scopes + the two webhooks + POST to `callback_url`, all undone if the callback fails, uninstall revokes them); `modules/dropship` with the provider contract (`providers/README.md`), a `sandbox` provider and connect / import / push order / sync stock. Checked on :4107 with a local receiver (callback got a working key; a failing callback left no key or endpoint behind; uninstall killed the key) and in the browser on :5207: Apps page, approval screen, bad-link screen, test supplier connect + import.
 
 ## Next
-- [ ] 6. Team (§17.1): invite dialog with section checkboxes, `fulfillment` role; sessions screen; two-factor on login; activity log screen; support access grant (§17.2)
-- [ ] 7. `requirePlanLimit(key)` + `usage_counters` (§17.4, allowed part)
+- [ ] 6. Team (§17.1–17.2) — **backend landed, dashboard not started.** Backend (migration 288), all checked on :4107: `fulfillment` system role (added to every existing store); `GET /team/access-options` + `POST /team/invite` (admin, or sections → a custom role, reused for the same ticks); `GET /auth/devices` + `POST /auth/sessions/:id/revoke`; two-step sign-in — email code or TOTP, remembered device cookie, `/auth/two-factor/*`, login answers `{ twoFactorRequired, challengeToken, channel }`; audit list filters `actorUserId` / `from`; `/support-access` grant / revoke + `assertGranted`. Still to build: `packages/api-client/src/endpoints/security.ts`; the code step on `LoginPage` (handle `twoFactorRequired` in `apiClient.login` and `AuthContext.login`, then `POST /auth/two-factor/verify` with `auth: false`); a Security section in Settings (devices list with End / End all, two-step setup with the QR, support access); the invite dialog in `SettingsPage.tsx` → `TeamSection` (Admin / Partial + section ticks + Advanced, seats counter); an Activity log page on `GET /audit-logs` + nav entry.
+- [ ] 7. `requirePlanLimit(key)` + `usage_counters` (§17.4, allowed part) — `billing/planLimits.js` (`limitFor`, `requirePlanLimit`, reads `plans.features.limits`) already exists and guards `/team/invite`; `usage_counters` table and its worker job are still to do.
 - [ ] 8. Platform-admin screens still missing (§17.5); queue status screen
 - [ ] 9. GitHub Actions workflows for typecheck and build (§3.5)
 
@@ -38,7 +38,10 @@
 - 2026-10-03 order.created / order.status_changed keep coming from Ziad's order change detector; the outbox consumer sends only the other topics, so nothing is sent twice. `order.fulfilled` = the order was delivered.
 - 2026-10-03 A filtered endpoint still receives events that are about neither a product nor a funnel (customer.created, contact_form.submitted). "Resend order" goes out as `order.created` with `resent: true` and a new event id.
 - 2026-10-03 checkout.created/updated/abandoned and lead.created are in the catalogue and are sent as soon as their lane records the event with `outbox.record` (lane 8 already records contact_form.submitted). "Resend to webhook" in the orders list's bulk bar is lane 1's screen: the endpoint takes up to 100 order ids.
-- 2026-10-03 Migration numbers used: 285, 286, 287.
+- 2026-10-03 Migration numbers used: 285, 286, 287, 288.
+- 2026-10-03 Two-step settings live in their own table (`user_two_factor`), not on `users`: `toSafeJSON` returns every user column, and a sealed secret must never ride along. Google sign-in skips the second step.
+- 2026-10-03 Plan limits are read from `plans.features.limits` (`{ members: 5 }`); no key, or the older array form of features, means unlimited. Billing code is untouched.
+- 2026-10-03 Support access: grant + revoke + `assertGranted` exist; there is no impersonation in the platform admin yet, so nothing calls `assertGranted` — item 8 must call it wherever admin opens a store's data.
 - 2026-10-03 New permission `apps.manage` (owner and workspace_manager). Anyone in the store can read the app list.
 - 2026-10-03 The catalogue's names and descriptions live in code (`appCatalogue.js`); the `apps` table carries only what the platform admin decides — active, order, and price once pricing exists (null = shown as Free). Integrations whose adapter is the integrations team's work are listed as "Coming soon".
 - 2026-10-03 Installing a feature app (webhooks, public API, offers…) is a record plus an "Open" link today: those features are other lanes' code and are not yet gated by `requireApp`. Only new lane-7 features should be gated.
@@ -54,4 +57,4 @@
 - Browser checks depend on a free preview slot (5 dev servers per folder, shared with the other lanes); when none is free, screens are typechecked and their API calls exercised from node. The storefront CSP was only seen as headers, not with a store page loaded under it.
 
 ## Handoff
-Branch `lane-7` in both repos. Items 1–5 landed. The demo user of zimos_lane_7 now has the username lane7.demo. Manual-check helpers are not in the repo (they lived in the chat's scratchpad): log in as demo@zimos.test on :4107 and query `zimos_lane_7` with `pg`.
+Branch `lane-7` in both repos. Items 1–5 landed; item 6 backend landed (see Next for what the dashboard still needs). The demo user of zimos_lane_7 now has the username lane7.demo. Manual-check helpers are not in the repo (they lived in the chat's scratchpad): log in as demo@zimos.test on :4107 and query `zimos_lane_7` with `pg`.
