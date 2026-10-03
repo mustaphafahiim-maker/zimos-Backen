@@ -191,6 +191,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
+// The sandbox gateway's hosted payment page — only where that gateway is registered.
+if (require('./modules/payments/gateways').isGateway('sandbox')) v1.use('/sandbox-pay', require('./modules/payments/sandboxPayRoutes'));
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.

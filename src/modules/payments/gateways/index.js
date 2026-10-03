@@ -61,6 +61,14 @@ const ADAPTERS = {
   [kashier.code]: kashier,
 };
 
+// The sandbox gateway (./sandbox.js, contract in ./README.md): never in
+// production unless it is switched on deliberately.
+const sandboxEnabled = process.env.PAYMENTS_SANDBOX_GATEWAY === 'true' || (process.env.NODE_ENV !== 'production' && process.env.PAYMENTS_SANDBOX_GATEWAY !== 'false');
+if (sandboxEnabled) {
+  const sandbox = require('./sandbox');
+  ADAPTERS[sandbox.code] = sandbox;
+}
+
 function getAdapter(code) {
   if (!code) return null;
   return Object.prototype.hasOwnProperty.call(ADAPTERS, code) ? ADAPTERS[code] : null;
