@@ -146,6 +146,8 @@ module.exports = {
           // Checkout bot guard (risk/botProtection): on/off, and the invisible challenge.
           bot_protection: Joi.boolean().allow(null).optional(),
           bot_captcha: Joi.boolean().allow(null).optional(),
+          // Lost orders: minutes of silence after which a checkout counts as abandoned (default 15).
+          abandoned_after_minutes: Joi.number().integer().min(5).max(1440).allow(null).optional(),
           // Phone verification at checkout (risk/checkoutOtp). Sent whole.
           checkout_otp: checkoutOtpSettingsSchema.allow(null).optional(),
           // Visitors from these countries do not see the store at all (risk/visitorGate).

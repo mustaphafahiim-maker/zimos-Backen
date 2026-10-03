@@ -206,6 +206,8 @@ v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
 v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
 // The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
 v1.use('/inbox-stream', inboxRoutes.stream);
+// The analytics live view's SSE stream — opened with a ticket, like the inbox stream.
+v1.use('/analytics-stream', require('./modules/analytics/realtimeStream').streamRouter);
 // WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
 // body proves the sender.
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);

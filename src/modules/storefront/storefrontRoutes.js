@@ -19,6 +19,8 @@ const onlinePaymentController = require('../payments/onlinePaymentController');
 const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
 const botProtection = require('../risk/botProtection');
 const checkoutOtp = require('../risk/checkoutOtp');
+const lostOrders = require('../checkoutSessions/lostOrderService');
+const lostOrderController = require('../checkoutSessions/lostOrderController');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
@@ -31,6 +33,8 @@ router.get('/checkout/guard', botProtection.guardConfig);
 // The code-entry step of a checkout that answered 428 OTP_REQUIRED.
 router.post('/checkout/otp/verify', checkoutOtp.verify);
 router.post('/checkout/otp/resend', checkoutOtp.resend);
+// What a recovery link (/r/:token) rebuilds: the cart and the form.
+router.get('/recover/:token', lostOrderController.recover);
 
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
 router.get('/policies/:key', validate(schemas.getPolicy), controller.getPolicy);
@@ -98,7 +102,9 @@ router.post(
   refuseDraftOrders,
   // Phone verification, when the store asks for it — modules/risk/checkoutOtp.
   checkoutOtp.guardCheckout,
-  idempotent('storefront.checkout')(checkoutController.checkout)
+  idempotent('storefront.checkout')(checkoutController.checkout),
+  // A refused checkout is kept as a lost order (checkoutSessions/lostOrderService).
+  lostOrders.captureRefusal
 );
 
 module.exports = router;

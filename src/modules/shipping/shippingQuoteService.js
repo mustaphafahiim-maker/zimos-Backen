@@ -51,6 +51,9 @@ async function quote(workspaceId, { country, region, items }) {
     // What quantity bundles took off (already out of `subtotal`), and which.
     bundleDiscountAmount: bundles.reduce((sum, b) => sum + b.amount, 0),
     bundles,
+    // automaticDiscount (what a no-code discount will take off) and
+    // minimumOrder (the store's minimum and how far these items are from it).
+    ...(await require('../discounts/couponExtras').quoteExtras(workspaceId, { subtotal, productIds: lines.map((l) => l.productId) })),
     weightGrams: shipping.weightGrams,
     weightEstimated: shipping.weightEstimated,
     tier: shipping.tier,
