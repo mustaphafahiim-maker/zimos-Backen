@@ -1,6 +1,7 @@
 'use strict';
 const asyncHandler = require('express-async-handler');
 const manualCheckout = require('./manualCheckout');
+const paymentRules = require('../payments/paymentRulesService');
 const env = require('../../config/env');
 const cartService = require('../cart/cartService');
 const orderService = require('../orders/orderService');
@@ -32,7 +33,7 @@ const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -44,6 +45,7 @@ const checkout = asyncHandler(async (req, res) => {
   // here, before any cart work; it is not an online (gateway) payment.
   const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
   const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
+  if (orderBody.paymentMethod === 'cod') paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: 'cod' });
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -52,6 +54,7 @@ const checkout = asyncHandler(async (req, res) => {
   let prepared = null;
   if (isOnline) {
     prepared = await online.prepareOnlineCheckout(workspace, { ...orderBody, paymentProvider, returnUrl }, req);
+    paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: `${prepared.method.provider}:${prepared.method.method}` });
   } else if (env.payments.onlineEnabled && orderBody.paymentMethod === 'cod') {
     // The merchant may have switched cash on delivery off.
     await methodsService.resolveStorefrontMethod(workspace, { paymentMethod: 'cod' }, {
@@ -87,6 +90,12 @@ const checkout = asyncHandler(async (req, res) => {
   // server from the configured offer (422 when it is not that offer).
   if (orderBump) {
     items = [...items, await resolveOrderBumpItem(workspace, { offerId: orderBump.offerId, funnelId: orderBody.funnelId })];
+  }
+
+  // The product's own bumps: lines built by the server from the rules of the products being bought.
+  if (orderBumps && orderBumps.length > 0) {
+    const bumpItems = await require('../offers/offerRules').resolveBumpItems(workspace, orderBumps.map((b) => b.offerId), items);
+    items = [...items, ...bumpItems.filter((b) => !items.some((i) => i.offerId === b.offerId))];
   }
 
   // Stock held by overdue unpaid online orders goes back first.

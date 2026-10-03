@@ -42,6 +42,18 @@ module.exports = {
       fullName: Joi.string().trim().max(200).allow(null, '').optional(),
     }),
   },
+  blockAndCancel: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    body: Joi.object({
+      reason: Joi.string().trim().min(2).max(300).allow(null, '').optional(),
+      // The order is booked with a courier that has no cancel API, and the merchant cancelled it there.
+      acknowledgeManualCancel: Joi.boolean().optional(),
+    }).default({}),
+  },
+  stats: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    query: Joi.object({ from: Joi.date().iso().optional(), to: Joi.date().iso().optional() }),
+  },
   networkScores: {
     params: Joi.object({ workspaceId: uuid.required() }),
     body: Joi.object({ customerIds: Joi.array().items(uuid).min(1).max(200).unique().required() }),

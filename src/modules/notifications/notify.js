@@ -11,6 +11,8 @@ const twilioSmsProvider = require('./twilioSmsProvider');
 // { minutes, locale }); anything else falls back to a terse template-name +
 // data dump so nothing sends blank.
 function smsBody(template, data = {}) {
+  // A ready text (automations' SMS step): sent as written.
+  if (typeof data.body === 'string' && data.body.trim()) return data.body;
   if (data.code) {
     const minutes = Number(data.minutes) || 5;
     if (data.locale === 'ar') return `رمز التحقق في Zimos: ${data.code}. صالح لمدة ${minutes} دقائق.`;
