@@ -83,7 +83,8 @@ async function loadOrderSubject(workspaceId, orderId) {
       shipping_amount: formatAmount(order.shippingAmount, order.currency),
       carrier_name: shipment ? shipment.carrierCode : '',
       waybill_number: shipment && shipment.waybillNumber ? shipment.waybillNumber : '',
-      order_link: base ? `${base}/track?order=${encodeURIComponent(order.orderNumber)}` : '',
+      // The signed tracking link: opens the order without asking for the phone number.
+      order_link: base ? `${base}/track?t=${require('../storefront/orderTrackingExtras').tokenFor(order)}` : '',
       recovery_link: '',
       review_link: reviewLink,
       payment_link: base && order.paymentMethod !== 'cod' ? `${base}/pay/${order.id}` : '',
