@@ -53,6 +53,8 @@ module.exports = (sequelize, DataTypes) => {
       externalRefs: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'external_refs' },
       pageSettings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'page_settings' },
       cms: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // null = sold once; otherwise a subscription or installments plan (migration 315, modules/subscriptions).
+      billingPlan: { type: DataTypes.JSONB, allowNull: true, field: 'billing_plan' },
       // The quantity bundle this product sells with (migration 189, modules/bundles).
       bundleId: { type: DataTypes.UUID, allowNull: true, field: 'bundle_id' },
     },
