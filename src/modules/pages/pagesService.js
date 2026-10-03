@@ -198,7 +198,12 @@ async function updateWebsite(workspaceId, websiteId, data, req) {
   const before = website.toJSON();
   const patch = {};
   if (data.name !== undefined) patch.name = data.name;
-  if (data.globalStyles !== undefined) patch.globalStyles = data.globalStyles;
+  if (data.globalStyles !== undefined) {
+    // Named styles feed the storefront's stylesheet: check them like a page tree's.
+    const problems = require('./elementStyle').namedStyleProblems(data.globalStyles);
+    if (problems.length) throw new ValidationError(problems, 'Invalid global styles');
+    patch.globalStyles = data.globalStyles;
+  }
   if (data.seo !== undefined) patch.seo = data.seo;
   await website.update(patch);
   await recordAudit({
