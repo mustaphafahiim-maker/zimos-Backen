@@ -5,6 +5,7 @@ const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
 const trackingPixelService = require('./trackingPixelService');
 const pixelEventLog = require('./pixelEventLog');
+const purchaseTiming = require('./purchaseTiming');
 const metaCapi = require('./pixelProviders/metaCapi');
 const tiktokCapi = require('./pixelProviders/tiktokCapi');
 const snapchatCapi = require('./pixelProviders/snapchatCapi');
@@ -59,14 +60,18 @@ function isGa4MeasurementId(id) {
 }
 
 async function run(workspaceId, trigger, orderId) {
-  if (trigger !== 'order.created') return [];
+  if (!purchaseTiming.TRIGGERS.includes(trigger)) return [];
 
   const order = await db.Order.findOne({
     where: { id: orderId, workspaceId },
     include: [{ model: db.OrderItem, as: 'items', attributes: ['productId'], required: false }],
   });
   if (!order) return [];
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug'] });
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug', 'settings'] });
+  // The merchant chooses the moment an order counts as a Purchase (SPEC
+  // §13.3, purchaseTiming.js); a test order never does. It is reported once.
+  if (order.isTest || !purchaseTiming.isDue(purchaseTiming.timingOf(workspace && workspace.settings), trigger, order)) return [];
+  if (!(await purchaseTiming.claim(order.id))) return [];
   // Since migration 211 the pixels are rows of tracking_pixels, each with its
   // own token and scope (trackingPixelService.js): the order goes to every
   // active CAPI pixel whose scope covers its funnel or one of its products.
@@ -74,7 +79,10 @@ async function run(workspaceId, trigger, orderId) {
     funnelId: order.funnelId,
     productIds: [...new Set((order.items || []).map((i) => i.productId).filter(Boolean))],
   });
-  if (targets.length === 0) return [];
+  if (targets.length === 0) {
+    await purchaseTiming.release(order.id);
+    return [];
+  }
   // The order's own id, used as the event id on every platform, so a
   // matching browser-side eventID (see apps/storefront/src/lib/track.ts) and
   // this server-side event dedup into one conversion instead of two.

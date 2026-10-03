@@ -117,7 +117,11 @@ async function publicTracking(workspaceId) {
     const key = legacyKey[p.platform];
     if (key && p.scope.type === 'all' && !tracking[key]) tracking[key] = p.pixelId;
   }
-  return { tracking, trackingPixels };
+  // on_order | on_confirmed | on_delivered — the browser pixel only reports
+  // Purchase itself with on_order (marketing/purchaseTiming.js).
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['settings'] });
+  const purchaseEventTiming = require('../marketing/purchaseTiming').timingOf(workspace && workspace.settings);
+  return { tracking, trackingPixels, purchaseEventTiming };
 }
 
 const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl'];

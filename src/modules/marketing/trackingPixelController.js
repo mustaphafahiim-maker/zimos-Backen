@@ -4,6 +4,7 @@ const asyncHandler = require('express-async-handler');
 const service = require('./trackingPixelService');
 const pixelEventLog = require('./pixelEventLog');
 const browserEventRelay = require('./browserEventRelay');
+const purchaseTiming = require('./purchaseTiming');
 
 const wid = (req) => req.tenant.workspaceId;
 
@@ -21,4 +22,8 @@ const events = asyncHandler(async (req, res) => res.json(await pixelEventLog.lis
 
 const sendTest = asyncHandler(async (req, res) => res.json(await browserEventRelay.sendTest(wid(req), req.params.pixelId, req)));
 
-module.exports = { list, create, update, remove, events, sendTest };
+const getSettings = asyncHandler(async (req, res) => res.json(await purchaseTiming.getSettings(wid(req))));
+
+const updateSettings = asyncHandler(async (req, res) => res.json(await purchaseTiming.updateSettings(wid(req), req.body, req)));
+
+module.exports = { list, create, update, remove, events, sendTest, getSettings, updateSettings };
