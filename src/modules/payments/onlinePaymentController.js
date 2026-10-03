@@ -33,7 +33,10 @@ const previewToken = asyncHandler(async (req, res) => res.status(201).json(metho
 
 const storefrontMethods = asyncHandler(async (req, res) => {
   const preview = methods.isPreviewRequest(req, req.publicWorkspace.id);
-  res.json({ methods: await methods.storefrontMethods(req.publicWorkspace, { preview }), preview });
+  // Gateway methods and cash on delivery, then the store's manual transfer methods.
+  const offered = await methods.storefrontMethods(req.publicWorkspace, { preview });
+  const manual = require('./manualTransferService');
+  res.json({ methods: [...offered, ...manual.storefrontMethods(req.publicWorkspace)], preview });
 });
 
 const shopperStatus = asyncHandler(async (req, res) => {

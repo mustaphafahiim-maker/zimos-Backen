@@ -37,7 +37,15 @@ module.exports = {
       // with it off the checkout takes cash on delivery only, as it always
       // has. Staff order creation (orders/orderValidation.js) accepts every
       // method — a merchant recording a bank transfer they received is real.
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet').required(),
+      // 'bank_transfer' is a manual transfer with a receipt (payments/
+      // manualTransferService.js); it does not depend on the gateway flag.
+      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').required(),
+      // The shopper's transfer: for 'bank_transfer', or the deposit a COD order needs.
+      transfer: Joi.object({
+        methodId: Joi.string().max(80).required(),
+        receiptUploadId: uuid.allow(null).optional(),
+        senderReference: Joi.string().max(100).allow('', null).optional(),
+      }).optional(),
       // Which gateway, when more than one offers the method. Optional.
       paymentProvider: Joi.string().max(50).optional(),
       // Where the gateway sends the shopper back to (online methods only).

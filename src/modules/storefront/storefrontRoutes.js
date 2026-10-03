@@ -53,6 +53,14 @@ router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shipp
 
 // The payment methods the checkout offers (COD only while online payments
 // are off). A valid X-Store-Preview header adds test-mode gateway methods.
+// Whether a cash-on-delivery order by this phone needs a deposit first (payments/manualTransferService.js).
+router.post(
+  '/deposit-quote',
+  validate({ params: onlinePaymentSchemas.storeMethods.params, body: require('joi').object({ phone: require('joi').string().max(32).allow('', null) }) }),
+  require('express-async-handler')(async (req, res) =>
+    res.json({ deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, req.body || {}) })
+  )
+);
 router.get('/payment-methods', validate(onlinePaymentSchemas.storeMethods), onlinePaymentController.storefrontMethods);
 
 // An unpaid online order, for the shopper holding its X-Payment-Token (given
