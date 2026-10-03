@@ -63,6 +63,11 @@ module.exports = (sequelize, DataTypes) => {
       ipAddress: { type: DataTypes.STRING(45), allowNull: true, field: 'ip_address' },
       ipCountry: { type: DataTypes.STRING(2), allowNull: true, field: 'ip_country' },
       userAgent: { type: DataTypes.STRING(400), allowNull: true, field: 'user_agent' },
+      // risk/riskService: points, low | moderate | high, the reasons, good | low — migration 162.
+      riskScore: { type: DataTypes.INTEGER, allowNull: true, field: 'risk_score' },
+      riskLevel: { type: DataTypes.STRING(10), allowNull: true, field: 'risk_level' },
+      riskReasons: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'risk_reasons' },
+      dataQuality: { type: DataTypes.STRING(10), allowNull: true, field: 'data_quality' },
       idempotencyKey: { type: DataTypes.STRING(200), allowNull: true, field: 'idempotency_key' },
       // Set when a merchant cancels the order directly (distinct from a COD
       // confirmation rejection, though both land on confirmationState 'rejected').

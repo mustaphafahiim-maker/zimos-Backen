@@ -222,6 +222,8 @@ const collection = {
     // Absent puts it after its siblings.
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
+    showInHeader: Joi.boolean().optional(),
+    hidden: Joi.boolean().optional(),
   }),
 };
 
@@ -242,6 +244,8 @@ const collectionUpdate = {
     parentId: uuid.allow(null).optional(),
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
+    showInHeader: Joi.boolean().optional(),
+    hidden: Joi.boolean().optional(),
   }).min(1),
 };
 

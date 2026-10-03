@@ -18,7 +18,7 @@ async function findOrCreateByPhone(workspaceId, { phone, alternatePhone, email, 
 
   const [customer] = await db.Customer.findOrCreate({
     where: { workspaceId, phoneNormalized },
-    defaults: { workspaceId, phoneNormalized, phoneRaw: phone, alternatePhone, email, fullName },
+    defaults: { workspaceId, phoneNormalized, phoneRaw: phone, alternatePhone, email, fullName, source: 'checkout' },
     transaction,
   });
 

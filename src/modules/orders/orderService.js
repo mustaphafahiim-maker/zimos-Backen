@@ -10,6 +10,7 @@ const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
 const blockedEntries = require('../fraud/blockedEntries');
 const visitorGate = require('../risk/visitorGate');
+const riskService = require('../risk/riskService');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -296,6 +297,21 @@ async function createOrder(
 
     // Before any inventory is touched, so a refusal has nothing to undo but
     // the customer lookup.
+    // Risk score and data quality of a storefront order (risk/riskService):
+    // a marker only, unless the store's high_risk rule acts on it.
+    const risk = evaluateFraudRules
+      ? await riskService.score(
+          { contact, shippingAddress },
+          {
+            workspaceId,
+            country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale'], transaction })),
+            visitor,
+            secondsOnPage: req && typeof req.secondsOnPage === 'number' ? req.secondsOnPage : null,
+            transaction,
+          }
+        )
+      : null;
+
     if (evaluateFraudRules) {
       const { flags: ruleFlags } = await fraudRules.evaluateStorefrontOrder({
         workspaceId,
@@ -308,6 +324,7 @@ async function createOrder(
         paymentMethod,
         phone: contact.phone,
         visitor,
+        riskLevel: risk.level,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
@@ -433,6 +450,10 @@ async function createOrder(
         riskFlags,
         ipAddress: visitorIp,
         ipCountry: visitor.ipCountry,
+        riskScore: risk ? risk.score : null,
+        riskLevel: risk ? risk.level : null,
+        riskReasons: risk ? risk.reasons : [],
+        dataQuality: risk ? risk.dataQuality : null,
         userAgent: visitorAgent ? String(visitorAgent).slice(0, 400) : null,
         source: orderSource,
         isTest,

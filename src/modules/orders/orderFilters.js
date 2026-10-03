@@ -10,7 +10,13 @@
  * how a merchant "deletes" an order.
  */
 function applyOrderFilters(conditions, bind, query = {}) {
-  const { archived = 'exclude', tag, source, paymentMethod, governorate, carrier, seen, test } = query;
+  const { archived = 'exclude', tag, source, paymentMethod, governorate, carrier, seen, test, riskLevel } = query;
+
+  // Lane 2: the risk level risk/riskService gave the order.
+  if (riskLevel) {
+    conditions.push('o.risk_level = $filterRiskLevel');
+    bind.filterRiskLevel = riskLevel;
+  }
 
   if (archived === 'only') conditions.push('o.archived_at IS NOT NULL');
   else if (archived !== 'include') conditions.push('o.archived_at IS NULL');
