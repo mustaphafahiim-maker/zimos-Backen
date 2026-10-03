@@ -8,6 +8,7 @@ const { NotFoundError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const trackingPixelService = require('./trackingPixelService');
 const pixelEventLog = require('./pixelEventLog');
+const orderAttribution = require('./orderAttribution');
 const browserEvents = require('./pixelProviders/browserEvents');
 
 /**
@@ -49,6 +50,8 @@ const hasServerPixels = (() => {
  * never delays the 202: a relay problem is logged, the analytics stay intact.
  */
 async function relay(workspaceId, body, { clientIp, userAgent } = {}) {
+  // A purchase event in the batch carries the shopper's first/last touch onto its order (§13.4).
+  await orderAttribution.capture(workspaceId, body);
   try {
     const events = (body.events || []).filter((e) => RELAYED.has(e.name) && e.eventId);
     if (events.length === 0 || !(await hasServerPixels(workspaceId))) return 0;

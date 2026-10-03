@@ -21,6 +21,7 @@ const catalogRoutes = require('./modules/catalog/catalogRoutes');
 const inventoryRoutes = require('./modules/inventory/inventoryRoutes');
 const customerRoutes = require('./modules/customers/customerRoutes');
 const contactRoutes = require('./modules/contacts/contactRoutes');
+const storesRoutes = require('./modules/stores/storesRoutes');
 const orderRoutes = require('./modules/orders/orderRoutes');
 const returnRoutes = require('./modules/returns/returnRoutes');
 const confirmationRoutes = require('./modules/cod/confirmationRoutes');
@@ -152,6 +153,8 @@ v1.use('/workspaces/:workspaceId/catalog', catalogRoutes);
 v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
 v1.use('/workspaces/:workspaceId/contacts', contactRoutes.staff);
+v1.use('/workspaces/:workspaceId/duplicate', storesRoutes.duplicate);
+v1.use('/me/stores', storesRoutes.me);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
 v1.use('/workspaces/:workspaceId/confirmation-tasks', confirmationRoutes);
@@ -177,6 +180,7 @@ v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
+v1.use('/workspaces/:workspaceId/manual-transfers', require('./modules/payments/manualTransferRoutes'));
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
 v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
@@ -193,6 +197,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
+// The sandbox gateway's hosted payment page — only where that gateway is registered.
+if (require('./modules/payments/gateways').isGateway('sandbox')) v1.use('/sandbox-pay', require('./modules/payments/sandboxPayRoutes'));
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.
@@ -202,6 +208,8 @@ v1.use('/admin', platformAdminRoutes);
 // Orders and their statuses for merchants' own integrations; see
 // docs/public-api.md. Outbound webhooks are sent by modules/webhooks.
 v1.use('/public', publicApiRoutes);
+// The same API under the path the spec and other platforms' docs use.
+app.use('/api/public/v1', publicApiRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
@@ -225,6 +233,12 @@ app.use('/shop/:workspaceId', quickstartPublicRoutes);
 const openapiSpec = require('../docs/openapi.json');
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec));
 app.get('/docs.json', (req, res) => res.json(openapiSpec));
+// The public API (modules/publicApi) has its own description, for merchants'
+// developers and partners: docs/public-openapi.json, written by
+// scripts/build-public-openapi.js.
+const publicOpenapiSpec = require('../docs/public-openapi.json');
+app.use('/public-docs', swaggerUi.serveFiles(publicOpenapiSpec), swaggerUi.setup(publicOpenapiSpec, { customSiteTitle: 'ZIMOS Public API' }));
+app.get('/public-docs.json', (req, res) => res.json(publicOpenapiSpec));
 
 app.use(notFoundHandler);
 app.use(errorHandler);
