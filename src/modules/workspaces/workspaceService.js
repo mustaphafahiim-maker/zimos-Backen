@@ -20,6 +20,10 @@ const {
 const { recordAudit } = require('../audit/auditService');
 const notify = require('../notifications/notify');
 const billingService = require('../billing/billingService');
+const entitlements = require('../billing/entitlementsService');
+const publicPlans = require('../billing/publicPlansService');
+const env = require('../../config/env');
+const { assertBumpOfferUsable } = require('../checkout/orderBump');
 
 async function sendInviteEmail(workspace, email, role) {
   await notify.email({
@@ -30,10 +34,45 @@ async function sendInviteEmail(workspace, email, role) {
   });
 }
 
-async function createWorkspace({ name, ownerUserId }, req) {
+/**
+ * The plan a new store starts on. With REQUIRE_PLAN_AT_SIGNUP off it is the
+ * default plan (the cheapest active one), as it always was, whatever the
+ * request says. With it on: the plan the request names, which must be on
+ * offer; otherwise, for someone's first store, the plan they chose at
+ * sign-up; otherwise the default. An account made through Google that has
+ * still to choose a plan (auth/signupPolicy) must name one.
+ */
+async function planForNewStore({ ownerUserId, planId, billingCycle }, transaction) {
+  if (!env.signup.requirePlan) return { plan: await billingService.defaultPlan(transaction), billingCycle: 'monthly' };
+  if (planId) {
+    return { plan: await publicPlans.findOfferedPlan(planId, transaction), billingCycle: billingCycle || 'monthly' };
+  }
+  const owner = await db.User.findByPk(ownerUserId, {
+    attributes: ['id', 'selectedPlanId', 'selectedBillingCycle', 'requiresPlanSelection'],
+    transaction,
+  });
+  if (owner && owner.requiresPlanSelection && !owner.selectedPlanId && (await publicPlans.anyOffered(transaction))) {
+    throw new AppError('PLAN_REQUIRED', 'Choose a plan first', 422, [{ field: 'planId', message: 'Choose a plan' }]);
+  }
+  if (owner && owner.selectedPlanId && (await db.Workspace.count({ where: { ownerUserId }, transaction })) === 0) {
+    const chosen = await db.Plan.findByPk(owner.selectedPlanId, { transaction });
+    if (chosen && chosen.isActive) {
+      return { plan: chosen, billingCycle: billingCycle || owner.selectedBillingCycle || 'monthly' };
+    }
+  }
+  return { plan: await billingService.defaultPlan(transaction), billingCycle: billingCycle || 'monthly' };
+}
+
+async function createWorkspace({ name, ownerUserId, referralCode = null, planId = null, billingCycle = null }, req) {
   const baseSlug = toWorkspaceSlug(name);
 
   return db.sequelize.transaction(async (t) => {
+    // The plan first, then the owner's store limit for it (billing/
+    // entitlementsService), under a lock on the owner held until this
+    // transaction ends: two stores created at once cannot both pass.
+    const start = await planForNewStore({ ownerUserId, planId, billingCycle }, t);
+    await entitlements.assertCanCreateStore(ownerUserId, start.plan, { transaction: t });
+
     // Pick a slug that's free right now, then insert it. The pre-check keeps
     // the common "someone already took this store name" case tidy
     // (my-store, my-store-2, …). The retry loop around the insert covers the
@@ -99,8 +138,13 @@ async function createWorkspace({ name, ownerUserId }, req) {
 
     await db.InvoiceCounter.create({ workspaceId: workspace.id, lastNumber: 0 }, { transaction: t });
 
-    // Every workspace starts on a trialing subscription (no card, no gateway).
-    await billingService.ensureSubscriptionForWorkspace(workspace.id, t);
+    // Every workspace starts on a trialing subscription (no card, no
+    // gateway) — or, while REQUIRE_SUBSCRIPTION_TO_GO_LIVE is on, as a draft.
+    await billingService.ensureSubscriptionForWorkspace(workspace.id, t, {
+      plan: start.plan,
+      billingCycle: start.billingCycle,
+      ownerUserId,
+    });
 
     await recordAudit({
       workspaceId: workspace.id,
@@ -112,6 +156,13 @@ async function createWorkspace({ name, ownerUserId }, req) {
       transaction: t,
     });
 
+    // The subscription starts here, so this is where an agent's referral code
+    // is entered first. A code that is not usable rolls the whole creation
+    // back with REFERRAL_CODE_INVALID, so the merchant can correct it.
+    if (referralCode) {
+      await billingService.attachReferralCodeInTransaction(workspace.id, referralCode, req, t);
+    }
+
     return workspace;
   });
 }
@@ -122,10 +173,22 @@ const MERCHANT_SETTINGS_KEYS = [
   'free_shipping_threshold_amount',
   'default_shipping_rate_amount',
   'tax_enabled',
+  'default_item_weight_grams',
+  'confirmation_whatsapp_template',
+  // Replaced whole, not merged: its filter list is ordered.
+  'storefront_catalog',
+  // Replaced whole: { enabled, offer_id, title, description }.
+  'order_bump',
+  // Funnel upsells joined to the checkout order (funnels/funnelOfferMerge.js).
+  'funnel_upsell_merge',
+  'funnel_offer_window_minutes',
+  // Replaced whole: the browser ad-pixel IDs (public, no secrets).
   'tracking_pixels',
-  'fraud_rules',
-  'checkout_settings',
 ];
+
+// Nested settings objects, merged a level deeper so a form that toggles one
+// switch cannot blank out the sibling keys it never loaded.
+const MERCHANT_SETTINGS_OBJECT_KEYS = ['checkout_settings', 'fraud_rules'];
 
 // Merge only the known keys of `patch` onto `current`; a null value clears
 // that key (back to "not configured").
@@ -135,6 +198,21 @@ function applyMerchantSettings(current, patch) {
     if (!(key in patch)) continue;
     if (patch[key] === null) delete next[key];
     else next[key] = patch[key];
+  }
+  for (const key of MERCHANT_SETTINGS_OBJECT_KEYS) {
+    if (!(key in patch)) continue;
+    if (patch[key] === null) {
+      delete next[key];
+      continue;
+    }
+    const merged = { ...(next[key] || {}) };
+    for (const [subKey, value] of Object.entries(patch[key])) {
+      if (value === null) delete merged[subKey];
+      else merged[subKey] = value;
+    }
+    // An object emptied key by key is the same as "not configured".
+    if (Object.keys(merged).length === 0) delete next[key];
+    else next[key] = merged;
   }
   return next;
 }
@@ -146,6 +224,34 @@ function applyMerchantSettings(current, patch) {
 async function updateWorkspace({ workspaceId, patch }, req) {
   const workspace = await db.Workspace.findByPk(workspaceId);
   if (!workspace) throw new NotFoundError('Workspace');
+
+  // Fraud rules decide which storefront orders get held or refused, so they
+  // take workspace.manage on top of the route's website.edit (which an Editor
+  // has). Any mention of the key counts, null included, and the whole request
+  // is refused before anything in it is written.
+  const touchesFraudRules =
+    patch.settings && typeof patch.settings === 'object' && Object.prototype.hasOwnProperty.call(patch.settings, 'fraud_rules');
+  if (touchesFraudRules && !req.tenant.hasPermission(PERMISSIONS.WORKSPACE_MANAGE)) {
+    throw new AuthorizationError('Changing fraud rules requires the workspace.manage permission');
+  }
+  // The confirmation team's WhatsApp message is theirs to manage: an Editor's
+  // website.edit is not enough.
+  const touchesWhatsappTemplate =
+    patch.settings &&
+    typeof patch.settings === 'object' &&
+    Object.prototype.hasOwnProperty.call(patch.settings, 'confirmation_whatsapp_template');
+  if (touchesWhatsappTemplate && !req.tenant.hasPermission(PERMISSIONS.ORDERS_MANAGE)) {
+    throw new AuthorizationError('Changing the WhatsApp confirmation message requires the orders.manage permission');
+  }
+  // Whether funnel orders wait for their offers before confirmation changes
+  // how the confirmation team works: theirs too.
+  const touchesFunnelMerge =
+    patch.settings &&
+    typeof patch.settings === 'object' &&
+    ['funnel_upsell_merge', 'funnel_offer_window_minutes'].some((key) => Object.prototype.hasOwnProperty.call(patch.settings, key));
+  if (touchesFunnelMerge && !req.tenant.hasPermission(PERMISSIONS.ORDERS_MANAGE)) {
+    throw new AuthorizationError('Changing how funnel upsells join orders requires the orders.manage permission');
+  }
 
   const before = {
     name: workspace.name,
@@ -194,7 +300,25 @@ async function updateWorkspace({ workspaceId, patch }, req) {
     next.themeSettings = blob;
   }
   if (patch.settings !== undefined) {
+    // A bump that is switched on must name an offer that can be one (active,
+    // priced, asks the shopper nothing) in this workspace.
+    const bump = patch.settings && patch.settings.order_bump;
+    if (bump && bump.enabled) {
+      await assertBumpOfferUsable(workspaceId, bump.offer_id, 'settings.order_bump.offer_id');
+    }
     next.settings = applyMerchantSettings(workspace.settings, patch.settings);
+    // Tier pricing weighs products without a weight at the default weight;
+    // it can't be removed while tier pricing depends on it.
+    const clearsDefaultWeight =
+      patch.settings && patch.settings.default_item_weight_grams === null && next.settings.shipping_pricing_mode === 'weight_tiers';
+    if (clearsDefaultWeight) {
+      throw new AppError(
+        'DEFAULT_ITEM_WEIGHT_REQUIRED',
+        'The default item weight is required while shipping is priced by weight tiers',
+        422,
+        [{ field: 'settings.default_item_weight_grams', message: 'Required while tier pricing is on' }]
+      );
+    }
   }
 
   try {

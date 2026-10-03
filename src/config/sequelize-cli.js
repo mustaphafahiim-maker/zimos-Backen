@@ -33,7 +33,12 @@ const fromUrl = dbUrl && {
 
 module.exports = {
   development: fromUrl || { ...base, database: process.env.DB_NAME || 'zimos_dev' },
-  test: { ...base, database: process.env.DB_NAME_TEST || 'zimos_test' },
+  // LOG_SQL=1 prints migration SQL when debugging the test database setup.
+  test: {
+    ...base,
+    database: process.env.DB_NAME_TEST || 'zimos_test',
+    logging: process.env.LOG_SQL === '1' ? console.log : false,
+  },
   production: fromUrl || {
     ...base,
     database: process.env.DB_NAME,

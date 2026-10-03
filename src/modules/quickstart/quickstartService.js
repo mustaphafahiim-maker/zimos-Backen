@@ -7,6 +7,7 @@ const pagesService = require('../pages/pagesService');
 const catalogService = require('../catalog/catalogService');
 const inventoryService = require('../inventory/inventoryService');
 const orderService = require('../orders/orderService');
+const { afterOrderCompleted } = require('../orders/orderCompletion');
 const storefrontService = require('../storefront/storefrontService');
 const { recordAudit } = require('../audit/auditService');
 const { formatMoney, parsePriceToMinor, parseBullets, storeHomeTree } = require('./quickstartAdapter');
@@ -41,7 +42,7 @@ async function addProduct(workspaceId, input, req) {
   const imageUrl = input.imageUrl || '';
 
   // 1. Catalog — product + variant + a default fixed-price offer.
-  const product = await catalogService.createProduct(
+  const { product } = await catalogService.createProduct(
     workspaceId,
     {
       name: input.productName,
@@ -312,6 +313,9 @@ async function placeSimpleOrder(workspaceId, form, req) {
     },
     req
   );
+  // This form has no autosave of its own, but the shopper may have started a
+  // checkout on the storefront API with the same phone. Never throws.
+  await afterOrderCompleted(workspaceId, order);
   return order;
 }
 

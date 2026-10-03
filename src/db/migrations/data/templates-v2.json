@@ -1,0 +1,2999 @@
+{
+  "minimal": {
+    "primaryColor": "#1F2937",
+    "pages": [
+      {
+        "path": "/",
+        "title": "الرئيسية",
+        "pageType": "home",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "hero-trust-c1a1ff62",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "hero-trust-c1a1ff62-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "hero-trust-c1a1ff62-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-7d378108",
+                          "type": "heading",
+                          "props": {
+                            "text": "كل اللي محتاجه، ببساطة",
+                            "level": 1
+                          }
+                        },
+                        {
+                          "id": "text-d5522fa3",
+                          "type": "text",
+                          "props": {
+                            "text": "منتجات مختارة بعناية، وتجربة شراء سهلة من أول ضغطة."
+                          }
+                        },
+                        {
+                          "id": "button-07c8a653",
+                          "type": "button",
+                          "props": {
+                            "label": "تسوّق دلوقتي",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        },
+                        {
+                          "id": "list-6fb0e425",
+                          "type": "list",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              "الدفع كاش عند الاستلام",
+                              "توصيل لحد باب البيت",
+                              "خدمة عملاء بترد عليك بسرعة"
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "claims-strip-907421b9",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "claims-strip-907421b9-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "claims-strip-907421b9-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "marquee-7322764b",
+                          "type": "marquee",
+                          "props": {
+                            "items": [
+                              "شحن لكل المحافظات",
+                              "الدفع عند الاستلام",
+                              "منتجات مختارة بعناية"
+                            ],
+                            "speed": "normal",
+                            "tone": "line"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper",
+                "padding": "compact"
+              }
+            },
+            {
+              "id": "product-grid-intro-dd66a3bf",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "product-grid-intro-dd66a3bf-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "product-grid-intro-dd66a3bf-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-c9d05f67",
+                          "type": "heading",
+                          "props": {
+                            "text": "وصل حديثًا",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-b4854bed",
+                          "type": "text",
+                          "props": {
+                            "text": "أحدث المنتجات اللي نزلت المتجر."
+                          }
+                        },
+                        {
+                          "id": "product_list-bc583d39",
+                          "type": "product_list",
+                          "props": {
+                            "title": "",
+                            "source": "newest",
+                            "limit": 8,
+                            "columns": 4
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "collection-tiles-3b351e9b",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "collection-tiles-3b351e9b-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "collection-tiles-3b351e9b-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-fb32449d",
+                          "type": "heading",
+                          "props": {
+                            "text": "تسوّق حسب القسم",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-39325dd7",
+                          "type": "text",
+                          "props": {
+                            "text": "اختار القسم اللي يناسبك وابدأ منه."
+                          }
+                        },
+                        {
+                          "id": "collection_list-c183f305",
+                          "type": "collection_list",
+                          "props": {
+                            "title": "",
+                            "limit": 6,
+                            "columns": 3
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "width": "wide"
+              }
+            },
+            {
+              "id": "feature-grid-3-3008d69e",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "feature-grid-3-3008d69e-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "feature-grid-3-3008d69e-r1-c1",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "icon-51eae4f4",
+                          "type": "icon",
+                          "props": {
+                            "name": "truck",
+                            "size": 32
+                          }
+                        },
+                        {
+                          "id": "heading-f1ebb4df",
+                          "type": "heading",
+                          "props": {
+                            "text": "توصيل لحد البيت",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-a7d63aab",
+                          "type": "text",
+                          "props": {
+                            "text": "طلبك بيوصلك لحد باب البيت، وتقدر تتابعه خطوة بخطوة."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-3-3008d69e-r1-c2",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "icon-9e04531b",
+                          "type": "icon",
+                          "props": {
+                            "name": "shield",
+                            "size": 32
+                          }
+                        },
+                        {
+                          "id": "heading-1b6514e0",
+                          "type": "heading",
+                          "props": {
+                            "text": "ادفع لما تستلم",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-fae98468",
+                          "type": "text",
+                          "props": {
+                            "text": "مفيش دفع مقدّم: بتدفع كاش لما طلبك يوصلك."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-3-3008d69e-r1-c3",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "icon-3e5d2184",
+                          "type": "icon",
+                          "props": {
+                            "name": "check",
+                            "size": 32
+                          }
+                        },
+                        {
+                          "id": "heading-f672636e",
+                          "type": "heading",
+                          "props": {
+                            "text": "اختيارات بعناية",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-5c50fc62",
+                          "type": "text",
+                          "props": {
+                            "text": "كل منتج في المتجر اخترناه لأننا نستخدمه ونثق فيه."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            },
+            {
+              "id": "cta-band-dededeb4",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "cta-band-dededeb4-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "cta-band-dededeb4-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-c290e05e",
+                          "type": "heading",
+                          "props": {
+                            "text": "جاهز تبدأ؟",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-646e048b",
+                          "type": "text",
+                          "props": {
+                            "text": "تصفّح المنتجات واطلب في أقل من دقيقة."
+                          }
+                        },
+                        {
+                          "id": "button-8677af12",
+                          "type": "button",
+                          "props": {
+                            "label": "تسوّق دلوقتي",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "primary",
+                "padding": "roomy"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      },
+      {
+        "path": "/about",
+        "title": "من إحنا",
+        "pageType": "static",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "rich-text-band-065c9173",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "rich-text-band-065c9173-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "rich-text-band-065c9173-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-5dbea5d2",
+                          "type": "heading",
+                          "props": {
+                            "text": "حكايتنا",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "rich_text-39251b89",
+                          "type": "rich_text",
+                          "props": {
+                            "text": "اكتب هنا قصة متجرك: بدأت إزاي، وبتبيع إيه، وليه العملاء بيرجعوا لك تاني."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper",
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "feature-grid-4-32c42729",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "feature-grid-4-32c42729-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "feature-grid-4-32c42729-r1-c1",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-29f409e0",
+                          "type": "icon",
+                          "props": {
+                            "name": "heart",
+                            "size": 28
+                          }
+                        },
+                        {
+                          "id": "heading-cc90794e",
+                          "type": "heading",
+                          "props": {
+                            "text": "بنهتم بالتفاصيل",
+                            "level": 4
+                          }
+                        },
+                        {
+                          "id": "text-9244fc85",
+                          "type": "text",
+                          "props": {
+                            "text": "من اختيار المنتج لحد التغليف."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-4-32c42729-r1-c2",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-84b5705a",
+                          "type": "icon",
+                          "props": {
+                            "name": "shield",
+                            "size": 28
+                          }
+                        },
+                        {
+                          "id": "heading-7d69c407",
+                          "type": "heading",
+                          "props": {
+                            "text": "شراء من غير قلق",
+                            "level": 4
+                          }
+                        },
+                        {
+                          "id": "text-feacfbbc",
+                          "type": "text",
+                          "props": {
+                            "text": "بتدفع لما تستلم."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-4-32c42729-r1-c3",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-eb71fe37",
+                          "type": "icon",
+                          "props": {
+                            "name": "truck",
+                            "size": 28
+                          }
+                        },
+                        {
+                          "id": "heading-770b3c2f",
+                          "type": "heading",
+                          "props": {
+                            "text": "توصيل لحد البيت",
+                            "level": 4
+                          }
+                        },
+                        {
+                          "id": "text-b856aa8b",
+                          "type": "text",
+                          "props": {
+                            "text": "لكل المحافظات اللي بنشحن لها."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-4-32c42729-r1-c4",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-8851a41a",
+                          "type": "icon",
+                          "props": {
+                            "name": "star",
+                            "size": 28
+                          }
+                        },
+                        {
+                          "id": "heading-047b10f1",
+                          "type": "heading",
+                          "props": {
+                            "text": "خدمة بعد البيع",
+                            "level": 4
+                          }
+                        },
+                        {
+                          "id": "text-6d61cd6d",
+                          "type": "text",
+                          "props": {
+                            "text": "إحنا معاك لو احتجت أي حاجة."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "seo": {}
+      },
+      {
+        "path": "/shipping",
+        "title": "الشحن والاستبدال",
+        "pageType": "static",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "shipping-returns-71a74d9e",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "shipping-returns-71a74d9e-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "shipping-returns-71a74d9e-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-ca766816",
+                          "type": "heading",
+                          "props": {
+                            "text": "الشحن والاستبدال",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "accordion-166c3b84",
+                          "type": "accordion",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "الشحن",
+                                "a": "اكتب هنا المحافظات اللي بتشحن لها، ومدة التوصيل، وتكلفته."
+                              },
+                              {
+                                "q": "الاستبدال والاسترجاع",
+                                "a": "اكتب هنا سياسة الاستبدال والاسترجاع عندك ومدتها."
+                              },
+                              {
+                                "q": "طرق الدفع",
+                                "a": "الدفع كاش عند الاستلام متاح لكل الطلبات. اكتب هنا أي طريقة دفع تانية بتقبلها."
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "id": "text-2f520aa3",
+                          "type": "text",
+                          "props": {
+                            "text": "لو عندك أي سؤال عن طلبك، تقدر تتابعه من صفحة «تتبع الطلب»."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      }
+    ]
+  },
+  "fashion": {
+    "primaryColor": "#BE185D",
+    "pages": [
+      {
+        "path": "/",
+        "title": "الرئيسية",
+        "pageType": "home",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "store-hero-slideshow-ed51cfc4",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "store-hero-slideshow-ed51cfc4-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "store-hero-slideshow-ed51cfc4-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "marquee-da5be426",
+                          "type": "marquee",
+                          "props": {
+                            "items": [
+                              "كولكشن جديد كل موسم",
+                              "الدفع كاش عند الاستلام",
+                              "استبدال سهل لو المقاس مش مظبوط"
+                            ],
+                            "speed": "normal",
+                            "tone": "primary"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "store-hero-slideshow-ed51cfc4-r2",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "store-hero-slideshow-ed51cfc4-r2-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "gallery-0521de40",
+                          "type": "gallery",
+                          "props": {
+                            "title": "",
+                            "images": [],
+                            "columns": 1,
+                            "layout": "slideshow"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "store-hero-slideshow-ed51cfc4-r3",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "store-hero-slideshow-ed51cfc4-r3-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-39927cab",
+                          "type": "heading",
+                          "props": {
+                            "text": "كولكشن الموسم الجديد",
+                            "level": 1
+                          }
+                        },
+                        {
+                          "id": "text-f86bf2d3",
+                          "type": "text",
+                          "props": {
+                            "text": "قطع مختارة بعناية لإطلالة مميزة كل يوم."
+                          }
+                        },
+                        {
+                          "id": "button-21460507",
+                          "type": "button",
+                          "props": {
+                            "label": "تسوّقي الآن",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "width": "full",
+                "padding": "tight"
+              }
+            },
+            {
+              "id": "collection-tiles-40929c8d",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "collection-tiles-40929c8d-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "collection-tiles-40929c8d-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-26a57b03",
+                          "type": "heading",
+                          "props": {
+                            "text": "تسوّقي حسب القسم",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-d4109594",
+                          "type": "text",
+                          "props": {
+                            "text": "فساتين، بلوزات، إكسسوارات — ابدئي من اللي بتدوري عليه."
+                          }
+                        },
+                        {
+                          "id": "collection_list-0c2b72fc",
+                          "type": "collection_list",
+                          "props": {
+                            "title": "",
+                            "limit": 6,
+                            "columns": 3
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "width": "wide"
+              }
+            },
+            {
+              "id": "store-product-floor-71f1c4f2",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "store-product-floor-71f1c4f2-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "store-product-floor-71f1c4f2-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-e8afe860",
+                          "type": "heading",
+                          "props": {
+                            "text": "الأكثر طلبًا",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-e0919d78",
+                          "type": "text",
+                          "props": {
+                            "text": "القطع اللي عملاءنا بيحبوها أكتر الموسم ده."
+                          }
+                        },
+                        {
+                          "id": "product_list-8ddc359c",
+                          "type": "product_list",
+                          "props": {
+                            "title": "",
+                            "source": "featured",
+                            "limit": 8,
+                            "columns": 4
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "orbit-showcase-ff89580b",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "orbit-showcase-ff89580b-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "orbit-showcase-ff89580b-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-bbda570c",
+                          "type": "heading",
+                          "props": {
+                            "text": "اختاري من الكولكشن",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "orbit_gallery-977d1426",
+                          "type": "orbit_gallery",
+                          "props": {
+                            "title": "",
+                            "limit": 8,
+                            "collectionId": ""
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "width": "wide",
+                "background": "paper"
+              }
+            },
+            {
+              "id": "feature-grid-3-0ad55627",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "feature-grid-3-0ad55627-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "feature-grid-3-0ad55627-r1-c1",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "icon-2295c2d6",
+                          "type": "icon",
+                          "props": {
+                            "name": "heart",
+                            "size": 32
+                          }
+                        },
+                        {
+                          "id": "heading-164005af",
+                          "type": "heading",
+                          "props": {
+                            "text": "خامات مريحة",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-d0ccb7d8",
+                          "type": "text",
+                          "props": {
+                            "text": "بنختار خامات تتلبس طول اليوم من غير تعب."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-3-0ad55627-r1-c2",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "icon-9ef62299",
+                          "type": "icon",
+                          "props": {
+                            "name": "check",
+                            "size": 32
+                          }
+                        },
+                        {
+                          "id": "heading-ff6cb1ae",
+                          "type": "heading",
+                          "props": {
+                            "text": "دليل مقاسات واضح",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-7666e040",
+                          "type": "text",
+                          "props": {
+                            "text": "قبل ما تطلبي، شوفي دليل المقاسات عشان تختاري صح."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-3-0ad55627-r1-c3",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "icon-9a374314",
+                          "type": "icon",
+                          "props": {
+                            "name": "gift",
+                            "size": 32
+                          }
+                        },
+                        {
+                          "id": "heading-3827460a",
+                          "type": "heading",
+                          "props": {
+                            "text": "تغليف يليق بيكي",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-4d383a48",
+                          "type": "text",
+                          "props": {
+                            "text": "طلبك بيوصلك متغلّف بعناية — ينفع كمان هدية."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "primary-soft"
+              }
+            },
+            {
+              "id": "cta-band-51714fed",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "cta-band-51714fed-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "cta-band-51714fed-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-64d64c51",
+                          "type": "heading",
+                          "props": {
+                            "text": "الإطلالة الجاية مستنياكي",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-5a7cbed4",
+                          "type": "text",
+                          "props": {
+                            "text": "اطلبي النهارده وادفعي عند الاستلام."
+                          }
+                        },
+                        {
+                          "id": "button-c88a9cbc",
+                          "type": "button",
+                          "props": {
+                            "label": "شوفي الكولكشن",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "primary",
+                "padding": "roomy"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      },
+      {
+        "path": "/size-guide",
+        "title": "دليل المقاسات",
+        "pageType": "static",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "rich-text-band-b2183fbc",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "rich-text-band-b2183fbc-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "rich-text-band-b2183fbc-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-1f574d2d",
+                          "type": "heading",
+                          "props": {
+                            "text": "إزاي تختاري مقاسك",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "rich_text-c54caff5",
+                          "type": "rich_text",
+                          "props": {
+                            "text": "اكتبي هنا جدول المقاسات عندك (الصدر، الوسط، الطول) وإزاي العميلة تقيس نفسها."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper",
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "faq-split-2c335553",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "faq-split-2c335553-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "faq-split-2c335553-r1-c1",
+                      "type": "column",
+                      "span": 5,
+                      "elements": [
+                        {
+                          "id": "heading-7657ff43",
+                          "type": "heading",
+                          "props": {
+                            "text": "أسئلة عن المقاسات",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-28e31cfd",
+                          "type": "text",
+                          "props": {
+                            "text": "لو لسه محتارة، تواصلي معانا قبل ما تطلبي."
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "faq-split-2c335553-r1-c2",
+                      "type": "column",
+                      "span": 7,
+                      "elements": [
+                        {
+                          "id": "faq-d05e7e73",
+                          "type": "faq",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "المقاسات بتيجي مظبوطة؟",
+                                "a": "اكتبي هنا إذا كانت المقاسات بتيجي مظبوطة، أو صغيرة، أو واسعة."
+                              },
+                              {
+                                "q": "لو المقاس مش مظبوط أعمل إيه؟",
+                                "a": "اكتبي هنا سياسة استبدال المقاس عندك."
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      },
+      {
+        "path": "/shipping",
+        "title": "الشحن والاستبدال",
+        "pageType": "static",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "shipping-returns-956e130a",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "shipping-returns-956e130a-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "shipping-returns-956e130a-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-dd85deb7",
+                          "type": "heading",
+                          "props": {
+                            "text": "الشحن والاستبدال",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "accordion-bd649a12",
+                          "type": "accordion",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "الشحن",
+                                "a": "اكتب هنا المحافظات اللي بتشحن لها، ومدة التوصيل، وتكلفته."
+                              },
+                              {
+                                "q": "الاستبدال والاسترجاع",
+                                "a": "اكتب هنا سياسة الاستبدال والاسترجاع عندك ومدتها."
+                              },
+                              {
+                                "q": "طرق الدفع",
+                                "a": "الدفع كاش عند الاستلام متاح لكل الطلبات. اكتب هنا أي طريقة دفع تانية بتقبلها."
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "id": "text-2646b97e",
+                          "type": "text",
+                          "props": {
+                            "text": "لو عندك أي سؤال عن طلبك، تقدر تتابعه من صفحة «تتبع الطلب»."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      }
+    ]
+  },
+  "electronics": {
+    "primaryColor": "#2563EB",
+    "pages": [
+      {
+        "path": "/",
+        "title": "الرئيسية",
+        "pageType": "home",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "announcement-bar-3744d9dc",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "announcement-bar-3744d9dc-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "announcement-bar-3744d9dc-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "text-42dc315b",
+                          "type": "text",
+                          "props": {
+                            "text": "الدفع كاش عند الاستلام على كل الأجهزة"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "primary",
+                "padding": "tight"
+              }
+            },
+            {
+              "id": "hero-split-07be7ec2",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "hero-split-07be7ec2-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "hero-split-07be7ec2-r1-c1",
+                      "type": "column",
+                      "span": 6,
+                      "elements": [
+                        {
+                          "id": "heading-91b62e75",
+                          "type": "heading",
+                          "props": {
+                            "text": "أحدث الأجهزة بأفضل الأسعار",
+                            "level": 1
+                          }
+                        },
+                        {
+                          "id": "text-8c546703",
+                          "type": "text",
+                          "props": {
+                            "text": "موبايلات، إكسسوارات وأجهزة منزلية — بضمان وشحن سريع."
+                          }
+                        },
+                        {
+                          "id": "button-b2c9f556",
+                          "type": "button",
+                          "props": {
+                            "label": "اكتشف العروض",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "verticalAlign": "center"
+                      }
+                    },
+                    {
+                      "id": "hero-split-07be7ec2-r1-c2",
+                      "type": "column",
+                      "span": 6,
+                      "elements": [
+                        {
+                          "id": "image-7c21ec5b",
+                          "type": "image",
+                          "props": {
+                            "src": "",
+                            "alt": ""
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "verticalAlign": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "trust-badges-4adbc2eb",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "trust-badges-4adbc2eb-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "trust-badges-4adbc2eb-r1-c1",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-34961681",
+                          "type": "icon",
+                          "props": {
+                            "name": "truck",
+                            "size": 24
+                          }
+                        },
+                        {
+                          "id": "heading-3e5d989d",
+                          "type": "heading",
+                          "props": {
+                            "text": "شحن سريع",
+                            "level": 5
+                          }
+                        },
+                        {
+                          "id": "text-13b82245",
+                          "type": "text",
+                          "props": {
+                            "text": "لكل المحافظات اللي بنشحن لها."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "trust-badges-4adbc2eb-r1-c2",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-afa32a45",
+                          "type": "icon",
+                          "props": {
+                            "name": "shield",
+                            "size": 24
+                          }
+                        },
+                        {
+                          "id": "heading-a14e9aed",
+                          "type": "heading",
+                          "props": {
+                            "text": "ضمان",
+                            "level": 5
+                          }
+                        },
+                        {
+                          "id": "text-728fa4df",
+                          "type": "text",
+                          "props": {
+                            "text": "تفاصيل الضمان في صفحة الضمان."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "trust-badges-4adbc2eb-r1-c3",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-e2f66faa",
+                          "type": "icon",
+                          "props": {
+                            "name": "check",
+                            "size": 24
+                          }
+                        },
+                        {
+                          "id": "heading-0c2fe590",
+                          "type": "heading",
+                          "props": {
+                            "text": "منتجات أصلية",
+                            "level": 5
+                          }
+                        },
+                        {
+                          "id": "text-3432e6da",
+                          "type": "text",
+                          "props": {
+                            "text": "من مصادر موثوقة."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "trust-badges-4adbc2eb-r1-c4",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-75ebe704",
+                          "type": "icon",
+                          "props": {
+                            "name": "gift",
+                            "size": 24
+                          }
+                        },
+                        {
+                          "id": "heading-823edc84",
+                          "type": "heading",
+                          "props": {
+                            "text": "عروض كل أسبوع",
+                            "level": 5
+                          }
+                        },
+                        {
+                          "id": "text-7e915447",
+                          "type": "text",
+                          "props": {
+                            "text": "تابع الجديد في المتجر."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper",
+                "padding": "compact"
+              }
+            },
+            {
+              "id": "product-grid-intro-d0dac6ff",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "product-grid-intro-d0dac6ff-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "product-grid-intro-d0dac6ff-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-929fc60e",
+                          "type": "heading",
+                          "props": {
+                            "text": "عروض الأسبوع",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-0cc4b77d",
+                          "type": "text",
+                          "props": {
+                            "text": "أجهزة مختارة بأسعار خاصة لفترة محدودة."
+                          }
+                        },
+                        {
+                          "id": "product_list-14fc1df8",
+                          "type": "product_list",
+                          "props": {
+                            "title": "",
+                            "source": "newest",
+                            "limit": 8,
+                            "columns": 4
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "collection-tiles-29c547e5",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "collection-tiles-29c547e5-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "collection-tiles-29c547e5-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-935b5b68",
+                          "type": "heading",
+                          "props": {
+                            "text": "تسوّق حسب الفئة",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-7e60064a",
+                          "type": "text",
+                          "props": {
+                            "text": "ابدأ من الفئة اللي بتدور فيها."
+                          }
+                        },
+                        {
+                          "id": "collection_list-ef9720f0",
+                          "type": "collection_list",
+                          "props": {
+                            "title": "",
+                            "limit": 6,
+                            "columns": 3
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "width": "wide"
+              }
+            },
+            {
+              "id": "comparison-pitch-8c7d9f1d",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "comparison-pitch-8c7d9f1d-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "comparison-pitch-8c7d9f1d-r1-c1",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "heading-51079cab",
+                          "type": "heading",
+                          "props": {
+                            "text": "ليه تشتري مننا؟",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-a8cd4195",
+                          "type": "text",
+                          "props": {
+                            "text": "قارن بنفسك قبل ما تطلب."
+                          }
+                        },
+                        {
+                          "id": "button-a0f4b056",
+                          "type": "button",
+                          "props": {
+                            "label": "تسوّق دلوقتي",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "verticalAlign": "center"
+                      }
+                    },
+                    {
+                      "id": "comparison-pitch-8c7d9f1d-r1-c2",
+                      "type": "column",
+                      "span": 8,
+                      "elements": [
+                        {
+                          "id": "comparison-03e48c7b",
+                          "type": "comparison",
+                          "props": {
+                            "title": "",
+                            "usLabel": "عندنا",
+                            "themLabel": "في أماكن تانية",
+                            "rows": [
+                              {
+                                "label": "الدفع",
+                                "us": "كاش عند الاستلام",
+                                "them": "غالبًا مقدّم"
+                              },
+                              {
+                                "label": "المتابعة",
+                                "us": "تتابع طلبك خطوة بخطوة",
+                                "them": "مش دايمًا"
+                              },
+                              {
+                                "label": "الضمان",
+                                "us": "مكتوب بوضوح في صفحة الضمان",
+                                "them": "مش واضح"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            },
+            {
+              "id": "faq-split-07272652",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "faq-split-07272652-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "faq-split-07272652-r1-c1",
+                      "type": "column",
+                      "span": 5,
+                      "elements": [
+                        {
+                          "id": "heading-2fbd56c7",
+                          "type": "heading",
+                          "props": {
+                            "text": "أسئلة بتتكرر",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-46eefede",
+                          "type": "text",
+                          "props": {
+                            "text": "لو ملقتش إجابة سؤالك، كلّمنا."
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "faq-split-07272652-r1-c2",
+                      "type": "column",
+                      "span": 7,
+                      "elements": [
+                        {
+                          "id": "faq-eb332ade",
+                          "type": "faq",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "الدفع إزاي؟",
+                                "a": "كاش عند الاستلام. تقدر تفتح الطلب وتتأكد منه قبل ما تدفع حسب سياسة المتجر."
+                              },
+                              {
+                                "q": "الشحن بياخد قد إيه؟",
+                                "a": "اكتب هنا مدة الشحن للمحافظات المختلفة."
+                              },
+                              {
+                                "q": "فيه ضمان؟",
+                                "a": "تفاصيل الضمان لكل جهاز في صفحة الضمان."
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      },
+      {
+        "path": "/warranty",
+        "title": "الضمان",
+        "pageType": "static",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "rich-text-band-fa0b35d2",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "rich-text-band-fa0b35d2-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "rich-text-band-fa0b35d2-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-0c312e8c",
+                          "type": "heading",
+                          "props": {
+                            "text": "الضمان",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "rich_text-ffe4d3d5",
+                          "type": "rich_text",
+                          "props": {
+                            "text": "اكتب هنا مدة الضمان لكل نوع من الأجهزة، وإزاي العميل يستخدمه."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper",
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "shipping-returns-69298fc8",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "shipping-returns-69298fc8-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "shipping-returns-69298fc8-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-114b80b4",
+                          "type": "heading",
+                          "props": {
+                            "text": "الشحن والاستبدال",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "accordion-ed45d9a5",
+                          "type": "accordion",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "الشحن",
+                                "a": "اكتب هنا المحافظات اللي بتشحن لها، ومدة التوصيل، وتكلفته."
+                              },
+                              {
+                                "q": "الاستبدال والاسترجاع",
+                                "a": "اكتب هنا سياسة الاستبدال والاسترجاع عندك ومدتها."
+                              },
+                              {
+                                "q": "طرق الدفع",
+                                "a": "الدفع كاش عند الاستلام متاح لكل الطلبات. اكتب هنا أي طريقة دفع تانية بتقبلها."
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "id": "text-fa88e46d",
+                          "type": "text",
+                          "props": {
+                            "text": "لو عندك أي سؤال عن طلبك، تقدر تتابعه من صفحة «تتبع الطلب»."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      }
+    ]
+  },
+  "food": {
+    "primaryColor": "#C2410C",
+    "pages": [
+      {
+        "path": "/",
+        "title": "الرئيسية",
+        "pageType": "home",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "living-hero-intro-d7be59d8",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "living-hero-intro-d7be59d8-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "living-hero-intro-d7be59d8-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "shader_hero-33d35702",
+                          "type": "shader_hero",
+                          "props": {
+                            "title": "طازة كل يوم، لحد باب البيت",
+                            "subtitle": "اطلب وجباتك ومشروباتك المفضّلة في دقايق.",
+                            "ctaLabel": "اطلب الآن",
+                            "ctaHref": "/products",
+                            "height": 520
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "claims-strip-521c9695",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "claims-strip-521c9695-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "claims-strip-521c9695-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "marquee-ec7948bd",
+                          "type": "marquee",
+                          "props": {
+                            "items": [
+                              "بنحضّر طلبك أول ما يوصلنا",
+                              "الدفع عند الاستلام",
+                              "مكونات طازة كل يوم"
+                            ],
+                            "speed": "normal",
+                            "tone": "line"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper",
+                "padding": "compact"
+              }
+            },
+            {
+              "id": "collection-tiles-87b200d0",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "collection-tiles-87b200d0-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "collection-tiles-87b200d0-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-6bdd4aa4",
+                          "type": "heading",
+                          "props": {
+                            "text": "المنيو",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-1ea393e0",
+                          "type": "text",
+                          "props": {
+                            "text": "اختار القسم وابدأ طلبك."
+                          }
+                        },
+                        {
+                          "id": "collection_list-21c2f1b5",
+                          "type": "collection_list",
+                          "props": {
+                            "title": "",
+                            "limit": 6,
+                            "columns": 3
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "width": "wide"
+              }
+            },
+            {
+              "id": "store-product-floor-3d4139ef",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "store-product-floor-3d4139ef-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "store-product-floor-3d4139ef-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-809ed909",
+                          "type": "heading",
+                          "props": {
+                            "text": "الأطباق المميزة",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-d270dc69",
+                          "type": "text",
+                          "props": {
+                            "text": "الأكتر طلبًا عند عملاءنا."
+                          }
+                        },
+                        {
+                          "id": "product_list-fe79d23c",
+                          "type": "product_list",
+                          "props": {
+                            "title": "",
+                            "source": "featured",
+                            "limit": 8,
+                            "columns": 4
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "steps-a6173c9c",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "steps-a6173c9c-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "steps-a6173c9c-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-29e9d33a",
+                          "type": "heading",
+                          "props": {
+                            "text": "إزاي تطلب؟",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-61220297",
+                          "type": "text",
+                          "props": {
+                            "text": "تلات خطوات وطلبك في الطريق."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "steps-a6173c9c-r2",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "steps-a6173c9c-r2-c1",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "heading-08e13368",
+                          "type": "heading",
+                          "props": {
+                            "text": "١. اختار",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-bc207fe2",
+                          "type": "text",
+                          "props": {
+                            "text": "اختار الأطباق والمشروبات اللي نفسك فيها."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    },
+                    {
+                      "id": "steps-a6173c9c-r2-c2",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "heading-bb50954f",
+                          "type": "heading",
+                          "props": {
+                            "text": "٢. أكّد",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-53d85f5f",
+                          "type": "text",
+                          "props": {
+                            "text": "اكتب عنوانك ورقمك، وهنكلّمك نأكّد الطلب."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    },
+                    {
+                      "id": "steps-a6173c9c-r2-c3",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "heading-88e75bae",
+                          "type": "heading",
+                          "props": {
+                            "text": "٣. استلم",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-a7427962",
+                          "type": "text",
+                          "props": {
+                            "text": "طلبك يوصلك، وتدفع كاش عند الاستلام."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "flash-offer-e2985f9f",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "flash-offer-e2985f9f-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "flash-offer-e2985f9f-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-6f731dfd",
+                          "type": "heading",
+                          "props": {
+                            "text": "عرض النهارده",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "countdown-e09a8d15",
+                          "type": "countdown",
+                          "props": {
+                            "label": "العرض بينتهي خلال",
+                            "endsInHours": 24
+                          }
+                        },
+                        {
+                          "id": "text-5fbe9700",
+                          "type": "text",
+                          "props": {
+                            "text": "اكتب هنا تفاصيل عرض اليوم وشروطه."
+                          }
+                        },
+                        {
+                          "id": "button-f04d564b",
+                          "type": "button",
+                          "props": {
+                            "label": "اطلب الآن",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "primary-soft",
+                "padding": "compact"
+              }
+            },
+            {
+              "id": "faq-split-e38e4963",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "faq-split-e38e4963-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "faq-split-e38e4963-r1-c1",
+                      "type": "column",
+                      "span": 5,
+                      "elements": [
+                        {
+                          "id": "heading-33752b31",
+                          "type": "heading",
+                          "props": {
+                            "text": "أسئلة عن التوصيل",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-2b76bc25",
+                          "type": "text",
+                          "props": {
+                            "text": "كل اللي محتاج تعرفه قبل ما تطلب."
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "faq-split-e38e4963-r1-c2",
+                      "type": "column",
+                      "span": 7,
+                      "elements": [
+                        {
+                          "id": "faq-c13f4d56",
+                          "type": "faq",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "بتوصّلوا لفين؟",
+                                "a": "اكتب هنا مناطق التوصيل عندك."
+                              },
+                              {
+                                "q": "الطلب بياخد وقت قد إيه؟",
+                                "a": "اكتب هنا متوسط وقت التحضير والتوصيل."
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      },
+      {
+        "path": "/about",
+        "title": "حكايتنا",
+        "pageType": "static",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "rich-text-band-3cb209ed",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "rich-text-band-3cb209ed-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "rich-text-band-3cb209ed-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-638ae2a5",
+                          "type": "heading",
+                          "props": {
+                            "text": "حكايتنا",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "rich_text-d6c3428a",
+                          "type": "rich_text",
+                          "props": {
+                            "text": "اكتب هنا حكاية مطبخك: بدأ إزاي، وإيه اللي بيميّز أكلك."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper",
+                "padding": "roomy"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      },
+      {
+        "path": "/delivery",
+        "title": "التوصيل",
+        "pageType": "static",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "shipping-returns-5df6867a",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "shipping-returns-5df6867a-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "shipping-returns-5df6867a-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-aa9340d6",
+                          "type": "heading",
+                          "props": {
+                            "text": "التوصيل والدفع",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "accordion-7ce9ce9c",
+                          "type": "accordion",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "الشحن",
+                                "a": "اكتب هنا المحافظات اللي بتشحن لها، ومدة التوصيل، وتكلفته."
+                              },
+                              {
+                                "q": "الاستبدال والاسترجاع",
+                                "a": "اكتب هنا سياسة الاستبدال والاسترجاع عندك ومدتها."
+                              },
+                              {
+                                "q": "طرق الدفع",
+                                "a": "الدفع كاش عند الاستلام متاح لكل الطلبات. اكتب هنا أي طريقة دفع تانية بتقبلها."
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "id": "text-eb18eac7",
+                          "type": "text",
+                          "props": {
+                            "text": "لو عندك أي سؤال عن طلبك، تقدر تتابعه من صفحة «تتبع الطلب»."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      }
+    ]
+  },
+  "funnel": {
+    "primaryColor": "#047857",
+    "pages": [
+      {
+        "path": "/",
+        "title": "الرئيسية",
+        "pageType": "home",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "announcement-bar-280613a8",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "announcement-bar-280613a8-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "announcement-bar-280613a8-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "text-7efef25c",
+                          "type": "text",
+                          "props": {
+                            "text": "عرض لفترة محدودة — والدفع كاش عند الاستلام"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "primary",
+                "padding": "tight"
+              }
+            },
+            {
+              "id": "hero-trust-808765d5",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "hero-trust-808765d5-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "hero-trust-808765d5-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-0cea5c93",
+                          "type": "heading",
+                          "props": {
+                            "text": "المنتج اللي هيغيّر يومك",
+                            "level": 1
+                          }
+                        },
+                        {
+                          "id": "text-f44e5196",
+                          "type": "text",
+                          "props": {
+                            "text": "اكتب هنا في سطرين المشكلة اللي المنتج بيحلها، ولمين."
+                          }
+                        },
+                        {
+                          "id": "button-08192ac7",
+                          "type": "button",
+                          "props": {
+                            "label": "اطلبه الآن",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        },
+                        {
+                          "id": "list-87c6600c",
+                          "type": "list",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              "الدفع عند الاستلام",
+                              "توصيل لحد باب البيت",
+                              "خدمة عملاء بترد عليك"
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "featured-product-0d60cf83",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "featured-product-0d60cf83-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "featured-product-0d60cf83-r1-c1",
+                      "type": "column",
+                      "span": 6,
+                      "elements": [
+                        {
+                          "id": "product_card-b9bca2a7",
+                          "type": "product_card",
+                          "props": {
+                            "title": "",
+                            "showPrice": true,
+                            "showBuyButton": true
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "featured-product-0d60cf83-r1-c2",
+                      "type": "column",
+                      "span": 6,
+                      "elements": [
+                        {
+                          "id": "heading-01df1202",
+                          "type": "heading",
+                          "props": {
+                            "text": "ليه هتحبه؟",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "list-4dc73a4d",
+                          "type": "list",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              "اكتب هنا أهم ميزة",
+                              "اكتب هنا الميزة التانية",
+                              "اكتب هنا الميزة التالتة"
+                            ]
+                          }
+                        },
+                        {
+                          "id": "button-07c376de",
+                          "type": "button",
+                          "props": {
+                            "label": "شوف التفاصيل",
+                            "href": "/products",
+                            "variant": "outline"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "verticalAlign": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            },
+            {
+              "id": "feature-grid-4-c9088486",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "feature-grid-4-c9088486-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "feature-grid-4-c9088486-r1-c1",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-7ffeff6e",
+                          "type": "icon",
+                          "props": {
+                            "name": "star",
+                            "size": 28
+                          }
+                        },
+                        {
+                          "id": "heading-656d328c",
+                          "type": "heading",
+                          "props": {
+                            "text": "جودة عالية",
+                            "level": 4
+                          }
+                        },
+                        {
+                          "id": "text-ee3ad90a",
+                          "type": "text",
+                          "props": {
+                            "text": "اكتب هنا تفصيلة عن الجودة."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-4-c9088486-r1-c2",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-7edf17e8",
+                          "type": "icon",
+                          "props": {
+                            "name": "heart",
+                            "size": 28
+                          }
+                        },
+                        {
+                          "id": "heading-9fe66d85",
+                          "type": "heading",
+                          "props": {
+                            "text": "سهل الاستخدام",
+                            "level": 4
+                          }
+                        },
+                        {
+                          "id": "text-45610dbf",
+                          "type": "text",
+                          "props": {
+                            "text": "اكتب هنا إزاي بيتستخدم."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-4-c9088486-r1-c3",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-5784b10d",
+                          "type": "icon",
+                          "props": {
+                            "name": "shield",
+                            "size": 28
+                          }
+                        },
+                        {
+                          "id": "heading-ac803859",
+                          "type": "heading",
+                          "props": {
+                            "text": "شراء آمن",
+                            "level": 4
+                          }
+                        },
+                        {
+                          "id": "text-7ffb29bf",
+                          "type": "text",
+                          "props": {
+                            "text": "بتدفع لما تستلم."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    },
+                    {
+                      "id": "feature-grid-4-c9088486-r1-c4",
+                      "type": "column",
+                      "span": 3,
+                      "elements": [
+                        {
+                          "id": "icon-1949c3db",
+                          "type": "icon",
+                          "props": {
+                            "name": "truck",
+                            "size": 28
+                          }
+                        },
+                        {
+                          "id": "heading-1a12566a",
+                          "type": "heading",
+                          "props": {
+                            "text": "توصيل سريع",
+                            "level": 4
+                          }
+                        },
+                        {
+                          "id": "text-118b4334",
+                          "type": "text",
+                          "props": {
+                            "text": "لحد باب البيت."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "steps-cb525b9d",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "steps-cb525b9d-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "steps-cb525b9d-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-5acf9092",
+                          "type": "heading",
+                          "props": {
+                            "text": "إزاي بيشتغل؟",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "text-3a567d79",
+                          "type": "text",
+                          "props": {
+                            "text": "استخدامه بسيط من أول يوم."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "steps-cb525b9d-r2",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "steps-cb525b9d-r2-c1",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "heading-715be848",
+                          "type": "heading",
+                          "props": {
+                            "text": "١. اكتب الخطوة الأولى",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-ed116a0f",
+                          "type": "text",
+                          "props": {
+                            "text": "اشرحها في سطر."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    },
+                    {
+                      "id": "steps-cb525b9d-r2-c2",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "heading-f1080ad6",
+                          "type": "heading",
+                          "props": {
+                            "text": "٢. اكتب الخطوة التانية",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-622bd507",
+                          "type": "text",
+                          "props": {
+                            "text": "اشرحها في سطر."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    },
+                    {
+                      "id": "steps-cb525b9d-r2-c3",
+                      "type": "column",
+                      "span": 4,
+                      "elements": [
+                        {
+                          "id": "heading-de5d5278",
+                          "type": "heading",
+                          "props": {
+                            "text": "٣. اكتب الخطوة التالتة",
+                            "level": 3
+                          }
+                        },
+                        {
+                          "id": "text-7e847a72",
+                          "type": "text",
+                          "props": {
+                            "text": "اشرحها في سطر."
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "surface": "card"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "countdown-band-0c7fa8d0",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "countdown-band-0c7fa8d0-r1",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "countdown-band-0c7fa8d0-r1-c1",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-4a4808d8",
+                          "type": "heading",
+                          "props": {
+                            "text": "العرض بينتهي قريب",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "countdown-a25a5271",
+                          "type": "countdown",
+                          "props": {
+                            "label": "باقي على نهاية العرض",
+                            "endsInHours": 24
+                          }
+                        },
+                        {
+                          "id": "button-b088e438",
+                          "type": "button",
+                          "props": {
+                            "label": "اطلب الآن",
+                            "href": "/products",
+                            "variant": "primary"
+                          }
+                        }
+                      ],
+                      "settings": {
+                        "align": "center"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "ink",
+                "padding": "compact"
+              }
+            },
+            {
+              "id": "why-us-e60682c2",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "why-us-e60682c2-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "why-us-e60682c2-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-db078334",
+                          "type": "heading",
+                          "props": {
+                            "text": "لسه محتار؟",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "accordion-583cf000",
+                          "type": "accordion",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "لو المنتج مجاش زي ما اتوقعت؟",
+                                "a": "اكتب هنا سياسة الاستبدال والاسترجاع عندك."
+                              },
+                              {
+                                "q": "هدفع إمتى؟",
+                                "a": "كاش عند الاستلام، بعد ما طلبك يوصلك."
+                              },
+                              {
+                                "q": "التوصيل بياخد قد إيه؟",
+                                "a": "اكتب هنا مدة التوصيل."
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "primary-soft",
+                "padding": "roomy"
+              }
+            },
+            {
+              "id": "offer-ef0061a7",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "offer-ef0061a7-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "offer-ef0061a7-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "product_card-2a6c6420",
+                          "type": "product_card",
+                          "props": {
+                            "title": "اطلبه دلوقتي",
+                            "showPrice": true,
+                            "showBuyButton": true
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "seo": {}
+      },
+      {
+        "path": "/shipping",
+        "title": "الشحن والاستبدال",
+        "pageType": "static",
+        "builderData": {
+          "version": 1,
+          "sections": [
+            {
+              "id": "shipping-returns-8611944f",
+              "type": "section",
+              "rows": [
+                {
+                  "id": "shipping-returns-8611944f-r",
+                  "type": "row",
+                  "columns": [
+                    {
+                      "id": "shipping-returns-8611944f-c",
+                      "type": "column",
+                      "span": 12,
+                      "elements": [
+                        {
+                          "id": "heading-24bc6ec4",
+                          "type": "heading",
+                          "props": {
+                            "text": "الشحن والاستبدال",
+                            "level": 2
+                          }
+                        },
+                        {
+                          "id": "accordion-6e2363eb",
+                          "type": "accordion",
+                          "props": {
+                            "title": "",
+                            "items": [
+                              {
+                                "q": "الشحن",
+                                "a": "اكتب هنا المحافظات اللي بتشحن لها، ومدة التوصيل، وتكلفته."
+                              },
+                              {
+                                "q": "الاستبدال والاسترجاع",
+                                "a": "اكتب هنا سياسة الاستبدال والاسترجاع عندك ومدتها."
+                              },
+                              {
+                                "q": "طرق الدفع",
+                                "a": "الدفع كاش عند الاستلام متاح لكل الطلبات. اكتب هنا أي طريقة دفع تانية بتقبلها."
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "id": "text-4c66111e",
+                          "type": "text",
+                          "props": {
+                            "text": "لو عندك أي سؤال عن طلبك، تقدر تتابعه من صفحة «تتبع الطلب»."
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "settings": {
+                "background": "paper"
+              }
+            }
+          ]
+        },
+        "seo": {}
+      }
+    ]
+  }
+}

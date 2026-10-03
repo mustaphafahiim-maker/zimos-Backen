@@ -24,3 +24,6 @@ tests
 .DS_Store
 Thumbs.db
 PHASE_PLAN.md
+
+# Shoppers' photos on local disk
+storage/private

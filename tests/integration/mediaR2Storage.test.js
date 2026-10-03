@@ -62,9 +62,10 @@ describe('media upload — R2 backend', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.mimeType).toBe('image/png');
-    expect(res.body.size).toBe(PNG.length);
+    expect(res.body.size).toBeGreaterThan(0);
     expect(res.body.path).toMatch(new RegExp(`^/${workspace.id}/[0-9a-f-]+\\.png$`));
     expect(res.body.url).toBe(`${R2_PUBLIC}${res.body.path}`);
+    // Same shape on either backend, plus the media-library row's id.
     expect(Object.keys(res.body).sort()).toEqual(['id', 'mimeType', 'path', 'size', 'url']);
 
     // the object really went through the R2 client
@@ -74,7 +75,8 @@ describe('media upload — R2 backend', () => {
     expect(putInput.Key).toBe(res.body.path.slice(1)); // key = path without leading slash
     expect(putInput.ContentType).toBe('image/png');
     expect(Buffer.isBuffer(putInput.Body)).toBe(true);
-    expect(putInput.Body.length).toBe(PNG.length);
+    // What was sent is the processed file, and the response says so.
+    expect(putInput.Body.length).toBe(res.body.size);
 
     // and nothing was written to local disk
     const localGuess = path.join(UPLOAD_ROOT, res.body.path.replace(/^\//, ''));

@@ -4,7 +4,7 @@
 // distinct from the UUID PK, unique, generated with a collision-retry loop.
 // It's what shows on the waybill and shipment responses.
 
-const { app, request, setupWorkspaceWithProduct } = require('../helpers/factories');
+const { app, request, setupWorkspaceWithProduct, confirmCodOrder } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const orderService = require('../../src/modules/orders/orderService');
 const waybillService = require('../../src/modules/waybill/waybillService');
@@ -24,6 +24,8 @@ async function placeOrder(token, workspaceId, variantId, i = 0) {
       paymentMethod: 'cod',
     });
   if (res.status !== 201) throw new Error(`placeOrder failed: ${res.status} ${JSON.stringify(res.body)}`);
+  // Every order here is shipped, and a COD order ships only once confirmed.
+  await confirmCodOrder(token, workspaceId, res.body.order.id);
   return res.body.order;
 }
 
@@ -41,7 +43,7 @@ describe('shipment tracking code', () => {
     const res = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'manual' });
+      .send({ carrierCode: 'local-courier' });
     expect(res.status).toBe(201);
     expect(res.body.shipment.trackingCode).toMatch(PATTERN);
     expect(res.body.shipment.trackingCode).not.toBe(res.body.shipment.id);
@@ -65,7 +67,7 @@ describe('shipment tracking code', () => {
         request(app)
           .post(`/api/v1/workspaces/${workspace.id}/orders/${o.id}/shipments`)
           .set(bearer(auth.accessToken))
-          .send({ carrierCode: 'manual' })
+          .send({ carrierCode: 'local-courier' })
       )
     );
 
@@ -90,7 +92,7 @@ describe('shipment tracking code', () => {
     const ship = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`)
       .set(bearer(auth.accessToken))
-      .send({ carrierCode: 'manual' });
+      .send({ carrierCode: 'local-courier' });
 
     model = await waybillService.computeWaybillModel(workspace.id, order.id);
     expect(model.trackingValue).toBe(ship.body.shipment.trackingCode);

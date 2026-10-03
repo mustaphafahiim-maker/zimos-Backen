@@ -3,6 +3,7 @@
 const { Op } = require('sequelize');
 const { randomUUID: uuidv4 } = require('crypto');
 const db = require('../../db/models');
+const env = require('../../config/env');
 const { getClientInfo, getDevice, isBot } = require('./clientDetect');
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -166,7 +167,12 @@ async function ingest(workspaceId, body, { userAgent, getHeader } = {}) {
   if (isBot(userAgent)) return { accepted: 0, bot: true };
 
   const now = new Date();
-  const client = getClientInfo({ userAgent, screen: body.screen, getHeader: getHeader || (() => undefined) });
+  const client = getClientInfo({
+    userAgent,
+    screen: body.screen,
+    getHeader: getHeader || (() => undefined),
+    trustedGeo: env.analytics.geoHeaders,
+  });
   const attribution = body.attribution || {};
 
   const distinct = (pick) => [...new Set(body.events.map(pick).filter(Boolean))];

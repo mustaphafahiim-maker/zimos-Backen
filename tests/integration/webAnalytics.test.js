@@ -1,7 +1,22 @@
 'use strict';
 
+// Web analytics over analytics_events / analytics_sessions (Umami port):
+// ingest-derived columns, stats, series, metrics, weekly and realtime.
+// Ported from the zimos-additions branch. Visitor geo is read from CDN
+// headers only for the CDNs env.analytics.geoHeaders trusts; this suite
+// trusts Cloudflare's (analyticsAccess.test.js checks the untrusted default).
+
 const { app, request, registerAndActivate, createWorkspace } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const env = require('../../src/config/env');
+
+const trustedGeoBefore = env.analytics.geoHeaders;
+beforeAll(() => {
+  env.analytics.geoHeaders = ['cloudflare'];
+});
+afterAll(() => {
+  env.analytics.geoHeaders = trustedGeoBefore;
+});
 
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
@@ -113,7 +128,6 @@ describe('web analytics (Umami port)', () => {
     expect(res.status).toBe(200);
     // 5 pageviews / 3 sessions / 4 visits; A's visit lasted 60s and has a custom event, the other 3 bounced.
     expect(res.body).toEqual({ pageviews: 5, visitors: 3, visits: 4, bounces: 3, totaltime: 60, bounceRate: 75, avgVisitTime: 15 });
-    console.log('SAMPLE stats', JSON.stringify(res.body));
 
     res = await ctx.get('stats', { compare: 'prev' });
     expect(res.status).toBe(200);
@@ -158,7 +172,6 @@ describe('web analytics (Umami port)', () => {
     expect(res.body.series[0].t).toBe(new Date(Math.floor(from.getTime() / (60 * MIN)) * 60 * MIN).toISOString());
     expect(res.body.series.reduce((s, b) => s + b.pageviews, 0)).toBe(5);
     expect(res.body.series.filter((b) => b.pageviews === 0).length).toBeGreaterThanOrEqual(2);
-    console.log('SAMPLE series', JSON.stringify(res.body));
 
     const cmp = await ctx.get('series', { from: from.toISOString(), to: now.toISOString(), compare: 'prev', unit: 'hour' });
     expect(cmp.body.comparison).toHaveLength(4);
@@ -181,7 +194,6 @@ describe('web analytics (Umami port)', () => {
     expect(path).toHaveLength(3);
     expect(path).toEqual(expect.arrayContaining([{ x: '/', y: 2 }, { x: '/about', y: 1 }, { x: '/products/hat', y: 1 }]));
     expect(path[0]).toEqual({ x: '/', y: 2 });
-    console.log('SAMPLE metrics(path)', JSON.stringify({ type: 'path', rows: path }));
 
     expect(await metrics('fullPath')).toEqual(expect.arrayContaining([{ x: '/products/hat?utm_content=c1&utm_term=hats', y: 1 }]));
     // Same-origin "/" referrer is not a referrer.
@@ -235,6 +247,5 @@ describe('web analytics (Umami port)', () => {
     expect(res.body.urls.sort((a, b) => a.x.localeCompare(b.x))).toEqual([{ x: '/', y: 2 }, { x: '/about', y: 1 }, { x: '/products/hat', y: 1 }]);
     expect(res.body.referrers.sort((a, b) => a.x.localeCompare(b.x))).toEqual([{ x: 'facebook.com', y: 1 }, { x: 'google.com', y: 1 }]);
     expect(res.body.countries).toEqual([{ x: 'EG', y: 1 }]);
-    console.log('SAMPLE realtime', JSON.stringify(res.body));
   });
 });

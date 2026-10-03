@@ -5,6 +5,11 @@ const env = require('./config/env');
 const db = require('./db/models');
 const logger = require('./core/utils/logger');
 const { describeStorage, r2ConfigError } = require('./modules/media/storage');
+const { logRollout: logCarrierRollout } = require('./modules/shipping/carriers');
+const { imageProcessingStatus } = require('./modules/media/imageProcessing');
+const { startUploadSweep } = require('./modules/customerUploads/customerUploadService');
+const signupPolicy = require('./modules/auth/signupPolicy');
+const { releaseDraftsWhenOff } = require('./modules/billing/goLiveService');
 
 async function start() {
   try {
@@ -25,6 +30,29 @@ async function start() {
   logger.info(`Storage backend: ${describeStorage()}`);
   const storageProblem = r2ConfigError();
   if (storageProblem) logger.error(`Storage misconfigured: ${storageProblem} — uploads will fail until this is fixed`);
+
+  // Image processing (sharp): every upload is re-encoded and stripped of its
+  // metadata, so a missing native binary must be visible at boot.
+  logger.info(`Image processing: ${imageProcessingStatus()}`);
+
+  // Shoppers' photos no order took are deleted after CUSTOMER_UPLOAD_TTL_HOURS.
+  startUploadSweep();
+
+  // And for couriers: which adapters this process actually switched on, from
+  // CARRIERS_ENABLED / CARRIERS_BETA / CARRIERS_BETA_WORKSPACES as parsed.
+  await logCarrierRollout(logger);
+
+  // Sign-up and go-live switches (REQUIRE_*), and a verification switch with
+  // no email provider behind it (sign-ups are refused until one is set).
+  signupPolicy.logBootState(logger);
+  // With REQUIRE_SUBSCRIPTION_TO_GO_LIVE off, drafts left from while it was
+  // on become the trials they would have been.
+  try {
+    const released = await releaseDraftsWhenOff();
+    if (released > 0) logger.info(`Released ${released} draft store(s): REQUIRE_SUBSCRIPTION_TO_GO_LIVE is off`);
+  } catch (err) {
+    logger.error('Could not release draft stores', { message: err.message });
+  }
 
   const server = app.listen(env.port, () => {
     logger.info(`Zimos backend listening on port ${env.port}`, { env: env.nodeEnv });

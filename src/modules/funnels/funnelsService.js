@@ -1,13 +1,25 @@
 'use strict';
 
+const crypto = require('crypto');
 const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { NotFoundError, ConflictError, ValidationError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const logger = require('../../core/utils/logger');
 const slugify = require('../../core/utils/slugify');
 const orderService = require('../orders/orderService');
-const { validateStepData, validateGraph, resolveEntry, OFFER_STEP_TYPES, EMPTY_TREE } = require('./funnelGraph');
+const {
+  validateStepData,
+  validateGraph,
+  resolveEntry,
+  isTerminalStep,
+  OFFER_STEP_TYPES,
+  EMPTY_TREE,
+} = require('./funnelGraph');
 const { conditionProblem, pickNextEdge } = require('./funnelRouting');
+const { assertBumpOfferUsable, bumpProblem, presentBump } = require('../checkout/orderBump');
+const funnelOfferMerge = require('./funnelOfferMerge');
+const entitlements = require('../billing/entitlementsService');
 
 const Op = db.Sequelize.Op;
 
@@ -27,6 +39,12 @@ const Op = db.Sequelize.Op;
 // --- helpers --------------------------------------------------------------
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// One-time deep copy — the copy shares no reference with the source, so a
+// later edit to one funnel can never reach the other.
+function deepClone(v) {
+  return v == null ? v : JSON.parse(JSON.stringify(v));
+}
 
 async function ensureUniqueSubdomain(base) {
   let root = slugify(base).replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
@@ -77,8 +95,17 @@ function toSnapshotSteps(stepRows) {
     name: s.name,
     builderData: s.builderData,
     offerId: s.offerId,
+    // Only a checkout step has a form to offer a bump on.
+    bumpOfferId: s.stepType === 'checkout' ? s.bumpOfferId || null : null,
     seo: s.seo || {},
   }));
+}
+
+/** A bump offer belongs on a checkout step only (422 elsewhere). */
+function assertBumpStepType(stepType) {
+  if (stepType !== 'checkout') {
+    throw new ValidationError([{ field: 'bumpOfferId', message: 'Only a checkout step can offer an order bump' }]);
+  }
 }
 
 function toSnapshotEdges(edgeRows) {
@@ -92,19 +119,31 @@ function toSnapshotEdges(edgeRows) {
 
 // --- funnels -----------------------------------------------------------
 
+/**
+ * A new funnel counts against the plan's funnels a month
+ * (billing/entitlementsService.recordFunnelCreation), in the same
+ * transaction as its insert: refused with 403 PLAN_LIMIT_REACHED past the
+ * limit, and recorded for good otherwise — deleting it later does not give
+ * the month's allowance back.
+ */
 async function createFunnel(workspaceId, data, req) {
   const subdomain = await ensureUniqueSubdomain(data.subdomain || data.name);
-  const funnel = await scoped(db.Funnel, workspaceId).create({ name: data.name, subdomain, status: 'draft' });
-  await recordAudit({
-    workspaceId,
-    actorUserId: req.user.id,
-    action: 'funnel.create',
-    entityType: 'Funnel',
-    entityId: funnel.id,
-    after: funnel.toJSON(),
-    req,
+  return db.sequelize.transaction(async (t) => {
+    const id = crypto.randomUUID();
+    await entitlements.recordFunnelCreation(workspaceId, id, 'create', { transaction: t });
+    const funnel = await scoped(db.Funnel, workspaceId).create({ id, name: data.name, subdomain, status: 'draft' }, { transaction: t });
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'funnel.create',
+      entityType: 'Funnel',
+      entityId: funnel.id,
+      after: funnel.toJSON(),
+      req,
+      transaction: t,
+    });
+    return funnel;
   });
-  return funnel;
 }
 
 async function listFunnels(workspaceId) {
@@ -148,6 +187,103 @@ async function updateFunnel(workspaceId, funnelId, data, req) {
   return funnel;
 }
 
+const COPY_SUFFIX = ' (copy)';
+
+/**
+ * Duplicate a funnel into a brand-new draft in the same workspace.
+ *
+ * Steps and edges are copied verbatim, `key` included: keys are unique per
+ * funnel rather than globally, so keeping them means every copied edge still
+ * points at the step it pointed at in the source and the graph needs no
+ * remapping. Revisions are deliberately NOT copied — the copy has never been
+ * published, so it starts at `draft` with no `publishedRevisionId`, no
+ * history, and its own free subdomain. The runtime therefore can't reach it
+ * until someone publishes it, which is the point of duplicating.
+ */
+async function duplicateFunnel(workspaceId, funnelId, data, req) {
+  const source = await loadFunnel(workspaceId, funnelId);
+  const name = data.name || `${source.name.slice(0, 200 - COPY_SUFFIX.length)}${COPY_SUFFIX}`;
+  // Resolved before the transaction opens, exactly as createFunnel does — the
+  // subdomain is globally unique, so it can't be checked workspace-scoped.
+  const subdomain = await ensureUniqueSubdomain(name);
+
+  return db.sequelize.transaction(async (t) => {
+    const stepRows = await db.FunnelStep.findAll({
+      where: { workspaceId, funnelId },
+      order: [['createdAt', 'ASC']],
+      transaction: t,
+    });
+    const edgeRows = await db.FunnelEdge.findAll({
+      where: { workspaceId, funnelId },
+      order: [['priority', 'DESC'], ['createdAt', 'ASC']],
+      transaction: t,
+    });
+
+    // A copy is a new funnel: it counts against the plan's funnels a month.
+    const id = crypto.randomUUID();
+    await entitlements.recordFunnelCreation(workspaceId, id, 'duplicate', { transaction: t });
+    const funnel = await scoped(db.Funnel, workspaceId).create(
+      { id, name, subdomain, status: 'draft', publishedRevisionId: null },
+      { transaction: t }
+    );
+
+    const steps = [];
+    for (const s of stepRows) {
+      steps.push(
+        await db.FunnelStep.create(
+          {
+            workspaceId,
+            funnelId: funnel.id,
+            key: s.key,
+            stepType: s.stepType,
+            name: s.name,
+            builderData: deepClone(s.builderData),
+            // Offers are workspace-scoped, so the copy's step sells the same
+            // one the source did (and offers the same bump).
+            offerId: s.offerId,
+            bumpOfferId: s.bumpOfferId,
+            // abTestExperimentId is intentionally not carried over: an
+            // experiment belongs to the step it was set up on.
+            seo: deepClone(s.seo) || {},
+          },
+          { transaction: t }
+        )
+      );
+    }
+
+    const edges = [];
+    for (const e of edgeRows) {
+      edges.push(
+        await db.FunnelEdge.create(
+          {
+            workspaceId,
+            funnelId: funnel.id,
+            fromStepKey: e.fromStepKey,
+            toStepKey: e.toStepKey,
+            condition: deepClone(e.condition),
+            priority: e.priority,
+          },
+          { transaction: t }
+        )
+      );
+    }
+
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'funnel.duplicate',
+      entityType: 'Funnel',
+      entityId: funnel.id,
+      after: funnel.toJSON(),
+      metadata: { sourceFunnelId: source.id, stepCount: steps.length, edgeCount: edges.length },
+      req,
+      transaction: t,
+    });
+
+    return { funnel, steps, edges };
+  });
+}
+
 async function deleteFunnel(workspaceId, funnelId, req) {
   const funnel = await loadFunnel(workspaceId, funnelId);
   const before = funnel.toJSON();
@@ -172,6 +308,10 @@ async function createStep(workspaceId, funnelId, data, req) {
   const builderData = data.builderData !== undefined ? data.builderData : EMPTY_TREE;
   validateStepData(builderData, { label: `step "${data.key}"` });
   if (data.offerId) await assertOfferUsable(workspaceId, data.offerId);
+  if (data.bumpOfferId) {
+    assertBumpStepType(data.stepType);
+    await assertBumpOfferUsable(workspaceId, data.bumpOfferId, 'bumpOfferId');
+  }
 
   const clash = await db.FunnelStep.findOne({ where: { funnelId, key: data.key }, attributes: ['id'] });
   if (clash) throw new ConflictError(`A step with key "${data.key}" already exists in this funnel`, 'FUNNEL_STEP_KEY_TAKEN');
@@ -184,6 +324,7 @@ async function createStep(workspaceId, funnelId, data, req) {
     name: data.name,
     builderData,
     offerId: data.offerId || null,
+    bumpOfferId: data.bumpOfferId || null,
     seo: data.seo || {},
   });
   await recordAudit({
@@ -224,6 +365,15 @@ async function updateStep(workspaceId, funnelId, stepId, data, req) {
   if (data.offerId !== undefined) {
     if (data.offerId) await assertOfferUsable(workspaceId, data.offerId);
     patch.offerId = data.offerId; // null clears it
+  }
+  const stepType = patch.stepType || step.stepType;
+  if (data.bumpOfferId) {
+    assertBumpStepType(stepType);
+    await assertBumpOfferUsable(workspaceId, data.bumpOfferId, 'bumpOfferId');
+    patch.bumpOfferId = data.bumpOfferId;
+  } else if (data.bumpOfferId === null || (stepType !== 'checkout' && step.bumpOfferId)) {
+    // Cleared, or the step stopped being a checkout: no form, no bump.
+    patch.bumpOfferId = null;
   }
 
   await step.update(patch);
@@ -418,6 +568,22 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
           problems.push({ field: `steps.${s.key}.offerId`, message: `Offer for step "${s.key}" not found or not active` });
         }
       }
+      if (s.bumpOfferId) {
+        const bump = await db.Offer.findOne({
+          where: { id: s.bumpOfferId, workspaceId },
+          include: [
+            { model: db.Product, as: 'product', attributes: ['id', 'status', 'customFields'] },
+            { model: db.OfferVariant, as: 'lines', include: [{ model: db.ProductVariant, as: 'variant', attributes: ['id', 'status'] }] },
+          ],
+          transaction: t,
+        });
+        if (bumpProblem(bump)) {
+          problems.push({
+            field: `steps.${s.key}.bumpOfferId`,
+            message: `The order bump on step "${s.key}" can no longer be offered (archived, unpriced or asks for custom details)`,
+          });
+        }
+      }
     }
     if (problems.length) {
       throw new ValidationError(problems, 'Funnel cannot be published yet — fix the issues below');
@@ -536,19 +702,33 @@ const resumeFunnel = (workspaceId, funnelId, userId, req) => setStatus(workspace
 
 // --- public runtime -------------------------------------------------
 
+// The runtime's 404/422s carry their own codes, so the storefront can tell a
+// dead link from a vanished step or offer. Statuses and messages are the same
+// as before, when these were the generic NOT_FOUND / VALIDATION_ERROR.
+const funnelNotFound = () => new AppError('FUNNEL_NOT_FOUND', 'Funnel not found', 404);
+const sessionNotFound = () => new AppError('FUNNEL_SESSION_NOT_FOUND', 'FunnelSession not found', 404);
+const stepNotFound = () => new AppError('FUNNEL_STEP_NOT_FOUND', 'Step not found', 404);
+const offerUnavailable = (resource) => new AppError('FUNNEL_OFFER_UNAVAILABLE', `${resource} not found`, 404);
+
 function renderStepData(snapshot, stepKey) {
   const step = (snapshot.steps || []).find((s) => s.key === stepKey);
-  if (!step) throw new NotFoundError('Step');
+  if (!step) throw stepNotFound();
   return { key: step.key, name: step.name, stepType: step.stepType, tree: step.builderData, seo: step.seo || {} };
 }
 
 async function resolveStepPayload(workspaceId, snapshot, stepKey) {
   const step = (snapshot.steps || []).find((s) => s.key === stepKey);
-  if (!step) throw new NotFoundError('Step');
+  if (!step) throw stepNotFound();
   const payload = { step: renderStepData(snapshot, stepKey) };
+  // The checkout step's order bump, when it has one that can still be sold.
+  if (step.stepType === 'checkout' && step.bumpOfferId) {
+    payload.bump = await presentBump(workspaceId, step.bumpOfferId);
+  }
   if (OFFER_STEP_TYPES.has(step.stepType) && step.offerId) {
+    // An archived offer (e.g. its product was archived) isn't shown; accepting
+    // it would fail anyway (createFollowOnOrder also requires 'active').
     const offer = await db.Offer.findOne({
-      where: { id: step.offerId, workspaceId },
+      where: { id: step.offerId, workspaceId, status: 'active' },
       include: [{ model: db.OfferVariant, as: 'lines' }],
     });
     if (offer) {
@@ -575,21 +755,41 @@ function publicSession(session) {
   };
 }
 
+const stepExists = (snapshot, stepKey) => (snapshot.steps || []).some((s) => s.key === stepKey);
+
+/**
+ * Republishing a funnel can delete the step a live session is sitting on. The
+ * visitor is then mid-journey on a page that no longer exists, so put them
+ * back at the funnel's entry instead of answering "Step not found". Their
+ * path is cleared with it: every key in it may be gone too.
+ */
+async function resetSessionToEntry(session, snapshot, transaction) {
+  const entryKey = snapshot.entryKey;
+  if (!entryKey || !stepExists(snapshot, entryKey)) throw stepNotFound();
+  logger.warn(
+    `funnel session ${session.id}: step "${session.currentStepKey}" is no longer in the published revision — restarting at "${entryKey}"`
+  );
+  session.currentStepKey = entryKey;
+  session.path = [];
+  await session.save(transaction ? { transaction } : undefined);
+  return session;
+}
+
 async function loadPublishedSnapshot(workspaceId, funnelId, transaction) {
   const funnel = await db.Funnel.findOne({
     where: { id: funnelId, workspaceId },
     ...(transaction ? { transaction } : {}),
   });
-  if (!funnel) throw new NotFoundError('Funnel');
+  if (!funnel) throw funnelNotFound();
   if (funnel.status === 'paused') {
     throw new AppError('FUNNEL_PAUSED', 'This funnel is not currently available', 410);
   }
-  if (funnel.status !== 'published' || !funnel.publishedRevisionId) throw new NotFoundError('Funnel');
+  if (funnel.status !== 'published' || !funnel.publishedRevisionId) throw funnelNotFound();
   const revision = await db.FunnelRevision.findOne({
     where: { id: funnel.publishedRevisionId, funnelId: funnel.id },
     ...(transaction ? { transaction } : {}),
   });
-  if (!revision) throw new NotFoundError('Funnel');
+  if (!revision) throw funnelNotFound();
   return { funnel, snapshot: revision.snapshot || {} };
 }
 
@@ -599,7 +799,7 @@ async function startSession(workspaceId, funnelRef, body) {
   else where.subdomain = funnelRef;
 
   const funnelLookup = await db.Funnel.findOne({ where });
-  if (!funnelLookup) throw new NotFoundError('Funnel');
+  if (!funnelLookup) throw funnelNotFound();
 
   const { funnel, snapshot } = await loadPublishedSnapshot(workspaceId, funnelLookup.id);
 
@@ -619,6 +819,13 @@ async function startSession(workspaceId, funnelRef, body) {
     });
   }
 
+  // Only 'active' sessions are resumed above, so a completed visitor always
+  // starts a fresh journey. A resumed one may still be sitting on a step a
+  // republish removed.
+  if (!stepExists(snapshot, session.currentStepKey)) {
+    await resetSessionToEntry(session, snapshot);
+  }
+
   const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
   return {
     funnel: { id: funnel.id, name: funnel.name, subdomain: funnel.subdomain },
@@ -629,37 +836,57 @@ async function startSession(workspaceId, funnelRef, body) {
 
 async function getSessionStep(workspaceId, funnelId, sessionId) {
   const session = await db.FunnelSession.findOne({ where: { id: sessionId, funnelId, workspaceId } });
-  if (!session) throw new NotFoundError('FunnelSession');
+  if (!session) throw sessionNotFound();
   const { snapshot } = await loadPublishedSnapshot(workspaceId, funnelId);
+
   if (session.status === 'completed') {
-    return { done: true, session: publicSession(session) };
+    // Still serve the step it finished on — that page is the thank-you the
+    // visitor is looking at, and refreshing it must not blank it. Nothing to
+    // render (or to resume) if a republish removed that step.
+    if (!stepExists(snapshot, session.currentStepKey)) return { done: true, session: publicSession(session) };
+    const finishedPayload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+    return { done: true, session: publicSession(session), ...finishedPayload };
+  }
+
+  if (!stepExists(snapshot, session.currentStepKey)) {
+    await resetSessionToEntry(session, snapshot);
   }
   const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+  // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
+  if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session);
   return { session: publicSession(session), ...payload };
 }
 
 /**
  * Creates the follow-on order for an accepted upsell/downsell through the
  * shared order engine (server-side pricing, transactional inventory,
- * idempotency) and reuses the original order's customer/address/payment.
- * Runs in its own transaction (orderService.createOrder always does); the
- * caller links it via `linked_from_order_id` afterwards.
+ * idempotency) and reuses the original order's customer and address.
+ *
+ * It is always cash on delivery. After a COD order that is the same method;
+ * after an order paid online there is no second payment page to send the
+ * shopper to mid-funnel, and copying 'card' would create an unpaid card order
+ * nothing ever charges — so the add-on is collected on delivery, riding the
+ * same parcel's COD amount when the waybill allows.
+ * Runs inside the caller's transaction, so the order and the session move that
+ * routes the visitor past the offer commit together or not at all — a failure
+ * after the order was created must never leave a charged visitor on a session
+ * that never advanced. The caller links it via `linked_from_order_id`.
  */
-async function createFollowOnOrder(workspaceId, funnelId, step, session, req) {
+async function createFollowOnOrder(workspaceId, funnelId, step, session, req, transaction) {
   if (!session.orderId) {
-    throw new ValidationError(
-      [{ field: 'session', message: 'This upsell has no prior order to attach to — the visitor must complete checkout first' }],
-      'Cannot accept this offer'
-    );
+    throw new AppError('FUNNEL_OFFER_NEEDS_ORDER', 'Cannot accept this offer', 422, [
+      { field: 'session', message: 'This upsell has no prior order to attach to — the visitor must complete checkout first' },
+    ]);
   }
-  const original = await db.Order.findOne({ where: { id: session.orderId, workspaceId } });
-  if (!original) throw new NotFoundError('Order');
+  const original = await db.Order.findOne({ where: { id: session.orderId, workspaceId }, transaction });
+  if (!original) throw offerUnavailable('Order');
 
   const offer = await db.Offer.findOne({
     where: { id: step.offerId, workspaceId, status: 'active' },
     include: [{ model: db.OfferVariant, as: 'lines' }],
+    transaction,
   });
-  if (!offer || (offer.lines || []).length === 0) throw new NotFoundError('Offer');
+  if (!offer || (offer.lines || []).length === 0) throw offerUnavailable('Offer');
 
   const { order } = await orderService.createOrder(
     workspaceId,
@@ -667,16 +894,21 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req) {
       items: [{ variantId: offer.lines[0].variantId, offerId: offer.id, quantity: 1 }],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
-      paymentMethod: original.paymentMethod,
+      paymentMethod: 'cod',
       funnelId,
     },
-    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null }
+    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
+    // The buyer's own accepted add-on to the order they just placed: it
+    // shares that order's customer and often its variant, so duplicate_order
+    // would flag (or refuse) every upsell. The original order already went
+    // through the storefront rules.
+    { transaction, skipFraudRules: true }
   );
   return { order, originalId: original.id };
 }
 
 async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
-  const { outcome } = body;
+  const { outcome, fromStepKey } = body;
 
   return db.sequelize.transaction(async (t) => {
     const session = await db.FunnelSession.findOne({
@@ -684,32 +916,69 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       lock: t.LOCK.UPDATE,
       transaction: t,
     });
-    if (!session) throw new NotFoundError('FunnelSession');
+    if (!session) throw sessionNotFound();
+
+    // A stale tab, a double-submitted button or a replayed request: the client
+    // names the step it produced this outcome on, and the session has since
+    // moved past it. Applying it would route the visitor from somewhere they
+    // no longer are, so refuse and change nothing.
+    if (fromStepKey && fromStepKey !== session.currentStepKey) {
+      throw new AppError(
+        'STEP_MISMATCH',
+        `This outcome came from step "${fromStepKey}", but the session has already moved to "${session.currentStepKey}"`,
+        409
+      );
+    }
+
     if (session.status === 'completed') {
       return { done: true, session: publicSession(session) };
     }
 
     const funnel = await db.Funnel.findOne({ where: { id: funnelId, workspaceId }, transaction: t });
-    if (!funnel || !funnel.publishedRevisionId) throw new NotFoundError('Funnel');
+    if (!funnel || !funnel.publishedRevisionId) throw funnelNotFound();
     const revision = await db.FunnelRevision.findOne({
       where: { id: funnel.publishedRevisionId, funnelId },
       transaction: t,
     });
-    if (!revision) throw new NotFoundError('Funnel');
+    if (!revision) throw funnelNotFound();
 
     const snapshot = revision.snapshot || {};
     const steps = snapshot.steps || [];
     const edges = snapshot.edges || [];
     const currentStep = steps.find((s) => s.key === session.currentStepKey);
-    if (!currentStep) throw new NotFoundError('Step');
-
-    // Accepted upsell/downsell -> a linked follow-on order (own transaction).
-    let followOn = null;
-    if (outcome.type === 'accepted_offer' && OFFER_STEP_TYPES.has(currentStep.stepType)) {
-      followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req);
+    if (!currentStep) {
+      // A republish removed the step this outcome belongs to. There is nothing
+      // left to route from, so restart the visitor at the entry instead of
+      // dead-ending them; the outcome is dropped with the step it came from.
+      await resetSessionToEntry(session, snapshot, t);
+      const restarted = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+      return { session: publicSession(session), ...restarted };
     }
 
-    // completed_checkout carries the order just placed on this step.
+    // Accepted upsell/downsell, in this same transaction so it cannot outlive
+    // a failed advance: joined to the checkout order while its offer window is
+    // open when the store has turned that on (funnelOfferMerge), else a linked
+    // follow-on order as it has always been.
+    let followOn = null;
+    let accepted = null;
+    if (outcome.type === 'accepted_offer' && OFFER_STEP_TYPES.has(currentStep.stepType)) {
+      accepted = await funnelOfferMerge.acceptOffer({ workspaceId, funnelId, step: currentStep, session, req }, t);
+      if (!accepted) followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t);
+    }
+
+    // completed_checkout carries the order just placed on this step. An order
+    // paid online only counts once it is paid: the shopper is sent on through
+    // the funnel after the payment page, not before.
+    if (outcome.type === 'completed_checkout' && outcome.orderId) {
+      const placed = await db.Order.findOne({
+        where: { id: outcome.orderId, workspaceId },
+        attributes: ['id', 'paymentMethod', 'financialState', 'cancelledAt'],
+        transaction: t,
+      });
+      if (placed && placed.paymentMethod !== 'cod' && !['paid', 'partially_paid'].includes(placed.financialState)) {
+        throw new AppError('FUNNEL_ORDER_NOT_PAID', 'This order has not been paid yet', 409);
+      }
+    }
     if (outcome.type === 'completed_checkout' && outcome.orderId) {
       const [n] = await db.Order.update(
         { funnelId },
@@ -725,9 +994,20 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
     let result;
     if (nextEdge) {
       session.currentStepKey = nextEdge.toStepKey;
+      // Landing on a step no edge leaves ends the journey. Complete it here
+      // rather than waiting for one more advance that has nowhere to go — but
+      // still return the step, because that page is the thank-you the visitor
+      // has to see.
+      const finished = isTerminalStep(session.currentStepKey, edges);
+      if (finished) {
+        session.status = 'completed';
+        session.completedAt = new Date();
+      }
       await session.save({ transaction: t });
       const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
-      result = { session: publicSession(session), ...payload };
+      // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
+      if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session, t);
+      result = { ...(finished ? { done: true } : {}), session: publicSession(session), ...payload };
     } else {
       // No matching outbound edge — the funnel ends here.
       session.status = 'completed';
@@ -735,6 +1015,12 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       await session.save({ transaction: t });
       result = { done: true, session: publicSession(session) };
     }
+
+    // No offer can follow from here: the order's offer window closes and it
+    // goes to the confirmation queue (a no-op unless the merge is on).
+    await funnelOfferMerge.afterSessionMove(workspaceId, session, snapshot, t);
+    if (accepted && accepted.followOn) result.followOnOrder = accepted.followOn;
+    if (accepted && accepted.merged) result.mergedOrder = { ...accepted.merged, addedItemId: accepted.addedItemId };
 
     if (followOn) {
       await db.Order.update(
@@ -758,6 +1044,7 @@ module.exports = {
   listFunnels,
   getFunnel,
   updateFunnel,
+  duplicateFunnel,
   deleteFunnel,
   createStep,
   listSteps,

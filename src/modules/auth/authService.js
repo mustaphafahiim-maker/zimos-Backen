@@ -14,6 +14,10 @@ const notify = require('../notifications/notify');
 const googleClient = require('./googleClient');
 const otpService = require('../otp/otpService');
 const { normalizePhone } = require('../../core/utils/phone');
+const usernameService = require('../users/usernameService');
+const { isUsernameConflict } = require('../users/username');
+const signupPolicy = require('./signupPolicy');
+const verificationCodes = require('../otp/verificationCodeService');
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -41,14 +45,65 @@ async function createSession(user, req) {
   return { raw, session };
 }
 
-async function register({ email, password, fullName, phone }, req) {
+/**
+ * The account row, with its username. A chosen username that someone else
+ * holds — checked here, and again by the unique index for two sign-ups racing
+ * for it — is 409 USERNAME_TAKEN. With none given (a client from before
+ * usernames: the dashboard deployed before this API asks for one) the account
+ * gets one made from the email, as existing accounts did (migration 124).
+ */
+async function createAccount({ email, passwordHash, fullName, phone, username, extra = {} }) {
+  if (username) {
+    if (await usernameService.isTaken(username)) throw usernameService.takenError();
+    try {
+      return await db.User.create({ email, passwordHash, fullName, phone, username, ...extra });
+    } catch (err) {
+      if (isUsernameConflict(err)) throw usernameService.takenError();
+      throw err;
+    }
+  }
+  for (let attempt = 0; ; attempt += 1) {
+    const generated = await usernameService.suggestFor(email);
+    try {
+      return await db.User.create({ email, passwordHash, fullName, phone, username: generated, ...extra });
+    } catch (err) {
+      if (!isUsernameConflict(err) || attempt >= 4) throw err;
+    }
+  }
+}
+
+/**
+ * Email/password sign-up. The plan, terms and code rules are
+ * auth/signupPolicy's; with every switch off this is the sign-up it always
+ * was: the account is created pending, a confirmation link is emailed, and
+ * tokens are returned.
+ */
+async function register({ email, password, fullName, phone, username, planId, billingCycle, acceptTerms, locale }, req) {
   const existing = await db.User.findOne({ where: { email } });
   if (existing) {
     throw new ConflictError('An account with this email already exists', 'EMAIL_TAKEN');
   }
 
+  const extra = await signupPolicy.registrationFields({ email, planId, billingCycle, acceptTerms });
+  const verifying = signupPolicy.verificationRequired();
+  if (verifying) {
+    // Fail closed: a code nobody can receive would lock the account out.
+    if (!verificationCodes.emailReady()) {
+      throw new AppError('SIGNUP_UNAVAILABLE', 'Sign-up is not available right now. Try again later.', 503);
+    }
+    // Checked before the account exists, so one address or IP cannot mint
+    // accounts past the code limits.
+    await verificationCodes.assertCanSend({ channel: 'email', target: String(email).toLowerCase(), ip: req ? req.ip : null });
+  }
+
   const passwordHash = await hashPassword(password);
-  const user = await db.User.create({ email, passwordHash, fullName, phone });
+  const user = await createAccount({ email, passwordHash, fullName, phone, username, extra });
+
+  if (verifying) {
+    await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
+    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+    return signupPolicy.verificationResponse(user, sent);
+  }
 
   const rawToken = generateOpaqueToken();
   await db.VerificationToken.create({
@@ -125,7 +180,7 @@ async function resendVerificationEmail(email) {
   return { success: true };
 }
 
-async function login({ email, password }, req) {
+async function login({ email, password, locale }, req) {
   const user = await db.User.findOne({ where: { email } });
   // Same error for "no such user" and "wrong password" — never reveal which
   // one it was, to avoid account enumeration via the login endpoint.
@@ -134,6 +189,22 @@ async function login({ email, password }, req) {
   }
   if (user.status === 'suspended') {
     throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
+  }
+
+  // With sign-up codes on, an account not confirmed yet is sent to its code
+  // (a fresh one, unless one went out moments ago) instead of being signed
+  // in; one confirmed some other way is let in.
+  if (signupPolicy.verificationRequired()) {
+    if (!signupPolicy.isVerified(user)) {
+      let sent = null;
+      try {
+        sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+      } catch (err) {
+        if (!(err instanceof AppError) || err.statusCode !== 429) throw err;
+      }
+      return signupPolicy.verificationResponse(user, sent);
+    }
+    if (user.status === 'pending_verification') await user.update({ status: 'active' });
   }
 
   await user.update({ lastLoginAt: new Date() });
@@ -180,6 +251,8 @@ async function loginWithGoogle(code, req) {
         passwordHash: null,
         status: 'active',
         emailVerifiedAt: new Date(),
+        // While a plan is required at sign-up, it picks one after signing in.
+        ...(await signupPolicy.googleAccountFields()),
       });
       action = 'user.register.google';
     }
@@ -307,6 +380,46 @@ async function resetPassword(rawToken, newPassword) {
   return { success: true };
 }
 
+// --- Sign-up codes (REQUIRE_SIGNUP_VERIFICATION) -------------------------
+
+function assertUnconfirmed(user) {
+  if (user.status === 'active' && signupPolicy.isVerified(user)) {
+    throw new ConflictError('This account is already confirmed. Sign in.', 'ALREADY_VERIFIED');
+  }
+}
+
+/** POST /auth/verify/send — a new code by 'email' or 'sms' (the account's own phone). */
+async function sendVerificationCode(user, { channel = 'email', locale }, req) {
+  assertUnconfirmed(user);
+  const sent = await verificationCodes.sendCode(user, channel, { ip: req ? req.ip : null, locale, req });
+  return { sent: true, ...sent };
+}
+
+/**
+ * POST /auth/verify/confirm — the right code confirms the address it went to,
+ * activates the account and signs it in at once.
+ */
+async function confirmVerificationCode(user, code, req) {
+  assertUnconfirmed(user);
+  const { channel } = await verificationCodes.confirmCode(user, code, { req });
+  const now = new Date();
+  await user.update({
+    status: 'active',
+    lastLoginAt: now,
+    ...(channel === 'sms' ? { phoneVerifiedAt: now, phone: normalizePhone(user.phone) || user.phone } : { emailVerifiedAt: now }),
+  });
+  await recordAudit({
+    actorUserId: user.id,
+    action: 'auth.verify.confirm',
+    entityType: 'User',
+    entityId: user.id,
+    metadata: { channel },
+    req,
+  });
+  const tokens = await issueTokenPair(user, req);
+  return { user: user.toSafeJSON(), ...tokens };
+}
+
 // --- Phone verification (during/after registration) ----------------------
 
 async function requestPhoneVerification(userId, phone) {
@@ -347,6 +460,8 @@ async function resetPasswordSms(phone, code, newPassword) {
 
 module.exports = {
   register,
+  sendVerificationCode,
+  confirmVerificationCode,
   verifyEmail,
   resendVerificationEmail,
   login,

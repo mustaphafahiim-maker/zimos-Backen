@@ -28,7 +28,7 @@ const generalLimiter = rateLimit({
   // The public storefront API is limited per shopper by storefrontLimiter,
   // which marks the requests it handled. Counting them again here, by IP,
   // would put every shopper behind our storefront server back in one bucket.
-  skip: (req) => skip() || req.rateLimitScope === 'storefront',
+  skip: (req) => skip() || req.rateLimitScope === 'storefront' || req.rateLimitScope === 'carrier_webhook' || req.rateLimitScope === 'payment_webhook',
   handler,
 });
 
@@ -148,12 +148,28 @@ function resolveStorefrontClient(req, { secretDigest, serverIps }) {
   };
 }
 
+/*
+ * Analytics beacons (POST /store/:workspaceId/events) go through the same
+ * limiter with the same limits and the same shopper identification, but are
+ * counted in buckets of their own. A browser sends them without an
+ * X-Cart-Token, so they would otherwise share the per-IP bucket (and the
+ * connection ceiling) with every shopper behind that IP, and a busy
+ * carrier-NAT address could see its cart and checkout calls refused because
+ * of page views. Tracking must never be what stops a checkout.
+ */
+const EVENTS_PATH = /^\/[^/]+\/events\/?$/;
+
 function createStorefrontLimiter({ windowMs, visitorMax, ipMax, serverMax, secret, serverIps = [], skip: skipAll = () => false }) {
   const trust = { secretDigest: secret ? sha256(secret) : null, serverIps: buildIpList(serverIps) };
 
   const resolve = (req, res, next) => {
     req.rateLimitScope = 'storefront';
-    req.storefrontClient = resolveStorefrontClient(req, trust);
+    const client = resolveStorefrontClient(req, trust);
+    if (EVENTS_PATH.test(req.path || '')) {
+      if (client.visitorKey) client.visitorKey = `events:${client.visitorKey}`;
+      client.connectionKey = `events:${client.connectionKey}`;
+    }
+    req.storefrontClient = client;
     next();
   };
 
@@ -267,11 +283,208 @@ const trackingLimiter = createTrackingLimiter({
   skip,
 });
 
+/*
+ * The storefront search box's suggestions (GET /store/:id/products/suggest)
+ * are asked for while the shopper types, so they get a bucket of their own —
+ * a minute and an hour — on top of the storefront limiter every /store
+ * request already passed. Keyed on the shopper as that limiter identified
+ * them (req.storefrontClient), falling back to the connection: our own
+ * storefront server never calls this, browsers do. A debounced search box
+ * sends a few requests per second at most while typing, so the minute limit
+ * is generous for a person and tight for a scraper walking the catalogue.
+ */
+function createSuggestLimiter({ minuteMax, hourMax, skip: skipAll = () => false }) {
+  const key = (req) => {
+    const client = req.storefrontClient;
+    const who = (client && (client.visitorKey || client.connectionKey)) || `ip:${ipKeyGenerator(req.ip || '')}`;
+    return `suggest:${who}`;
+  };
+  const bucket = (windowMs, limit, standardHeaders, prefix) =>
+    rateLimit({
+      windowMs,
+      limit,
+      standardHeaders,
+      legacyHeaders: false,
+      skip: skipAll,
+      keyGenerator: (req) => `${prefix}:${key(req)}`,
+      handler,
+    });
+  return [bucket(60 * 1000, minuteMax, true, 'm'), bucket(60 * 60 * 1000, hourMax, false, 'h')];
+}
+
+const suggestLimiter = createSuggestLimiter({
+  minuteMax: env.rateLimit.suggestMinuteMax,
+  hourMax: env.rateLimit.suggestHourMax,
+  skip,
+});
+
+/*
+ * Shoppers' photo uploads (POST /store/:id/uploads): the most expensive public
+ * request we serve — up to 15 MB in, then decoded and re-encoded — so it gets
+ * its own buckets on top of the storefront limiter: per connecting IP and per
+ * visitor id (X-Visitor-Id), each by the minute and by the hour. The visitor
+ * id is the client's to choose, so its buckets only split shoppers behind one
+ * IP; rotating ids to dodge them still hits the IP buckets. The per-visitor
+ * cap on photos waiting for an order lives in the upload service.
+ */
+const VISITOR_HEADER_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+
+function createUploadLimiter({ ipPerMinute, ipPerHour, visitorPerMinute, visitorPerHour, skip: skipAll = () => false }) {
+  const ipKey = (req) => `upload-ip:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`;
+  const visitorKey = (req) => {
+    const id = req.headers['x-visitor-id'];
+    return typeof id === 'string' && VISITOR_HEADER_PATTERN.test(id) ? `upload-visitor:${id}` : null;
+  };
+  const bucket = (windowMs, limit, keyGenerator, standardHeaders, skipWhen = () => false) =>
+    rateLimit({
+      windowMs,
+      limit,
+      standardHeaders,
+      legacyHeaders: false,
+      skip: (req) => skipAll(req) || skipWhen(req),
+      keyGenerator,
+      handler,
+    });
+  const MINUTE = 60 * 1000;
+  const HOUR = 60 * MINUTE;
+  return [
+    // The visitor's own buckets first: a shopper over their limit never uses
+    // up the IP budget everyone behind that address shares.
+    bucket(MINUTE, visitorPerMinute, (req) => `m:${visitorKey(req)}`, true, (req) => !visitorKey(req)),
+    bucket(HOUR, visitorPerHour, (req) => `h:${visitorKey(req)}`, false, (req) => !visitorKey(req)),
+    bucket(MINUTE, ipPerMinute, (req) => `m:${ipKey(req)}`, false),
+    bucket(HOUR, ipPerHour, (req) => `h:${ipKey(req)}`, false),
+  ];
+}
+
+const uploadLimiter = createUploadLimiter({
+  ipPerMinute: env.customerUploads.ipPerMinute,
+  ipPerHour: env.customerUploads.ipPerHour,
+  visitorPerMinute: env.customerUploads.visitorPerMinute,
+  visitorPerHour: env.customerUploads.visitorPerHour,
+  skip,
+});
+
+/*
+ * "Is this username free?" (GET /auth/username-available) answers anyone,
+ * signed in or not — it is what the sign-up form asks while the person types.
+ * Walked systematically it would say which usernames exist, so it gets tight
+ * buckets of its own per connecting IP, by the minute and by the hour: enough
+ * for a person trying a few names, not for a list.
+ */
+function createUsernameCheckLimiter({ minuteMax, hourMax, skip: skipAll = () => false }) {
+  const ipKey = (req) => `username-check:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`;
+  const bucket = (windowMs, limit, prefix, standardHeaders) =>
+    rateLimit({
+      windowMs,
+      limit,
+      standardHeaders,
+      legacyHeaders: false,
+      skip: skipAll,
+      keyGenerator: (req) => `${prefix}:${ipKey(req)}`,
+      handler,
+    });
+  return [bucket(60 * 1000, minuteMax, 'm', true), bucket(60 * 60 * 1000, hourMax, 'h', false)];
+}
+
+const usernameCheckLimiter = createUsernameCheckLimiter({
+  minuteMax: env.rateLimit.usernameCheckMinuteMax,
+  hourMax: env.rateLimit.usernameCheckHourMax,
+  skip,
+});
+
+/*
+ * Two public, per-IP buckets of one minute each: the plan list the marketing
+ * site and the sign-up form read (GET /plans/public), and the sign-up code
+ * endpoints (POST /auth/verify/send, /auth/verify/confirm), whose real limits
+ * — per address, per account, per IP per hour and day — are counted in the
+ * database by otp/verificationCodeService so they hold across instances.
+ */
+function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}) {
+  return rateLimit({
+    windowMs: 60 * 1000,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`,
+    handler,
+  });
+}
+
+const publicPlansLimiter = createIpMinuteLimiter('public-plans', env.rateLimit.publicPlansMinuteMax, { skip });
+const verifyCodeLimiter = createIpMinuteLimiter('verify-code', env.rateLimit.verifyMinuteMax, { skip });
+
+/*
+ * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
+ * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
+ * put all merchants in one bucket; each merchant's webhook token gets its own.
+ * Mounted on the /webhooks/carriers prefix, where req.params isn't populated
+ * yet, so the token is read from the path. Unknown tokens are still limited
+ * (and then 404).
+ */
+function carrierWebhookKey(req) {
+  const [, code = '', token = ''] = (req.path || '').split('/');
+  return `carrier-webhook:${code.slice(0, 50)}:${sha256(token).toString('hex').slice(0, 32)}`;
+}
+
+const carrierWebhookLimiter = [
+  (req, res, next) => {
+    req.rateLimitScope = 'carrier_webhook';
+    next();
+  },
+  rateLimit({
+    windowMs: env.rateLimit.windowMs,
+    limit: env.carriers.webhookRateLimitMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip,
+    keyGenerator: carrierWebhookKey,
+    handler,
+  }),
+];
+
+// Payment gateway callbacks: like the courier ones, all from the gateway's
+// servers, so limited per merchant webhook token rather than per IP.
+function paymentWebhookKey(req) {
+  const [, code = '', token = ''] = (req.path || '').split('/');
+  return `payment-webhook:${code.slice(0, 50)}:${sha256(token).toString('hex').slice(0, 32)}`;
+}
+
+const paymentWebhookLimiter = [
+  (req, res, next) => {
+    req.rateLimitScope = 'payment_webhook';
+    next();
+  },
+  rateLimit({
+    windowMs: env.rateLimit.windowMs,
+    limit: env.payments.webhookRateLimitMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip,
+    keyGenerator: paymentWebhookKey,
+    handler,
+  }),
+];
+
 module.exports = {
   generalLimiter,
+  carrierWebhookLimiter,
+  paymentWebhookLimiter,
+  paymentWebhookKey,
+  carrierWebhookKey,
   authLimiter,
   storefrontLimiter,
   createStorefrontLimiter,
   trackingLimiter,
   createTrackingLimiter,
+  suggestLimiter,
+  createSuggestLimiter,
+  uploadLimiter,
+  createUploadLimiter,
+  usernameCheckLimiter,
+  createUsernameCheckLimiter,
+  publicPlansLimiter,
+  verifyCodeLimiter,
+  createIpMinuteLimiter,
 };

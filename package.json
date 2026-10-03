@@ -6,8 +6,10 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
+    "start:migrate": "node scripts/release-migrate.js && node src/server.js",
     "dev": "nodemon src/server.js",
     "migrate": "npx sequelize-cli db:migrate",
+    "migrate:deploy": "node scripts/release-migrate.js",
     "migrate:undo": "npx sequelize-cli db:migrate:undo",
     "seed": "npx sequelize-cli db:seed:all",
     "test": "cross-env NODE_ENV=test jest --runInBand",
@@ -17,6 +19,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1126.0",
     "bcryptjs": "^3.0.3",
+    "bidi-js": "^1.1.0",
     "bwip-js": "^4.11.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -38,6 +41,7 @@
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.37.8",
     "sequelize-cli": "^6.6.5",
+    "sharp": "^0.34.5",
     "swagger-ui-express": "^5.0.1",
     "twilio": "^6.1.0",
     "uuid": "^14.0.2"
@@ -45,7 +49,9 @@
   "devDependencies": {
     "cross-env": "^10.1.0",
     "jest": "^30.5.0",
+    "jsqr": "^1.4.0",
     "nodemon": "^3.1.14",
+    "pngjs": "^7.0.0",
     "supertest": "^7.2.2"
   }
 }

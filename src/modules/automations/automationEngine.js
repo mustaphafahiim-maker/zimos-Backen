@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../../db/models');
+const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
 
 const TRIGGERS = [
@@ -82,9 +83,14 @@ async function run(workspaceId, trigger, orderId) {
 /**
  * Fire-and-forget: automations never block or fail the business action that
  * triggered them. Call from `transaction.afterCommit` so the order exists.
+ *
+ * Under test the work is handed back, so the afterCommit hook waits for it:
+ * the suite truncates every table between tests, and a query still running
+ * from the previous test would fight that TRUNCATE for its locks.
  */
 function emit(workspaceId, trigger, orderId) {
-  run(workspaceId, trigger, orderId).catch((err) => logger.error(`[automations] ${trigger} for order ${orderId} failed: ${err.message}`));
+  const work = run(workspaceId, trigger, orderId).catch((err) => logger.error(`[automations] ${trigger} for order ${orderId} failed: ${err.message}`));
+  return env.isTest ? work : undefined;
 }
 
 module.exports = { TRIGGERS, TOKENS, emit, run, render };

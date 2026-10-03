@@ -39,14 +39,20 @@ async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds
     }
   }
 
-  let amount = 0;
-  if (discount.type === 'percentage') amount = applyBasisPoints(subtotal, discount.value);
-  else if (discount.type === 'fixed') amount = Math.min(discount.value, subtotal);
-  // free_shipping and buy_x_get_y are applied by the caller against
-  // shipping/line totals respectively using discount.buyXGetYConfig; amount
-  // here only covers the subtotal-level percentage/fixed cases.
+  return { discount, amount: amountFor(discount, subtotal) };
+}
 
-  return { discount, amount };
+/**
+ * What a code takes off `subtotal`. free_shipping and buy_x_get_y are applied
+ * by the caller against shipping/line totals respectively using
+ * discount.buyXGetYConfig; this only covers the subtotal-level percentage /
+ * fixed cases. Also used when an order's subtotal changes after the code was
+ * redeemed (an upsell joined to it), so the same code is not checked again.
+ */
+function amountFor(discount, subtotal) {
+  if (discount.type === 'percentage') return applyBasisPoints(subtotal, discount.value);
+  if (discount.type === 'fixed') return Math.min(Number(discount.value), subtotal);
+  return 0;
 }
 
 /**
@@ -54,10 +60,15 @@ async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds
  * and inserts a DiscountRedemption row, using SELECT ... FOR UPDATE on the
  * discount row so two concurrent checkouts racing for the last remaining
  * use of a limited discount cannot both succeed.
+ *
+ * `allowOverLimit` is for a prepaid order redeemed only once its payment is
+ * confirmed (orders/orderCompletion.js): the code was valid when the shopper
+ * placed the order and they were charged the discounted price, so the use is
+ * recorded even if the limit ran out while they were paying.
  */
-async function redeem(discountId, { orderId, customerId, amountAllocated }, transaction) {
+async function redeem(discountId, { orderId, customerId, amountAllocated }, transaction, { allowOverLimit = false } = {}) {
   const discount = await db.Discount.findByPk(discountId, { lock: transaction.LOCK.UPDATE, transaction });
-  if (discount.usageLimit !== null && discount.usageCount >= discount.usageLimit) {
+  if (!allowOverLimit && discount.usageLimit !== null && discount.usageCount >= discount.usageLimit) {
     throw new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'Discount code has reached its usage limit', 422);
   }
   await discount.update({ usageCount: discount.usageCount + 1 }, { transaction });
@@ -67,4 +78,4 @@ async function redeem(discountId, { orderId, customerId, amountAllocated }, tran
   );
 }
 
-module.exports = { evaluate, redeem };
+module.exports = { evaluate, redeem, amountFor };

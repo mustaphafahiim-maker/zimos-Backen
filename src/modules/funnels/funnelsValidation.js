@@ -67,6 +67,12 @@ const funnelIdParam = {
   params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required() }),
 };
 
+// `name` is optional — the service falls back to "<source name> (copy)".
+const duplicateFunnel = {
+  params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required() }),
+  body: Joi.object({ name: Joi.string().min(1).max(200).optional() }).default({}),
+};
+
 const createStep = {
   params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required() }),
   body: Joi.object({
@@ -75,6 +81,8 @@ const createStep = {
     name: Joi.string().min(1).max(200).required(),
     builderData: treeData.optional(),
     offerId: uuid.optional(),
+    // Checkout steps only: the order bump offered on the step's form.
+    bumpOfferId: uuid.allow(null).optional(),
     seo: seo.default({}),
   }),
 };
@@ -87,6 +95,7 @@ const updateStep = {
     name: Joi.string().min(1).max(200).optional(),
     builderData: treeData.optional(),
     offerId: uuid.allow(null).optional(),
+    bumpOfferId: uuid.allow(null).optional(),
     seo: seo.optional(),
   }).min(1),
 };
@@ -160,6 +169,11 @@ const advance = {
     sessionId: uuid.required(),
   }),
   body: Joi.object({
+    // Which step the visitor produced this outcome on. Optional for backward
+    // compatibility; when sent it must still be the session's current step or
+    // the advance is refused with 409 STEP_MISMATCH, so a stale tab or a
+    // double-submitted button cannot route the visitor from the wrong place.
+    fromStepKey: stepKey.optional(),
     outcome: Joi.object({
       type: Joi.string()
         .valid('completed_checkout', 'accepted_offer', 'declined_offer', 'clicked_through')
@@ -173,6 +187,7 @@ module.exports = {
   createFunnel,
   updateFunnel,
   funnelIdParam,
+  duplicateFunnel,
   createStep,
   updateStep,
   stepIdParam,

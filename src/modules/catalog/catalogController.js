@@ -6,8 +6,8 @@ const inventoryService = require('../inventory/inventoryService');
 const db = require('../../db/models');
 
 const createProduct = asyncHandler(async (req, res) => {
-  const product = await service.createProduct(req.tenant.workspaceId, req.body, req);
-  res.status(201).json({ product });
+  // `variant` is only in the response when the request created one.
+  res.status(201).json(await service.createProduct(req.tenant.workspaceId, req.body, req));
 });
 
 const listProducts = asyncHandler(async (req, res) => {
@@ -27,6 +27,15 @@ const updateProduct = asyncHandler(async (req, res) => {
 
 const deleteProduct = asyncHandler(async (req, res) => {
   res.json(await service.deleteProduct(req.tenant.workspaceId, req.params.productId, req));
+});
+
+const restoreProduct = asyncHandler(async (req, res) => {
+  const product = await service.restoreProduct(req.tenant.workspaceId, req.params.productId, req);
+  res.json({ product });
+});
+
+const deleteProductPermanently = asyncHandler(async (req, res) => {
+  res.json(await service.deleteProductPermanently(req.tenant.workspaceId, req.params.productId, req));
 });
 
 const createVariant = asyncHandler(async (req, res) => {
@@ -69,6 +78,10 @@ const listOffers = asyncHandler(async (req, res) => {
   res.json({ offers: await service.listOffers(req.tenant.workspaceId, req.params.productId) });
 });
 
+const listWorkspaceOffers = asyncHandler(async (req, res) => {
+  res.json({ offers: await service.listWorkspaceOffers(req.tenant.workspaceId, req.query) });
+});
+
 const getOffer = asyncHandler(async (req, res) => {
   res.json({ offer: await service.getOffer(req.tenant.workspaceId, req.params.offerId) });
 });
@@ -96,6 +109,20 @@ const getCollection = asyncHandler(async (req, res) => {
 
 const updateCollection = asyncHandler(async (req, res) => {
   res.json({ collection: await service.updateCollection(req.tenant.workspaceId, req.params.collectionId, req.body, req) });
+});
+
+const reorderCollections = asyncHandler(async (req, res) => {
+  res.json(await service.reorderCollections(req.tenant.workspaceId, req.body.items, req));
+});
+
+const reorderCollectionProducts = asyncHandler(async (req, res) => {
+  res.json(
+    await service.reorderCollectionProducts(req.tenant.workspaceId, req.params.collectionId, req.body.productIds, req)
+  );
+});
+
+const listOptionNames = asyncHandler(async (req, res) => {
+  res.json({ options: await service.listOptionNames(req.tenant.workspaceId) });
 });
 
 const deleteCollection = asyncHandler(async (req, res) => {
@@ -128,12 +155,15 @@ module.exports = {
   getProduct,
   updateProduct,
   deleteProduct,
+  restoreProduct,
+  deleteProductPermanently,
   createVariant,
   getVariant,
   updateVariant,
   deleteVariant,
   createOffer,
   listOffers,
+  listWorkspaceOffers,
   getOffer,
   updateOffer,
   deleteOffer,
@@ -144,4 +174,7 @@ module.exports = {
   deleteCollection,
   addToCollection,
   removeFromCollection,
+  reorderCollections,
+  reorderCollectionProducts,
+  listOptionNames,
 };

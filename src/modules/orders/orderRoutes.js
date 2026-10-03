@@ -6,24 +6,30 @@ const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { idempotent } = require('../../core/middleware/idempotency');
 const { PERMISSIONS } = require('../../core/security/permissions');
+const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const controller = require('./orderController');
 const schemas = require('./orderValidation');
 const returnController = require('../returns/returnController');
 const returnSchemas = require('../returns/returnValidation');
 const waybillController = require('../waybill/waybillController');
+const carrierController = require('../shipping/carrierController');
+const carrierSchemas = require('../shipping/carrierValidation');
 
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
 
+// A draft store (not subscribed yet) takes no orders, by hand either.
 router.post(
   '/',
   validate(schemas.create),
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  requireLive,
   idempotent('order.create')(controller.create)
 );
 router.get('/', validate(schemas.list), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.list);
-// Before '/:orderId' so "counts" is never read as an order id.
-router.get('/counts', validate(schemas.counts), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.counts);
+// Before '/:orderId', or Express matches "pipeline" as an order id and the
+// request dies as a uuid validation error instead of reaching the counts.
+router.get('/pipeline', validate(schemas.pipeline), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.pipeline);
 router.get('/:orderId', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.get);
 
 router.post(
@@ -31,6 +37,14 @@ router.post(
   validate(schemas.cancel),
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
   controller.cancel
+);
+// A COD order confirmed from the order page — same rules and bookkeeping as
+// a queue call (modules/cod/confirmationService.js#confirmFromOrder).
+router.post(
+  '/:orderId/confirmation',
+  validate(schemas.confirm),
+  requirePermission(PERMISSIONS.ORDERS_CONFIRM),
+  controller.confirm
 );
 router.patch(
   '/:orderId',
@@ -49,6 +63,7 @@ router.post(
   '/:orderId/shipments',
   validate(schemas.createShipment),
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  requireLive,
   controller.createShipment
 );
 router.patch(
@@ -57,11 +72,20 @@ router.patch(
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
   controller.updateShipment
 );
+
+// Shipments booked with a connected courier: pull the status now, and the
+// courier's own printable label (AWB).
 router.post(
-  '/:orderId/shipments/:shipmentId/refresh',
-  validate(schemas.refreshShipment),
+  '/:orderId/shipments/:shipmentId/sync',
+  validate(carrierSchemas.shipmentAction),
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
-  controller.refreshShipment
+  carrierController.sync
+);
+router.get(
+  '/:orderId/shipments/:shipmentId/label',
+  validate(carrierSchemas.shipmentAction),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  carrierController.label
 );
 
 router.get(

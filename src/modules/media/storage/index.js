@@ -10,6 +10,7 @@ const backends = { local: localStorage, r2: r2Storage };
 // env.js). Read here rather than captured once so a runtime override in tests
 // still applies. Every backend exposes the same
 //   put({ workspaceId, filename, buffer, contentType }) -> { url, path }
+//   remove(path)  — deletes one object by the key put() returned
 function getStorage() {
   const name = env.storage.provider;
   const backend = backends[name];
@@ -55,4 +56,17 @@ function r2ConfigError() {
   return missing.length ? `STORAGE_PROVIDER=r2 but missing: ${missing.map((k) => map[k]).join(', ')}` : null;
 }
 
-module.exports = { getStorage, describeStorage, r2ConfigError, UPLOAD_ROOT: localStorage.UPLOAD_ROOT };
+// Health probe for the ACTIVE backend, for /admin/system/services. Each
+// backend implements probe() itself so the S3 client and the disk paths stay
+// behind their own module.
+function probeStorage() {
+  return getStorage().probe();
+}
+
+module.exports = {
+  getStorage,
+  describeStorage,
+  r2ConfigError,
+  probeStorage,
+  UPLOAD_ROOT: localStorage.UPLOAD_ROOT,
+};

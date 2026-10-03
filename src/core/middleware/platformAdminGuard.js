@@ -1,17 +1,26 @@
 'use strict';
 
 const { AuthorizationError } = require('../errors/AppError');
+const { hasPlatformPermission } = require('../security/platformPermissions');
 
 /**
- * Gate for the platform-admin endpoints. Bypasses workspace RBAC entirely;
- * the only check is the global `users.platform_admin` flag. Runs after
- * `authenticate` / `authenticateFlexible`.
+ * Gates for the platform-console endpoints. They bypass workspace RBAC
+ * entirely and check only the account's own platform permission set
+ * (users.platform_permissions, see core/security/platformPermissions.js).
+ * Run after `authenticate` / `authenticateFlexible`, which reload the user
+ * on every request, so a role change applies to that user's next call.
+ *
+ * Every /admin route names the permission it needs; there is deliberately no
+ * "any platform user" gate, so a route cannot be left open to agents by
+ * forgetting to narrow it.
  */
-function requirePlatformAdmin(req, res, next) {
-  if (!req.user || req.user.platformAdmin !== true) {
-    return next(new AuthorizationError('Platform admin access required'));
-  }
-  next();
+function requirePlatformPermission(permission) {
+  return (req, res, next) => {
+    if (!hasPlatformPermission(req.user, permission)) {
+      return next(new AuthorizationError(`Missing required platform permission: ${permission}`));
+    }
+    next();
+  };
 }
 
-module.exports = { requirePlatformAdmin };
+module.exports = { requirePlatformPermission };

@@ -1,7 +1,30 @@
 'use strict';
 const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
+const { STAGES } = require('./orderStage');
+const { ORDER_SORT_KEYS, DEFAULT_ORDER_SORT } = require('./orderSort');
+const { CHANNELS: CONFIRMATION_CHANNELS } = require('../cod/confirmationValidation');
 const uuid = Joi.string().uuid();
+
+// carrierAddress.cityId / districtId: required together, unless the address
+// is sent as `path` or `names` instead.
+const carrierIdUnlessPathOrNames = () =>
+  Joi.string()
+    .max(100)
+    .when('path', {
+      is: Joi.exist(),
+      then: Joi.forbidden(),
+      otherwise: Joi.when('names', { is: Joi.exist(), then: Joi.forbidden(), otherwise: Joi.required() }),
+    });
+
+// The search box and date range, shared by the list and the tab counts so the
+// two can never disagree about what they are counting. `q` is trimmed before
+// the length check — two spaces are not a two-character search.
+const search = {
+  q: Joi.string().trim().min(2).max(100).optional(),
+  from: Joi.date().iso().optional(),
+  to: Joi.date().iso().optional(),
+};
 
 const contact = Joi.object({
   fullName: Joi.string().max(200).required(),
@@ -18,19 +41,6 @@ const address = Joi.object({
   postalCode: Joi.string().max(20).allow(null, '').optional(),
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
-
-// Filters shared by GET /orders and GET /orders/counts.
-const listFilters = {
-  q: Joi.string().trim().max(100).optional(),
-  from: Joi.date().iso().optional(),
-  to: Joi.date().iso().optional(),
-  source: Joi.string().valid('store', 'funnel').optional(),
-  funnelId: uuid.optional(),
-  paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').optional(),
-  cancelled: Joi.boolean().optional(),
-  financialState: Joi.string().valid('pending', 'partially_paid', 'paid', 'failed', 'refunded', 'partially_refunded').optional(),
-  fulfillmentState: Joi.string().valid('unfulfilled', 'partially_fulfilled', 'fulfilled', 'returned').optional(),
-};
 
 module.exports = {
   create: {
@@ -58,7 +68,20 @@ module.exports = {
   get: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }) },
   cancel: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
-    body: Joi.object({ reason: Joi.string().min(1).max(500).required() }),
+    body: Joi.object({
+      reason: Joi.string().min(1).max(500).required(),
+      // The merchant cancelled the order's courier booking in the courier's
+      // own dashboard (couriers without a cancel API only).
+      acknowledgeManualCancel: Joi.boolean().optional(),
+    }),
+  },
+  confirm: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    body: Joi.object({
+      notes: Joi.string().max(1000).allow('').optional(),
+      // How the customer was reached — see cod/confirmationValidation.js.
+      channel: Joi.string().valid(...CONFIRMATION_CHANNELS).optional(),
+    }),
   },
   update: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
@@ -71,22 +94,32 @@ module.exports = {
   createShipment: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
     body: Joi.object({
-      // 'manual' (or any other carrier without an API) takes the
-      // hand-typed waybillNumber/trackingUrl below as-is. 'bosta' ignores
-      // both and books a real delivery instead — see orderService#createShipment.
       carrierCode: Joi.string().min(1).max(100).required(),
       waybillNumber: Joi.string().max(100).allow(null, '').optional(),
       trackingUrl: Joi.string().uri().max(500).allow(null, '').optional(),
-      // Optional Bosta district (staff-picked via the /bosta/cities +
-      // /bosta/cities/:cityId/districts lookups) for this one shipment only —
-      // only read when carrierCode is 'bosta'; ignored otherwise. Omitting it
-      // leaves booking behavior unchanged (Bosta may still refuse a delivery
-      // it can't place on its own — see bostaCarrier.js#buildDropOffAddress).
-      bostaDistrictId: Joi.string().max(100).allow(null, '').optional(),
+      // Connected couriers only (see modules/shipping/carriers). The carrier's
+      // own ids for the drop-off address, sent when the order's free-text
+      // address couldn't be matched (422 CARRIER_ADDRESS_UNMATCHED). Either
+      // cityId + districtId (city/district carriers) or `path`, one id per
+      // address level, top first (any carrier). Or `names`: the carrier's own
+      // names typed by the merchant, one per level, only while the carrier
+      // refuses this account its address list (422
+      // CARRIER_ADDRESS_NAMES_REQUIRED).
+      carrierAddress: Joi.object({
+        names: Joi.array().items(Joi.string().trim().max(100).allow('')).min(1).max(6).optional(),
+        path: Joi.array()
+          .items(Joi.string().max(100))
+          .min(1)
+          .max(6)
+          .when('names', { is: Joi.exist(), then: Joi.forbidden(), otherwise: Joi.optional() }),
+        cityId: carrierIdUnlessPathOrNames(),
+        districtId: carrierIdUnlessPathOrNames(),
+      }).optional(),
+      notes: Joi.string().max(500).allow(null, '').optional(),
+      // Connected couriers only: book as this weight tier instead of the one
+      // stored on the order at checkout.
+      tierId: uuid.optional(),
     }),
-  },
-  refreshShipment: {
-    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required(), shipmentId: uuid.required() }),
   },
   updateShipment: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required(), shipmentId: uuid.required() }),
@@ -96,21 +129,31 @@ module.exports = {
         .optional(),
       waybillNumber: Joi.string().max(100).allow(null, '').optional(),
       trackingUrl: Joi.string().uri().max(500).allow(null, '').optional(),
-    }).min(1),
+      // With status 'cancelled' on a booking whose courier has no cancel API.
+      acknowledgeManualCancel: Joi.boolean().optional(),
+    })
+      .min(1)
+      .or('status', 'waybillNumber', 'trackingUrl'),
   },
   list: {
     params: Joi.object({ workspaceId: uuid.required() }),
     query: Joi.object({
       limit: Joi.number().integer().min(1).max(200).default(50),
-      // Opaque keyset cursor (base64url JSON) — see orderService#listOrders.
-      cursor: Joi.string().max(500).optional(),
-      sort: Joi.string().valid('newest', 'oldest', 'total_desc', 'total_asc').default('newest'),
+      cursor: uuid.optional(),
+      // A whitelisted key (orderSort.js); a cursor only pages the sort it came from.
+      sort: Joi.string()
+        .valid(...ORDER_SORT_KEYS)
+        .default(DEFAULT_ORDER_SORT),
       confirmationState: Joi.string().valid('pending', 'confirmed', 'rejected', 'unreachable', 'postponed').optional(),
-      ...listFilters,
+      financialState: Joi.string().valid('pending', 'partially_paid', 'paid', 'failed', 'refunded', 'partially_refunded').optional(),
+      fulfillmentState: Joi.string().valid('unfulfilled', 'partially_fulfilled', 'fulfilled', 'returned').optional(),
+      stage: Joi.string().valid(...STAGES).optional(),
+      ...search,
     }),
   },
-  counts: {
+  pipeline: {
     params: Joi.object({ workspaceId: uuid.required() }),
-    query: Joi.object(listFilters),
+    // No `stage`: the counts are the answer for every stage at once.
+    query: Joi.object(search),
   },
 };

@@ -1,5 +1,8 @@
 'use strict';
 
+// GET /analytics/funnels and /analytics/funnels/:funnelId, from funnel
+// sessions and funnel orders. Ported from the zimos-additions branch.
+
 const {
   app,
   request,
@@ -63,6 +66,7 @@ async function setup() {
         .send({
           items: [{ variantId, quantity: 1 }],
           contact: { fullName: 'Funnel Buyer', phone: nextPhone() },
+          shippingAddress: { country: 'EG', city: 'Cairo', addressLine: '1 Funnel St' },
           paymentMethod: 'cod',
         });
       if (res.status !== 201) throw new Error(`placeOrder failed: ${res.status} ${JSON.stringify(res.body)}`);
@@ -114,7 +118,7 @@ async function runThreeSessions(ctx, funnel, variant) {
   const decliner = await ctx.startSession(funnel.id, { visitorId: 'v-decliner', attribution: { utm_source: 'facebook', utm_medium: 'cpc', utm_campaign: 'launch' } });
   const second = await ctx.placeOrder(variant.id);
   await ctx.advance(funnel.id, decliner.body.session.id, { type: 'completed_checkout', orderId: second.id });
-  await ctx.advance(funnel.id, decliner.body.session.id, { type: 'declined_offer' }); // -> lose (still active)
+  await ctx.advance(funnel.id, decliner.body.session.id, { type: 'declined_offer' }); // -> lose (terminal: completed)
 
   await ctx.startSession(funnel.id, { visitorId: 'v-bounce', attribution: { utm_source: 'tiktok' } });
 
@@ -215,7 +219,10 @@ describe('Funnel analytics — detail', () => {
     expect(byKey.checkout).toMatchObject({ stepType: 'checkout', reached: 3, dropped: 1, reachRate: 100 });
     expect(byKey.upsell).toMatchObject({ reached: 2, dropped: 0, reachRate: 66.7 });
     expect(byKey.win).toMatchObject({ reached: 1, dropped: 0 }); // buyer finished the funnel there
-    expect(byKey.lose).toMatchObject({ reached: 1, dropped: 1 }); // decliner is still sitting on it
+    // Our runtime completes a session the moment it lands on a step no edge
+    // leaves (funnelsService advance), so the decliner finished on "lose"
+    // rather than dropping there.
+    expect(byKey.lose).toMatchObject({ reached: 1, dropped: 0 });
 
     // Sources: upsell revenue follows the source of the session that produced it.
     expect(res.body.sources).toEqual([

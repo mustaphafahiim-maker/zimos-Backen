@@ -33,6 +33,20 @@ module.exports = (sequelize, DataTypes) => {
       media: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
       tags: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
       seo: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // How this product ships — see migration 114 and shipping/shippingRules.
+      // 'standard' uses the store's rates; 'free' ships free (the whole order
+      // only when every line is free); 'extra_fee' adds shippingExtraAmount
+      // per unit on top of the store's rate. The amount is set exactly when
+      // the mode is 'extra_fee' (a DB check enforces it).
+      shippingMode: {
+        type: DataTypes.STRING(16),
+        allowNull: false,
+        defaultValue: 'standard',
+        field: 'shipping_mode',
+      },
+      shippingExtraAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'shipping_extra_amount' },
+      // Fields the shopper fills in when ordering (catalog/customFields.js), at most five.
+      customFields: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'custom_fields' },
     },
     {
       tableName: 'products',

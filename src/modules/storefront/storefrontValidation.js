@@ -1,6 +1,7 @@
 'use strict';
 const Joi = require('joi');
 const { workspaceRef } = require('../../core/utils/workspaceSlug');
+const { CATALOG_SORTS } = require('./catalogSettings');
 
 const uuid = Joi.string().uuid();
 const workspaceIdParam = workspaceRef().required();
@@ -10,11 +11,34 @@ module.exports = {
     params: Joi.object({ workspaceId: workspaceIdParam }),
     query: Joi.object({
       collectionId: uuid.optional(),
-      tag: Joi.string().max(100).optional(),
-      search: Joi.string().max(200).optional(),
+      // A collection by id or slug; its sub-collections' products are included.
+      collection: Joi.string().trim().min(1).max(200).optional(),
+      // One tag, or several (?tag=a&tag=b): a product with any of them.
+      tag: Joi.alternatives()
+        .try(Joi.string().trim().max(100), Joi.array().items(Joi.string().trim().max(100)).max(20))
+        .optional(),
+      search: Joi.string().trim().max(200).allow('').optional(),
+      // Minor units, compared with each active variant's price.
+      minPrice: Joi.number().integer().min(0).optional(),
+      maxPrice: Joi.number().integer().min(0).optional(),
+      // Built from ?option[Size]=M&option[Size]=L by optionFilters.js.
+      options: Joi.object()
+        .pattern(Joi.string().max(100), Joi.array().items(Joi.string().max(100)).min(1).max(20))
+        .max(10)
+        .optional(),
+      sort: Joi.string()
+        .valid('relevance', ...CATALOG_SORTS)
+        .optional(),
+      page: Joi.number().integer().min(1).max(1000).optional(),
+      // Counts per collection, tag, option value and the price range.
+      facets: Joi.boolean().optional(),
       limit: Joi.number().integer().min(1).max(100).default(24),
       cursor: uuid.optional(),
     }),
+  },
+  suggest: {
+    params: Joi.object({ workspaceId: workspaceIdParam }),
+    query: Joi.object({ q: Joi.string().trim().max(100).allow('').required() }),
   },
   getProduct: {
     params: Joi.object({ workspaceId: workspaceIdParam, idOrSlug: Joi.string().max(300).required() }),
@@ -29,16 +53,27 @@ module.exports = {
       number: Joi.string().required().trim().regex(/^[A-Za-z0-9-]{3,40}$/),
     }),
   },
-  workspaceParam: { params: Joi.object({ workspaceId: workspaceIdParam }) },
-  getCollection: { params: Joi.object({ workspaceId: workspaceIdParam, collectionId: uuid.required() }) },
-  quoteShipping: {
+  // Shipping price for the checkout form. `items` or an X-Cart-Token header,
+  // like checkout itself. `governorate` is the address's province.
+  shippingQuote: {
     params: Joi.object({ workspaceId: workspaceIdParam }),
-    query: Joi.object({
+    body: Joi.object({
       country: Joi.string().length(2).uppercase().default('EG'),
-      region: Joi.string().max(100).allow('').optional(),
-      subtotal: Joi.number().integer().min(0).default(0),
-      quantity: Joi.number().integer().min(1).max(1000).default(1),
-      weightGrams: Joi.number().integer().min(0).default(0),
+      governorate: Joi.string().max(100).allow(null, '').optional(),
+      items: Joi.array()
+        .items(
+          Joi.object({
+            variantId: uuid.required(),
+            offerId: uuid.optional(),
+            quantity: Joi.number().integer().min(1).max(1000).default(1),
+          })
+        )
+        .min(1)
+        .max(50)
+        .optional(),
     }),
   },
+  workspaceParam: { params: Joi.object({ workspaceId: workspaceIdParam }) },
+  // An id or a slug.
+  getCollection: { params: Joi.object({ workspaceId: workspaceIdParam, collectionId: Joi.string().trim().min(1).max(200).required() }) },
 };

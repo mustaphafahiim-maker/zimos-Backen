@@ -14,7 +14,7 @@ async function setConfirmationState(workspaceId, orderId, state, req, transactio
   const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction });
   if (!order) throw new NotFoundError('Order');
   const before = order.confirmationState;
-  await order.update({ confirmationState: state }, { transaction });
+  await order.update({ confirmationState: state, confirmedAt: confirmedAtFor(order, state) }, { transaction });
   await recordAudit({
     workspaceId,
     actorUserId: req.user ? req.user.id : null,
@@ -27,6 +27,15 @@ async function setConfirmationState(workspaceId, orderId, state, req, transactio
     transaction,
   });
   return order;
+}
+
+/**
+ * confirmed_at follows the confirmation state (migration 115): stamped on the
+ * move into 'confirmed', kept while it stays there, cleared when it leaves.
+ */
+function confirmedAtFor(order, state, now = new Date()) {
+  if (state !== 'confirmed') return null;
+  return order.confirmationState === 'confirmed' && order.confirmedAt ? order.confirmedAt : now;
 }
 
 async function setFinancialState(workspaceId, orderId, state, req, transaction) {
@@ -67,4 +76,4 @@ async function setFulfillmentState(workspaceId, orderId, state, req, transaction
   return order;
 }
 
-module.exports = { setConfirmationState, setFinancialState, setFulfillmentState };
+module.exports = { setConfirmationState, setFinancialState, setFulfillmentState, confirmedAtFor };

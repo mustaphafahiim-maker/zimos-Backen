@@ -67,6 +67,23 @@ module.exports = (sequelize, DataTypes) => {
       // Links an appended-order (e.g. COD upsell that couldn't be merged
       // because the waybill was already created) back to the original order.
       linkedFromOrderId: { type: DataTypes.UUID, allowNull: true, field: 'linked_from_order_id' },
+      // Weight snapshot taken at checkout — see migration 097.
+      totalWeightGrams: { type: DataTypes.INTEGER, allowNull: true, field: 'total_weight_grams' },
+      weightTierSnapshot: { type: DataTypes.JSONB, allowNull: true, field: 'weight_tier_snapshot' },
+      weightEstimated: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'weight_estimated' },
+      // How shippingAmount was reached (rule, base, extra fees, governorate) —
+      // migration 114. Display only; the amount is shippingAmount.
+      shippingSnapshot: { type: DataTypes.JSONB, allowNull: true, field: 'shipping_snapshot' },
+      // When the current confirmation happened; null while not confirmed —
+      // migration 115, written by orderStateService.setConfirmationState.
+      confirmedAt: { type: DataTypes.DATE, allowNull: true, field: 'confirmed_at' },
+      // When the order became a sale — see modules/orders/orderCompletion.js.
+      completedAt: { type: DataTypes.DATE, allowNull: true, field: 'completed_at' },
+      // Unpaid online orders — see migration 099. The token hash is never
+      // serialized (toJSON below).
+      paymentExpiresAt: { type: DataTypes.DATE, allowNull: true, field: 'payment_expires_at' },
+      paymentTokenHash: { type: DataTypes.STRING(64), allowNull: true, field: 'payment_token_hash' },
+      completionContext: { type: DataTypes.JSONB, allowNull: true, field: 'completion_context' },
     },
     {
       tableName: 'orders',
@@ -81,10 +98,16 @@ module.exports = (sequelize, DataTypes) => {
     }
   );
 
+  Order.prototype.toJSON = function toJSON() {
+    const values = this.get({ plain: true });
+    delete values.paymentTokenHash;
+    delete values.completionContext;
+    return values;
+  };
+
   Order.associate = (models) => {
     Order.belongsTo(models.Workspace, { foreignKey: 'workspaceId', as: 'workspace' });
     Order.belongsTo(models.Customer, { foreignKey: 'customerId', as: 'customer' });
-    Order.belongsTo(models.Funnel, { foreignKey: 'funnelId', as: 'funnel' });
     Order.hasMany(models.OrderItem, { foreignKey: 'orderId', as: 'items' });
     Order.hasMany(models.Payment, { foreignKey: 'orderId', as: 'payments' });
     Order.hasMany(models.Refund, { foreignKey: 'orderId', as: 'refunds' });

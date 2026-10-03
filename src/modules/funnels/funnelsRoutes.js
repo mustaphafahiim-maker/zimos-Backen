@@ -5,7 +5,7 @@ const validate = require('../../core/middleware/validate');
 const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
-const { requireActiveSubscription } = require('../../core/middleware/subscriptionGuard');
+const { requireCreationAllowed, requireLive } = require('../../core/middleware/subscriptionGuard');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./funnelsController');
 const schemas = require('./funnelsValidation');
@@ -17,23 +17,36 @@ const MANAGE = requirePermission(PERMISSIONS.FUNNELS_MANAGE);
 const PUBLISH = requirePermission(PERMISSIONS.FUNNELS_PUBLISH);
 
 // --- funnels ---
-router.post('/', validate(schemas.createFunnel), MANAGE, requireActiveSubscription, controller.createFunnel);
+// Creating a funnel is refused while the store is restricted (unpaid past its
+// grace day, or suspended); editing, publishing and pausing are not.
+router.post('/', validate(schemas.createFunnel), MANAGE, requireCreationAllowed, controller.createFunnel);
 router.get('/', MANAGE, controller.listFunnels);
 router.get('/:funnelId', validate(schemas.funnelIdParam), MANAGE, controller.getFunnel);
 router.patch('/:funnelId', validate(schemas.updateFunnel), MANAGE, controller.updateFunnel);
+// Creates a funnel, so it sits behind the same creation lock as POST /.
+router.post(
+  '/:funnelId/duplicate',
+  validate(schemas.duplicateFunnel),
+  MANAGE,
+  requireCreationAllowed,
+  controller.duplicateFunnel
+);
 router.delete('/:funnelId', validate(schemas.funnelIdParam), MANAGE, controller.deleteFunnel);
 
 // --- publish / revisions / rollback / pause ---
-router.post('/:funnelId/publish', validate(schemas.publish), PUBLISH, requireActiveSubscription, controller.publishFunnel);
+// Putting a funnel live (publish, rollback, resume) needs a store out of
+// draft; pausing one never does.
+router.post('/:funnelId/publish', validate(schemas.publish), PUBLISH, requireLive, controller.publishFunnel);
 router.get('/:funnelId/revisions', validate(schemas.funnelIdParam), MANAGE, controller.listRevisions);
 router.post(
   '/:funnelId/revisions/:revisionId/rollback',
   validate(schemas.rollback),
   PUBLISH,
+  requireLive,
   controller.rollback
 );
 router.post('/:funnelId/pause', validate(schemas.funnelIdParam), PUBLISH, controller.pause);
-router.post('/:funnelId/resume', validate(schemas.funnelIdParam), PUBLISH, controller.resume);
+router.post('/:funnelId/resume', validate(schemas.funnelIdParam), PUBLISH, requireLive, controller.resume);
 
 // --- steps ---
 router.post('/:funnelId/steps', validate(schemas.createStep), MANAGE, controller.createStep);

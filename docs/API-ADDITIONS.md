@@ -1,7 +1,8 @@
 # API additions
 
-What this branch adds on top of `main`, for review before merging. Everything
-here is new files except the short list under "Changes to existing files".
+What this branch adds on top of upstream `main` (as of `0dd31ce`, 2026-10-02),
+for review before merging. Everything here is new files except the short list
+under "Changes to existing files".
 
 Conventions followed from the existing code: `Router({ mergeParams: true })`,
 `authenticate` → `resolveTenant` → `requirePermission(...)`, Joi schemas passed
@@ -10,17 +11,14 @@ for domain errors, `recordAudit` on every mutation, money in minor units.
 
 ## Migrations
 
-Numbered 082–087 so they run after `079-add-fees-to-plans`,
-`080-create-feature-flags` and `081-create-announcements`.
+Numbered 130–133 so they run after upstream's `129-create-billing-payment-attempts`.
 
 | # | Adds |
 |---|---|
-| 082 | `media_assets` — uploaded images per workspace |
-| 083 | recovery columns on `checkout_sessions` (contact, cart, stage, converted/abandoned) |
-| 084 | `low_stock_threshold` on `product_variants` |
-| 085 | `workspace_integrations`, `whatsapp_conversations`, `whatsapp_messages` |
-| 086 | `automation_runs` |
-| 087 | `cod_settlements`, `cod_settlement_lines` |
+| 130 | `low_stock_threshold` on `product_variants` |
+| 131 | `workspace_integrations`, `whatsapp_conversations`, `whatsapp_messages` |
+| 132 | `automation_runs` |
+| 133 | `cod_settlements`, `cod_settlement_lines` |
 
 ## New endpoints
 
@@ -64,7 +62,7 @@ into the request — a failed run is recorded, not raised.
 | Method | Path | Notes |
 |---|---|---|
 | GET/PUT/DELETE | `/whatsapp/integration` | credentials are AES-256-GCM encrypted at rest (`INTEGRATIONS_ENCRYPTION_KEY`); the response only ever returns a masked token |
-| GET | `/whatsapp/conversations` | `?status&search&limit&cursor` |
+| GET | `/whatsapp/conversations` | `?status&search&limit&before` |
 | PATCH | `/whatsapp/conversations/:conversationId` | close / reopen |
 | GET | `/whatsapp/conversations/:conversationId/messages` | |
 | POST | `/whatsapp/messages` | free text inside the 24h window, otherwise an approved template |
@@ -73,58 +71,22 @@ Public webhook, outside the workspace mount:
 `GET|POST /api/v1/webhooks/whatsapp/:workspaceId` — verified with
 `X-Hub-Signature-256` against the app secret, using `req.rawBody`.
 
-### Abandoned checkouts — `/checkout-sessions`
+### Server-side ad pixels — `/server-pixels`
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/checkout-sessions` | `?stage&limit&before` |
-| PATCH | `/checkout-sessions/:sessionId` | mark recovered / dismissed |
-| POST | `/store/:workspaceId/checkout-sessions` | public; the storefront upserts the session while the shopper is still typing. The checkout controller marks it converted when the order is placed. |
+| GET/PUT/DELETE | `/server-pixels/integration` | the Conversions API tokens for Meta, TikTok and Snapchat and the GA4 API secret, encrypted like the WhatsApp credentials and only ever returned masked |
+
+A `Purchase` is sent server-side when an order is created (never for an order
+still waiting for its online payment), with the order id as the event id so the
+browser pixel's event dedupes against it. The public pixel IDs live in
+`settings.tracking_pixels` (PATCH `/workspaces/:id`), and `GET /store/:workspaceId`
+returns them in a read-only `tracking` block.
 
 ### Merchant records
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/analytics/summary` | `?from&to` — revenue, orders, COD rate, top products, all computed from orders |
-| GET | `/billing` | the merchant's own plan, subscription and usage |
-| GET | `/audit-logs` | `?action&entityType&limit&before` |
+| GET | `/audit-logs` | `?action&entityType&limit&before`, each entry with its actor |
 | GET | `/invoices` | `?status&limit&before` |
-| GET | `/media` and DELETE `/media/:mediaId` | the store's image library (upload already existed) |
-| GET | `/confirmation-tasks/attempts`, `/confirmation-tasks/agents` | call-centre history and per-agent stats |
-
-### Fraud rules — `/fraud`
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/fraud/flagged-orders` | |
-| POST | `/fraud/flagged-orders/:orderId/approve` | clears the risk flags |
-| GET/POST | `/fraud/blocklist` | blocked phone numbers = blacklisted customers |
-
-Rules live in `settings.fraud_rules` and are evaluated on storefront orders
-only (`!req.user`), so staff-created orders are never blocked.
-
-### Platform admin — `/api/v1/admin`
-New file `modules/platformAdmin/platformOpsRoutes.js`, same mount and the same
-`requirePlatformAdmin` guard as `platformAdminRoutes.js`. Plans, subscriptions,
-feature flags and announcements were deliberately **not** duplicated.
-
-`GET /overview`, `GET /workspaces/:workspaceId`,
-`PATCH /workspaces/:workspaceId/status`,
-`PATCH /workspaces/:workspaceId/subscription`, `GET /users`,
-`PATCH /users/:userId`, `GET /audit-logs`, `GET /templates`,
-`PATCH /templates/:templateId`, `GET /system`.
-
-An admin cannot demote or suspend their own account (`CANNOT_DEMOTE_SELF`).
-
-### Public storefront
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/store/:workspaceId/shipping/quote` | `?country&region&subtotal&quantity&weightGrams` — same pricing path checkout uses |
-| POST | `/store/:workspaceId/checkout-sessions` | see above |
-
-`GET /store/:workspaceId` also returns two new read-only blocks:
-`tracking` (public pixel IDs from `settings.tracking_pixels`) and `checkout`
-(the checkout form behaviour from `settings.checkout_settings`).
-
-Order tracking uses the existing `GET /store/:workspaceId/orders/track`; the
-lookup endpoint that had been written separately was dropped.
 
 ## Changes to existing files
 
@@ -132,26 +94,31 @@ Kept as small as possible — nothing was restyled or refactored.
 
 | File | Change |
 |---|---|
-| `src/app.js` | requires and mounts for the routers above; `express.json` now keeps `rawBody` for webhook signature checks |
-| `src/modules/storefront/storefrontService.js` | `quoteShipping()` added; `getStorefront` also returns `tracking` and `checkout` |
-| `src/modules/storefront/storefrontController.js` / `storefrontRoutes.js` / `storefrontValidation.js` | the two public routes above |
-| `src/modules/checkout/checkoutController.js` | enforces `settings.checkout_settings`, marks the checkout session converted |
-| `src/modules/orders/orderService.js`, `modules/cod/confirmationService.js` | emit automation triggers after commit |
-| `src/modules/media/*` | list and delete, and the upload response now includes the asset `id` |
-| `src/modules/billing/gatewaySignature.js` | the billing webhook is HMAC-verified (`BILLING_WEBHOOK_SECRET`) and refuses every request when the secret is unset |
+| `src/app.js` | requires and mounts for the routers above |
+| `src/modules/orders/orderService.js` | `order.created` (automations, server pixels) and `order.cancelled` (automations) after commit |
+| `src/modules/orders/shipmentLifecycle.js` | `order.shipped` / `order.out_for_delivery` / `order.delivered` automations when a shipment's status changes |
+| `src/modules/cod/confirmationService.js` | `order.confirmed` / `order.rejected` automations after commit |
+| `src/modules/storefront/storefrontService.js` | `getStorefront` also returns `tracking` |
+| `src/modules/workspaces/workspaceService.js`, `workspaceValidation.js` | `tracking_pixels` in workspace settings |
+| `src/modules/media/mediaService.js`, `mediaController.js` | GLB 3D models accepted (15MB ceiling, stored as uploaded) for the `product_3d` page element |
 | `src/modules/catalog/catalogValidation.js`, `db/models/ProductVariant.js` | `lowStockThreshold` on variants |
-| `src/modules/workspaces/*` | `tracking_pixels`, `fraud_rules` and `checkout_settings` in workspace settings |
-| `tests/integration/billing.test.js` | webhook requests are signed now |
-| `tests/integration/mediaR2Storage.test.js` | the upload response includes `id` |
+
+## Dropped in favour of upstream's own implementation
+
+Earlier versions of this branch carried these; upstream now has its own, so
+ours were removed rather than merged: Bosta (→ `shipping/carriers`), Paymob
+(→ `payments/gateways`), fraud rules (→ `modules/fraud`), abandoned checkouts
+(→ `modules/checkoutSessions`), the shipping quote, orders list paging and
+counts, web / funnel analytics, the media library list, merchant billing, the
+platform-admin overview routes, and the billing webhook signature. The
+confirmation call log and per-agent stats were removed with the call centre.
 
 ## Environment
 
-New, all optional except where a feature is used:
-
 ```
-BILLING_WEBHOOK_SECRET=        # required for POST /billing/webhook to accept anything
-INTEGRATIONS_ENCRYPTION_KEY=   # 32-byte key (base64 or hex) for stored WhatsApp credentials
+INTEGRATIONS_ENCRYPTION_KEY=   # encrypts stored WhatsApp and server-pixel credentials; required in production
 PUBLIC_API_URL=                # used to build the WhatsApp webhook URL shown in settings
+META_GRAPH_API_VERSION=        # optional, defaults to v21.0
 ```
 
 Without these keys the features report themselves as not connected. Nothing is
@@ -159,7 +126,6 @@ stubbed or faked.
 
 ## Tests
 
-`npm test` → 50 suites, 397 tests, all passing, with the new suites:
-`settlements`, `automations`, `whatsapp`, `checkoutSessions`,
-`fraudAndCheckoutSettings`, `trackingPixels`, `merchantRecords`,
-`lowStockThreshold`, `platformOps`.
+New suites: `settlements`, `automations`, `whatsapp`, `pixelEvents`,
+`trackingPixels`, `merchantRecords`, `lowStockThreshold`, `immersiveBlocks`,
+`nicheTemplates`.

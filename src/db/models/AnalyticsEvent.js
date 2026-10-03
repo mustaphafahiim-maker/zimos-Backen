@@ -24,7 +24,7 @@ module.exports = (sequelize, DataTypes) => {
       orderId: { type: DataTypes.UUID, allowNull: true, field: 'order_id' },
       revenueAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'revenue_amount' },
       metadata: { type: DataTypes.JSONB, allowNull: true },
-      // Web-analytics columns (ported from Umami's website_event, MIT).
+      // Web-analytics columns (ported from Umami's website_event, MIT; migration 113).
       visitId: { type: DataTypes.STRING(64), allowNull: true, field: 'visit_id' },
       eventType: { type: DataTypes.SMALLINT, allowNull: false, defaultValue: 1, field: 'event_type' }, // 1 pageview, 2 custom, 3 link, 4 pixel
       urlPath: { type: DataTypes.STRING(500), allowNull: true, field: 'url_path' },

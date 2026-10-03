@@ -5,7 +5,7 @@
 // updates, no duplicate); reviews start pending and only approved ones show
 // on the public product endpoint.
 
-const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace } = require('../helpers/factories');
+const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace, confirmCodOrder } = require('../helpers/factories');
 const db = require('../../src/db/models');
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
@@ -27,10 +27,12 @@ async function placeOrder(token, workspaceId, variantId) {
 }
 
 async function markDelivered(token, workspaceId, orderId) {
+  // A COD order ships only once confirmed.
+  await confirmCodOrder(token, workspaceId, orderId);
   const ship = await request(app)
     .post(`/api/v1/workspaces/${workspaceId}/orders/${orderId}/shipments`)
     .set(bearer(token))
-    .send({ carrierCode: 'manual' });
+    .send({ carrierCode: 'local-courier' });
   await request(app)
     .patch(`/api/v1/workspaces/${workspaceId}/orders/${orderId}/shipments/${ship.body.shipment.id}`)
     .set(bearer(token))

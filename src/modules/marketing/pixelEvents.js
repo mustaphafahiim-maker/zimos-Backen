@@ -20,8 +20,7 @@ const googleMp = require('./pixelProviders/googleMp');
  * actually configured (a public pixel/measurement id in
  * workspaces.settings.tracking_pixels AND a matching secret in this
  * workspace's "server_pixels" integration). A platform missing either half
- * is silently skipped, exactly like every other integration in this
- * codebase (see paymobService/bostaService: no integration -> no call).
+ * is silently skipped: no integration -> no call.
  *
  * Only 'order.created' is handled. That is the one moment that corresponds
  * to a Purchase-equivalent conversion for this storefront: checkout is a
@@ -117,10 +116,13 @@ async function run(workspaceId, trigger, orderId) {
 /**
  * Fire-and-forget, exactly like automationEngine.emit — never blocks or
  * fails order creation. Call from `transaction.afterCommit` so the order
- * (and, on a webhook-driven confirm, nothing here) already exists.
+ * (and, on a webhook-driven confirm, nothing here) already exists. Under
+ * test the work is handed back so the afterCommit hook waits for it, for
+ * the same reason as automationEngine.emit.
  */
 function emit(workspaceId, trigger, orderId) {
-  run(workspaceId, trigger, orderId).catch((err) => logger.error(`[pixelEvents] ${trigger} for order ${orderId} failed: ${err.message}`));
+  const work = run(workspaceId, trigger, orderId).catch((err) => logger.error(`[pixelEvents] ${trigger} for order ${orderId} failed: ${err.message}`));
+  return env.isTest ? work : undefined;
 }
 
 module.exports = { emit, run };

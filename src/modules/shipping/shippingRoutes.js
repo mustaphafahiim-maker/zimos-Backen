@@ -13,6 +13,10 @@ const schemas = require('./shippingValidation');
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.SHIPPING_MANAGE));
 
+// --- Store prices and default courier ---------------------------------------
+router.get('/settings', validate(schemas.settings), controller.getSettings);
+router.patch('/settings', validate(schemas.updateSettings), controller.updateSettings);
+
 // --- Zones -----------------------------------------------------------------
 router.get('/zones', validate(schemas.listZones), controller.listZones);
 router.post('/zones', validate(schemas.createZone), controller.createZone);
@@ -26,5 +30,12 @@ router.post('/zones/:zoneId/rates', validate(schemas.createRate), controller.cre
 router.get('/rates/:rateId', validate(schemas.rateParams), controller.getRate);
 router.patch('/rates/:rateId', validate(schemas.updateRate), controller.updateRate);
 router.delete('/rates/:rateId', validate(schemas.rateParams), controller.deleteRate);
+
+// --- Weight tiers and tier pricing ----------------------------------------
+router.get('/weight-tiers', validate(schemas.weightTiers), controller.getWeightTiers);
+router.put('/weight-tiers', validate(schemas.replaceWeightTiers), controller.replaceWeightTiers);
+router.get('/zones/:zoneId/tier-prices', validate(schemas.zoneParams), controller.getTierPrices);
+router.put('/zones/:zoneId/tier-prices', validate(schemas.replaceTierPrices), controller.replaceTierPrices);
+router.post('/pricing-mode', validate(schemas.pricingMode), controller.setPricingMode);
 
 module.exports = router;

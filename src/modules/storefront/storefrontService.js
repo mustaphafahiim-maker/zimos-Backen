@@ -4,67 +4,42 @@ const db = require('../../db/models');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const reviewService = require('../reviews/reviewService');
-const { calculateShippingAmount } = require('../shipping/shippingPricing');
+const { resolveCheckoutSettings } = require('../checkout/checkoutSettings');
+const { resolveCatalogSettings } = require('./catalogSettings');
+const { presentStoreBump } = require('../checkout/orderBump');
+const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
+const productSearch = require('./productSearch');
 
 /**
  * Public (no-auth) storefront queries: only status='active' rows, and only
  * shopper-facing fields — no cost price, internal notes, or draft/archived
- * items. Don't reuse the staff catalog service here; it has no such filter.
+ * items (./publicProduct.js). Don't reuse the staff catalog service here; it
+ * has no such filter.
  */
 
-function toPublicVariant(variant) {
-  return {
-    id: variant.id,
-    sku: variant.sku,
-    optionValues: variant.optionValues,
-    priceAmount: variant.priceAmount,
-    compareAtAmount: variant.compareAtAmount,
-    currency: variant.currency,
-    weightGrams: variant.weightGrams,
-    // Availability is exposed as a boolean, not exact counts, so shoppers
-    // (and competitors) never see precise stock levels via the public API.
-    inStock: variant.allowOverselling || variant.stockOnHand - variant.reservedStock > 0,
-  };
+// Any of these asks for the search / filter / sort listing (./productSearch.js).
+const LISTING_PARAMS = ['search', 'collection', 'minPrice', 'maxPrice', 'options', 'sort', 'page', 'facets'];
+
+function wantsListing(query) {
+  if (LISTING_PARAMS.some((key) => query[key] !== undefined && query[key] !== '' && query[key] !== false)) return true;
+  // Several tags at once is the new filter; one tag stays on the old path.
+  return Array.isArray(query.tag);
 }
 
-function toPublicOffer(offer) {
-  return {
-    id: offer.id,
-    name: offer.name,
-    pricingMode: offer.pricingMode,
-    priceAmount: offer.priceAmount,
-    currency: offer.currency,
-    badge: offer.badge,
-    isDefault: offer.isDefault,
-    lines: (offer.lines || []).map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
-  };
-}
+/**
+ * The public product list. Plain requests (limit, collectionId, one tag,
+ * cursor) keep the original id-ordered cursor paging every existing caller
+ * relies on; anything from LISTING_PARAMS goes to productSearch.
+ */
+async function listProducts(workspaceId, query = {}) {
+  if (wantsListing(query)) return productSearch.searchProducts(workspaceId, query);
 
-function toPublicProduct(product) {
-  return {
-    id: product.id,
-    name: product.name,
-    slug: product.slug,
-    description: product.description,
-    productType: product.productType,
-    media: product.media,
-    tags: product.tags,
-    seo: product.seo,
-    variants: (product.variants || []).map(toPublicVariant),
-    offers: (product.offers || []).map(toPublicOffer),
-  };
-}
-
-async function listProducts(workspaceId, { collectionId, tag, search, limit = 24, cursor } = {}) {
+  const { collectionId, tag, limit = 24, cursor } = query;
   const where = { workspaceId, status: 'active' };
   if (cursor) where.id = { [db.Sequelize.Op.gt]: cursor };
   if (tag) where.tags = { [db.Sequelize.Op.contains]: [tag] };
-  if (search) where.name = { [db.Sequelize.Op.iLike]: `%${search}%` };
 
-  const include = [
-    { model: db.ProductVariant, as: 'variants', where: { status: 'active' }, required: false },
-    { model: db.Offer, as: 'offers', where: { status: 'active' }, required: false, include: [{ model: db.OfferVariant, as: 'lines' }] },
-  ];
+  const include = publicInclude();
   if (collectionId) {
     include.push({ model: db.Collection, as: 'collections', where: { id: collectionId }, attributes: [] });
   }
@@ -80,10 +55,7 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrSlug);
   const product = await db.Product.findOne({
     where: { workspaceId, status: 'active', ...(isUuid ? { id: idOrSlug } : { slug: idOrSlug }) },
-    include: [
-      { model: db.ProductVariant, as: 'variants', where: { status: 'active' }, required: false },
-      { model: db.Offer, as: 'offers', where: { status: 'active' }, required: false, include: [{ model: db.OfferVariant, as: 'lines' }] },
-    ],
+    include: publicInclude(),
   });
   if (!product) throw new NotFoundError('Product');
 
@@ -98,13 +70,6 @@ async function getStorefront(workspaceId) {
     attributes: ['id', 'name', 'slug', 'logoUrl', 'tagline', 'themeSettings', 'defaultCurrency', 'settings'],
   });
   if (!w) throw new NotFoundError('Workspace');
-  // Only the public pixel IDs leave the server; the rest of settings stays private.
-  const pixels = (w.settings && w.settings.tracking_pixels) || {};
-  const tracking = {};
-  if (pixels.meta) tracking.meta = pixels.meta;
-  if (pixels.tiktok) tracking.tiktok = pixels.tiktok;
-  if (pixels.snapchat) tracking.snapchat = pixels.snapchat;
-  if (pixels.google_tag) tracking.googleTag = pixels.google_tag;
   return {
     id: w.id,
     name: w.name,
@@ -113,29 +78,59 @@ async function getStorefront(workspaceId) {
     tagline: w.tagline,
     themeSettings: w.themeSettings || {},
     currency: w.defaultCurrency,
-    tracking,
-    // Public checkout form behaviour (defaults when the merchant never set it).
-    checkout: (() => {
-      const c = (w.settings && w.settings.checkout_settings) || {};
-      return {
-        email: c.email || 'optional',
-        alternatePhone: c.alternate_phone || 'optional',
-        notes: c.notes || 'optional',
-        allowDiscountCodes: c.allow_discount_codes !== false,
-        thankYouMessage: c.thank_you_message || null,
-      };
-    })(),
+    // Which optional fields the checkout form should show or demand. Always
+    // fully populated — an unconfigured store gets the defaults, which are
+    // what the checkout already enforced before this existed.
+    checkout: resolveCheckoutSettings(w),
+    // The product listing's sidebar, filters and default sort.
+    catalog: resolveCatalogSettings(w.settings),
+    // The "add to your order" card the store's checkout offers, or null
+    // (none set, or its offer is archived / out of stock).
+    orderBump: await presentStoreBump(w),
+    // The browser ad-pixel IDs; the rest of settings stays private.
+    tracking: publicTrackingPixels(w.settings),
   };
 }
 
-async function listCollections(workspaceId) {
-  return db.Collection.findAll({ where: { workspaceId }, attributes: ['id', 'name', 'slug', 'description', 'seo'] });
+function publicTrackingPixels(settings) {
+  const pixels = (settings && settings.tracking_pixels) || {};
+  const tracking = {};
+  if (pixels.meta) tracking.meta = pixels.meta;
+  if (pixels.tiktok) tracking.tiktok = pixels.tiktok;
+  if (pixels.snapchat) tracking.snapchat = pixels.snapchat;
+  if (pixels.google_tag) tracking.googleTag = pixels.google_tag;
+  return tracking;
 }
 
-async function getCollection(workspaceId, collectionId) {
-  const collection = await db.Collection.findOne({ where: { id: collectionId, workspaceId }, attributes: ['id', 'name', 'slug', 'description', 'seo'] });
+const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl'];
+
+/** The store's collections as a flat list, in the merchant's order; `parentId` builds the tree. */
+async function listCollections(workspaceId) {
+  return db.Collection.findAll({
+    where: { workspaceId },
+    attributes: PUBLIC_COLLECTION_FIELDS,
+    order: [
+      ['position', 'ASC'],
+      ['name', 'ASC'],
+      ['id', 'ASC'],
+    ],
+  });
+}
+
+/** One collection, by id or by slug. */
+async function getCollection(workspaceId, idOrSlug) {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrSlug);
+  const collection = await db.Collection.findOne({
+    where: { workspaceId, ...(isUuid ? { id: idOrSlug } : { slug: idOrSlug }) },
+    attributes: PUBLIC_COLLECTION_FIELDS,
+  });
   if (!collection) throw new NotFoundError('Collection');
   return collection;
+}
+
+/** The search box's suggestions — see productSearch.suggest. */
+async function suggestProducts(workspaceId, q) {
+  return productSearch.suggest(workspaceId, q);
 }
 
 /* --- Public order tracking ---------------------------------------------- */
@@ -241,36 +236,13 @@ async function trackOrder(workspaceId, phone, orderNumber) {
   };
 }
 
-/**
- * Shipping price the checkout would charge for this destination and cart shape,
- * so the storefront can show it before the shopper has typed an address.
- * Same pricing path checkout uses, so the two can never disagree.
- */
-async function quoteShipping(workspaceId, { country = 'EG', region, subtotal = 0, quantity = 1, weightGrams = 0 }) {
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['defaultCurrency', 'settings'] });
-  if (!workspace) throw new NotFoundError('Workspace');
-  const amount = await calculateShippingAmount(workspaceId, {
-    country,
-    region: region || null,
-    subtotal: Number(subtotal) || 0,
-    totalQuantity: Number(quantity) || 1,
-    totalWeightGrams: Number(weightGrams) || 0,
-  });
-  const threshold = workspace.settings ? workspace.settings.free_shipping_threshold_amount : null;
-  return {
-    amount: Number(amount),
-    currency: workspace.defaultCurrency || 'EGP',
-    freeShippingThreshold: threshold === undefined || threshold === null ? null : Number(threshold),
-  };
-}
-
 module.exports = {
   getStorefront,
   listProducts,
   getProductBySlugOrId,
   listCollections,
   getCollection,
+  suggestProducts,
   trackOrder,
-  quoteShipping,
   toPublicVariant,
 };

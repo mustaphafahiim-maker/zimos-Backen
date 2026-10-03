@@ -67,8 +67,7 @@ async function call(pixelId, accessToken, body) {
  * pixel id from workspaces.settings.tracking_pixels.meta. Neither fbp nor fbc
  * is populated today — the storefront (apps/storefront) does not currently
  * capture Meta's own `_fbp`/`_fbc` cookies anywhere, so there is nothing real
- * to forward; left out rather than invented (same treatment as Bosta's
- * district gap in bostaCarrier.js).
+ * to forward; left out rather than invented.
  */
 async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, fbp, fbc, eventSourceUrl }) {
   if (!pixelId || !secrets || !secrets.metaAccessToken) {

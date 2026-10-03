@@ -25,6 +25,17 @@ if (storefrontProxySecret && storefrontProxySecret.length < 32) {
   throw new Error('STOREFRONT_PROXY_SECRET must be at least 32 characters (generate one with `openssl rand -hex 32`)');
 }
 
+// A comma-separated env var as a list of lower-cased, trimmed entries. Unset
+// uses the fallback; set but empty is an empty list. Under NODE_ENV=test the
+// fallback always wins, so a dev .env can't change what the suite sees.
+function csvList(raw, fallback) {
+  const value = raw === undefined || process.env.NODE_ENV === 'test' ? fallback : raw;
+  return String(value)
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
@@ -90,6 +101,20 @@ const env = {
     trackingWindowMs: parseInt(process.env.TRACKING_RATE_LIMIT_WINDOW_MS || '600000', 10),
     trackingMax: parseInt(process.env.TRACKING_RATE_LIMIT_MAX || '3', 10),
     trackingPhoneMax: parseInt(process.env.TRACKING_PHONE_RATE_LIMIT_MAX || '30', 10),
+    // Storefront search suggestions (GET /store/:id/products/suggest), per
+    // shopper: a minute and an hour. See core/middleware/rateLimiters.js.
+    suggestMinuteMax: parseInt(process.env.SUGGEST_RATE_LIMIT_PER_MINUTE || '60', 10),
+    suggestHourMax: parseInt(process.env.SUGGEST_RATE_LIMIT_PER_HOUR || '1200', 10),
+    // "Is this username free?" (GET /auth/username-available), per IP: tight,
+    // so the endpoint cannot be used to list who has an account.
+    usernameCheckMinuteMax: parseInt(process.env.USERNAME_CHECK_RATE_LIMIT_PER_MINUTE || '20', 10),
+    usernameCheckHourMax: parseInt(process.env.USERNAME_CHECK_RATE_LIMIT_PER_HOUR || '200', 10),
+    // The public plan list (GET /plans/public), per IP per minute.
+    publicPlansMinuteMax: parseInt(process.env.PUBLIC_PLANS_RATE_LIMIT_PER_MINUTE || '60', 10),
+    // Sign-up codes (POST /auth/verify/send and /confirm), per IP per minute —
+    // on top of the per-address and per-account limits kept in the database
+    // (otp/verificationCodeService).
+    verifyMinuteMax: parseInt(process.env.VERIFY_RATE_LIMIT_PER_MINUTE || '10', 10),
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is
@@ -105,9 +130,13 @@ const env = {
       .filter(Boolean),
   },
 
+  // Under NODE_ENV=test email and SMS are pinned to `console` (as storage is
+  // pinned to `local` below) so a dev .env with EMAIL_PROVIDER=brevo or
+  // SMS_PROVIDER=twilio can't make the suite send real mail/SMS. A test that
+  // wants a real adapter sets env.notifications.*Provider at runtime.
   notifications: {
-    emailProvider: process.env.EMAIL_PROVIDER || 'console',
-    smsProvider: process.env.SMS_PROVIDER || 'console',
+    emailProvider: process.env.NODE_ENV === 'test' ? 'console' : process.env.EMAIL_PROVIDER || 'console',
+    smsProvider: process.env.NODE_ENV === 'test' ? 'console' : process.env.SMS_PROVIDER || 'console',
     whatsappProvider: process.env.WHATSAPP_PROVIDER || 'console',
     smtp: {
       host: process.env.SMTP_HOST || '',
@@ -149,15 +178,201 @@ const env = {
       secretAccessKey: (process.env.R2_SECRET_ACCESS_KEY || '').trim(),
       bucketName: (process.env.R2_BUCKET_NAME || '').trim(),
       publicUrl: (process.env.R2_PUBLIC_URL || '').trim().replace(/\/+$/, ''),
+      // Optional: a bucket with no public access for shoppers' photos. Unset,
+      // they go to the media bucket under customer-uploads/ (never linked publicly).
+      privateBucketName: (process.env.R2_PRIVATE_BUCKET_NAME || '').trim(),
     },
+  },
+
+  // Photos shoppers attach to an order through a product's custom fields
+  // (POST /store/:workspaceId/uploads). See modules/customerUploads.
+  customerUploads: {
+    // Refused before any processing above this (413).
+    maxRawBytes: 15 * 1024 * 1024,
+    // Photos one visitor may have waiting for an order at once.
+    maxPendingPerVisitor: parseInt(process.env.CUSTOMER_UPLOAD_MAX_PENDING || '10', 10),
+    // A photo no order took is deleted after this long.
+    pendingTtlHours: parseInt(process.env.CUSTOMER_UPLOAD_TTL_HOURS || '48', 10),
+    // How often the server sweeps expired photos; 0 turns the in-process sweep
+    // off (scripts/sweep-customer-uploads.js still works). Off under tests.
+    sweepMinutes:
+      process.env.NODE_ENV === 'test' ? 0 : parseInt(process.env.CUSTOMER_UPLOAD_SWEEP_MINUTES || '30', 10),
+    // Upload rate limits, per connecting IP and per visitor id.
+    ipPerMinute: parseInt(process.env.CUSTOMER_UPLOAD_IP_PER_MINUTE || '20', 10),
+    ipPerHour: parseInt(process.env.CUSTOMER_UPLOAD_IP_PER_HOUR || '120', 10),
+    visitorPerMinute: parseInt(process.env.CUSTOMER_UPLOAD_VISITOR_PER_MINUTE || '8', 10),
+    visitorPerHour: parseInt(process.env.CUSTOMER_UPLOAD_VISITOR_PER_HOUR || '40', 10),
+    // Signs the short-lived links the dashboard shows these photos through.
+    // Unset: derived from JWT_ACCESS_SECRET, so it is secret either way.
+    urlSecret: (process.env.UPLOAD_URL_SECRET || '').trim(),
+    urlTtlSeconds: parseInt(process.env.UPLOAD_URL_TTL_SECONDS || '900', 10),
   },
 
   payments: {
     defaultProvider: process.env.PAYMENTS_DEFAULT_PROVIDER || 'mock',
+    // Online (gateway) checkout on the storefront. Off: the storefront and the
+    // public API behave exactly as the COD-only store always has. The
+    // dashboard may still connect gateway accounts while it is off.
+    onlineEnabled: process.env.PAYMENTS_ONLINE_ENABLED === 'true',
+    // Encrypts merchants' gateway keys at rest (AES-256-GCM, see
+    // core/utils/credentialsCipher.js): 32 bytes, base64. Separate from
+    // CARRIER_CREDENTIALS_KEY. Unset or malformed: every gateway feature
+    // answers 503 GATEWAYS_NOT_CONFIGURED; the app still boots.
+    credentialsKey: (process.env.GATEWAY_CREDENTIALS_KEY || '').trim(),
+    // How long an unpaid online order holds its stock before it expires.
+    attemptTtlMinutes: Math.max(5, parseInt(process.env.PAYMENT_ATTEMPT_TTL_MINUTES || '30', 10) || 30),
+    // How many payment attempts one order may start (first try + retries).
+    maxAttemptsPerOrder: Math.max(1, parseInt(process.env.PAYMENT_MAX_ATTEMPTS_PER_ORDER || '5', 10) || 5),
+    // POST /webhooks/payments/:code/:token, per token per window.
+    webhookRateLimitMax: parseInt(process.env.PAYMENT_WEBHOOK_RATE_LIMIT_MAX || '300', 10),
+    // Extra hosts (comma-separated) a shopper may be sent back to after
+    // paying, besides the platform's own subdomains and the store's verified
+    // custom domains — e.g. the storefront app's own host.
+    returnHosts: (process.env.PAYMENT_RETURN_HOSTS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+    // Where each gateway's API lives. Overridable for a regional account.
+    paymobBaseUrl: (process.env.PAYMOB_BASE_URL || 'https://accept.paymob.com').trim().replace(/\/+$/, ''),
+    // Kashier: the API host (sessions, inquiry) and the checkout host (refund
+    // / void), per mode. A test key only works on the test hosts.
+    kashier: {
+      testApiUrl: (process.env.KASHIER_TEST_API_URL || 'https://test-api.kashier.io').trim().replace(/\/+$/, ''),
+      liveApiUrl: (process.env.KASHIER_LIVE_API_URL || 'https://api.kashier.io').trim().replace(/\/+$/, ''),
+      testFepUrl: (process.env.KASHIER_TEST_FEP_URL || 'https://test-fep.kashier.io').trim().replace(/\/+$/, ''),
+      liveFepUrl: (process.env.KASHIER_LIVE_FEP_URL || 'https://fep.kashier.io').trim().replace(/\/+$/, ''),
+    },
+  },
+
+  // Shared secret the billing gateway signs its webhook bodies with
+  // (HMAC-SHA256, hex, sent as X-Zimos-Signature). Deliberately has no
+  // fallback: with nothing configured every webhook is rejected rather than
+  // trusted, so a missing value can never become an open endpoint that lets
+  // anyone flip a subscription to `active`. See modules/billing/gatewaySignature.js.
+  billing: {
+    webhookSecret: (process.env.BILLING_WEBHOOK_SECRET || '').trim(),
+    // What an unpaid subscription past its grace day does (see
+    // workspaces/workspaceAccessService):
+    //   enforce  the storefront shows "unavailable" and new products/funnels
+    //            are blocked;
+    //   warn     the dashboard still shows the expiry banners, nothing is
+    //            restricted.
+    // Defaults to `warn` in production until merchants have a way to pay —
+    // with `enforce`, every store more than a day past its trial with no
+    // recorded payment goes unavailable. Tests always enforce. A manual
+    // suspension (workspace status) is enforced either way.
+    restrictions:
+      process.env.NODE_ENV === 'test'
+        ? 'enforce'
+        : ['enforce', 'warn'].includes(process.env.BILLING_RESTRICTIONS)
+          ? process.env.BILLING_RESTRICTIONS
+          : process.env.NODE_ENV === 'production'
+            ? 'warn'
+            : 'enforce',
+
+    // Paying a subscription charge online through Fawaterak
+    // (billing/onlineBillingService). ONLINE_BILLING_ENABLED lets a merchant
+    // start a payment; it is off unless set to exactly "true". Webhooks and
+    // the sweep settle attempts that already exist whenever the keys are set,
+    // flag or not: that money moved. Recording a payment by hand works
+    // either way.
+    online: {
+      enabled: process.env.NODE_ENV !== 'test' && process.env.ONLINE_BILLING_ENABLED === 'true',
+    },
+
+    // Zimos's own Fawaterak account (billing/fawaterak). All secrets except
+    // `env`, `baseUrl` and `tokenUrl`, none with a fallback. Under
+    // NODE_ENV=test nothing here is read from the environment: a test sets
+    // fake values on this object at runtime, so a dev .env holding staging
+    // keys can never reach the suite.
+    //   env           staging | live — picks the documented base URL
+    //   baseUrl       optional override of that URL (https)
+    //   tokenUrl      optional; default {baseUrl}/oauth/token, same origin only
+    //   clientId / clientSecret   the OAuth client (dashboard → Integrations)
+    //   hashKey       the dashboard's "HASH API key": the key Fawaterak's
+    //                 webhook signatures are made with
+    //   webhookToken  ours, random: a path segment of our webhook URLs
+    fawaterak: {
+      env: process.env.NODE_ENV === 'test' ? 'staging' : (process.env.FAWATERAK_ENV || 'staging').trim().toLowerCase(),
+      baseUrl: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_BASE_URL || '').trim(),
+      tokenUrl: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_TOKEN_URL || '').trim(),
+      clientId: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_CLIENT_ID || '').trim(),
+      clientSecret: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_CLIENT_SECRET || '').trim(),
+      hashKey: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_HASH_KEY || '').trim(),
+      webhookToken: process.env.NODE_ENV === 'test' ? '' : (process.env.FAWATERAK_WEBHOOK_TOKEN || '').trim(),
+    },
+  },
+
+  // Sign-up and go-live rules (modules/auth/signupPolicy.js). Three switches,
+  // all off unless set to exactly "true"; off is the behaviour from before
+  // they existed, so they can be turned on one at a time after the dashboard
+  // that understands them is deployed, and turned off again to go back:
+  //   requirePlan          a plan (and the terms) must be chosen at sign-up,
+  //                        while at least one plan is public;
+  //   requireVerification  a new email/password account signs in only after
+  //                        a 6-digit code sent to its email or phone;
+  //   requireSubscription  a new store starts as a draft: it can be built but
+  //                        not published or sell until a trial or a paid
+  //                        subscription starts.
+  // Under NODE_ENV=test they start off whatever the .env says; a test that
+  // needs one sets it on this object at runtime.
+  signup: {
+    requirePlan: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_PLAN_AT_SIGNUP === 'true',
+    requireVerification: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_SIGNUP_VERIFICATION === 'true',
+    requireSubscription: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_SUBSCRIPTION_TO_GO_LIVE === 'true',
+    // Draft stores one person may hold while none of their stores is live.
+    draftStoresPerUser: Math.max(1, parseInt(process.env.DRAFT_STORES_PER_USER || '1', 10) || 1),
+    // Country calling codes a verification SMS may go to (digits, no "+").
+    // Anything else is refused, so the SMS channel can't be pointed at premium
+    // numbers abroad. Unset: Egypt only.
+    smsCountryCodes: csvList(process.env.VERIFICATION_SMS_COUNTRY_CODES, '20').map((c) => c.replace(/^\+/, '')),
+    // How a merchant pays while there is no gateway, shown next to the
+    // subscribe button. Plain text; empty hides the block.
+    paymentInstructions: {
+      ar: (process.env.PAYMENT_INSTRUCTIONS_AR || '').trim(),
+      en: (process.env.PAYMENT_INSTRUCTIONS_EN || '').trim(),
+    },
+  },
+
+  // COD confirmation queue. A claim locks a task to one agent for this long;
+  // an expired lock returns the task to Pending the next time the queue is
+  // read or a task claimed (see modules/cod/confirmationService.js).
+  confirmation: {
+    lockTtlMinutes: Math.max(1, parseInt(process.env.CONFIRMATION_LOCK_TTL_MINUTES || '15', 10) || 15),
   },
 
   webhooks: {
     signingAlgo: process.env.WEBHOOK_SIGNING_ALGO || 'sha256',
+  },
+
+  // Merchant courier accounts (modules/shipping/carriers). The key encrypts
+  // the credentials each merchant connects (AES-256-GCM, see
+  // core/utils/credentialsCipher.js): 32 bytes, base64. Unset or malformed
+  // disables carrier features with a 503 — it never stops the app booting.
+  carriers: {
+    credentialsKey: (process.env.CARRIER_CREDENTIALS_KEY || '').trim(),
+    // POST /webhooks/carriers/:code/:token, per token per window.
+    webhookRateLimitMax: parseInt(process.env.CARRIER_WEBHOOK_RATE_LIMIT_MAX || '300', 10),
+    // Which adapters exist on this server (modules/shipping/carriers/index.js).
+    // CARRIERS_ENABLED: for every store (unset: bosta; set but empty: none).
+    // CARRIERS_BETA: only for the stores whose slugs are in
+    // CARRIERS_BETA_WORKSPACES; every other store never sees them.
+    enabled: csvList(process.env.CARRIERS_ENABLED, 'bosta'),
+    beta: csvList(process.env.CARRIERS_BETA, ''),
+    betaWorkspaces: csvList(process.env.CARRIERS_BETA_WORKSPACES, ''),
+    // scripts/sync-carrier-shipments.js: shipments per run, and how long a
+    // shipment is polled at all after it was booked.
+    syncBatchSize: Math.max(1, parseInt(process.env.CARRIER_SYNC_BATCH_SIZE || '200', 10) || 200),
+    pollMaxAgeDays: Math.max(1, parseInt(process.env.CARRIER_POLL_MAX_AGE_DAYS || '45', 10) || 45),
+  },
+
+  // Storefront analytics (modules/analytics). The event ingest can read a
+  // visitor's country/region/city from CDN geo headers, but only from the
+  // CDNs named here: this API is not behind a CDN today, so any client could
+  // send those headers itself. Unset or empty trusts none and geo is null.
+  // Accepted: cloudflare, vercel, cloudfront.
+  analytics: {
+    geoHeaders: csvList(process.env.ANALYTICS_GEO_HEADERS, ''),
   },
 };
 

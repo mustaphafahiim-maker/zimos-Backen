@@ -39,6 +39,30 @@ function addOrder(m, o) {
     m.upsellOrders += 1;
     m.upsellRevenue += total;
   }
+  // Offers joined to the checkout order (funnels/funnelOfferMerge.js) are its
+  // is_upsell lines: counted as accepted offers, their amount as upsell revenue.
+  if (o.mergedUpsells) {
+    m.upsellOrders += o.mergedUpsells.count;
+    m.upsellRevenue += o.mergedUpsells.amount;
+  }
+}
+
+/** Tags each order with its is_upsell lines (count and amount). */
+async function withMergedUpsells(orders) {
+  if (orders.length === 0) return orders;
+  const lines = await db.OrderItem.findAll({
+    where: { orderId: orders.map((o) => o.id), isUpsell: true },
+    attributes: ['orderId', 'lineTotalAmount'],
+  });
+  const byOrder = new Map();
+  for (const line of lines) {
+    const entry = byOrder.get(line.orderId) || { count: 0, amount: 0 };
+    entry.count += 1;
+    entry.amount += toNumber(line.lineTotalAmount);
+    byOrder.set(line.orderId, entry);
+  }
+  for (const o of orders) o.mergedUpsells = byOrder.get(o.id) || null;
+  return orders;
 }
 
 const withRate = (m) => ({ ...m, conversionRate: rate(m.completed, m.sessions) });
@@ -66,7 +90,9 @@ async function getFunnelsOverview(workspaceId, query = {}) {
   const [funnels, sessions, orders] = await Promise.all([
     db.Funnel.findAll({ where: { workspaceId }, attributes: FUNNEL_ATTRIBUTES, order: [['createdAt', 'ASC']] }),
     db.FunnelSession.findAll({ where: { workspaceId, createdAt }, attributes: SESSION_ATTRIBUTES }),
-    db.Order.findAll({ where: { workspaceId, funnelId: { [Op.ne]: null }, createdAt }, attributes: ORDER_ATTRIBUTES }),
+    db.Order.findAll({ where: { workspaceId, funnelId: { [Op.ne]: null }, createdAt }, attributes: ORDER_ATTRIBUTES }).then(
+      withMergedUpsells
+    ),
   ]);
 
   const byFunnel = new Map(funnels.map((f) => [f.id, emptyMetrics()]));
@@ -167,7 +193,9 @@ async function getFunnelDetail(workspaceId, funnelId, query = {}) {
   const [graph, sessions, orders] = await Promise.all([
     loadStepGraph(funnel),
     db.FunnelSession.findAll({ where: { workspaceId, funnelId, createdAt }, attributes: SESSION_ATTRIBUTES, order: [['createdAt', 'ASC']] }),
-    db.Order.findAll({ where: { workspaceId, funnelId, createdAt }, attributes: ORDER_ATTRIBUTES, order: [['createdAt', 'ASC']] }),
+    db.Order.findAll({ where: { workspaceId, funnelId, createdAt }, attributes: ORDER_ATTRIBUTES, order: [['createdAt', 'ASC']] }).then(
+      withMergedUpsells
+    ),
   ]);
 
   const totals = emptyMetrics();

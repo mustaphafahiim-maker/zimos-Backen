@@ -3,15 +3,16 @@
 const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
-const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
 const env = require('./config/env');
 const requestId = require('./core/middleware/requestId');
-const { generalLimiter, storefrontLimiter } = require('./core/middleware/rateLimiters');
+const { corsPolicy } = require('./core/middleware/cors');
+const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter } = require('./core/middleware/rateLimiters');
 const { errorHandler, notFoundHandler } = require('./core/middleware/errorHandler');
 const { hostResolver } = require('./core/middleware/hostResolver');
 const logger = require('./core/utils/logger');
+const { redactUrl } = require('./core/utils/redactUrl');
 const db = require('./db/models');
 
 const authRoutes = require('./modules/auth/authRoutes');
@@ -35,25 +36,28 @@ const funnelsPublicRoutes = require('./modules/funnels/funnelsPublicRoutes');
 const quickstartRoutes = require('./modules/quickstart/quickstartRoutes');
 const quickstartPublicRoutes = require('./modules/quickstart/quickstartPublicRoutes');
 const billingRoutes = require('./modules/billing/billingRoutes');
+const publicPlansRoutes = require('./modules/billing/publicPlansRoutes');
+const workspaceBillingRoutes = require('./modules/billing/workspaceBillingRoutes');
 const adminRoutes = require('./modules/billing/adminRoutes');
 const platformAdminRoutes = require('./modules/platformAdmin/platformAdminRoutes');
 const domainsRoutes = require('./modules/domains/domainsRoutes');
 const mediaRoutes = require('./modules/media/mediaRoutes');
 const reviewRoutes = require('./modules/reviews/reviewRoutes');
+const fraudRoutes = require('./modules/fraud/fraudRoutes');
+const supportRoutes = require('./modules/support/supportRoutes');
+const checkoutSessionRoutes = require('./modules/checkoutSessions/checkoutSessionRoutes');
 const templateRoutes = require('./modules/templates/templateRoutes');
-const platformOpsRoutes = require('./modules/platformAdmin/platformOpsRoutes');
+const carrierRoutes = require('./modules/shipping/carrierRoutes');
+const carrierWebhookRoutes = require('./modules/shipping/carrierWebhookRoutes');
+const onlinePaymentRoutes = require('./modules/payments/onlinePaymentRoutes');
+const paymentWebhookRoutes = require('./modules/payments/paymentWebhookRoutes');
 const analyticsRoutes = require('./modules/analytics/analyticsRoutes');
 const eventsPublicRoutes = require('./modules/analytics/eventsPublicRoutes');
-const merchantBillingRoutes = require('./modules/billing/merchantBillingRoutes');
 const auditRoutes = require('./modules/audit/auditRoutes');
 const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
-const { staff: checkoutSessionRoutes } = require('./modules/checkout/checkoutSessionRoutes');
-const fraudRoutes = require('./modules/orders/fraudRoutes');
 const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
 const automationRoutes = require('./modules/automations/automationRoutes');
 const settlementRoutes = require('./modules/settlements/settlementRoutes');
-const paymobRoutes = require('./modules/payments/paymobRoutes');
-const bostaRoutes = require('./modules/shipping/bostaRoutes');
 const serverPixelsRoutes = require('./modules/marketing/serverPixelsRoutes');
 
 const app = express();
@@ -67,13 +71,16 @@ app.set('views', path.join(__dirname, 'views'));
 
 app.use(requestId);
 app.use(helmet());
-app.use(
-  cors({
-    origin: env.cors.origins,
-    credentials: true,
-  })
-);
-// rawBody is kept for webhook signature checks (WhatsApp X-Hub-Signature-256).
+// Any origin for the public /api/v1/store API, the CORS_ORIGINS allowlist
+// everywhere else (see core/middleware/cors.js).
+app.use(corsPolicy);
+// Storefront analytics beacons get their own, much smaller, body limit. Mounted
+// before the API-wide parser below, which then skips the already-read body.
+app.use(`/api/${env.apiVersion}/store/:workspaceId/events`, eventsPublicRoutes.eventsBodyParser);
+// `verify` keeps the exact bytes Express parsed so webhook signatures can be
+// checked against what the gateway actually signed — a re-serialised req.body
+// would differ by key order or whitespace and never match. See
+// modules/billing/gatewaySignature.js.
 app.use(
   express.json({
     limit: '2mb',
@@ -87,7 +94,9 @@ app.use(cookieParser());
 
 if (!env.isTest) {
   app.use((req, res, next) => {
-    logger.info(`${req.method} ${req.originalUrl}`, { requestId: req.id, ip: req.ip });
+    // Gateway callbacks carry their signature in the query string (?hmac=):
+    // it never reaches a log line.
+    logger.info(`${req.method} ${redactUrl(req.originalUrl)}`, { requestId: req.id, ip: req.ip });
     next();
   });
 }
@@ -95,6 +104,10 @@ if (!env.isTest) {
 // The public storefront API is limited per shopper rather than per IP (see
 // rateLimiters.js); generalLimiter skips whatever this limiter handled.
 app.use(`/api/${env.apiVersion}/store`, storefrontLimiter);
+// Courier webhooks all come from the courier's servers: limited per merchant
+// webhook token, not per IP (see rateLimiters.js).
+app.use(`/api/${env.apiVersion}/webhooks/carriers`, carrierWebhookLimiter);
+app.use(`/api/${env.apiVersion}/webhooks/payments`, paymentWebhookLimiter);
 app.use(generalLimiter);
 
 // --- Health / readiness -----------------------------------------------
@@ -143,40 +156,46 @@ v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
+v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
+v1.use('/workspaces/:workspaceId/support', supportRoutes);
+v1.use('/workspaces/:workspaceId/billing', workspaceBillingRoutes);
+v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
+v1.use('/workspaces/:workspaceId/carriers', carrierRoutes);
+v1.use('/workspaces/:workspaceId/payments', onlinePaymentRoutes);
 v1.use('/workspaces/:workspaceId/analytics', analyticsRoutes);
-v1.use('/workspaces/:workspaceId/billing', merchantBillingRoutes);
 v1.use('/workspaces/:workspaceId/audit-logs', auditRoutes);
 v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
-v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
-v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
 v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
-v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
-v1.use('/workspaces/:workspaceId/paymob', paymobRoutes.staff);
-v1.use('/webhooks/paymob', paymobRoutes.webhook);
-v1.use('/workspaces/:workspaceId/bosta', bostaRoutes.staff);
-v1.use('/webhooks/bosta', bostaRoutes.webhook);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
+// WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
+// body proves the sender.
+v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
 v1.use('/billing', billingRoutes);
+// The plans on offer — public, for the marketing site and the sign-up form.
+v1.use('/plans', publicPlansRoutes);
+// Courier status webhooks — public; the token in the path is the identity.
+v1.use('/webhooks/carriers', carrierWebhookRoutes);
+// Payment gateway callbacks — public; the token names the account, the HMAC
+// proves the sender.
+v1.use('/webhooks/payments', paymentWebhookRoutes);
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.
 v1.use('/admin', platformAdminRoutes);
-// Overview, workspace detail, staff users, audit log, templates and system
-// health. Same /admin mount and the same platform-admin guard.
-v1.use('/admin', platformOpsRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
 // Storefront visit tracking (page views, cart, checkout, purchase).
 v1.use('/store/:workspaceId/events', eventsPublicRoutes);
-// Online payment for a placed order; handles only its own two paths and passes
-// everything else through to the storefront router below.
-v1.use('/store/:workspaceId', paymobRoutes.store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
+
+// The signed, short-lived link to a shopper's photo that staff open from an
+// order (customerUploads/uploadLinks.js). The signature is the credential.
+v1.get('/customer-uploads/:uploadId', require('./modules/customerUploads/customerUploadController').readSigned);
 
 app.use(`/api/${env.apiVersion}`, v1);
 

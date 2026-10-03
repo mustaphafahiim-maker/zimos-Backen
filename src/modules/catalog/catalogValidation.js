@@ -1,27 +1,76 @@
 'use strict';
 
 const Joi = require('joi');
+const { PRODUCT_SHIPPING_MODES } = require('../shipping/shippingRules');
+const { customFieldsSchema } = require('./customFields');
+
 const uuid = Joi.string().uuid();
+
+const productStatus = Joi.string().valid('draft', 'active', 'archived');
+
+// Shipping weight in grams; null clears it ("no weight set"). 0 is a real
+// weight. The cap matches shipping/shippingWeight.MAX_WEIGHT_GRAMS (1 t).
+const weightGrams = Joi.number().integer().min(0).max(1000000).allow(null);
+// Package dimensions in centimetres, all three or none.
+const dimensions = Joi.object({
+  lengthCm: Joi.number().positive().max(10000).required(),
+  widthCm: Joi.number().positive().max(10000).required(),
+  heightCm: Joi.number().positive().max(10000).required(),
+}).allow(null);
+
+// Field rules only, no defaults: defaults belong to create. A PATCH must
+// leave every field it doesn't send untouched (a defaulted `status` would
+// silently un-archive or un-publish, a defaulted `media` would wipe images).
+const productFields = {
+  name: Joi.string().min(1).max(300),
+  slug: Joi.string().max(300),
+  description: Joi.string().allow('').max(20000),
+  productType: Joi.string().valid('physical', 'digital', 'service'),
+  status: productStatus,
+  options: Joi.array().items(Joi.object({ name: Joi.string().required(), values: Joi.array().items(Joi.string()) })),
+  media: Joi.array().items(Joi.object()),
+  tags: Joi.array().items(Joi.string()),
+  seo: Joi.object(),
+  websiteId: uuid,
+  // How the product ships (shipping/shippingRules.js). The extra fee is per
+  // unit, minor units, and goes with shippingMode 'extra_fee' only — the
+  // service checks the pair against what the product already has.
+  shippingMode: Joi.string().valid(...PRODUCT_SHIPPING_MODES),
+  shippingExtraAmount: Joi.number().integer().min(1).max(100000000).allow(null),
+  // What the shopper fills in when ordering: at most five text / textarea /
+  // image fields (catalog/customFields.js). Sent whole; [] removes them all.
+  customFields: customFieldsSchema,
+};
 
 const product = {
   params: Joi.object({ workspaceId: uuid.required() }),
   body: Joi.object({
-    name: Joi.string().min(1).max(300).required(),
-    slug: Joi.string().max(300).optional(),
-    description: Joi.string().allow('').max(20000).optional(),
-    productType: Joi.string().valid('physical', 'digital', 'service').default('physical'),
-    status: Joi.string().valid('draft', 'active', 'archived').default('draft'),
-    options: Joi.array().items(Joi.object({ name: Joi.string().required(), values: Joi.array().items(Joi.string()) })).default([]),
-    media: Joi.array().items(Joi.object()).default([]),
-    tags: Joi.array().items(Joi.string()).default([]),
-    seo: Joi.object().default({}),
-    websiteId: uuid.optional(),
+    ...productFields,
+    name: productFields.name.required(),
+    productType: productFields.productType.default('physical'),
+    status: productFields.status.default('draft'),
+    options: productFields.options.default([]),
+    media: productFields.media.default([]),
+    tags: productFields.tags.default([]),
+    seo: productFields.seo.default({}),
+    // Optional first variant, created with the product in one transaction so a
+    // simple product is sellable (priced and stocked) straight away.
+    variant: Joi.object({
+      priceAmount: Joi.number().integer().min(0).required(),
+      compareAtAmount: Joi.number().integer().min(0).allow(null).optional(),
+      sku: Joi.string().max(100).allow(null, '').optional(),
+      stockOnHand: Joi.number().integer().min(0).default(0),
+      allowOverselling: Joi.boolean().default(false),
+      weightGrams: weightGrams.optional(),
+      dimensions: dimensions.optional(),
+    }).optional(),
   }),
 };
 
+// No `variant` here: variants are edited through their own endpoints.
 const productUpdate = {
   params: Joi.object({ workspaceId: uuid.required(), productId: uuid.required() }),
-  body: product.body.fork(['name'], (s) => s.optional()),
+  body: Joi.object(productFields),
 };
 
 const productGet = {
@@ -29,11 +78,22 @@ const productGet = {
 };
 
 const productDelete = productGet;
+const productRestore = productGet;
+const productDeletePermanent = productGet;
 
 const productList = {
   params: Joi.object({ workspaceId: uuid.required() }),
   query: Joi.object({
-    status: Joi.string().valid('draft', 'active', 'archived').optional(),
+    // One status, or several: "draft,active" (or a repeated ?status= param).
+    status: Joi.alternatives()
+      .try(
+        productStatus,
+        Joi.string()
+          .pattern(/^(draft|active|archived)(,(draft|active|archived))+$/)
+          .message('"status" must be draft, active, archived, or a comma-separated list of them'),
+        Joi.array().items(productStatus).min(1)
+      )
+      .optional(),
     collectionId: uuid.optional(),
     limit: Joi.number().integer().min(1).max(200).default(50),
     cursor: uuid.optional(),
@@ -52,8 +112,8 @@ const variant = {
     lowStockThreshold: Joi.number().integer().min(0).max(1000000).allow(null).optional(),
     currency: Joi.string().length(3).default('EGP'),
     allowOverselling: Joi.boolean().default(false),
-    weightGrams: Joi.number().integer().min(0).allow(null).optional(),
-    dimensions: Joi.object().allow(null).optional(),
+    weightGrams: weightGrams.optional(),
+    dimensions: dimensions.optional(),
     // Initial stock is set here at creation only; all later mutations go through /inventory endpoints.
     stockOnHand: Joi.number().integer().min(0).default(0),
   }),
@@ -73,6 +133,8 @@ const variantUpdate = {
     costAmount: Joi.number().integer().min(0).allow(null).optional(),
     lowStockThreshold: Joi.number().integer().min(0).max(1000000).allow(null).optional(),
     allowOverselling: Joi.boolean().optional(),
+    weightGrams: weightGrams.optional(),
+    dimensions: dimensions.optional(),
     status: Joi.string().valid('active', 'archived').optional(),
   }),
 };
@@ -102,6 +164,15 @@ const offerList = {
   params: Joi.object({ workspaceId: uuid.required(), productId: uuid.required() }),
 };
 
+const workspaceOfferList = {
+  params: Joi.object({ workspaceId: uuid.required() }),
+  query: Joi.object({
+    // Matches the offer's or its product's name.
+    q: Joi.string().trim().max(100).allow('').optional(),
+    limit: Joi.number().integer().min(1).max(100).default(50),
+  }),
+};
+
 const offerGet = { params: offerParams };
 const offerDelete = { params: offerParams };
 
@@ -123,6 +194,13 @@ const offerUpdate = {
   }).min(1),
 };
 
+// A collection's picture: an http(s) URL, typically from the media library.
+const collectionImage = Joi.string()
+  .uri({ scheme: ['http', 'https'] })
+  .max(1000)
+  .allow('', null);
+const collectionPosition = Joi.number().integer().min(0).max(100000);
+
 const collection = {
   params: Joi.object({ workspaceId: uuid.required() }),
   body: Joi.object({
@@ -131,6 +209,11 @@ const collection = {
     description: Joi.string().allow('').optional(),
     rules: Joi.object().allow(null).optional(),
     seo: Joi.object().default({}),
+    // Null (or absent) is a top-level collection.
+    parentId: uuid.allow(null).optional(),
+    // Absent puts it after its siblings.
+    position: collectionPosition.optional(),
+    imageUrl: collectionImage.optional(),
   }),
 };
 
@@ -148,7 +231,36 @@ const collectionUpdate = {
     description: Joi.string().allow('').optional(),
     rules: Joi.object().allow(null).optional(),
     seo: Joi.object().optional(),
+    parentId: uuid.allow(null).optional(),
+    position: collectionPosition.optional(),
+    imageUrl: collectionImage.optional(),
   }).min(1),
+};
+
+const collectionReorder = {
+  params: Joi.object({ workspaceId: uuid.required() }),
+  body: Joi.object({
+    items: Joi.array()
+      .items(
+        Joi.object({
+          id: uuid.required(),
+          // Leave out to keep the current parent; null moves it to the top level.
+          parentId: uuid.allow(null).optional(),
+          position: collectionPosition.optional(),
+        })
+      )
+      .min(1)
+      .max(500)
+      .unique('id')
+      .required(),
+  }),
+};
+
+const collectionProductOrder = {
+  params: collectionParams,
+  body: Joi.object({
+    productIds: Joi.array().items(uuid.required()).min(1).max(2000).unique().required(),
+  }),
 };
 
 const addToCollection = {
@@ -162,6 +274,8 @@ module.exports = {
   productUpdate,
   productGet,
   productDelete,
+  productRestore,
+  productDeletePermanent,
   productList,
   variant,
   variantGet,
@@ -169,6 +283,7 @@ module.exports = {
   variantDelete,
   offer,
   offerList,
+  workspaceOfferList,
   offerGet,
   offerUpdate,
   offerDelete,
@@ -179,4 +294,6 @@ module.exports = {
   collectionDelete,
   addToCollection,
   removeFromCollection,
+  collectionReorder,
+  collectionProductOrder,
 };

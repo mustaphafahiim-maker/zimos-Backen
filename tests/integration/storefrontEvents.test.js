@@ -1,5 +1,8 @@
 'use strict';
 
+// Storefront event ingest (POST /store/:workspaceId/events) and the traffic
+// block of GET /analytics/summary. Ported from the zimos-additions branch.
+
 const { app, request, registerAndActivate, createWorkspace, createProductWithVariant } = require('../helpers/factories');
 const db = require('../../src/db/models');
 
@@ -26,7 +29,12 @@ async function setup() {
         .post(`/api/v1/workspaces/${workspace.id}/orders`)
         .set(H)
         .set('Idempotency-Key', `ord-${Math.random().toString(36).slice(2)}`)
-        .send({ items: [{ variantId: variant.id, quantity: 1 }], contact: { fullName: 'Buyer', phone: nextPhone() }, paymentMethod: 'cod' });
+        .send({
+          items: [{ variantId: variant.id, quantity: 1 }],
+          contact: { fullName: 'Buyer', phone: nextPhone() },
+          shippingAddress: { country: 'EG', city: 'Cairo', addressLine: '1 Traffic St' },
+          paymentMethod: 'cod',
+        });
       if (res.status !== 201) throw new Error(`placeOrder failed: ${res.status} ${JSON.stringify(res.body)}`);
       return res.body.order;
     },

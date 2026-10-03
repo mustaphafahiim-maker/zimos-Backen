@@ -7,7 +7,7 @@
 //      after an order exists never changes that order's OrderItem snapshot.
 
 const bwipjs = require('bwip-js');
-const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace } = require('../helpers/factories');
+const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace, confirmCodOrder } = require('../helpers/factories');
 const db = require('../../src/db/models');
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
@@ -126,10 +126,8 @@ describe('audit logging on every new mutating endpoint', () => {
     await request(app).patch(`/api/v1/workspaces/${workspace.id}/orders/${order.id}`).set(H).send({ notes: 'x' }).expect(200);
     expect((await auditRow('order.update', order.id)).beforeState).not.toBeNull();
 
-    // 'bosta' is a real, special-cased carrierCode now (books a live Bosta
-    // delivery — see tests/integration/bosta.test.js); this test only wants a
-    // generic manual-carrier shipment to check audit logging.
-    const ship = (await request(app).post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`).set(H).send({ carrierCode: 'manual', waybillNumber: 'WB-1' })).body.shipment;
+    await confirmCodOrder(auth.accessToken, workspace.id, order.id);
+    const ship = (await request(app).post(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments`).set(H).send({ carrierCode: 'local-courier' })).body.shipment;
     expect(await auditRow('shipment.create', ship.id)).not.toBeNull();
     await request(app).patch(`/api/v1/workspaces/${workspace.id}/orders/${order.id}/shipments/${ship.id}`).set(H).send({ status: 'delivered' }).expect(200);
     expect((await auditRow('shipment.update', ship.id)).beforeState).not.toBeNull();

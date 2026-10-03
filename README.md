@@ -52,7 +52,7 @@ src/
     invoices/                 atomic counter-based invoice numbering, credit notes
     otp/                      generic SMS one-time codes (hash-only, rate-limited)
     media/                    image upload (local disk or Cloudflare R2), content-validated type
-    waybill/                  order shipping-label PDF (pdfkit + Code128 barcode)
+    waybill/                  order shipping-label PDF (pdfkit + Code128 + QR; Arabic via core/pdf/bidiText)
     audit/                    append-only audit log writer
     notifications/            provider-abstracted email/sms/whatsapp — console default,
                               real Brevo (email) + Twilio (SMS) adapters wired
@@ -61,6 +61,11 @@ src/
     quickstart/               flat forms → EJS multi-product storefront + branding
     billing/                  internal subscription state + stubbed gateway webhook
     domains/                  custom domain record + DNS-TXT verification (no TLS)
+    risk/                     platform-wide blocklist (honoured by order creation in every
+                              workspace) + cross-workspace fraud signals, admin only
+    support/                  merchant support tickets: workspace side + platform queue
+    platformAdmin/            the /admin console API: plans, flags, announcements, audit log,
+                              system health, carrier/gateway registry, admin users
 views/                        EJS templates for the storefront viewer + admin dashboard
 tests/
   helpers/                   supertest app wrapper, DB truncation, test factories
@@ -237,7 +242,7 @@ transactional email via the real **Brevo** adapter and SMS via the real
 **Twilio** adapter (both behind the `EMAIL_PROVIDER` / `SMS_PROVIDER`
 abstraction, `console` by default), a generic reusable **SMS OTP** module,
 **local image upload** (disk-backed, content-sniffed type check), the order
-**waybill PDF** (pdfkit + Code128 barcode), **product reviews** (gated on a
+**waybill PDF** (pdfkit + Code128 barcode + QR, Arabic-capable), **product reviews** (gated on a
 delivered purchase, staff-moderated, aggregated onto the public product
 endpoint), "**Buy Now**" cartless checkout, the **website page engine**, and
 the **funnel engine**.
@@ -303,8 +308,14 @@ forms → published page), not a page builder; platform subscriptions/billing
 exist as internal state only — every workspace gets a `trialing` Subscription
 on creation, a webhook endpoint maps generic events to status, and mutations
 are subscription-gated, but **no payment gateway is connected** (see
-"Payment gateway integration — NOT YET CONNECTED" below). `platformAdmin` is
-a single boolean flag on `User`, not a role system.
+"Payment gateway integration — NOT YET CONNECTED" below). Platform-console
+access is a role (creator / admin / agent, stored as data in `platform_roles`)
+plus an editable permission set on `User`; every `/admin` route names the
+permission it needs (`src/core/security/platformPermissions.js`). The first
+creator is set out-of-band with `node scripts/set-platform-role.js <email> creator`.
+Agent referral codes attach to a subscription and price every charge through
+`billing/subscriptionChargeService`; since no gateway exists, charges are only
+created by that service and settled through the signed billing webhook.
 
 **Modeled and migrated, with working CRUD services, but not yet as deep or
 covered by the test suite**:

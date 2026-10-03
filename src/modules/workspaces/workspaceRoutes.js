@@ -4,7 +4,7 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
-const { requirePermission } = require('../../core/middleware/rbac');
+const { requirePermission, requireAnyPermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./workspaceController');
 const schemas = require('./workspaceValidation');
@@ -26,6 +26,38 @@ router.patch(
   resolveTenant,
   requirePermission(PERMISSIONS.WEBSITE_EDIT),
   controller.updateWorkspace
+);
+
+// Whether the store is restricted and what the dashboard should warn about
+// (subscription expiring / expired, manual suspension). Any member: everyone
+// who can hit the creation lock should be told why.
+router.get('/:workspaceId/access', validate(schemas.listMembers), resolveTenant, controller.getAccess);
+
+// Taking a draft store live (billing/goLiveService): its plan's free trial, or
+// a plan that costs nothing. Whoever manages the store's billing.
+router.post(
+  '/:workspaceId/start-trial',
+  validate(schemas.listMembers),
+  resolveTenant,
+  requirePermission(PERMISSIONS.BILLING_MANAGE),
+  controller.startTrial
+);
+router.post(
+  '/:workspaceId/activate-free-plan',
+  validate(schemas.listMembers),
+  resolveTenant,
+  requirePermission(PERMISSIONS.BILLING_MANAGE),
+  controller.activateFreePlan
+);
+
+// A short-lived X-Store-Preview token: whoever edits the website or funnels
+// sees the store on the storefront even while it is a draft.
+router.post(
+  '/:workspaceId/store-preview-token',
+  validate(schemas.listMembers),
+  resolveTenant,
+  requireAnyPermission(PERMISSIONS.WEBSITE_EDIT, PERMISSIONS.FUNNELS_MANAGE),
+  controller.storePreviewToken
 );
 
 router.get(

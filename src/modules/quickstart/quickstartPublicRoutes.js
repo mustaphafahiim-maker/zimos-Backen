@@ -2,7 +2,7 @@
 
 const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
-const { resolvePublicWorkspace } = require('../../core/middleware/publicWorkspace');
+const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const controller = require('./quickstartController');
 const schemas = require('./quickstartValidation');
 
@@ -19,7 +19,7 @@ router.use(resolvePublicWorkspace);
 router.get('/', validate(schemas.workspaceParam), controller.renderStoreHome);
 router.get('/products/:productId', validate(schemas.productDetail), controller.renderProductDetail);
 router.get('/checkout', validate(schemas.checkoutView), controller.renderCheckout);
-router.post('/checkout', validate(schemas.checkout), controller.submitCheckout);
+router.post('/checkout', validate(schemas.checkout), refuseDraftOrders, controller.submitCheckout);
 router.get('/thanks/:orderId', validate(schemas.thankYou), controller.renderThankYou);
 
 module.exports = router;

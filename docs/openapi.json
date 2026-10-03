@@ -91,12 +91,38 @@
     },
 
     "/workspaces/{workspaceId}/catalog/products": {
-      "post": { "summary": "Create a product (requires products.manage)", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "201": { "description": "Created" } } },
-      "get": { "summary": "List products (cursor paginated)", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK" } } }
+      "post": {
+        "summary": "Create a product (requires products.manage), optionally with its first variant and initial stock in one transaction",
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "name": { "type": "string" }, "status": { "type": "string", "enum": ["draft", "active", "archived"] },
+          "variant": { "type": "object", "description": "Optional. Initial stock is applied as an audited restock movement.", "properties": {
+            "priceAmount": { "type": "integer", "minimum": 0 }, "compareAtAmount": { "type": "integer", "minimum": 0, "nullable": true },
+            "sku": { "type": "string", "nullable": true }, "stockOnHand": { "type": "integer", "minimum": 0, "default": 0 },
+            "allowOverselling": { "type": "boolean", "default": false }
+          }, "required": ["priceAmount"] }
+        }, "required": ["name"] } } } },
+        "responses": { "201": { "description": "{ product } — plus { variant } when one was requested" }, "409": { "description": "Duplicate SKU (nothing is created)" }, "422": { "description": "Validation failed" } }
+      },
+      "get": {
+        "summary": "List products (cursor paginated)",
+        "parameters": [
+          { "$ref": "#/components/parameters/workspaceId" },
+          { "name": "status", "in": "query", "required": false, "description": "One status, a comma-separated list (draft,active) or a repeated param", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
     },
     "/workspaces/{workspaceId}/catalog/products/{productId}": {
       "get": { "summary": "Get a product with variants/offers", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK" }, "404": { "description": "Not found (including cross-tenant access)" } } },
-      "patch": { "summary": "Update a product", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK" } } }
+      "patch": { "summary": "Update a product (only the fields sent change). status into/out of 'archived' cascades like DELETE / restore", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK" } } },
+      "delete": { "summary": "Archive a product with its variants and offers (soft delete)", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "{ archived: true, id }" }, "404": { "description": "Not found (including cross-tenant access)" } } }
+    },
+    "/workspaces/{workspaceId}/catalog/products/{productId}/restore": {
+      "post": { "summary": "Restore an archived product to draft, with the variants/offers its archive took down", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "{ product } with variants, offers, collections" }, "404": { "description": "Not found (including cross-tenant access)" }, "409": { "description": "PRODUCT_NOT_ARCHIVED" } } }
+    },
+    "/workspaces/{workspaceId}/catalog/products/{productId}/permanent": {
+      "delete": { "summary": "Permanently delete a never-ordered product (any status) and its variants, offers, cart lines, stock history, collection links, product tax rates and reviews", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "{ deleted: true, id }" }, "404": { "description": "Not found (including cross-tenant access)" }, "409": { "description": "PRODUCT_HAS_ORDERS (archive instead), or PRODUCT_IN_FUNNEL with details[0] = { field: 'funnelIds', message, funnelIds }" } } }
     },
     "/workspaces/{workspaceId}/catalog/products/{productId}/variants": {
       "post": { "summary": "Create a variant (initial stock is applied via inventoryService, audited)", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "201": { "description": "Created" } } }
@@ -149,32 +175,13 @@
           "422": { "description": "Insufficient stock / invalid discount / validation error" }
         }
       },
-      "get": {
-        "summary": "List orders (search, filters, sortable keyset pagination; each order carries its `funnel` {id,name,subdomain} or null for store orders)",
-        "parameters": [
-          { "$ref": "#/components/parameters/workspaceId" },
-          { "name": "q", "in": "query", "schema": { "type": "string", "maxLength": 100 }, "description": "Matches order number, customer name or phone (case-insensitive substring)" },
-          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "createdAt >= from" },
-          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "createdAt < to" },
-          { "name": "source", "in": "query", "schema": { "type": "string", "enum": ["store", "funnel"] } },
-          { "name": "funnelId", "in": "query", "schema": { "type": "string", "format": "uuid" } },
-          { "name": "paymentMethod", "in": "query", "schema": { "type": "string", "enum": ["cod", "card", "wallet", "bank_transfer"] } },
-          { "name": "cancelled", "in": "query", "schema": { "type": "boolean" }, "description": "true = only cancelled, false = only non-cancelled, omitted = both" },
-          { "name": "confirmationState", "in": "query", "schema": { "type": "string", "enum": ["pending", "confirmed", "rejected", "unreachable", "postponed"] } },
-          { "name": "financialState", "in": "query", "schema": { "type": "string", "enum": ["pending", "partially_paid", "paid", "failed", "refunded", "partially_refunded"] } },
-          { "name": "fulfillmentState", "in": "query", "schema": { "type": "string", "enum": ["unfulfilled", "partially_fulfilled", "fulfilled", "returned"] } },
-          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["newest", "oldest", "total_desc", "total_asc"], "default": "newest" } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
-          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque nextCursor from the previous page" }
-        ],
-        "responses": { "200": { "description": "{ orders: [...], nextCursor: string | null }" }, "422": { "description": "Malformed cursor or filter" } }
-      }
+      "get": { "summary": "List orders, newest first — keyset cursor; filter by stage, q (number/name/email/phone), from/to, or confirmation/financial/fulfillment state", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK — each order carries its derived pipeline `stage`" }, "422": { "description": "Unknown cursor, unknown stage, or q outside 2–100 characters" } } }
     },
-    "/workspaces/{workspaceId}/orders/counts": {
-      "get": { "summary": "Tab counts for the orders page (same filters as the list, minus confirmationState/sort/limit/cursor)", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "{ counts: { all, pending, confirmed, unreachable, postponed, rejected, cancelled, unfulfilled, fulfilled, returned, unpaid } }" } } }
+    "/workspaces/{workspaceId}/orders/pipeline": {
+      "get": { "summary": "Order counts per pipeline stage (the orders-screen tabs), under the same q/from/to as the list", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK — { stages: { <stage>: count, ... }, total }, every stage key present" } } }
     },
     "/workspaces/{workspaceId}/orders/{orderId}": {
-      "get": { "summary": "Get an order with items/payments/shipments", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK" }, "404": { "description": "Not found (including cross-tenant access)" } } }
+      "get": { "summary": "Get an order with items/payments/shipments and its derived pipeline stage", "parameters": [{ "$ref": "#/components/parameters/workspaceId" }], "responses": { "200": { "description": "OK" }, "404": { "description": "Not found (including cross-tenant access)" } } }
     },
 
     "/workspaces/{workspaceId}/confirmation-tasks": {

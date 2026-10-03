@@ -1,9 +1,11 @@
 'use strict';
 const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
-const { resolvePublicWorkspace } = require('../../core/middleware/publicWorkspace');
+const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { trackingLimiter, suggestLimiter, uploadLimiter } = require('../../core/middleware/rateLimiters');
+const customerUploadController = require('../customerUploads/customerUploadController');
+const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
 const cartController = require('../cart/cartController');
 const checkoutController = require('../checkout/checkoutController');
@@ -11,16 +13,24 @@ const reviewController = require('../reviews/reviewController');
 const reviewSchemas = require('../reviews/reviewValidation');
 const schemas = require('./storefrontValidation');
 const checkoutSchemas = require('../checkout/checkoutValidation');
-const checkoutSessions = require('../checkout/checkoutSessionRoutes');
+const checkoutSessionController = require('../checkoutSessions/checkoutSessionController');
+const checkoutSessionSchemas = require('../checkoutSessions/checkoutSessionValidation');
+const onlinePaymentController = require('../payments/onlinePaymentController');
+const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
-router.get('/products', validate(schemas.listProducts), controller.listProducts);
+router.get('/products', collectOptionFilters, validate(schemas.listProducts), controller.listProducts);
+// Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
+router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
 router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getProduct);
 router.post('/products/:productId/reviews', validate(reviewSchemas.submit), reviewController.submit);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
+// A shopper's photo for a product's image field (customerUploads). Limited
+// before multer reads a byte; multer refuses anything over 15 MB mid-stream.
+router.post('/uploads', uploadLimiter, customerUploadController.acceptFile, customerUploadController.create);
 router.get('/collections/:collectionId', validate(schemas.getCollection), controller.getCollection);
 
 // Shopper order lookup. The limiter runs ahead of `validate` so a request that
@@ -28,14 +38,33 @@ router.get('/collections/:collectionId', validate(schemas.getCollection), contro
 // order number, not the IP (see rateLimiters.js).
 router.get('/orders/track', trackingLimiter, validate(schemas.track), controller.trackOrder);
 
-// Shipping price for a destination, and the abandoned-checkout session the
-// storefront keeps while the shopper is still filling the form.
-router.get('/shipping/quote', validate(schemas.quoteShipping), controller.quoteShipping);
-router.post('/checkout-sessions', validate(checkoutSessions.schemas.upsert), checkoutSessions.upsert);
+// Checkout-form autosave for abandoned-checkout recovery. An upsert keyed on
+// the visitor, so a replay is harmless and it takes no Idempotency-Key.
+router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), refuseDraftOrders, checkoutSessionController.capture);
 
+// Read-only: prices the shipping line the checkout would get.
+router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shippingQuote);
+
+// The payment methods the checkout offers (COD only while online payments
+// are off). A valid X-Store-Preview header adds test-mode gateway methods.
+router.get('/payment-methods', validate(onlinePaymentSchemas.storeMethods), onlinePaymentController.storefrontMethods);
+
+// An unpaid online order, for the shopper holding its X-Payment-Token (given
+// once, by the checkout that created the order).
+router.get('/orders/:orderId/payment', validate(onlinePaymentSchemas.shopperStatus), onlinePaymentController.shopperStatus);
+router.post('/orders/:orderId/payment/return', validate(onlinePaymentSchemas.shopperReturn), onlinePaymentController.shopperReturn);
+router.post('/orders/:orderId/payment/retry', validate(onlinePaymentSchemas.shopperRetry), onlinePaymentController.shopperRetry);
+router.post(
+  '/orders/:orderId/payment/switch-to-cod',
+  validate(onlinePaymentSchemas.shopperAction),
+  onlinePaymentController.shopperSwitchToCod
+);
+
+// A draft store, reachable here only through a staff preview, sells nothing.
 router.post(
   '/checkout',
   validate(checkoutSchemas.checkout),
+  refuseDraftOrders,
   idempotent('storefront.checkout')(checkoutController.checkout)
 );
 

@@ -136,7 +136,7 @@ module.exports = {
         key: 'starter',
         name: 'Starter',
         monthly_price_amount: 29900,
-        yearly_price_amount: 299900,
+        yearly_price_amount: 299000, // 10 × monthly (billing/planPricing)
         currency: 'USD',
         trial_days: 14,
         soft_order_quota: 200,
@@ -150,7 +150,7 @@ module.exports = {
         key: 'growth',
         name: 'Growth',
         monthly_price_amount: 79900,
-        yearly_price_amount: 799900,
+        yearly_price_amount: 799000, // 10 × monthly (billing/planPricing)
         currency: 'USD',
         trial_days: 14,
         soft_order_quota: 2000,

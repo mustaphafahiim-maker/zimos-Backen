@@ -20,6 +20,12 @@ async function deliveredOrder(auth, workspaceId, variantId, carrierCode = 'manua
       paymentMethod: 'cod',
     });
   if (order.status !== 201) throw new Error(`order failed ${order.status} ${JSON.stringify(order.body)}`);
+  // A COD order is confirmed before a courier can be booked for it.
+  await request(app)
+    .post(`/api/v1/workspaces/${workspaceId}/orders/${order.body.order.id}/confirmation`)
+    .set(bearer(auth.accessToken))
+    .send({})
+    .expect(200);
   const ship = await request(app).post(`/api/v1/workspaces/${workspaceId}/orders/${order.body.order.id}/shipments`).set(bearer(auth.accessToken)).send({ carrierCode });
   await request(app)
     .patch(`/api/v1/workspaces/${workspaceId}/orders/${order.body.order.id}/shipments/${ship.body.shipment.id}`)

@@ -75,7 +75,63 @@ async function setupWorkspaceWithProduct(opts = {}) {
   return { auth, workspace, product, variant };
 }
 
+/** A fresh user added to `workspaceId` with one of its system roles (by key). */
+async function addMemberWithRole(ownerToken, workspaceId, roleKey, fullName = 'Team Member') {
+  const member = await registerAndActivate({ fullName });
+  const role = await db.Role.findOne({ where: { workspaceId, key: roleKey } });
+  if (!role) throw new Error(`addMemberWithRole: no role ${roleKey}`);
+  const res = await request(app)
+    .post(`/api/v1/workspaces/${workspaceId}/members`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .send({ email: member.email, roleId: role.id });
+  if (res.status !== 201) {
+    throw new Error(`addMemberWithRole failed: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return member;
+}
+
+/**
+ * Confirms a COD order from the order page, as a merchant would before
+ * shipping it: every shipment path requires a confirmed COD order.
+ */
+async function confirmCodOrder(accessToken, workspaceId, orderId) {
+  const res = await request(app)
+    .post(`/api/v1/workspaces/${workspaceId}/orders/${orderId}/confirmation`)
+    .set('Authorization', `Bearer ${accessToken}`)
+    .send({});
+  if (res.status !== 200) {
+    throw new Error(`confirmCodOrder failed: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return res.body;
+}
+
+/**
+ * Gives an existing account a platform-console role with that role's default
+ * permission set, straight in the DB — the out-of-band way the first creator
+ * is made (scripts/set-platform-role.js). The roles themselves are seeded by
+ * migration 105 and survive the per-test truncate.
+ */
+async function setPlatformRole(userId, roleKey = 'admin') {
+  const role = await db.PlatformRole.findByPk(roleKey);
+  if (!role) throw new Error(`setPlatformRole: no platform role ${roleKey}`);
+  await db.User.update(
+    { platformRole: role.key, platformPermissions: role.defaultPermissions },
+    { where: { id: userId } }
+  );
+}
+
+/** A fresh active account holding `roleKey`, with a ready Authorization header. */
+async function makePlatformUser(roleKey = 'admin', overrides = {}) {
+  const auth = await registerAndActivate(overrides);
+  await setPlatformRole(auth.userId, roleKey);
+  return { ...auth, H: { Authorization: `Bearer ${auth.accessToken}` } };
+}
+
 module.exports = {
+  addMemberWithRole,
+  confirmCodOrder,
+  setPlatformRole,
+  makePlatformUser,
   app,
   request,
   uniqueEmail,
