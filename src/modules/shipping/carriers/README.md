@@ -84,7 +84,9 @@ through `carrierHttp.request`: creates without retry, reads with retry.
 The whole contract with no network, for building and testing features:
 
 - connect it with any key of 8+ characters; one pickup location;
-- the address list is Egypt's 27 governorates (one level);
+- the address list has two levels, city > district: Egypt's governorates and the
+  platform's cities under each (`geo_regions`). North Coast towns sit under
+  Alexandria or Matrouh, as on most real couriers' lists;
 - waybills are `SBX-` + 8 digits; no label (the store's own waybill PDF is used);
 - the courier's side of a parcel lives on the shipment (`carrier_response.sandboxStatus`),
   starting at `created`; it can be cancelled while `created`;
@@ -106,3 +108,14 @@ The whole contract with no network, for building and testing features:
 2. One line in `REGISTERED` (`index.js`).
 3. Ship it in `CARRIERS_BETA` with a test store in `CARRIERS_BETA_WORKSPACES`,
    then move it to `CARRIERS_ENABLED`.
+
+## Areas map (`../carrierRegionMap.js`)
+
+An order's free-text province and city are first read back to a place of the
+platform's list (`geo_regions`, `modules/geo/geoRegions.js`), and the place is
+looked up in `carrier_region_map`: the store's own choice, else the one found
+by name matching (shared by every store, refreshed daily when a store opens
+the courier's Areas screen). Only when the place has no mapping, or the mapping
+names a node the courier no longer lists, does booking fall back to matching
+the order's own text, as before. An adapter needs nothing for this: its
+`listCities` / `listAddressTree` is what the places are matched against.

@@ -5,7 +5,6 @@ const Joi = require('joi');
 const db = require('../../../db/models');
 const { defineAdapter } = require('./adapterContract');
 const { CarrierError } = require('./carrierErrors');
-const { GOVERNORATES } = require('../governorates');
 
 /**
  * The sandbox courier (SPEC §0): the whole adapter contract (README.md in
@@ -42,9 +41,29 @@ async function verifyCredentials() {
   return { pickupLocations: [{ id: 'main', name: 'Sandbox warehouse' }] };
 }
 
-/** One level: the governorates. Any of them is bookable. */
-async function listAddressTree() {
-  return GOVERNORATES.map((g) => ({ id: g.code, name: g.en, nameAr: g.ar, dropOffAvailable: true }));
+// Where the sandbox lists North Coast towns: under a governorate, as real
+// couriers often do, so mapping North Coast is exercised.
+const COAST_UNDER = { 'north-coast.sidi-kerir': 'alexandria' };
+const COAST_DEFAULT = 'matrouh';
+
+/**
+ * City > district, in the shape Bosta answers (listCities): Egypt's
+ * governorates as the cities and the platform's cities under each as the
+ * districts, from geo_regions. North Coast is not a city of its own; its
+ * towns sit under Alexandria or Matrouh.
+ */
+async function listCities() {
+  const regions = await db.GeoRegion.findAll({ where: { country: 'EG' }, order: [['sortOrder', 'ASC']], raw: true });
+  const place = (r) => ({ id: r.code, name: r.nameEn, nameAr: r.nameAr, dropOffAvailable: true });
+  const cities = regions
+    .filter((r) => r.level === 'governorate' && r.code !== 'north-coast')
+    .map((r) => ({ ...place(r), districts: [] }));
+  const byCode = new Map(cities.map((c) => [c.id, c]));
+  for (const r of regions.filter((x) => x.level === 'city')) {
+    const parent = r.parentCode === 'north-coast' ? COAST_UNDER[r.code] || COAST_DEFAULT : r.parentCode;
+    if (byCode.has(parent)) byCode.get(parent).districts.push({ ...place(r), zoneId: null, zoneName: null, zoneNameAr: null });
+  }
+  return cities;
 }
 
 function waybill() {
@@ -53,13 +72,13 @@ function waybill() {
 
 async function createShipment(creds, input) {
   const { order, address } = input;
-  const place = address && Array.isArray(address.path) ? address.path[address.path.length - 1] : null;
+  const path = address && Array.isArray(address.path) ? address.path : [];
   return {
     trackingNumber: waybill(),
     carrierShipmentId: null,
     trackingUrl: null,
     labelUrl: null,
-    raw: { sandbox: true, sandboxStatus: 'created', governorate: place ? place.id : null, reference: order.orderNumber },
+    raw: { sandbox: true, sandboxStatus: 'created', city: path[0] ? path[0].id : null, district: path[1] ? path[1].id : null, reference: order.orderNumber },
   };
 }
 
@@ -129,7 +148,7 @@ module.exports = defineAdapter({
     webhook: 'none',
     polling: true,
     bulkStatus: true,
-    addressLevels: ['governorate'],
+    addressLevels: ['city', 'district'],
   },
   pollIntervalMinutes: 5,
   credentialFields: [{ key: 'apiKey', label: 'Any key (8+ characters)', secret: true }],
@@ -137,7 +156,7 @@ module.exports = defineAdapter({
   credentialsSchema,
   settingsSchema,
   verifyCredentials,
-  listAddressTree,
+  listCities,
   createShipment,
   getShipment,
   getShipments,

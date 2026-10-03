@@ -16,6 +16,9 @@ the numbers **400–449** (no lane owns them).
 - Storefront cache (`storefront/storefrontCache.js`): raw data only (store, product lists and pages, collections), localized after the read; Redis when `REDIS_URL`, else memory; dropped when an audited store-visible change commits and when the merchant restocks or adjusts stock; not on orders (stock shown ≤ 60 s old; checkout checks real stock). The storefront's Next.js pages stay per-request on purpose (shopper IP for rate limits, staff preview, locale cookie — see `lib/serverApiClient.ts`); they read through this cache instead of ISR.
 - A single courier booking stays inside the request: a courier create is never retried automatically (a retry after a timeout could book the parcel twice — the adapters say so), and the merchant waits for the waybill. Bulk shipping goes through the queue (item 10).
 - Automatic booking (`shipping/carrierBooking.js`) runs on `order.confirmed` / `order.paid` on the carriers queue with the default courier (or the only one set to book on its own), and is never retried for the same reason. A failed one — address not in the courier list, courier refusal — becomes a per-order merchant notification plus an audit row on the order, and the merchant books it by hand. Test orders are booked automatically only by the sandbox courier. An order that already has an active shipment is left alone.
+- Places (`geo_regions`, migration 403): two levels, governorate (Egypt's 27 + North Coast, Saudi Arabia's 13 regions) and city (343 in Egypt, 84 in Saudi Arabia). Egyptian governorates keep their existing codes; North Coast is `north-coast`; Saudi regions are `sa-*`; cities are `<parent>.<slug>`. The list changes only by migration. The storefront form still takes the city as free text; the order's text is read back to a place when booking.
+- Courier area map (`carrier_region_map`, migration 404): rows matched by name are shared by every store (`workspace_id` null), because a courier's list is the same for everyone, and are refreshed at most daily when a store opens the Areas screen. A store's own choice is stored per store and wins. A pick made on one order's booking is not remembered as the area's mapping: that order's street may not represent the area. Mappings are set only from the Areas screen.
+- The sandbox courier now has two levels (city > district, Bosta-shaped) built from `geo_regions`, with North Coast towns under Alexandria and Matrouh, so district picking and mapping can be exercised.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -46,7 +49,7 @@ the numbers **400–449** (no lane owns them).
   behind `AUTH_REFRESH_COOKIE=true` — an owner setting, because the cookie only
   works once the dashboard and the API share a site (app.x + api.x). Nothing to
   code; turn it on with the deploy.
-- [ ] 10. Shipping data (10a shipment_events and 10b per-account booking settings + automatic booking done): `geo_regions` seed (Egypt + North Coast + districts,
+- [ ] 10. Shipping data (10a shipment_events, 10b per-account booking settings + automatic booking, 10c geo_regions + carrier_region_map done): `geo_regions` seed (Egypt + North Coast + districts,
   Saudi regions), `carrier_region_map` (stored, editable), `shipment_events`
   timeline, per-carrier-account `autoCreateShipmentOn` / inspection / courier
   notes; bulk ship shows ready vs missing-mapping and retries failures.

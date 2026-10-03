@@ -32,4 +32,14 @@ router.patch(
   require('express-async-handler')(async (req, res) => res.json({ booking: await booking.updateBooking(req.tenant.workspaceId, req.params.code, req.body, req) }))
 );
 
+// Where each place is on the courier's own address list (carrierRegionMap.js).
+const regionMap = require('./carrierRegionMap');
+const handle = require('express-async-handler');
+const manage = requirePermission(PERMISSIONS.SHIPPING_MANAGE);
+const ws = (req) => req.tenant.workspaceId;
+router.get('/:code/regions', validate(regionMap.schemas.list), readAccess, handle(async (req, res) => res.json(await regionMap.listRegions(ws(req), req.params.code, req.query))));
+router.post('/:code/regions/auto-match', validate(regionMap.schemas.rematch), manage, handle(async (req, res) => res.json(await regionMap.rematch(ws(req), req.params.code, req.query))));
+router.put('/:code/regions/:regionCode', validate(regionMap.schemas.set), manage, handle(async (req, res) => res.json(await regionMap.setMapping(ws(req), req.params.code, req.params.regionCode, req.body, req))));
+router.delete('/:code/regions/:regionCode', validate(regionMap.schemas.clear), manage, handle(async (req, res) => res.json(await regionMap.clearMapping(ws(req), req.params.code, req.params.regionCode, req))));
+
 module.exports = router;

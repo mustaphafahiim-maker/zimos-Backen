@@ -10,7 +10,7 @@ const { trackStage } = require('../orders/orderStateService');
 const { getAdapter, availableFor, assertSandboxAllowed, reservedAdapterFor, MANUAL } = require('./carriers');
 const { isCityDistrict } = require('./carriers/adapterContract');
 const accounts = require('./carrierAccountService');
-const { matchAddress } = require('./carrierAddressMatching');
+const { resolveDropOff } = require('./carrierRegionMap');
 const { CarrierAuthError, CarrierPermissionError } = require('./carriers/carrierErrors');
 const { loadTiers } = require('./shippingPricing');
 
@@ -346,7 +346,7 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       assertReadyToShip(order);
       await assertNoActiveShipment(order.id, transaction);
 
-      const address = typed || (await matchAddress(adapter, index, order.shippingAddressSnapshot, data.carrierAddress));
+      const address = typed || (await resolveDropOff(adapter, index, workspaceId, order.shippingAddressSnapshot, data.carrierAddress, { transaction }));
 
       // Resolved before the carrier call, so an unmapped tier costs nothing.
       const tier = await bookingTier(workspaceId, order, data.tierId, transaction);
