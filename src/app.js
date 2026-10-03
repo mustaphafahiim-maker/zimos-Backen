@@ -70,6 +70,7 @@ const publicApiRoutes = require('./modules/publicApi/publicApiRoutes');
 const merchantNotificationRoutes = require('./modules/notifications/merchantNotificationRoutes');
 const trackingPixelRoutes = require('./modules/marketing/trackingPixelRoutes');
 const inboxRoutes = require('./modules/whatsapp/inboxRoutes');
+const orderEmailRoutes = require('./modules/notifications/orderEmailRoutes');
 
 const app = express();
 
@@ -202,6 +203,7 @@ v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropship
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
 v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
+v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
 // The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
 v1.use('/inbox-stream', inboxRoutes.stream);
 // WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
