@@ -5,10 +5,12 @@ const { NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const reviewService = require('../reviews/reviewService');
 const { resolveCheckoutSettings } = require('../checkout/checkoutSettings');
+const { resolveThankYouPage } = require('./thankYouPage');
 const { resolveCatalogSettings } = require('./catalogSettings');
 const { presentStoreBump } = require('../checkout/orderBump');
 const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
 const productSearch = require('./productSearch');
+const { notHiddenSql } = require('../catalog/productPage');
 
 /**
  * Public (no-auth) storefront queries: only status='active' rows, and only
@@ -35,7 +37,8 @@ async function listProducts(workspaceId, query = {}) {
   if (wantsListing(query)) return productSearch.searchProducts(workspaceId, query);
 
   const { collectionId, tag, limit = 24, cursor } = query;
-  const where = { workspaceId, status: 'active' };
+  // A hidden product opens by its link only (page_settings.hidden).
+  const where = { workspaceId, status: 'active', [db.Sequelize.Op.and]: [db.sequelize.literal(notHiddenSql('"Product"'))] };
   if (cursor) where.id = { [db.Sequelize.Op.gt]: cursor };
   if (tag) where.tags = { [db.Sequelize.Op.contains]: [tag] };
 
@@ -82,6 +85,8 @@ async function getStorefront(workspaceId) {
     // fully populated — an unconfigured store gets the defaults, which are
     // what the checkout already enforced before this existed.
     checkout: resolveCheckoutSettings(w),
+    // What the thank-you page shows after an order (settings.thank_you_page).
+    thankYou: resolveThankYouPage(w.settings),
     // The product listing's sidebar, filters and default sort.
     catalog: resolveCatalogSettings(w.settings),
     // The "add to your order" card the store's checkout offers, or null
@@ -237,6 +242,8 @@ async function trackOrder(workspaceId, phone, orderNumber) {
     shippingAmount: String(order.shippingAmount),
     totalAmount: String(order.totalAmount),
     currency: order.currency,
+    // What the store wrote for the customer (order notes marked public).
+    notes: await require('../orders/orderMetaService').publicNotes(order.id),
   };
 }
 

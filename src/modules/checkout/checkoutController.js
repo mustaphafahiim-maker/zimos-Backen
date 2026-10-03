@@ -6,6 +6,7 @@ const orderService = require('../orders/orderService');
 const { afterOrderCompleted } = require('../orders/orderCompletion');
 const { AppError, ValidationError } = require('../../core/errors/AppError');
 const { assertRequiredCheckoutFields } = require('./checkoutSettings');
+const { saveCheckoutAnswers } = require('./checkoutForm');
 const methodsService = require('../payments/paymentMethodsService');
 const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
@@ -30,7 +31,7 @@ const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, checkoutSessionId, paymentProvider, returnUrl, orderBump, ...orderBody } = req.body;
+  const { item, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -102,6 +103,7 @@ const checkout = asyncHandler(async (req, res) => {
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
+    await saveCheckoutAnswers(order, workspace, formFields);
     await afterOrderCompleted(workspaceId, order, context);
     return res.status(201).json({ order: { ...order.toJSON(), items: orderItems } });
   }
@@ -119,6 +121,8 @@ const checkout = asyncHandler(async (req, res) => {
       },
     }
   );
+
+  await saveCheckoutAnswers(order, workspace, formFields);
 
   const attempt = await online.startAttempt(order, {
     provider: prepared.method.provider,

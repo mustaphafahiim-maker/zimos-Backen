@@ -5,6 +5,7 @@ const db = require('../../db/models');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { ancestryOf, descendantsOf } = require('../catalog/collectionTree');
 const { loadPublicProducts } = require('./publicProduct');
+const { notHiddenSql } = require('../catalog/productPage');
 
 /*
  * The storefront's product listing with search, filters, sort, paging and
@@ -59,11 +60,11 @@ const FACET_OPTION_VALUES_LIMIT = 500;
 
 const SORT_ORDER = {
   relevance: 'score DESC, sim DESC, created_at DESC, id DESC',
-  newest: 'created_at DESC, id DESC',
+  newest: 'priority DESC, created_at DESC, id DESC',
   price_asc: 'min_price ASC NULLS LAST, created_at DESC, id DESC',
   price_desc: 'min_price DESC NULLS LAST, created_at DESC, id DESC',
   name: 'lower(name) ASC, id ASC',
-  position: 'coll_pos ASC NULLS LAST, created_at DESC, id DESC',
+  position: 'coll_pos ASC NULLS LAST, priority DESC, created_at DESC, id DESC',
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -195,7 +196,7 @@ function scoringPipeline(b, q, workspaceId, where, { description = true } = {}) 
  * matched ids (`filters.matchedIds`), set once by matchSearch.
  */
 function filterConditions(b, filters, skip = new Set()) {
-  const conditions = [`p.workspace_id = ${b.add(filters.workspaceId, 'ws')}`, "p.status = 'active'"];
+  const conditions = [`p.workspace_id = ${b.add(filters.workspaceId, 'ws')}`, "p.status = 'active'", notHiddenSql('p')];
   if (filters.matchedIds && !skip.has('search')) {
     conditions.push(`p.id = ANY(${b.add(filters.matchedIds, 'm')}::uuid[])`);
   }
@@ -473,7 +474,7 @@ async function searchProducts(workspaceId, query) {
 
   const rows = await select(
     `SELECT id, total FROM (
-        SELECT p.id, p.name, p.created_at,
+        SELECT p.id, p.name, p.created_at, p.priority,
                ${byRelevance ? 'm.score' : '0'} AS score,
                ${byRelevance ? 'm.sim' : '0'} AS sim,
                ${
@@ -561,7 +562,7 @@ async function suggest(workspaceId, rawQuery) {
   );
 
   const b = binder();
-  const where = `p.workspace_id = ${b.add(workspaceId, 'ws')} AND p.status = 'active'`;
+  const where = `p.workspace_id = ${b.add(workspaceId, 'ws')} AND p.status = 'active' AND ${notHiddenSql('p')}`;
   const rows = await select(
     `${scoringPipeline(b, q, workspaceId, where, { description: false })}
      SELECT id, name, slug, media, score FROM scored

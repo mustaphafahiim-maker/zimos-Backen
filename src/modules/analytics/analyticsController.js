@@ -38,3 +38,21 @@ const webRealtime = asyncHandler(async (req, res) => {
 });
 
 Object.assign(module.exports, { webStats, webSeries, webMetrics, webWeekly, webRealtime });
+
+// --- Dashboard home (SPEC §15.1) ---------------------------------------------
+const overviewService = require('./overviewService');
+
+const overview = asyncHandler(async (req, res) => {
+  res.json({ overview: await overviewService.getOverview(req.tenant.workspaceId, req.query) });
+});
+
+Object.assign(module.exports, { overview });
+
+// --- Sales attribution (SPEC §15.3) ------------------------------------------
+const attributionService = require('./attributionService');
+
+const attribution = asyncHandler(async (req, res) => {
+  res.json({ attribution: await attributionService.getAttribution(req.tenant.workspaceId, req.query) });
+});
+
+Object.assign(module.exports, { attribution });

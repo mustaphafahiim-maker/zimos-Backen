@@ -24,7 +24,18 @@ const search = {
   q: Joi.string().trim().min(2).max(100).optional(),
   from: Joi.date().iso().optional(),
   to: Joi.date().iso().optional(),
+  // SPEC §4.3 filters (orderFilters.js). Archived orders are left out unless asked for.
+  archived: Joi.string().valid('exclude', 'only', 'include').optional(),
+  tag: Joi.string().trim().min(1).max(40).optional(),
+  source: Joi.string().valid('store', 'funnel', 'manual', 'api', 'import', 'upsell').optional(),
+  paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').optional(),
+  governorate: Joi.string().trim().min(1).max(100).optional(),
+  carrier: Joi.string().trim().min(1).max(100).optional(),
+  seen: Joi.boolean().optional(),
+  test: Joi.boolean().optional(),
 };
+
+const tagList = Joi.array().items(Joi.string().trim().min(1).max(40)).max(20);
 
 const contact = Joi.object({
   fullName: Joi.string().max(200).required(),
@@ -91,6 +102,29 @@ module.exports = {
       waybillNumber: Joi.string().trim().max(100).allow('', null).optional(),
       trackingUrl: Joi.string().uri().max(500).allow('', null).optional(),
     }),
+  },
+  // PATCH /:orderId/meta — tags (replace, or add/remove), test, seen, archive.
+  updateMeta: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    body: Joi.object({
+      tags: tagList.optional(),
+      addTags: tagList.optional(),
+      removeTags: tagList.optional(),
+      isTest: Joi.boolean().optional(),
+      isSeen: Joi.boolean().optional(),
+      archived: Joi.boolean().optional(),
+    }).min(1),
+  },
+  listTags: { params: Joi.object({ workspaceId: uuid.required() }) },
+  addNote: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    body: Joi.object({
+      body: Joi.string().trim().min(1).max(2000).required(),
+      visibility: Joi.string().valid('internal', 'public').default('internal'),
+    }),
+  },
+  deleteNote: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required(), noteId: uuid.required() }),
   },
   confirm: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
