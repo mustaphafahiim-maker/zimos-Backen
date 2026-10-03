@@ -23,6 +23,9 @@ const checkoutOtp = require('../risk/checkoutOtp');
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
+// Order bumps, cross-sell, the thank-you upsell and the exit popup (modules/offers).
+router.use(require('../offers/publicOfferRoutes'));
+
 // What the checkout form needs to pass the bot guard (a fresh time token).
 router.get('/checkout/guard', botProtection.guardConfig);
 // The code-entry step of a checkout that answered 428 OTP_REQUIRED.
