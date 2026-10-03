@@ -253,6 +253,10 @@ async function createOrder(
     );
     if (platformBlock) throw platformBlocklist.rejection(customer.id, platformBlock);
 
+    // The shopper's own IP and browser: a staff order carries the staff member's.
+    const visitorIp = req && !req.user ? blockedEntries.normalizeIp(req.ip) : null;
+    const visitorAgent = req && !req.user && req.headers ? req.headers['user-agent'] : null;
+
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
     // The store's blocked_entries (scope orders). The IP is the shopper's only
@@ -263,7 +267,7 @@ async function createOrder(
       {
         phoneNormalized: customer.phoneNormalized,
         email: contact.email,
-        ip: req && !req.user ? req.ip : null,
+        ip: visitorIp,
         deviceId: payload.deviceId,
         fullName: contact.fullName,
         addressLine: shippingAddress && shippingAddress.addressLine,
@@ -282,13 +286,17 @@ async function createOrder(
     // Before any inventory is touched, so a refusal has nothing to undo but
     // the customer lookup.
     if (evaluateFraudRules) {
-      const ruleFlags = await fraudRules.evaluateStorefrontOrder({
+      const { flags: ruleFlags } = await fraudRules.evaluateStorefrontOrder({
         workspaceId,
         customer,
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
         transaction,
         onlinePayment: Boolean(awaitingPayment),
         blockedEntry,
+        items,
+        paymentMethod,
+        phone: contact.phone,
+        visitor: { ip: visitorIp },
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
@@ -412,6 +420,8 @@ async function createOrder(
         discountsSnapshot,
         notes: notes || null,
         riskFlags,
+        ipAddress: visitorIp,
+        userAgent: visitorAgent ? String(visitorAgent).slice(0, 400) : null,
         totalWeightGrams: shipping.weightGrams,
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,

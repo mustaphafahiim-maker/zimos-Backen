@@ -59,6 +59,10 @@ module.exports = (sequelize, DataTypes) => {
       discountsSnapshot: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'discounts_snapshot' },
       notes: { type: DataTypes.TEXT, allowNull: true },
       riskFlags: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [], field: 'risk_flags' },
+      // The shopper's IP, its country and their browser (storefront orders only) — migration 161.
+      ipAddress: { type: DataTypes.STRING(45), allowNull: true, field: 'ip_address' },
+      ipCountry: { type: DataTypes.STRING(2), allowNull: true, field: 'ip_country' },
+      userAgent: { type: DataTypes.STRING(400), allowNull: true, field: 'user_agent' },
       idempotencyKey: { type: DataTypes.STRING(200), allowNull: true, field: 'idempotency_key' },
       // Set when a merchant cancels the order directly (distinct from a COD
       // confirmation rejection, though both land on confirmationState 'rejected').
