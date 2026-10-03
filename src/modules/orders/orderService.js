@@ -471,6 +471,7 @@ async function createOrder(
     // conversions run after commit and never fail the order. An order waiting
     // for its online payment is not a purchase yet, so it sends no conversion.
     transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
+    transaction.afterCommit(() => require('../notifications/merchantNotificationEvents').emit(workspaceId, 'order.created', order.id));
     if (!awaitingPayment) transaction.afterCommit(() => pixelEvents.emit(workspaceId, 'order.created', order.id));
 
     return { order, items: orderItems };
