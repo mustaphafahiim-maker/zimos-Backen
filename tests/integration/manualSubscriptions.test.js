@@ -203,7 +203,9 @@ describe('feature overrides', () => {
     expect(byKey(res, 'api_access')).toMatchObject({ enabled: true, source: 'override', inPlan: false });
     expect(byKey(res, 'funnels')).toMatchObject({ enabled: false, source: 'override', inPlan: true });
     const billing = await request(app).get(`/api/v1/workspaces/${wid}/billing`).set(H);
-    expect(billing.body.billing.features.sort()).toEqual(['api_access', 'custom_domain']);
+    // The merchant sees only features that exist today (billing/featureCatalog):
+    // the api_access grant applies (the console row above) but isn't listed to them.
+    expect(billing.body.billing.features.sort()).toEqual(['custom_domain']);
   });
 
   it('refuses keys outside the catalogue, values for on/off features, past expiries and a second live override', async () => {

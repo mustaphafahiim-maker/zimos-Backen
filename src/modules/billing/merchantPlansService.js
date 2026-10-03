@@ -21,11 +21,7 @@ const { planPrice, BILLING_CYCLES } = require('./planPricing');
  * percentage of any plan, or a fixed amount in the code's own currency.
  */
 
-const PLAN_ORDER = [
-  ['displayOrder', 'ASC'],
-  ['monthlyPriceAmount', 'ASC'],
-  ['name', 'ASC'],
-];
+const { PLAN_ORDER } = publicPlans;
 
 function priced(plan, cycle, code) {
   const gross = planPrice(plan, cycle);
