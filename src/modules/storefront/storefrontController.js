@@ -22,6 +22,9 @@ const suggestProducts = asyncHandler(async (req, res) =>
   res.json(await service.suggestProducts(req.tenant.workspaceId, req.query.q))
 );
 const getCollection = asyncHandler(async (req, res) => res.json({ collection: await service.getCollection(req.tenant.workspaceId, req.params.collectionId) }));
+// The signed tracking link (…/track?t=<token>): the same answer, no phone number needed.
+const trackOrderByToken = asyncHandler(async (req, res) => res.json({ result: await service.trackOrderByToken(req.tenant.workspaceId, req.query.token) }));
+
 // Always 200, with `result: null` when nothing matches — see service.trackOrder.
 const trackOrder = asyncHandler(async (req, res) => res.json({ result: await service.trackOrder(req.tenant.workspaceId, req.query.phone, req.query.number) }));
 
@@ -58,5 +61,6 @@ module.exports = {
   listCollections,
   getCollection,
   trackOrder,
+  trackOrderByToken,
   shippingQuote,
 };

@@ -15,6 +15,9 @@ const schemas = require('./platformAdminValidation');
 const router = Router();
 router.use(authenticate);
 
+// Lane 7: queues, app catalogue, suppliers, usage, delivery network, support access.
+router.use(require('./platformExtraRoutes'));
+
 // --- Plans ---------------------------------------------------------------
 router.get('/plans', can(P.PLANS_VIEW), controller.listPlans);
 router.post('/plans', can(P.PLANS_MANAGE), validate(schemas.createPlan), controller.createPlan);

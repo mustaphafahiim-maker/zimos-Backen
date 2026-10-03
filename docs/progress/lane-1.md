@@ -9,9 +9,10 @@
 - [x] 6. Manual order screen (§4.5) — checked on :4101 and :5201 in Arabic: `/orders/new` found the customer by phone, filled their last address, priced the summary on the server, created the order (source "manual") and opened its page; preview with a typed shipping amount, a bad coupon (422) and too many units (409) over the API.
 - [x] 7. Edit items / refund by lines / fulfill — checked on :4101: `POST /orders/:id/items/preview` shows before/after/difference and saves nothing, `PUT /orders/:id/items` reprices the order and moves the stock reservation (13 → 15 → 14 reserved), duplicate lines 422, 409 once shipped; `POST /orders/:id/refund-quote`; `POST /orders/:id/fulfill` refuses an unconfirmed order and ships a confirmed one with courier + tracking. On :5201: edited a quantity (250 → 750, difference shown), confirmed, "Mark as shipped" with a tracking number, timeline shows it all. The refund-by-items picker inside the refund dialog is typechecked and its endpoint checked, but was not clicked through (no paid order in the lane database).
 - [x] 8. Tracking import, bulk waybills, manifest (§12.4) — checked against `zimos_lane_1` and on :5201: a six-row CSV created shipments and moved two confirmed orders (shipped, delivered) and reported the other rows one by one (unconfirmed order, unknown number, missing number, unknown status); from the list, five ticked orders gave a 2-page A4×4 PDF, a 5-page 10×15 PDF and a manifest; "Today's manifest" and "Sync from file" in the header, the import result listed per line in Arabic. NOT eyeballed: the PDFs were checked for being valid and having the right page count, but nothing on this machine renders a PDF page to look at the label layout.
+- [x] 9. Invoice PDF + xlsx export — checked on :4101 and :5201: `GET /orders/:id/invoice.pdf` answers a PDF named after the invoice number, `GET /orders/export?format=xlsx` a workbook (zip read back entry by entry, right-to-left sheet for Arabic, amounts as numeric cells), CSV unchanged, `format=pdf` 422; on the dashboard the Export dialog's "Excel (.xlsx)" choice downloaded a workbook and the order page's "Invoice" button opened the PDF.
 
 ## Next
-- [ ] 9. Invoice PDF + xlsx export — CODE LANDED, TWO BUTTONS NOT CLICKED YET (see Blocked). Checked on :4101: `GET /orders/:id/invoice.pdf` answers a PDF named after the invoice number (and JSON with `?as=base64`), `GET /orders/export?format=xlsx` answers a workbook (zip read back entry by entry, sheet is right-to-left for Arabic, amounts are numeric cells), CSV unchanged, `format=pdf` is 422. The dashboard typechecks.
+Every item of lane 1 is ticked.
 
 ## Decisions
 - 2026-10-03 No `status` column (LANES §3). The spec's statuses map onto the derived stages: confirmed/paid/processing/awaiting_pickup → `ready_to_ship`; unreachable/postponed → `needs_follow_up`; in_delivery → `shipped`/`out_for_delivery`; payment_failed → `awaiting_payment`. No new stage was added.
@@ -42,11 +43,10 @@
 - 2026-10-03 Frontend: lane-1 API calls live in `packages/api-client/src/endpoints/orders.ts`; lane-1 error wording in `pages/orders/orderErrors.ts` (the shared `ApiErrorCode` union is not extended).
 
 ## Blocked
-- Item 9 browser check — only one dev-server slot was free (the other lanes hold four of the five). At the next wake-up: start `lane-1-backend` + `lane-1-dashboard`, open an order and press "Invoice", open Export on the list, choose "Excel (.xlsx)" and download; then tick item 9 and end the loop. Also still not eyeballed: the layout of the label, manifest and invoice PDFs and opening the .xlsx in Excel — nothing on this machine renders them.
 
 ## Handoff
-- Branch `lane-1` in both worktrees; everything listed under Done is merged into `origin/zimos-additions`.
-- Migrations used: 135, 136. Next free: 137.
-- Dev servers: at most 5 per folder across all lanes — stop the dashboard before starting the storefront. The demo user's username is already set in `zimos_lane_1`.
-- Never put backticks inside a double-quoted `node -e "..."` in Git Bash (they run as commands and hang); write the script to a file. `git merge` needs `--no-edit`.
-- Scratch helpers are not in the repo: log in as `demo@zimos.test` on `http://localhost:4101/api/v1`, workspace from `GET /workspaces`, orders through `POST /workspaces/:id/orders` with an `Idempotency-Key` header.
+- Lane 1 is complete: items 1–9 are ticked and merged into `origin/zimos-additions` in both repos. Migrations used: 135, 136 (137–159 are free).
+- Left for a person to look at, because nothing on this machine renders them: the printed layout of the bulk waybill labels (A4 ×4 and 10×15), the courier manifest and the invoice PDF, and opening the exported .xlsx in Excel. They were checked for being valid files with the right page counts and contents, not by eye.
+- Not clicked through: the "Refund by items" picker inside the refund dialog (needs a paid order; its endpoint was checked).
+- Known limits, by decision (see Decisions): no `return_requested` stages; item editing is refused on paid orders; saved views / columns / page size live in localStorage; the export is synchronous, not a queue job; "notify customer" on refund and cancel is left to lane 4's automations; "resend to webhook" is lane 7's.
+- Dev servers: at most 5 per folder across all lanes; the lane needs two (backend + dashboard) to check a screen.

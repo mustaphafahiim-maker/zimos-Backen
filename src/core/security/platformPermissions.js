@@ -46,6 +46,9 @@ const PLATFORM_PERMISSIONS = Object.freeze({
   FEATURE_FLAGS_MANAGE: 'feature_flags.manage',
   ANNOUNCEMENTS_VIEW: 'announcements.view',
   ANNOUNCEMENTS_MANAGE: 'announcements.manage',
+  // The merchants' services directory (modules/serviceListings).
+  SERVICE_LISTINGS_VIEW: 'service_listings.view',
+  SERVICE_LISTINGS_MANAGE: 'service_listings.manage',
   SUPPORT_VIEW: 'support.view',
   SUPPORT_MANAGE: 'support.manage',
   AUDIT_LOG_VIEW: 'audit_log.view',
