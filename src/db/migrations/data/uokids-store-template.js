@@ -313,7 +313,7 @@ const home = [
             id: 'reviews-c',
             type: 'column',
             span: 12,
-            elements: [el('reviews-e', 'reviews_list', { title: 'آراء عملائنا', productId: 'baby-bouncer-uokids', limit: 6 })],
+            elements: [el('reviews-e', 'reviews_list', { title: 'آراء عملائنا', productId: '', limit: 6 })],
           },
         ],
       },
