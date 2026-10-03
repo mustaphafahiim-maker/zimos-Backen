@@ -3,6 +3,7 @@
 const db = require('../../db/models');
 const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { clientIp } = require('../../core/middleware/clientIp');
 const orderService = require('../orders/orderService');
 const { OFFER_STEP_TYPES } = require('./funnelGraph');
 
@@ -283,7 +284,7 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req }, transa
       paymentMethod: 'cod',
       funnelId,
     },
-    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
+    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? clientIp(req) : null },
     // One purchase split in two: no second pay-per-order fee (Q14).
     { transaction, skipFraudRules: true, shippingOverride: { amount: 0 }, chargeFee: false }
   );

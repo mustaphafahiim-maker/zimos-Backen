@@ -5,6 +5,7 @@ const { Op } = require('sequelize');
 const db = require('../../db/models');
 const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
+const { clientIp } = require('../../core/middleware/clientIp');
 const { hashPassword, verifyPassword } = require('../../core/security/password');
 const {
   signAccessToken,
@@ -46,7 +47,7 @@ async function createSession(user, req) {
     userId: user.id,
     refreshTokenHash: hash,
     userAgent: req ? req.headers['user-agent'] : null,
-    ipAddress: req ? req.ip : null,
+    ipAddress: req ? clientIp(req) : null,
     expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
   });
   return { raw, session };
@@ -89,7 +90,7 @@ async function createAccount({ email, passwordHash, fullName, phone, username, e
 async function sendSignupCode(user, { locale, req }) {
   if (!verificationCodes.emailReady()) return { sent: false };
   try {
-    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
     return { sent: true, ...sent };
   } catch (err) {
     if (!(err instanceof AppError)) logger.error('Could not send the sign-up code', { userId: user.id, message: err.message });
@@ -121,7 +122,7 @@ async function register({ email, password, fullName, phone, username, planId, bi
     }
     // Checked before the account exists, so one address or IP cannot mint
     // accounts past the code limits.
-    await verificationCodes.assertCanSend({ channel: 'email', target: String(email).toLowerCase(), ip: req ? req.ip : null });
+    await verificationCodes.assertCanSend({ channel: 'email', target: String(email).toLowerCase(), ip: req ? clientIp(req) : null });
   }
 
   const passwordHash = await hashPassword(password);
@@ -136,7 +137,7 @@ async function register({ email, password, fullName, phone, username, planId, bi
   await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
 
   if (verifying) {
-    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
     return signupPolicy.verificationResponse(user, sent);
   }
 
@@ -243,7 +244,7 @@ async function login({ identifier, email, password, locale }, req) {
     if (!signupPolicy.isVerified(user)) {
       let sent = null;
       try {
-        sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+        sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
       } catch (err) {
         if (!(err instanceof AppError) || err.statusCode !== 429) throw err;
       }
@@ -580,7 +581,7 @@ function assertUnconfirmed(user) {
 /** POST /auth/verify/send — a new code by 'email' or 'sms' (the account's own phone). */
 async function sendVerificationCode(user, { channel = 'email', locale }, req) {
   assertUnconfirmed(user);
-  const sent = await verificationCodes.sendCode(user, channel, { ip: req ? req.ip : null, locale, req });
+  const sent = await verificationCodes.sendCode(user, channel, { ip: req ? clientIp(req) : null, locale, req });
   return { sent: true, ...sent };
 }
 
@@ -630,7 +631,7 @@ async function sendAccountCode(user, { locale } = {}, req) {
   if (!verificationCodes.emailReady()) {
     throw new AppError('EMAIL_UNAVAILABLE', 'Codes cannot be sent by email right now. Try again later.', 503);
   }
-  const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+  const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
   return { sent: true, ...sent };
 }
 
