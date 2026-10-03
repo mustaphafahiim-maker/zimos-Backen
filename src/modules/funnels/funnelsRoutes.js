@@ -19,6 +19,8 @@ const PUBLISH = requirePermission(PERMISSIONS.FUNNELS_PUBLISH);
 // Share code, import by code, the map's draft and the issues list. Registered
 // first so `/import` is not read as a funnel id.
 require('./funnelExtras').mount(router, { MANAGE, requireCreationAllowed });
+// Geo redirects and the funnel's own settings.
+require('./geoRedirects').mount(router, { MANAGE });
 
 // --- funnels ---
 // Creating a funnel is refused while the store is restricted (unpaid past its

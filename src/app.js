@@ -193,6 +193,8 @@ v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').router);
 // Page sections saved for reuse across pages and funnels (website.edit).
 v1.use('/workspaces/:workspaceId/saved-sections', require('./modules/savedSections/savedSectionsRoutes'));
+// Split tests on funnel steps (funnels.manage).
+v1.use('/workspaces/:workspaceId/experiments', require('./modules/funnels/splitTests').router);
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);

@@ -134,7 +134,9 @@ const resume = asyncHandler(async (req, res) => {
 
 // --- public runtime ---
 const startSession = asyncHandler(async (req, res) => {
-  const result = await service.startSession(req.tenant.workspaceId, req.params.funnelRef, req.body);
+  // The visitor's country, for geo redirects (funnels/geoRedirects.js); null when unknown.
+  const country = await require('./geoRedirects').countryOf(req);
+  const result = await service.startSession(req.tenant.workspaceId, req.params.funnelRef, { ...req.body, country });
   res.status(201).json(result);
 });
 

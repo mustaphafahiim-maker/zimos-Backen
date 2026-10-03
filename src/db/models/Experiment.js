@@ -12,6 +12,11 @@ module.exports = (sequelize, DataTypes) => {
       // [{ key: 'A', weight: 50, data: {...} }, { key: 'B', weight: 50, data: {...} }]
       variants: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
       status: { type: DataTypes.ENUM('running', 'paused', 'completed'), allowNull: false, defaultValue: 'running' },
+      // Split tests on a funnel step (modules/funnels/splitTests.js).
+      funnelId: { type: DataTypes.UUID, allowNull: true, field: 'funnel_id' },
+      stepKey: { type: DataTypes.STRING(100), allowNull: true, field: 'step_key' },
+      autoWinner: { type: DataTypes.JSONB, allowNull: true, field: 'auto_winner' },
+      winnerVariantKey: { type: DataTypes.STRING(50), allowNull: true, field: 'winner_variant_key' },
     },
     { tableName: 'experiments', indexes: [{ fields: ['workspace_id', 'subject_type', 'subject_id'] }] }
   );

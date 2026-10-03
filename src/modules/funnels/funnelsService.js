@@ -716,7 +716,7 @@ function renderStepData(snapshot, stepKey) {
   return { key: step.key, name: step.name, stepType: step.stepType, tree: step.builderData, seo: step.seo || {} };
 }
 
-async function resolveStepPayload(workspaceId, snapshot, stepKey) {
+async function resolveStepPayload(workspaceId, snapshot, stepKey, session = null) {
   const step = (snapshot.steps || []).find((s) => s.key === stepKey);
   if (!step) throw stepNotFound();
   const payload = { step: renderStepData(snapshot, stepKey) };
@@ -742,7 +742,8 @@ async function resolveStepPayload(workspaceId, snapshot, stepKey) {
       };
     }
   }
-  return payload;
+  // A split test on this step swaps in the visitor's variant (splitTests.js).
+  return session ? require('./splitTests').applyToPayload(workspaceId, payload, session) : payload;
 }
 
 function publicSession(session) {
@@ -798,8 +799,11 @@ async function startSession(workspaceId, funnelRef, body) {
   if (UUID_RE.test(funnelRef)) where.id = funnelRef;
   else where.subdomain = funnelRef;
 
-  const funnelLookup = await db.Funnel.findOne({ where });
+  let funnelLookup = await db.Funnel.findOne({ where });
   if (!funnelLookup) throw funnelNotFound();
+  // A visitor from a redirected country gets the other funnel (geoRedirects.js).
+  const redirected = await require('./geoRedirects').redirectTarget(workspaceId, funnelLookup.id, body.country);
+  if (redirected) funnelLookup = redirected;
 
   const { funnel, snapshot } = await loadPublishedSnapshot(workspaceId, funnelLookup.id);
 
@@ -826,9 +830,15 @@ async function startSession(workspaceId, funnelRef, body) {
     await resetSessionToEntry(session, snapshot);
   }
 
-  const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+  const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
   return {
-    funnel: { id: funnel.id, name: funnel.name, subdomain: funnel.subdomain },
+    funnel: {
+      id: funnel.id,
+      name: funnel.name,
+      subdomain: funnel.subdomain,
+      // Its own icon, title and currency label (funnels/geoRedirects.js).
+      settings: require('./geoRedirects').resolveSettings(funnel),
+    },
     session: publicSession(session),
     ...payload,
   };
@@ -844,14 +854,14 @@ async function getSessionStep(workspaceId, funnelId, sessionId) {
     // visitor is looking at, and refreshing it must not blank it. Nothing to
     // render (or to resume) if a republish removed that step.
     if (!stepExists(snapshot, session.currentStepKey)) return { done: true, session: publicSession(session) };
-    const finishedPayload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+    const finishedPayload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
     return { done: true, session: publicSession(session), ...finishedPayload };
   }
 
   if (!stepExists(snapshot, session.currentStepKey)) {
     await resetSessionToEntry(session, snapshot);
   }
-  const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+  const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
   // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
   if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session);
   return { session: publicSession(session), ...payload };
@@ -951,7 +961,7 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       // left to route from, so restart the visitor at the entry instead of
       // dead-ending them; the outcome is dropped with the step it came from.
       await resetSessionToEntry(session, snapshot, t);
-      const restarted = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+      const restarted = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
       return { session: publicSession(session), ...restarted };
     }
 
@@ -984,7 +994,11 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
         { funnelId },
         { where: { id: outcome.orderId, workspaceId }, transaction: t }
       );
-      if (n) session.orderId = outcome.orderId;
+      if (n) {
+        session.orderId = outcome.orderId;
+        // Credit the order to the visitor's variant in the funnel's split tests.
+        await require('./splitTests').recordOrder(workspaceId, funnelId, session.visitorId, outcome.orderId, t);
+      }
     }
 
     const outbound = edges.filter((e) => e.fromStepKey === session.currentStepKey);
@@ -1004,7 +1018,7 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
         session.completedAt = new Date();
       }
       await session.save({ transaction: t });
-      const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey);
+      const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
       // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
       if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session, t);
       result = { ...(finished ? { done: true } : {}), session: publicSession(session), ...payload };

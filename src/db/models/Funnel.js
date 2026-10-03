@@ -14,6 +14,8 @@ module.exports = (sequelize, DataTypes) => {
       shareCode: { type: DataTypes.STRING(20), allowNull: true, unique: true, field: 'share_code' },
       draftData: { type: DataTypes.JSONB, allowNull: true, field: 'draft_data' },
       draftUpdatedAt: { type: DataTypes.DATE, allowNull: true, field: 'draft_updated_at' },
+      // { currency, faviconUrl, title, description } — funnels/geoRedirects.js.
+      settings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
     },
     {
       tableName: 'funnels',
