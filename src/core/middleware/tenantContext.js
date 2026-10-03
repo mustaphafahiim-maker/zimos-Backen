@@ -1,6 +1,7 @@
 'use strict';
 
 const asyncHandler = require('express-async-handler');
+const requestContext = require('../utils/requestContext');
 const db = require('../../db/models');
 const { NotFoundError, AuthenticationError } = require('../errors/AppError');
 
@@ -40,6 +41,8 @@ const resolveTenant = asyncHandler(async (req, res, next) => {
       return permissions.includes('*') || permissions.includes(permission);
     },
   };
+  // The rest of the request logs which store and user it was for.
+  requestContext.set({ workspaceId, userId: req.user.id });
 
   next();
 });

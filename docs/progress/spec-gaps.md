@@ -31,7 +31,7 @@ the numbers **400–449** (no lane owns them).
   `subscription.payment_failed`) reach the automations engine.
 - [x] 4. Carrier sandbox adapter + README of the carrier contract +
   `POST /dev/sandbox/shipments/:id/advance` (Gate 2 depends on it).
-- [ ] 5. `requestId` on every log line (request context in the logger).
+- [x] 5. `requestId` on every log line (request context in the logger).
 - [ ] 6. Storefront cache: 60 s on `GET /store/:ws` and products, invalidated on
   `product.updated` / `funnel.published`; storefront ISR that actually revalidates.
 - [ ] 7. Background work in the worker: courier booking through the `carriers`
