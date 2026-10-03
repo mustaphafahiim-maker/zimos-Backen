@@ -6,9 +6,9 @@
 - [x] 3. Variant bulk editor, duplicate, list bulk edit — backend: the "Bulk edit products" commit / frontend bb186f6 — over HTTP on the lane DB: duplicate → draft copy with new slug/code, stock 0, no SKU; variants/bulk set price, SKU and stock (one inventory movement written), a variant of another product refused (422); products/bulk set status + free shipping + −10% price; unknown id refused whole (422 PRODUCT_NOT_FOUND); list filters q / sku / stock. Dashboard typechecks; not opened in a browser (only one preview slot free, the dashboard needs two).
 - [x] 4. Reviews — backend: the "Manual reviews" commit / frontend d1c49a4 — over HTTP on the lane DB: manual review created approved (source manual), a pending one stays out of the store, rating 9 refused (422), public product returns average + count + distribution and the review with author, photos, verified:false; shopper with no delivered order gets 403 NO_DELIVERED_PURCHASE; manual delete works. Both apps typecheck; not opened in a browser (preview slots taken).
 - [x] 5. Import/export — backend: the "Import and export products" commit / frontend 53d3751 — over HTTP on the lane DB (job run by hand, the script has no worker): export.json returns the catalog; re-importing it in the same store reports the SKU clash per product; a CSV with Arabic, quoted commas and two rows of one name creates one product with two variants, stock, weight and a new collection, and reports the row with a bad price; an .xlsx built in the script (deflate, shared + inline strings) imports; unreadable file / no columns / no input / non-product link / private host all 422; a live Shopify link (allbirds) imported as a draft. Dashboard typechecks; not opened in a browser.
+- [x] 6. Collections showInHeader / hidden — backend: the "Collections: show in header and hidden" commit / frontend 29bb19c — over HTTP: flags saved on create and PATCH, hidden collection absent from the public list but opens by its link, public store carries headerCollections and drops one when the flag goes off. Both apps typecheck; not opened in a browser.
 
 ## Next
-- [ ] 6. Collections: `showInHeader`, `hidden`.
 - [ ] 7. Bundles and tiers (§10.1) priced on the server, storefront tier picker.
 - [ ] 8. Order bumps per product, cross-sell, post-purchase upsell rules, exit downsell.
 - [ ] 9. Coupons: bulk generate, automatic discounts, `?coupon=`; minimum order, free-shipping bar.
@@ -33,11 +33,12 @@
 - 2026-10-03 No spreadsheet dependency: `importExport/sheetReader.js` reads CSV and .xlsx (zip + XML) itself; the template is CSV with a BOM (opens in Excel).
 - 2026-10-03 Shopify link: https only, public addresses only (webhookUrlGuard lookup), no redirects, 2 MB cap; images stay as the source URLs; SKUs dropped; always a draft. Other link sources (AliExpress, Amazon…) are the spec's open decision — not built. Shopify review import not built.
 - 2026-10-03 The api-client's private `rawFetch` is reached by one typed cast in endpoints/catalog.ts for the multipart upload (client.ts may not be edited).
+- 2026-10-03 Header collections ride on the public store (`headerCollections`, at most 12) and join the header menu after the pages lane 5 put there. A hidden collection is never in the header. Search facets still count hidden collections.
 
 ## Blocked
 
 ## Handoff
-Items 1–5 landed on zimos-additions. Next is item 6 (collections showInHeader, hidden); nothing half-done.
+Items 1–6 landed on zimos-additions. Next is item 7 (bundles and tiers, §10.1): read storefront lib/commerce.ts bundleTiers/bundlePricing and the Offer model first — tiers are drawn from offers today; nothing half-done.
 Browser checks still owed for items 1–5 when preview slots are free (other chats hold 4 of the 5; this lane needs backend + one app): dashboard /catalog (checkboxes, Duplicate, bulk bar, Import / export), /catalog/<id>, /reviews (Add review), storefront /products/demo-t-shirt.
-Next free migration: 188. API verification pattern: a one-shot node script that does require('./src/app').listen(0) and fetches (delete it after); it has no worker, so call a job's handler directly.
+Next free migration: 189. API verification pattern: a one-shot node script that does require('./src/app').listen(0) and fetches (delete it after); it has no worker, so call a job's handler directly.
 My api-client file: packages/api-client/src/endpoints/catalog.ts. Storefront strings for my pieces live beside the components (components/product/productPageText.ts), not in lib/i18n.ts. New catalog routes go in catalog/catalogBulkRoutes.js or a router it mounts (it sits ahead of /products/:productId).

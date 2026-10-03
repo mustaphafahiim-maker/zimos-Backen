@@ -33,6 +33,7 @@ const search = {
   carrier: Joi.string().trim().min(1).max(100).optional(),
   seen: Joi.boolean().optional(),
   test: Joi.boolean().optional(),
+  riskLevel: Joi.string().valid('low', 'moderate', 'high').optional(),
 };
 
 const tagList = Joi.array().items(Joi.string().trim().min(1).max(40)).max(20);
