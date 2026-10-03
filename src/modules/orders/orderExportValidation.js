@@ -29,6 +29,7 @@ module.exports = {
       cursor: Joi.forbidden(),
       columns: columns.optional(),
       rowPer: Joi.string().valid('order', 'item').default('order'),
+      format: Joi.string().valid('csv', 'xlsx').default('csv'),
       lang: Joi.string().valid('en', 'ar').default('en'),
     }),
   },

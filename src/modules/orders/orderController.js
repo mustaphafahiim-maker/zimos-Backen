@@ -12,6 +12,7 @@ const itemsEdit = require('./orderItemsEdit');
 const orderFulfill = require('./orderFulfill');
 const orderDocuments = require('./orderDocuments');
 const trackingImport = require('./trackingImport');
+const { invoicePdf: buildInvoicePdf } = require('./orderInvoicePdf');
 
 const create = asyncHandler(async (req, res) => {
   const { shippingAmount, ...body } = req.body;
@@ -107,6 +108,11 @@ const manifestPdf = asyncHandler(async (req, res) => {
   sendPdf(res, await orderDocuments.manifestPdf(req.tenant.workspaceId, req.body), 'manifest');
 });
 
+const invoicePdf = asyncHandler(async (req, res) => {
+  const { pdf, invoiceNumber } = await buildInvoicePdf(req.tenant.workspaceId, req.params.orderId);
+  sendPdf(res, pdf, `invoice-${invoiceNumber}`);
+});
+
 const importTracking = asyncHandler(async (req, res) => {
   res.json(await trackingImport.importTracking(req.tenant.workspaceId, req.body, req));
 });
@@ -183,6 +189,7 @@ module.exports = {
   listStatusHistory,
   waybillsPdf,
   manifestPdf,
+  invoicePdf,
   importTracking,
   previewItems,
   updateItems,

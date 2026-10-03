@@ -101,6 +101,8 @@ router.patch(
     )(req, res, next),
   controller.updateMeta
 );
+// The order's invoice as a printable page.
+router.get('/:orderId/invoice.pdf', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.invoicePdf);
 // Edit the order's items before it ships: see the new totals, then save.
 router.post(
   '/:orderId/items/preview',
