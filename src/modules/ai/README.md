@@ -1,0 +1,64 @@
+# AI module — provider contract
+
+`aiService` turns a merchant's request into a prompt, hands it to **one
+provider**, validates the answer and stores it as a job. Choosing the real
+provider and its key is the integrations team's work; this file is the
+contract a provider must meet. `providers/sandbox.js` is the reference
+implementation.
+
+## Where a provider lives
+
+`src/modules/ai/providers/<name>.js`, registered in `providers/index.js`.
+`AI_PROVIDER=<name>` selects it (default `sandbox`, refused in production).
+Its API key is read from the environment by the provider itself and is never
+returned by any endpoint.
+
+## Interface
+
+```js
+module.exports = {
+  name: 'acme',                 // stored on ai_jobs.provider and ai_usage.provider
+  isSandbox: () => false,       // optional; true shows a "Test" badge in the dashboard
+  async generate(request) { return { output, usage }; },
+};
+```
+
+### `request`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `feature` | `'product' \| 'page' \| 'translate' \| 'policies'` | Which feature (see `features.js`). |
+| `prompt` | string | The rendered prompt from `prompts/<file>.vN.md`, placeholders filled. Send this to the model. |
+| `promptVersion` | string | e.g. `product_content.v1`. |
+| `input` | object | The merchant's validated input (`features.js` → `input`). |
+| `context` | object | Server-side facts the prompt was built from. `page`: `{ product: { id, name, slug, description, imageUrl, features[], faqs[] }, allowedElements[] }`. Others: `{}`. |
+| `workspaceId`, `jobId` | uuid | For the provider's own logging. No customer data is ever in a request. |
+
+### Return value
+
+- `output` — a plain object matching the feature's `output` schema in
+  `features.js`. For `page`, `output.tree` must also pass
+  `pages/pageTree.validatePageTree` (structured elements only — no HTML).
+  Anything else fails the job with `AI_OUTPUT_INVALID`; nothing unvalidated is
+  stored.
+- `usage` — `{ tokensIn, tokensOut, costMicros, costCurrency }`. `costMicros`
+  is the provider's own charge in millionths of `costCurrency`; `0`/`null`
+  when unknown. Written to `ai_usage`.
+
+### Errors
+
+Throw an `Error`. Set `err.permanent = true` when a retry cannot help (bad
+key, content refused, unknown feature); otherwise the `ai` queue retries once
+after 30 seconds. `err.message` (first 500 characters) is shown to the
+merchant on the failed job, so it must not contain secrets.
+
+## What the module guarantees around a provider
+
+- **Draft only.** Output is stored on the job. "Apply" creates a *draft*
+  product or an *unpublished* page; the merchant publishes.
+- **Limits.** A request is refused before the provider is called when the
+  store is over its plan's `ai_requests_per_month` (read from the plan's
+  features; absent = no monthly limit) or over the abuse guard of 30 requests
+  per hour.
+- **No fake content.** The prompts forbid invented reviews, counters, stock
+  and urgency (SPEC §21); a provider must not add them.
