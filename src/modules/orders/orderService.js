@@ -30,6 +30,7 @@ const { presentOrderItems } = require('../customerUploads/customerUploadService'
 const { orderBumpUnavailable } = require('../checkout/orderBump');
 const automationEngine = require('../automations/automationEngine');
 const pixelEvents = require('../marketing/pixelEvents');
+const { effectiveVariantPrice } = require('../catalog/productPage');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -101,7 +102,9 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     };
   }
 
-  const lineTotal = variant.priceAmount * quantity;
+  // A countdown offer that has ended sells at the full price (catalog/productPage.js).
+  const unitPriceAmount = effectiveVariantPrice(variant, variant.product).priceAmount;
+  const lineTotal = unitPriceAmount * quantity;
   return {
     productId: variant.productId,
     productName: variant.product.name,
@@ -111,7 +114,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     offerId: null,
     offerName: null,
     quantity,
-    unitPriceAmount: variant.priceAmount,
+    unitPriceAmount,
     unitCostAmount: variant.costAmount,
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
@@ -509,6 +512,7 @@ async function createOrder(
     // conversions run after commit and never fail the order. An order waiting
     // for its online payment is not a purchase yet, so it sends no conversion.
     transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
+    transaction.afterCommit(() => require('../notifications/merchantNotificationEvents').emit(workspaceId, 'order.created', order.id));
     if (!awaitingPayment) transaction.afterCommit(() => pixelEvents.emit(workspaceId, 'order.created', order.id));
 
     return { order, items: orderItems };
