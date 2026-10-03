@@ -136,6 +136,10 @@ ${codeHtml}
 <p>الرمز صالح لمدة ${minutes} دقائق ويُستخدم مرة واحدة.</p>
 <p style="color:#6b7280">لو مش إنت، غيّر كلمة السر حالًا: في حد عارفها.</p>`,
         `رمز تسجيل الدخول إلى Zimos: ${code}\n\nصالح لمدة ${minutes} دقائق ويُستخدم مرة واحدة.\n\nلو مش إنت، غيّر كلمة السر حالًا.`
+      ),
+    };
+  },
+
   // A store's email to its customer about an order (orderEmailService.js):
   // the merchant's subject and text under the store's logo and colour.
   order_email(data = {}) {
