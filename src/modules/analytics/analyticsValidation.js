@@ -44,6 +44,17 @@ module.exports = {
       currency: Joi.string().length(3).uppercase().optional(),
     }),
   },
+  attribution: {
+    params: wsParams,
+    query: rangeQuery.keys({
+      groupBy: Joi.string().valid('source', 'medium', 'campaign', 'content').optional(),
+      funnelId: Joi.string().uuid().optional(),
+      utm_source: Joi.string().max(100).optional(),
+      utm_medium: Joi.string().max(100).optional(),
+      utm_campaign: Joi.string().max(150).optional(),
+      utm_content: Joi.string().max(255).optional(),
+    }),
+  },
   summary: {
     params: Joi.object({ workspaceId: Joi.string().uuid().required() }),
     query: rangeQuery,

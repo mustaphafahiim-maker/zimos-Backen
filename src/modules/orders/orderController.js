@@ -4,6 +4,7 @@ const service = require('./orderService');
 const confirmationService = require('../cod/confirmationService');
 const stageChange = require('./orderStageChange');
 const statusHistory = require('./orderStatusHistory');
+const orderMeta = require('./orderMetaService');
 
 const create = asyncHandler(async (req, res) => {
   const { order, items } = await service.createOrder(req.tenant.workspaceId, req.body, req);
@@ -47,6 +48,28 @@ const listStatusHistory = asyncHandler(async (req, res) => {
   res.json({ history: await statusHistory.listForOrder(req.tenant.workspaceId, req.params.orderId) });
 });
 
+const updateMeta = asyncHandler(async (req, res) => {
+  res.json({ order: await orderMeta.updateMeta(req.tenant.workspaceId, req.params.orderId, req.body, req) });
+});
+
+const listTags = asyncHandler(async (req, res) => {
+  res.json({ tags: await orderMeta.listTags(req.tenant.workspaceId) });
+});
+
+const listNotes = asyncHandler(async (req, res) => {
+  res.json({ notes: await orderMeta.listNotes(req.tenant.workspaceId, req.params.orderId) });
+});
+
+const addNote = asyncHandler(async (req, res) => {
+  const note = await orderMeta.addNote(req.tenant.workspaceId, req.params.orderId, req.body, req);
+  res.status(201).json({ note });
+});
+
+const deleteNote = asyncHandler(async (req, res) => {
+  await orderMeta.deleteNote(req.tenant.workspaceId, req.params.orderId, req.params.noteId, req);
+  res.status(204).end();
+});
+
 const update = asyncHandler(async (req, res) => {
   const order = await service.updateOrderLimited(req.tenant.workspaceId, req.params.orderId, req.body, req);
   res.json({ order });
@@ -81,6 +104,11 @@ module.exports = {
   confirm,
   changeStatus,
   listStatusHistory,
+  updateMeta,
+  listTags,
+  listNotes,
+  addNote,
+  deleteNote,
   update,
   listShipments,
   createShipment,

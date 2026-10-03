@@ -7,7 +7,6 @@ const { AppError, AuthorizationError, NotFoundError, ValidationError } = require
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState } = require('../orders/orderStateService');
-const automationEngine = require('../automations/automationEngine');
 const { assertNotShipped, SHIPMENT_IN_MOTION } = require('../orders/shipmentLifecycle');
 const carrierShipmentService = require('../shipping/carrierShipmentService');
 const orderStock = require('../inventory/orderStock');
@@ -371,7 +370,7 @@ async function applyOutcome(task, order, { outcome, notes, rejectionReason, sour
 
   await setConfirmationState(workspaceId, order.id, outcome, req, transaction);
   if (outcome === 'confirmed' || outcome === 'rejected') {
-    transaction.afterCommit(() => automationEngine.emit(workspaceId, `order.${outcome}`, order.id));
+    await require('../../core/outbox/outbox').record(transaction, `order.${outcome}`, { workspaceId, orderId: order.id });
   }
 
   if (outcome === 'rejected') {
