@@ -17,11 +17,16 @@ const checkoutSessionController = require('../checkoutSessions/checkoutSessionCo
 const checkoutSessionSchemas = require('../checkoutSessions/checkoutSessionValidation');
 const onlinePaymentController = require('../payments/onlinePaymentController');
 const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
+const botProtection = require('../risk/botProtection');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
+// What the checkout form needs to pass the bot guard (a fresh time token).
+router.get('/checkout/guard', botProtection.guardConfig);
+
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
+router.get('/policies/:key', validate(schemas.getPolicy), controller.getPolicy);
 router.get('/products', collectOptionFilters, validate(schemas.listProducts), controller.listProducts);
 // Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
 router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
@@ -64,6 +69,8 @@ router.post(
 router.post(
   '/checkout',
   validate(checkoutSchemas.checkout),
+  // Honeypot, time token, optional challenge — modules/risk/botProtection.
+  botProtection.guardCheckout,
   refuseDraftOrders,
   idempotent('storefront.checkout')(checkoutController.checkout)
 );

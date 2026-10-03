@@ -1,6 +1,7 @@
 'use strict';
 
 const Joi = require('joi');
+const { pageFlagKeys } = require('./pageFlags');
 const { workspaceRef } = require('../../core/utils/workspaceSlug');
 
 const uuid = Joi.string().uuid();
@@ -78,6 +79,7 @@ const createPage = {
     pageType: pageTypeEnum.default('custom'),
     draftData: treeData.optional(),
     seo: seo.default({}),
+    ...pageFlagKeys,
   }),
 };
 
@@ -89,6 +91,7 @@ const updatePage = {
     pageType: pageTypeEnum.optional(),
     draftData: treeData.optional(),
     seo: seo.optional(),
+    ...pageFlagKeys,
   }).min(1),
 };
 

@@ -8,6 +8,7 @@ const { describeStorage, r2ConfigError } = require('./modules/media/storage');
 const { logRollout: logCarrierRollout } = require('./modules/shipping/carriers');
 const { imageProcessingStatus } = require('./modules/media/imageProcessing');
 const { startUploadSweep } = require('./modules/customerUploads/customerUploadService');
+const { startAdsSync } = require('./modules/profit/adsSyncJob');
 const signupPolicy = require('./modules/auth/signupPolicy');
 const { releaseDraftsWhenOff } = require('./modules/billing/goLiveService');
 const webhookWorker = require('./modules/webhooks/webhookWorker');
@@ -39,6 +40,9 @@ async function start() {
 
   // Shoppers' photos no order took are deleted after CUSTOMER_UPLOAD_TTL_HOURS.
   startUploadSweep();
+
+  // ads.sync_spend: hourly pull of ad spend from connected ad accounts.
+  startAdsSync();
 
   // And for couriers: which adapters this process actually switched on, from
   // CARRIERS_ENABLED / CARRIERS_BETA / CARRIERS_BETA_WORKSPACES as parsed.

@@ -15,5 +15,7 @@ router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.PRODUCTS_M
 
 router.get('/', validate(schemas.list), controller.list);
 router.patch('/:reviewId', validate(schemas.moderate), controller.moderate);
+// POST / (add a review by hand) and DELETE /:reviewId (remove one of those).
+router.use(require('./manualReviews').router);
 
 module.exports = router;
