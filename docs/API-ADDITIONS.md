@@ -99,6 +99,18 @@ Public API, authenticated by the key (`Authorization: Bearer zk_…`), outside t
 
 Webhook events: `order.created`, `order.status_changed` (and `webhook.test`). Each request carries `X-Zimos-Signature: t=<unix>,v1=<HMAC-SHA256(secret, t + "." + body)>`. The module observes orders and shipments by `updated_at` instead of hooking each writer, so no order code was changed; `src/server.js` starts the loop (`WEBHOOKS_IN_PROCESS=false` leaves it to `scripts/dispatch-webhooks.js`).
 
+### Orders export — `/orders/export`
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/orders/export/columns` | the columns a file can carry (English and Arabic labels) and the default set per row mode |
+| GET | `/orders/export` | the orders list as a CSV file: the list's own `q`, `from`, `to`, `stage`, `sort` and state filters, plus `columns=a,b,c`, `rowPer=order|item`, `lang=en|ar` |
+
+Needs `orders.view`. It pages through `orderService.listOrders`, so the file
+and the screen always agree on which orders match; rows are streamed a page at
+a time, up to 20,000 orders per file. UTF-8 with a BOM (Excel reads Arabic),
+dates on the store's own timezone, amounts as decimals, and cells a spreadsheet
+would run as a formula are neutralised. Each export is written to the audit log.
+
 ### Merchant records
 | Method | Path | Notes |
 |---|---|---|

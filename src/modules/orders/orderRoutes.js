@@ -9,6 +9,8 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const controller = require('./orderController');
 const schemas = require('./orderValidation');
+const exportController = require('./orderExportController');
+const exportSchemas = require('./orderExportValidation');
 const returnController = require('../returns/returnController');
 const returnSchemas = require('../returns/returnValidation');
 const waybillController = require('../waybill/waybillController');
@@ -30,6 +32,10 @@ router.get('/', validate(schemas.list), requirePermission(PERMISSIONS.ORDERS_VIE
 // Before '/:orderId', or Express matches "pipeline" as an order id and the
 // request dies as a uuid validation error instead of reaching the counts.
 router.get('/pipeline', validate(schemas.pipeline), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.pipeline);
+// The orders list as a CSV file, and the columns it can carry. Before
+// '/:orderId' for the same reason as '/pipeline'.
+router.get('/export/columns', validate(exportSchemas.columns), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.columns);
+router.get('/export', validate(exportSchemas.exportCsv), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.exportCsv);
 router.get('/:orderId', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.get);
 
 router.post(
