@@ -33,7 +33,7 @@ const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -90,6 +90,12 @@ const checkout = asyncHandler(async (req, res) => {
   // server from the configured offer (422 when it is not that offer).
   if (orderBump) {
     items = [...items, await resolveOrderBumpItem(workspace, { offerId: orderBump.offerId, funnelId: orderBody.funnelId })];
+  }
+
+  // The product's own bumps: lines built by the server from the rules of the products being bought.
+  if (orderBumps && orderBumps.length > 0) {
+    const bumpItems = await require('../offers/offerRules').resolveBumpItems(workspace, orderBumps.map((b) => b.offerId), items);
+    items = [...items, ...bumpItems.filter((b) => !items.some((i) => i.offerId === b.offerId))];
   }
 
   // Stock held by overdue unpaid online orders goes back first.
