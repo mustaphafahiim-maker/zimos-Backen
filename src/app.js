@@ -173,6 +173,8 @@ v1.use('/workspaces/:workspaceId', paymentRoutes);
 v1.use('/workspaces/:workspaceId/discounts', discountRoutes);
 v1.use('/workspaces/:workspaceId/bundles', require('./modules/bundles/bundleRoutes'));
 v1.use('/workspaces/:workspaceId/offers', require('./modules/offers/offersRoutes'));
+// Product feeds for ad channels: /feeds/:workspaceSlug/:channel.xml|csv (public, no auth).
+v1.use('/feeds', require('./modules/offers/productFeed').publicRouter);
 v1.use('/workspaces/:workspaceId/shipping', shippingRoutes);
 v1.use('/workspaces/:workspaceId/tax-rates', taxRoutes);
 v1.use('/workspaces/:workspaceId/websites', pagesRoutes);

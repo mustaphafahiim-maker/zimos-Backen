@@ -11,7 +11,7 @@
 - [x] 8. Tracking import, bulk waybills, manifest (§12.4) — checked against `zimos_lane_1` and on :5201: a six-row CSV created shipments and moved two confirmed orders (shipped, delivered) and reported the other rows one by one (unconfirmed order, unknown number, missing number, unknown status); from the list, five ticked orders gave a 2-page A4×4 PDF, a 5-page 10×15 PDF and a manifest; "Today's manifest" and "Sync from file" in the header, the import result listed per line in Arabic. NOT eyeballed: the PDFs were checked for being valid and having the right page count, but nothing on this machine renders a PDF page to look at the label layout.
 
 ## Next
-- [ ] 9. Invoice PDF for an order; xlsx as a second export format.
+- [ ] 9. Invoice PDF + xlsx export — CODE LANDED, TWO BUTTONS NOT CLICKED YET (see Blocked). Checked on :4101: `GET /orders/:id/invoice.pdf` answers a PDF named after the invoice number (and JSON with `?as=base64`), `GET /orders/export?format=xlsx` answers a workbook (zip read back entry by entry, sheet is right-to-left for Arabic, amounts are numeric cells), CSV unchanged, `format=pdf` is 422. The dashboard typechecks.
 
 ## Decisions
 - 2026-10-03 No `status` column (LANES §3). The spec's statuses map onto the derived stages: confirmed/paid/processing/awaiting_pickup → `ready_to_ship`; unreachable/postponed → `needs_follow_up`; in_delivery → `shipped`/`out_for_delivery`; payment_failed → `awaiting_payment`. No new stage was added.
@@ -37,14 +37,16 @@
 - 2026-10-03 The tracking file is sent as text (`{ csv }`), parsed by a small reader in `orders/trackingImport.js` — no upload middleware, no CSV dependency. Each row goes through the order page's own operations, so an unconfirmed order cannot be shipped by a file either.
 - 2026-10-03 Bulk labels are a compact label drawn in `orders/orderDocuments.js` from the single waybill's model (same barcode value, same amount to collect); the A5 single waybill is untouched. PDFs answer `?as=base64` as JSON so the dashboard can fetch them through the shared `request()` (its `rawFetch` is private to `client.ts`).
 - 2026-10-03 The manifest lists the selected orders' live shipments, or with no selection every shipment created today (UTC), optionally one courier.
+- 2026-10-03 xlsx is written by hand (`orders/xlsxWriter.js`: five XML parts in a zip made with node's zlib) — no spreadsheet dependency was added. The export stays synchronous (`GET /orders/export?format=csv|xlsx`), not a queue job with a download link: lane 7's queue can wrap it later.
+- 2026-10-03 The invoice PDF reads Ziad's invoice row (number, date, total) and the order's lines and breakdown; an order with no invoice yet answers 409 `INVOICE_NOT_ISSUED`. PDF text labels are English (as the existing waybill), customer and product text is drawn with the bidi helper.
 - 2026-10-03 Frontend: lane-1 API calls live in `packages/api-client/src/endpoints/orders.ts`; lane-1 error wording in `pages/orders/orderErrors.ts` (the shared `ApiErrorCode` union is not extended).
 
 ## Blocked
+- Item 9 browser check — only one dev-server slot was free (the other lanes hold four of the five). At the next wake-up: start `lane-1-backend` + `lane-1-dashboard`, open an order and press "Invoice", open Export on the list, choose "Excel (.xlsx)" and download; then tick item 9 and end the loop. Also still not eyeballed: the layout of the label, manifest and invoice PDFs and opening the .xlsx in Excel — nothing on this machine renders them.
 
 ## Handoff
 - Branch `lane-1` in both worktrees; everything listed under Done is merged into `origin/zimos-additions`.
 - Migrations used: 135, 136. Next free: 137.
-- Items 8 and 9 are file outputs: read `src/modules/waybill/waybillService.js` (pdfkit, `renderWaybillPdf(model)`) and `src/core/pdf` first; `orders/orderExportService.js` for the xlsx format (check whether an xlsx library is already in `package.json` before adding one).
 - Dev servers: at most 5 per folder across all lanes — stop the dashboard before starting the storefront. The demo user's username is already set in `zimos_lane_1`.
 - Never put backticks inside a double-quoted `node -e "..."` in Git Bash (they run as commands and hang); write the script to a file. `git merge` needs `--no-edit`.
 - Scratch helpers are not in the repo: log in as `demo@zimos.test` on `http://localhost:4101/api/v1`, workspace from `GET /workspaces`, orders through `POST /workspaces/:id/orders` with an `Idempotency-Key` header.
