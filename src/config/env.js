@@ -341,6 +341,18 @@ const env = {
     lockTtlMinutes: Math.max(1, parseInt(process.env.CONFIRMATION_LOCK_TTL_MINUTES || '15', 10) || 15),
   },
 
+  // Background work (core/queue, core/outbox, src/worker.js). The queue runs on
+  // PostgreSQL unless REDIS_URL is set, then on BullMQ. While inProcess is on,
+  // the API process is its own worker — nothing else to deploy; turn it off
+  // (WORKER_IN_PROCESS=false) where `npm run worker` runs as its own service.
+  // Never on under NODE_ENV=test: jobs and events run inline there.
+  queue: {
+    redisUrl: (process.env.REDIS_URL || '').trim() || null,
+    inProcess: process.env.NODE_ENV !== 'test' && process.env.WORKER_IN_PROCESS !== 'false',
+    pollMs: Math.max(250, parseInt(process.env.QUEUE_POLL_MS || '1000', 10) || 1000),
+    concurrency: Math.max(1, parseInt(process.env.QUEUE_CONCURRENCY || '10', 10) || 10),
+  },
+
   // Outbound webhooks to merchants' own systems (modules/webhooks).
   webhooks: {
     signingAlgo: process.env.WEBHOOK_SIGNING_ALGO || 'sha256',

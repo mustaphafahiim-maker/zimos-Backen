@@ -9,6 +9,7 @@ const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
 const blockedEntries = require('../fraud/blockedEntries');
+const visitorGate = require('../risk/visitorGate');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -28,8 +29,7 @@ const confirmationService = require('../cod/confirmationService');
 const { resolveCustomizations, attachUploads } = require('../catalog/customFields');
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { orderBumpUnavailable } = require('../checkout/orderBump');
-const automationEngine = require('../automations/automationEngine');
-const pixelEvents = require('../marketing/pixelEvents');
+const outbox = require('../../core/outbox/outbox');
 const orderMeta = require('./orderMetaService');
 const { applyOrderFilters } = require('./orderFilters');
 const { effectiveVariantPrice } = require('../catalog/productPage');
@@ -264,7 +264,8 @@ async function createOrder(
     if (platformBlock) throw platformBlocklist.rejection(customer.id, platformBlock);
 
     // The shopper's own IP and browser: a staff order carries the staff member's.
-    const visitorIp = req && !req.user ? blockedEntries.normalizeIp(req.ip) : null;
+    const visitor = req && !req.user ? await visitorGate.describeVisitor(req) : { ip: null, ipCountry: null, isVpn: false };
+    const visitorIp = visitor.ip;
     const visitorAgent = req && !req.user && req.headers ? req.headers['user-agent'] : null;
 
     const riskFlags = [];
@@ -306,7 +307,7 @@ async function createOrder(
         items,
         paymentMethod,
         phone: contact.phone,
-        visitor: { ip: visitorIp },
+        visitor,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
@@ -431,6 +432,7 @@ async function createOrder(
         notes: notes || null,
         riskFlags,
         ipAddress: visitorIp,
+        ipCountry: visitor.ipCountry,
         userAgent: visitorAgent ? String(visitorAgent).slice(0, 400) : null,
         source: orderSource,
         isTest,
@@ -523,11 +525,8 @@ async function createOrder(
     // Merchant automations (WhatsApp templates) and server-side ad-platform
     // conversions run after commit and never fail the order. An order waiting
     // for its online payment is not a purchase yet, so it sends no conversion.
-    transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
-    transaction.afterCommit(() => require('../notifications/merchantNotificationEvents').emit(workspaceId, 'order.created', order.id));
-    if (!awaitingPayment && !isTest) {
-      transaction.afterCommit(() => pixelEvents.emit(workspaceId, 'order.created', order.id));
-    }
+    // They hang off the order.created event in the outbox (see each module's jobs.js).
+    await outbox.record(transaction, 'order.created', { workspaceId, orderId: order.id, awaitingPayment: Boolean(awaitingPayment), isTest: Boolean(isTest) });
 
     return { order, items: orderItems };
   };
@@ -1038,7 +1037,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       throw new AppError('ORDER_ALREADY_CANCELLED', 'This order is already cancelled', 409);
     }
     await assertNotShipped(order, transaction);
-    transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.cancelled', order.id));
+    await outbox.record(transaction, 'order.cancelled', { workspaceId, orderId: order.id });
 
     // Whatever the order still holds: nothing more if a rejection already gave it back.
     await orderStock.releaseOrderStock(
