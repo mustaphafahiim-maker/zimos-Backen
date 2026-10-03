@@ -103,6 +103,13 @@ async function commit({ workspaceId, variantId, quantity, referenceType, referen
   return externalTransaction ? run(externalTransaction) : db.sequelize.transaction(run);
 }
 
+// Stock the merchant adds or corrects shows in the store at once, not after
+// the storefront cache's 60 s (storefront/storefrontCache.js). Order
+// reservations do not drop it.
+function dropStoreCache(workspaceId, transaction) {
+  transaction.afterCommit(() => require('../storefront/storefrontCache').invalidate(workspaceId));
+}
+
 async function restock({ workspaceId, variantId, quantity, reason, actorUserId }, externalTransaction) {
   const run = async (transaction) => {
     const variant = await lockVariant(variantId, workspaceId, transaction);
@@ -112,6 +119,7 @@ async function restock({ workspaceId, variantId, quantity, reason, actorUserId }
       { workspaceId, variantId, type: 'restock', quantityDelta: quantity, reason, actorUserId },
       { transaction }
     );
+    dropStoreCache(workspaceId, transaction);
 
     return variant;
   };
@@ -127,6 +135,7 @@ async function returnRestock({ workspaceId, variantId, quantity, referenceType, 
       { workspaceId, variantId, type: 'return_restock', quantityDelta: quantity, referenceType, referenceId, actorUserId },
       { transaction }
     );
+    dropStoreCache(workspaceId, transaction);
     return variant;
   };
   return externalTransaction ? run(externalTransaction) : db.sequelize.transaction(run);
@@ -143,6 +152,7 @@ async function adjustStock({ workspaceId, variantId, delta, reason, actorUserId 
       { workspaceId, variantId, type: 'adjustment', quantityDelta: delta, reason, actorUserId },
       { transaction }
     );
+    dropStoreCache(workspaceId, transaction);
     return variant;
   });
 }

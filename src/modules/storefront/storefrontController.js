@@ -14,30 +14,41 @@ const getPolicy = asyncHandler(async (req, res) =>
 const getSitemap = asyncHandler(async (req, res) =>
   res.json({ entries: await require('./generalSettings').storeSitemap(req.publicWorkspace) })
 );
-const getStore = asyncHandler(async (req, res) => res.json({ store: await service.getStorefront(req.tenant.workspaceId) }));
+// The store, its product lists and pages and its collections are the same for
+// every shopper: read through the 60-second cache (storefrontCache.js), then
+// put in the shopper's language.
+const cache = require('./storefrontCache');
+const getStore = asyncHandler(async (req, res) => {
+  const ws = req.tenant.workspaceId;
+  res.json({ store: await cache.cached(ws, 'store', () => service.getStorefront(ws)) });
+});
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.
 const i18n = require('../translations/translations');
 const plain = (row) => (row && typeof row.toJSON === 'function' ? row.toJSON() : row);
 const listProducts = asyncHandler(async (req, res) => {
-  const result = await service.listProducts(req.tenant.workspaceId, req.query);
+  const ws = req.tenant.workspaceId;
+  const result = await cache.cached(ws, `products?${cache.queryKey(req.query)}`, () => service.listProducts(ws, req.query));
   if (result && Array.isArray(result.products)) await i18n.localizeProducts(req, result.products);
   res.json(result);
 });
 const getProduct = asyncHandler(async (req, res) => {
-  const product = await service.getProductBySlugOrId(req.tenant.workspaceId, req.params.idOrSlug);
+  const ws = req.tenant.workspaceId;
+  const product = await cache.cached(ws, `product:${req.params.idOrSlug}`, () => service.getProductBySlugOrId(ws, req.params.idOrSlug));
   await i18n.localizeProducts(req, [product]);
   res.json({ product });
 });
 const listCollections = asyncHandler(async (req, res) => {
-  const collections = (await service.listCollections(req.tenant.workspaceId)).map(plain);
+  const ws = req.tenant.workspaceId;
+  const collections = (await cache.cached(ws, 'collections', () => service.listCollections(ws))).map(plain);
   res.json({ collections: await i18n.localizeCollections(req, collections) });
 });
 const suggestProducts = asyncHandler(async (req, res) =>
   res.json(await service.suggestProducts(req.tenant.workspaceId, req.query.q))
 );
 const getCollection = asyncHandler(async (req, res) => {
-  const collection = plain(await service.getCollection(req.tenant.workspaceId, req.params.collectionId));
+  const ws = req.tenant.workspaceId;
+  const collection = plain(await cache.cached(ws, `collection:${req.params.collectionId}`, () => service.getCollection(ws, req.params.collectionId)));
   await i18n.localizeCollections(req, [collection]);
   res.json({ collection });
 });

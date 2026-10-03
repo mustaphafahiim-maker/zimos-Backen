@@ -13,6 +13,7 @@ the numbers **400–449** (no lane owns them).
 - A STOP is stored per phone in `marketing_opt_outs`, not on customers: an abandoned checkout has no customer row. A newsletter sign-up by that phone removes it; a staff edit of the customer does not.
 - A marketing SMS gets "للإيقاف أرسل: إيقاف" appended unless it already says how to stop. WhatsApp template texts carry it in their body. Email has no unsubscribe link yet (no email reply handling).
 - The sandbox courier exists outside production for every store; in production only with `CARRIERS_SANDBOX=true` and the FeatureFlag `sandbox_integrations` (shared check: `core/utils/featureFlags.js`). Its parcel state lives on the shipment (`carrier_response.sandboxStatus`), so it survives restarts and the poller sees it.
+- Storefront cache (`storefront/storefrontCache.js`): raw data only (store, product lists and pages, collections), localized after the read; Redis when `REDIS_URL`, else memory; dropped when an audited store-visible change commits and when the merchant restocks or adjusts stock; not on orders (stock shown ≤ 60 s old; checkout checks real stock). The storefront's Next.js pages stay per-request on purpose (shopper IP for rate limits, staff preview, locale cookie — see `lib/serverApiClient.ts`); they read through this cache instead of ISR.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -32,7 +33,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 4. Carrier sandbox adapter + README of the carrier contract +
   `POST /dev/sandbox/shipments/:id/advance` (Gate 2 depends on it).
 - [x] 5. `requestId` on every log line (request context in the logger).
-- [ ] 6. Storefront cache: 60 s on `GET /store/:ws` and products, invalidated on
+- [x] 6. Storefront cache: 60 s on `GET /store/:ws` and products, invalidated on
   `product.updated` / `funnel.published`; storefront ISR that actually revalidates.
 - [ ] 7. Background work in the worker: courier booking through the `carriers`
   queue with retries; `ads.sync_spend` and the FX refresh as repeatable jobs,
