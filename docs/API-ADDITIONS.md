@@ -19,6 +19,7 @@ Numbered 130–133 so they run after upstream's `129-create-billing-payment-atte
 | 131 | `workspace_integrations`, `whatsapp_conversations`, `whatsapp_messages` |
 | 132 | `automation_runs` |
 | 133 | `cod_settlements`, `cod_settlement_lines` |
+| 134 | `webhook_order_states`, `webhook_scan_cursors`, and the `updated_at` / due-delivery indexes outbound webhooks scan |
 
 ## New endpoints
 
@@ -81,6 +82,22 @@ still waiting for its online payment), with the order id as the event id so the
 browser pixel's event dedupes against it. The public pixel IDs live in
 `settings.tracking_pixels` (PATCH `/workspaces/:id`), and `GET /store/:workspaceId`
 returns them in a read-only `tracking` block.
+
+### API keys, public API and outbound webhooks
+Full reference, with a signature-verification snippet, in `docs/public-api.md`.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET/POST | `/api-keys` | list and create; the key (`zk_…`) is shown once, only its hash is stored. Scopes `orders:read`, `orders:write` |
+| DELETE | `/api-keys/:keyId` | revoke |
+| GET/POST | `/webhooks` | endpoints and the event catalogue; the signing secret is shown on create and on rotate |
+| PATCH/DELETE | `/webhooks/:endpointId` | |
+| POST | `/webhooks/:endpointId/rotate-secret`, `/test` | |
+| GET | `/webhooks/:endpointId/deliveries` | the delivery log; `POST …/deliveries/:deliveryId/redeliver` resends one |
+
+Public API, authenticated by the key (`Authorization: Bearer zk_…`), outside the workspace mount — `/api/v1/public`: `GET /me`, `GET /orders`, `GET /orders/by-number/:orderNumber`, `GET /orders/:orderId`, `GET /orders/:orderId/shipments`, `POST /orders/:orderId/confirmation`, `POST /orders/:orderId/cancel`, `POST /orders/:orderId/shipments`, `PATCH /orders/:orderId/shipments/:shipmentId`, `POST /orders/:orderId/cod-collected`.
+
+Webhook events: `order.created`, `order.status_changed` (and `webhook.test`). Each request carries `X-Zimos-Signature: t=<unix>,v1=<HMAC-SHA256(secret, t + "." + body)>`. The module observes orders and shipments by `updated_at` instead of hooking each writer, so no order code was changed; `src/server.js` starts the loop (`WEBHOOKS_IN_PROCESS=false` leaves it to `scripts/dispatch-webhooks.js`).
 
 ### Merchant records
 | Method | Path | Notes |

@@ -341,8 +341,26 @@ const env = {
     lockTtlMinutes: Math.max(1, parseInt(process.env.CONFIRMATION_LOCK_TTL_MINUTES || '15', 10) || 15),
   },
 
+  // Outbound webhooks to merchants' own systems (modules/webhooks).
   webhooks: {
     signingAlgo: process.env.WEBHOOK_SIGNING_ALGO || 'sha256',
+    // The API process runs the observer + dispatcher loop itself every
+    // intervalMs, so events leave within seconds with no extra service. Turn
+    // it off (WEBHOOKS_IN_PROCESS=false) to run scripts/dispatch-webhooks.js
+    // from a cron service instead; running both is safe, only slower to no
+    // purpose. Never on under NODE_ENV=test — the suite drives it by hand.
+    inProcess: process.env.NODE_ENV !== 'test' && process.env.WEBHOOKS_IN_PROCESS !== 'false',
+    intervalMs: Math.max(1000, parseInt(process.env.WEBHOOKS_INTERVAL_MS || '5000', 10) || 5000),
+    // A merchant types the URL, and this server then POSTs to it: an address
+    // inside our own network (localhost, 10/8, the cloud metadata service…)
+    // must never be reachable that way. Allowed outside production only, so a
+    // developer can point a webhook at a receiver on their own machine.
+    allowPrivateUrls:
+      process.env.WEBHOOKS_ALLOW_PRIVATE_URLS !== undefined
+        ? process.env.WEBHOOKS_ALLOW_PRIVATE_URLS === 'true'
+        : process.env.NODE_ENV !== 'production',
+    timeoutMs: Math.max(1000, parseInt(process.env.WEBHOOKS_TIMEOUT_MS || '10000', 10) || 10000),
+    batchSize: Math.max(1, parseInt(process.env.WEBHOOKS_BATCH_SIZE || '50', 10) || 50),
   },
 
   // Merchant courier accounts (modules/shipping/carriers). The key encrypts

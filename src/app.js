@@ -59,6 +59,9 @@ const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
 const automationRoutes = require('./modules/automations/automationRoutes');
 const settlementRoutes = require('./modules/settlements/settlementRoutes');
 const serverPixelsRoutes = require('./modules/marketing/serverPixelsRoutes');
+const apiKeyRoutes = require('./modules/apiKeys/apiKeyRoutes');
+const webhookRoutes = require('./modules/webhooks/webhookRoutes');
+const publicApiRoutes = require('./modules/publicApi/publicApiRoutes');
 
 const app = express();
 
@@ -169,6 +172,8 @@ v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
+v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
+v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
 // WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
 // body proves the sender.
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
@@ -184,6 +189,11 @@ v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.
 v1.use('/admin', platformAdminRoutes);
+
+// --- Public API (a workspace API key, no staff session) --------------------
+// Orders and their statuses for merchants' own integrations; see
+// docs/public-api.md. Outbound webhooks are sent by modules/webhooks.
+v1.use('/public', publicApiRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);

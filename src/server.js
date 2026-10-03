@@ -10,6 +10,7 @@ const { imageProcessingStatus } = require('./modules/media/imageProcessing');
 const { startUploadSweep } = require('./modules/customerUploads/customerUploadService');
 const signupPolicy = require('./modules/auth/signupPolicy');
 const { releaseDraftsWhenOff } = require('./modules/billing/goLiveService');
+const webhookWorker = require('./modules/webhooks/webhookWorker');
 
 async function start() {
   try {
@@ -58,8 +59,13 @@ async function start() {
     logger.info(`Zimos backend listening on port ${env.port}`, { env: env.nodeEnv });
   });
 
+  // Outbound webhooks: find order changes and send them, every few seconds
+  // (WEBHOOKS_IN_PROCESS=false leaves it to scripts/dispatch-webhooks.js).
+  if (env.webhooks.inProcess) webhookWorker.start();
+
   const shutdown = (signal) => {
     logger.info(`Received ${signal}, shutting down gracefully`);
+    webhookWorker.stop();
     server.close(async () => {
       await db.sequelize.close();
       process.exit(0);
