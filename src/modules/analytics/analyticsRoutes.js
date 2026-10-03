@@ -27,5 +27,9 @@ router.get('/web/series', validate(schemas.webSeries), controller.webSeries);
 router.get('/web/metrics', validate(schemas.webMetrics), controller.webMetrics);
 router.get('/web/weekly', validate(schemas.webWeekly), controller.webWeekly);
 router.get('/web/realtime', validate(schemas.webRealtime), controller.webRealtime);
+// Live view (SPEC §15.2): the snapshot the stream pushes, and the one-minute
+// ticket that opens the stream at /api/v1/analytics-stream/:workspaceId (realtimeStream.js).
+router.get('/live', validate(schemas.live), controller.live);
+router.post('/live/stream-ticket', validate(schemas.liveTicket), controller.liveTicket);
 
 module.exports = router;
