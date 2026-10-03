@@ -74,6 +74,7 @@ module.exports = {
     }),
   },
   workspaceParam: { params: Joi.object({ workspaceId: workspaceIdParam }) },
+  getPolicy: { params: Joi.object({ workspaceId: workspaceIdParam, key: Joi.string().trim().max(40).required() }) },
   // An id or a slug.
   getCollection: { params: Joi.object({ workspaceId: workspaceIdParam, collectionId: Joi.string().trim().min(1).max(200).required() }) },
 };

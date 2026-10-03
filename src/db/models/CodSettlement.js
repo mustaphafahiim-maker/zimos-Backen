@@ -20,6 +20,8 @@ module.exports = (sequelize, DataTypes) => {
       createdByUserId: { type: DataTypes.UUID, allowNull: true, field: 'created_by_user_id' },
       confirmedByUserId: { type: DataTypes.UUID, allowNull: true, field: 'confirmed_by_user_id' },
       confirmedAt: { type: DataTypes.DATE, allowNull: true, field: 'confirmed_at' },
+      // Result of matching a courier statement (settlementStatementService), when created from one.
+      statementReport: { type: DataTypes.JSONB, allowNull: true, field: 'statement_report' },
     },
     { tableName: 'cod_settlements', indexes: [{ fields: ['workspace_id', 'status'] }] }
   );

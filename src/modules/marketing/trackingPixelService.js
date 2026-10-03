@@ -225,6 +225,12 @@ async function serverPixelsFor(workspaceId, context) {
     .map((p) => ({ pixel: p, token: secretBox.open(p.capiTokenSealed) }));
 }
 
+/** One pixel as a send target ({ pixel, token }), or null when it has no usable server API. */
+function serverTargetOf(pixel) {
+  if (!pixel.capiEnabled || !pixel.capiTokenSealed || !supportsCapi(pixel.platform, pixel.pixelId)) return null;
+  return { pixel, token: secretBox.open(pixel.capiTokenSealed) };
+}
+
 async function recordSendResult(pixel, { ok, error }) {
   await pixel.update(ok ? { lastSentAt: new Date(), lastError: null } : { lastError: String(error).slice(0, 500) });
 }
@@ -242,5 +248,6 @@ module.exports = {
   publicPixels,
   scopeCovers,
   serverPixelsFor,
+  serverTargetOf,
   recordSendResult,
 };

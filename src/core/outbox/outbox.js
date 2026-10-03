@@ -128,14 +128,15 @@ let again = false;
 
 /** Moves undispatched events into the `events` queue. Returns how many. */
 async function dispatchPending() {
-  return db.sequelize.transaction(async (transaction) => {
+  // The once-a-second poll stays out of the SQL log.
+  return db.sequelize.transaction({ logging: false }, async (transaction) => {
     const rows = await db.sequelize.query(
       `SELECT id, workspace_id AS "workspaceId" FROM domain_events
         WHERE dispatched_at IS NULL
         ORDER BY occurred_at
         LIMIT :limit
         FOR UPDATE SKIP LOCKED`,
-      { replacements: { limit: BATCH }, type: QueryTypes.SELECT, transaction }
+      { replacements: { limit: BATCH }, type: QueryTypes.SELECT, transaction, logging: false }
     );
     if (rows.length === 0) return 0;
     for (const row of rows) {
