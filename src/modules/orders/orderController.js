@@ -2,6 +2,8 @@
 const asyncHandler = require('express-async-handler');
 const service = require('./orderService');
 const confirmationService = require('../cod/confirmationService');
+const stageChange = require('./orderStageChange');
+const statusHistory = require('./orderStatusHistory');
 
 const create = asyncHandler(async (req, res) => {
   const { order, items } = await service.createOrder(req.tenant.workspaceId, req.body, req);
@@ -34,6 +36,17 @@ const confirm = asyncHandler(async (req, res) => {
   res.json({ order, task });
 });
 
+const changeStatus = asyncHandler(async (req, res) => {
+  const order = await stageChange.changeStage(req.tenant.workspaceId, req.params.orderId, req.body, req);
+  res.json({ order });
+});
+
+const listStatusHistory = asyncHandler(async (req, res) => {
+  // 404 for an order of another workspace, before any history is read.
+  await service.getOrderRef(req.tenant.workspaceId, req.params.orderId);
+  res.json({ history: await statusHistory.listForOrder(req.tenant.workspaceId, req.params.orderId) });
+});
+
 const update = asyncHandler(async (req, res) => {
   const order = await service.updateOrderLimited(req.tenant.workspaceId, req.params.orderId, req.body, req);
   res.json({ order });
@@ -59,4 +72,17 @@ const updateShipment = asyncHandler(async (req, res) => {
   res.json({ shipment });
 });
 
-module.exports = { create, get, list, pipeline, cancel, confirm, update, listShipments, createShipment, updateShipment };
+module.exports = {
+  create,
+  get,
+  list,
+  pipeline,
+  cancel,
+  confirm,
+  changeStatus,
+  listStatusHistory,
+  update,
+  listShipments,
+  createShipment,
+  updateShipment,
+};

@@ -418,6 +418,22 @@ async function openTaskForOrder(workspaceId, orderId, transaction) {
 }
 
 /**
+ * Whether the caller may record an outcome on `task` from the order page:
+ * not while it waits for its funnel's offer window, is assigned to someone
+ * else, or another agent holds a live lock on it.
+ */
+async function assertMayWorkFromOrder(task, req, transaction) {
+  if (isWaitingForOffers(task)) throw waitingError(task);
+  if (!mayWorkAssigned(task, req)) {
+    throw assignedError(await db.User.findByPk(task.assignedToUserId, { attributes: ['id', 'fullName'], transaction }));
+  }
+  if (task.lockedByUserId && task.lockedByUserId !== req.user.id && lockIsLive(task)) {
+    task.lockedBy = await db.User.findByPk(task.lockedByUserId, { attributes: ['id', 'fullName'], transaction });
+    throw lockedError(task);
+  }
+}
+
+/**
  * Confirm from the order page: the same outcome a queue call records, without
  * claiming first. Refused while another agent holds a live lock on the task —
  * they may be on the phone with the customer right now.
@@ -435,14 +451,7 @@ async function confirmFromOrder(workspaceId, orderId, { notes, channel }, req) {
     }
 
     const task = await openTaskForOrder(workspaceId, order.id, transaction);
-    if (isWaitingForOffers(task)) throw waitingError(task);
-    if (!mayWorkAssigned(task, req)) {
-      throw assignedError(await db.User.findByPk(task.assignedToUserId, { attributes: ['id', 'fullName'], transaction }));
-    }
-    if (task.lockedByUserId && task.lockedByUserId !== req.user.id && lockIsLive(task)) {
-      task.lockedBy = await db.User.findByPk(task.lockedByUserId, { attributes: ['id', 'fullName'], transaction });
-      throw lockedError(task);
-    }
+    await assertMayWorkFromOrder(task, req, transaction);
 
     await applyOutcome(task, order, { outcome: 'confirmed', notes, channel, source: 'order_page' }, req, transaction);
     return loadTask(workspaceId, task.id, transaction);
@@ -900,4 +909,10 @@ module.exports = {
   listQueue,
   queueCounts,
   taskSummaryForOrder,
+  // For orders/orderStageChange.js: an outcome recorded from the order page
+  // goes through the same checks and bookkeeping as confirmFromOrder.
+  applyOutcome,
+  openTaskForOrder,
+  assertOrderOpen,
+  assertMayWorkFromOrder,
 };

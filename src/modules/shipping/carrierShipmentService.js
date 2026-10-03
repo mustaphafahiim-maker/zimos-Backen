@@ -6,6 +6,7 @@ const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const logger = require('../../core/utils/logger');
 const { recordAudit } = require('../audit/auditService');
 const { insertShipment, transitionShipment } = require('../orders/shipmentLifecycle');
+const { trackStage } = require('../orders/orderStateService');
 const { getAdapter, availableFor, assertSandboxAllowed, reservedAdapterFor, MANUAL } = require('./carriers');
 const { isCityDistrict } = require('./carriers/adapterContract');
 const accounts = require('./carrierAccountService');
@@ -391,6 +392,7 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
 
       if (account.status !== 'active') await account.update({ status: 'active' }, { transaction });
       await accounts.markCredentialsProven(account, { transaction });
+      await trackStage(workspaceId, order.id, { req, transaction });
 
       await recordAudit({
         workspaceId,

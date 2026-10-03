@@ -52,6 +52,20 @@ router.post(
   requirePermission(PERMISSIONS.ORDERS_CONFIRM),
   controller.confirm
 );
+// Move the order to another stage; only the moves orderStateService allows
+// (409 INVALID_STATUS_TRANSITION otherwise). And the record of every move.
+router.patch(
+  '/:orderId/status',
+  validate(schemas.changeStatus),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.changeStatus
+);
+router.get(
+  '/:orderId/status-history',
+  validate(schemas.get),
+  requirePermission(PERMISSIONS.ORDERS_VIEW),
+  controller.listStatusHistory
+);
 router.patch(
   '/:orderId',
   validate(schemas.update),
