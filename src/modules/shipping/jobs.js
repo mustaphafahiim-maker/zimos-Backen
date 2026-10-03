@@ -3,6 +3,17 @@
 const MINUTE = 60 * 1000;
 
 module.exports = {
+  consumers: [
+    {
+      // Book with the store's automatic courier once an order is confirmed or
+      // paid (carrierBooking.js). Never retried: a courier create is not undoable.
+      name: 'carrier_auto_booking',
+      queue: 'carriers',
+      events: ['order.confirmed', 'order.paid'],
+      // eslint-disable-next-line global-require
+      handle: (event) => require('./carrierBooking').autoBook(event),
+    },
+  ],
   schedules: [
     {
       // Couriers without a webhook are asked for their shipments' status

@@ -23,5 +23,13 @@ router.get('/', validate(schemas.list), readAccess, controller.list);
 router.put('/:code', validate(schemas.connect), requirePermission(PERMISSIONS.SHIPPING_MANAGE), controller.connect);
 router.delete('/:code', validate(schemas.byCode), requirePermission(PERMISSIONS.SHIPPING_MANAGE), controller.disconnect);
 router.get('/:code/cities', validate(schemas.cities), readAccess, controller.cities);
+// Default courier, automatic booking, inspection and courier notes (carrierBooking.js).
+const booking = require('./carrierBooking');
+router.patch(
+  '/:code/booking',
+  validate({ params: schemas.byCode.params, body: booking.bookingSchema }),
+  requirePermission(PERMISSIONS.SHIPPING_MANAGE),
+  require('express-async-handler')(async (req, res) => res.json({ booking: await booking.updateBooking(req.tenant.workspaceId, req.params.code, req.body, req) }))
+);
 
 module.exports = router;

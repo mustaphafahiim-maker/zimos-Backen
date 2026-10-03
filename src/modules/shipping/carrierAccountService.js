@@ -156,6 +156,12 @@ function describeConnection(account, adapter, credentials) {
     connectedAt: account.createdAt,
     updatedAt: account.updatedAt,
     webhookUrl: webhookUrlFor(account),
+    booking: {
+      isDefault: Boolean(account.isDefault),
+      autoCreateOn: account.autoCreateOn || 'never',
+      allowInspection: Boolean(account.allowInspection),
+      courierNotes: account.courierNotes || null,
+    },
   };
   if (adapter && typeof adapter.isSandbox === 'function' && credentials) {
     connection.environment = adapter.isSandbox(credentials) ? 'sandbox' : 'production';

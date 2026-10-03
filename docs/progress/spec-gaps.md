@@ -15,6 +15,7 @@ the numbers **400–449** (no lane owns them).
 - The sandbox courier exists outside production for every store; in production only with `CARRIERS_SANDBOX=true` and the FeatureFlag `sandbox_integrations` (shared check: `core/utils/featureFlags.js`). Its parcel state lives on the shipment (`carrier_response.sandboxStatus`), so it survives restarts and the poller sees it.
 - Storefront cache (`storefront/storefrontCache.js`): raw data only (store, product lists and pages, collections), localized after the read; Redis when `REDIS_URL`, else memory; dropped when an audited store-visible change commits and when the merchant restocks or adjusts stock; not on orders (stock shown ≤ 60 s old; checkout checks real stock). The storefront's Next.js pages stay per-request on purpose (shopper IP for rate limits, staff preview, locale cookie — see `lib/serverApiClient.ts`); they read through this cache instead of ISR.
 - A single courier booking stays inside the request: a courier create is never retried automatically (a retry after a timeout could book the parcel twice — the adapters say so), and the merchant waits for the waybill. Bulk shipping goes through the queue (item 10).
+- Automatic booking (`shipping/carrierBooking.js`) runs on `order.confirmed` / `order.paid` on the carriers queue with the default courier (or the only one set to book on its own), and is never retried for the same reason. A failed one — address not in the courier list, courier refusal — becomes a per-order merchant notification plus an audit row on the order, and the merchant books it by hand. Test orders are booked automatically only by the sandbox courier. An order that already has an active shipment is left alone.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -45,7 +46,7 @@ the numbers **400–449** (no lane owns them).
   behind `AUTH_REFRESH_COOKIE=true` — an owner setting, because the cookie only
   works once the dashboard and the API share a site (app.x + api.x). Nothing to
   code; turn it on with the deploy.
-- [ ] 10. Shipping data (10a shipment_events done): `geo_regions` seed (Egypt + North Coast + districts,
+- [ ] 10. Shipping data (10a shipment_events and 10b per-account booking settings + automatic booking done): `geo_regions` seed (Egypt + North Coast + districts,
   Saudi regions), `carrier_region_map` (stored, editable), `shipment_events`
   timeline, per-carrier-account `autoCreateShipmentOn` / inspection / courier
   notes; bulk ship shows ready vs missing-mapping and retries failures.
