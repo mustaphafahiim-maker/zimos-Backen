@@ -417,6 +417,7 @@ async function createOrder(
         productIds,
         customerId: customer.id,
         funnelId,
+        transaction,
       });
       discountAmount = evaluation.amount;
       discountRecord = evaluation.discount;
@@ -457,6 +458,7 @@ async function createOrder(
       region: shippingAddress ? shippingAddress.province : null,
       lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
       shippingAmount,
+      transaction,
     });
 
     // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
@@ -714,6 +716,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
     shippingAmount: shipping.amount,
+    transaction,
   });
   const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction);
   const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;

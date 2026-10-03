@@ -158,6 +158,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
     shippingAmount: shipping.amount,
+    transaction,
   });
   const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
 
