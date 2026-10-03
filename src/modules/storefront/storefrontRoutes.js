@@ -26,6 +26,7 @@ router.use(resolvePublicWorkspace);
 router.get('/checkout/guard', botProtection.guardConfig);
 
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
+router.get('/policies/:key', validate(schemas.getPolicy), controller.getPolicy);
 router.get('/products', collectOptionFilters, validate(schemas.listProducts), controller.listProducts);
 // Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
 router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
