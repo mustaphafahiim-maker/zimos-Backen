@@ -94,8 +94,9 @@ module.exports = {
   or recorded by `verifyCredentials`.
 
 Optional, not called by the core yet (SPEC §11.1 / §11.6): `describe()`,
-`validateCredentials(config)`, `tokenize`, `chargeSaved(token, amount)` — see
-`../savedMethods/README.md` once saved payment methods land.
+`validateCredentials(config)`. Saved cards — `supportsTokenization`, `tokenize`,
+`chargeSaved` — are specified in `../savedMethods/README.md` and implemented
+by the sandbox.
 
 ## The `sandbox` adapter
 

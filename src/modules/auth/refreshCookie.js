@@ -28,7 +28,10 @@ function parseDurationMs(value) {
 
 function cookieName(req) {
   const app = String(req.get('x-zimos-app') || '').trim().toLowerCase();
-  return /^[a-z]{1,20}$/.test(app) ? `${BASE_NAME}_${app}` : BASE_NAME;
+  const name = /^[a-z]{1,20}$/.test(app) ? `${BASE_NAME}_${app}` : BASE_NAME;
+  // Cookies ignore ports: several APIs on one machine (localhost:4000, :4101…)
+  // would overwrite each other's session. Outside production the port is in the name.
+  return env.isProduction ? name : `${name}_${env.port}`;
 }
 
 function cookieOptions() {

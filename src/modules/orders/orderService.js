@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const paymentRules = require('../payments/paymentRulesService');
+const fxService = require('../currencies/fxService');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
@@ -463,6 +464,7 @@ async function createOrder(
         totalAmount,
         paymentAdjustmentAmount: paymentAdjustment.amount,
         paymentAdjustmentLabel: paymentAdjustment.label,
+        ...(await fxService.baseFieldsFor(workspaceId, { currency: pricedLines[0].currency, totalAmount }, transaction)),
         contactSnapshot: contact,
         shippingAddressSnapshot: shippingAddress || null,
         discountsSnapshot,
@@ -727,6 +729,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       totalAmount,
       paymentAdjustmentAmount: paymentAdjustment.amount,
       paymentAdjustmentLabel: paymentAdjustment.label,
+      ...(await fxService.baseFieldsFor(workspaceId, { currency: order.currency, totalAmount }, transaction)),
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,
