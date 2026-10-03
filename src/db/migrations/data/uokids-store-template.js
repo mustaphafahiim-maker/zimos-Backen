@@ -316,7 +316,19 @@ const themeSettings = {
     },
     menu: [
       { label: 'الصفحة الرئيسية', href: '/' },
-      { label: 'تسوق', href: '/products' },
+      {
+        label: 'تسوق',
+        href: '/products',
+        children: [
+          { label: 'وصل حديثًا', href: collection('new-arrivals') },
+          { label: 'الأكثر مبيعاً', href: collection('best-seller') },
+          { label: 'مستلزمات الرضاعة', href: collection('feeding-1') },
+          { label: 'النوم والراحة', href: collection('sleep-comfort') },
+          { label: 'الخروجات والتغيير', href: collection('travel-changing') },
+          { label: 'ألعاب', href: collection('toys') },
+          { label: 'باقات يوكيدز', href: collection('uokids-bundles') },
+        ],
+      },
       { label: 'مجموعات البيبي الأساسية', href: collection('uokids-bundles') },
       { label: 'من نحن', href: '/about-us' },
       { label: 'تواصل معنا', href: '/contact' },
