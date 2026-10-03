@@ -7,10 +7,26 @@ const statusHistory = require('./orderStatusHistory');
 const orderMeta = require('./orderMetaService');
 const orderTimeline = require('./orderTimeline');
 const orderBulk = require('./orderBulkService');
+const manualOrder = require('./manualOrder');
 
 const create = asyncHandler(async (req, res) => {
-  const { order, items } = await service.createOrder(req.tenant.workspaceId, req.body, req);
+  const { shippingAmount, ...body } = req.body;
+  const { order, items } = await service.createOrder(req.tenant.workspaceId, body, req, {
+    shippingOverride: manualOrder.shippingOverrideOf({ shippingAmount }),
+  });
   res.status(201).json({ order: { ...order.toJSON(), items } });
+});
+
+const manualPreview = asyncHandler(async (req, res) => {
+  res.json({ preview: await manualOrder.preview(req.tenant.workspaceId, req.body, req) });
+});
+
+const manualCustomer = asyncHandler(async (req, res) => {
+  res.json({ customer: await manualOrder.customerByPhone(req.tenant.workspaceId, req.query.phone) });
+});
+
+const manualOptions = asyncHandler(async (req, res) => {
+  res.json(manualOrder.options());
 });
 
 const get = asyncHandler(async (req, res) => {
@@ -121,6 +137,9 @@ module.exports = {
   confirm,
   changeStatus,
   listStatusHistory,
+  manualPreview,
+  manualCustomer,
+  manualOptions,
   bulk,
   timeline,
   neighbors,
