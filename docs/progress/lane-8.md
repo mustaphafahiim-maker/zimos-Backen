@@ -6,7 +6,7 @@
 - [x] 3. Global search ⌘K, setup guide on real data, sidebar shortcuts (§18.6) — checked on :4108/:5208: Ctrl+K opens the palette, a phone fragment finds its orders and customer and Enter opens the order; empty query lists actions and pages; the home page guide shows 80% with shipping still open; pinned pages show above the sidebar and persist per member (`PUT /shortcuts`).
 
 ## Next
-- [ ] 4. Digital products (§18.2): deliveries, licence codes, signed download links, file library.
+- [ ] 4. Digital products (§18.2): deliveries, licence codes, signed download links, file library. — built and landed (migration 312, `modules/digital`, dashboard `/digital` + order-page card, storefront `/downloads/:token` + links on the tracking page). Checked in-process against the lane DB (scratch script calling the service): upload, file/link/code deliveries, a paid order got its grants and went `fulfilled`, the download limit refused the 3rd download, late codes filled a short grant, renew/revoke, `order.digital_delivered` in the outbox. **Still to do before ticking:** the HTTP routes and the three screens in a browser (`/digital` both tabs + upload, an order page with grants, the storefront download page) — every dev-server slot was held by other lanes.
 - [ ] 5. AI module (§19): provider interface + sandbox provider, usage counter, product generation, funnel/page generation, translation, store policies — output always a draft.
 - [ ] 6. Affiliates (§20.3): affiliates, commissions on delivered orders, a simple OTP portal.
 - [ ] 7. Dashboard as a PWA (manifest, install prompt) (§20.1 first step).
@@ -28,11 +28,17 @@
 
 - 2026-10-03 ⌘K: records come from the API; pages and actions are matched in the dashboard in the current language. The setup guide hides itself at 100% and can be dismissed per browser (localStorage), not per account.
 
+- 2026-10-03 Digital delivery fires from `orderStateService.setFinancialState` when an order becomes `paid` (one hook line, inside a savepoint so a delivery problem cannot undo a payment); a COD order therefore delivers only when its payment is recorded. An all-digital order is marked `fulfilled` at that moment.
+- 2026-10-03 Files are private (`storage.putPrivate`, key `digital/<ws>/<id>`) and streamed by the API after the grant token, expiry and download limit are checked; the token (random 64 hex, stored) is the "signed link". Upload is one multipart request capped at 100 MB — presigned multipart to R2 and a per-plan size limit are left to the storage integration; `link` delivery covers bigger files.
+- 2026-10-03 A grant snapshots the delivery at payment time. Licence codes: one per unit bought, drawn with `FOR UPDATE SKIP LOCKED`; if stock runs short the grant records `codesMissing` and is filled when codes are added. Email/WhatsApp delivery is left to automations via the `order.digital_delivered` event.
+- 2026-10-03 `downloads` is now a reserved storefront path (`RESERVED_PAGE_SEGMENTS`).
+
 ## Blocked
 
 ## Handoff
 - Branch `lane-8` in both worktrees; everything under Done is merged into `origin/zimos-additions`.
-- Migrations used: 310, 311. Next free: 312.
+- Migrations used: 310, 311, 312. Next free: 313.
+- Item 4 is landed but unticked: its browser/HTTP check is owed (see Next). The lane DB has two digital products (`EBOOK-1` file delivery, `LICENCE-1` codes) and a paid order `ORD-DIGI-…` with grants, made by the scratch script.
 - Setup guide: `payment` is done whenever the storefront offers a method (COD counts); `domain` and `pixel` are optional and outside the percentage. Shortcuts live on `memberships.nav_shortcuts` (max 8 dashboard routes).
 - Lane DB has demo data: 4 customers with COD orders, 3 leads, 2 segments, a published site "Lane 8 site" with `/contact` carrying a form (`form1`), and a second store "Demo Store Copy" made by the duplicate endpoint. The demo user's username is `demo`.
 - Scratch API helper (not in the repo): log in as `demo@zimos.test` against `http://localhost:4108/api/v1`, workspace from `GET /workspaces`; POSTs to `/orders` need an `Idempotency-Key` header.
