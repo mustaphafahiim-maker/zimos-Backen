@@ -40,7 +40,8 @@ staff.put(
   validate({
     params: Joi.object(ws),
     body: Joi.object({
-      phoneNumberId: Joi.string().pattern(/^\d{5,30}$/).required(),
+      // `sandbox` connects the test adapter (whatsappSandbox.js; refused in production).
+      phoneNumberId: Joi.string().pattern(/^(\d{5,30}|sandbox)$/).required(),
       accessToken: Joi.string().min(20).max(1000).required(),
       businessAccountId: Joi.string().pattern(/^\d{5,30}$/).allow('', null).optional(),
       appSecret: Joi.string().min(16).max(200).allow('', null).optional(),
