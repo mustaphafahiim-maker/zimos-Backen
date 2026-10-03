@@ -1,5 +1,6 @@
 'use strict';
 const asyncHandler = require('express-async-handler');
+const manualCheckout = require('./manualCheckout');
 const env = require('../../config/env');
 const cartService = require('../cart/cartService');
 const orderService = require('../orders/orderService');
@@ -31,7 +32,7 @@ const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, ...orderBody } = req.body;
+  const { item, extraItems, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -39,7 +40,10 @@ const checkout = asyncHandler(async (req, res) => {
   // cart work so a rejected checkout costs nothing.
   assertRequiredCheckoutFields(workspace, req.body);
 
-  const isOnline = orderBody.paymentMethod !== 'cod';
+  // A manual transfer (the whole order, or a COD order's deposit) is checked
+  // here, before any cart work; it is not an online (gateway) payment.
+  const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
+  const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -48,7 +52,7 @@ const checkout = asyncHandler(async (req, res) => {
   let prepared = null;
   if (isOnline) {
     prepared = await online.prepareOnlineCheckout(workspace, { ...orderBody, paymentProvider, returnUrl }, req);
-  } else if (env.payments.onlineEnabled) {
+  } else if (env.payments.onlineEnabled && orderBody.paymentMethod === 'cod') {
     // The merchant may have switched cash on delivery off.
     await methodsService.resolveStorefrontMethod(workspace, { paymentMethod: 'cod' }, {
       preview: methodsService.isPreviewRequest(req, workspaceId),
@@ -110,7 +114,8 @@ const checkout = asyncHandler(async (req, res) => {
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
     await afterOrderCompleted(workspaceId, order, context);
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems } });
+    const transferPayment = await manualCheckout.record(order, manualTransfer);
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(

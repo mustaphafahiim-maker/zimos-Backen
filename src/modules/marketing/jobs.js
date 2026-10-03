@@ -10,7 +10,8 @@ module.exports = {
     {
       name: 'server_pixels',
       queue: 'pixels',
-      events: ['order.created'],
+      // Which of these reports the Purchase is the merchant's choice (purchaseTiming.js).
+      events: ['order.created', 'order.confirmed', 'order.delivered'],
       // An order still waiting for its online payment is not a purchase yet,
       // and a test order never is.
       handle: (event) =>

@@ -2,6 +2,7 @@
 
 const Joi = require('joi');
 const { PLATFORM_NAMES, SCOPE_TYPES } = require('./trackingPixelService');
+const { TIMINGS } = require('./purchaseTiming');
 
 const uuid = Joi.string().uuid();
 const workspaceParam = { workspaceId: uuid.required() };
@@ -33,6 +34,10 @@ const shared = {
 
 module.exports = {
   list: { params: Joi.object(workspaceParam) },
+  updateSettings: {
+    params: Joi.object(workspaceParam),
+    body: Joi.object({ purchaseEventTiming: Joi.string().valid(...TIMINGS).required() }),
+  },
   events: {
     params: Joi.object(workspaceParam),
     query: Joi.object({
