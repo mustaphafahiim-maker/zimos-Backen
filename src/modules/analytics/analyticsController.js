@@ -47,3 +47,12 @@ const overview = asyncHandler(async (req, res) => {
 });
 
 Object.assign(module.exports, { overview });
+
+// --- Sales attribution (SPEC §15.3) ------------------------------------------
+const attributionService = require('./attributionService');
+
+const attribution = asyncHandler(async (req, res) => {
+  res.json({ attribution: await attributionService.getAttribution(req.tenant.workspaceId, req.query) });
+});
+
+Object.assign(module.exports, { attribution });

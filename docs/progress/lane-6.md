@@ -2,9 +2,9 @@
 
 ## Done
 - [x] 1. Dashboard home KPIs (§15.1): `GET /analytics/overview` (all KPIs + previous period, per-day series, conversion funnel, offers table, top sources/governorates/devices/products/funnels, funnel filter) and the home page built on it (`pages/home/StoreOverview.tsx`) — checked on :4106 / :5206 with seeded orders and events, in English and Arabic.
+- [x] 2. Sales attribution (§15.3): `GET /analytics/attribution` (group by source/medium/campaign/content, UTM and funnel filters, delivered column, spend/ROAS when ad spend exists) and `/analytics/attribution` page — checked on :5206 with seeded UTM traffic.
 
 ## Next
-- [ ] 2. Sales attribution report (§15.3).
 - [ ] 3. Real profit (§15.4): `product_economics`, `ad_spend_daily` (manual + CSV), P&L endpoint and page, campaigns screen, `ads.sync_spend` on a sandbox adapter.
 - [ ] 4. Settlements (§15.5): import courier statement, match waybills, discrepancies, money held by couriers.
 - [ ] 5. Payments: gateway adapter README + `sandbox` gateway; manual transfer with receipt image and confirm/reject (§11.3); deposits.
@@ -21,6 +21,8 @@
 - 2026-10-03 The home page keeps "Recent orders"; the old 30-day cards, quick stats, top products and funnels panels were replaced by the overview (same numbers, selectable period).
 - 2026-10-03 `currency` is accepted by `/analytics/overview` and ignored until item 7 adds conversion.
 - 2026-10-03 Lane API calls live in `packages/api-client/src/endpoints/insights.ts` (analytics/profit) — later `paymentsExtra.ts` for §11.
+
+- 2026-10-03 Orders are attributed through the UTM values on their own `purchase` event (orders have no attribution column yet — lane 4 adds one); orders without a tracked purchase appear under "No UTM".
 
 ## Blocked
 
