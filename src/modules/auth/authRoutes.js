@@ -10,6 +10,8 @@ const router = Router();
 
 // The refresh token travels as an httpOnly cookie for browser clients.
 router.use(require('./refreshCookie').attach);
+// Devices signed in to the account and two-step sign-in (SPEC §17.2).
+router.use(require('./securityRoutes'));
 
 router.post('/register', authLimiter, validate(schemas.register), controller.register);
 // What the sign-up form must ask for right now (plan, terms, a code).

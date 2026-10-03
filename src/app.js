@@ -71,6 +71,7 @@ const publicApiRoutes = require('./modules/publicApi/publicApiRoutes');
 const merchantNotificationRoutes = require('./modules/notifications/merchantNotificationRoutes');
 const trackingPixelRoutes = require('./modules/marketing/trackingPixelRoutes');
 const inboxRoutes = require('./modules/whatsapp/inboxRoutes');
+const orderEmailRoutes = require('./modules/notifications/orderEmailRoutes');
 
 const app = express();
 
@@ -201,11 +202,17 @@ v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
 // Lane 7: the app store, the app install link and dropshipping providers.
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
+// Lane 7: the simple invite (sections → permissions) and support access.
+v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
+v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
 v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
+v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
 // The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
 v1.use('/inbox-stream', inboxRoutes.stream);
+// The analytics live view's SSE stream — opened with a ticket, like the inbox stream.
+v1.use('/analytics-stream', require('./modules/analytics/realtimeStream').streamRouter);
 // WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
 // body proves the sender.
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);

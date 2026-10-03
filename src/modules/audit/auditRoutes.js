@@ -13,9 +13,10 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 
 /** Workspace activity log, newest first (`before` = createdAt of the last row seen). */
 const listAuditLogs = asyncHandler(async (req, res) => {
-  const { limit, before, entityType, action } = req.query;
+  const { limit, before, entityType, action, actorUserId, from } = req.query;
   const where = { workspaceId: req.tenant.workspaceId };
-  if (before) where.createdAt = { [Op.lt]: new Date(before) };
+  if (before || from) where.createdAt = { ...(before ? { [Op.lt]: new Date(before) } : {}), ...(from ? { [Op.gte]: new Date(from) } : {}) };
+  if (actorUserId) where.actorUserId = actorUserId;
   if (entityType) where.entityType = entityType;
   if (action) where.action = { [Op.iLike]: `${action}%` };
 
@@ -52,6 +53,8 @@ router.get(
       before: Joi.date().iso().optional(),
       entityType: Joi.string().max(100).optional(),
       action: Joi.string().max(100).optional(),
+      actorUserId: Joi.string().uuid().optional(),
+      from: Joi.date().iso().optional(),
     }),
   }),
   listAuditLogs
