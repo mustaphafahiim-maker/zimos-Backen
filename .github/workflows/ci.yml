@@ -1,0 +1,70 @@
+# Backend checks (SPEC §3.5). No test suites run here (owner's decision,
+# docs/LANES.md rule 2). The backend is plain JavaScript, so "typecheck and
+# build" means: every file parses, the whole app loads, and every migration
+# applies — and rolls back — on a real PostgreSQL.
+name: CI
+
+on:
+  push:
+    branches: [main, zimos-additions]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Syntax and load
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Every file parses, the app loads, the public OpenAPI file is current
+        run: node scripts/ci-check.js
+
+  migrations:
+    name: Migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zimos_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: development
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: zimos_ci
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply every migration
+        run: npx sequelize-cli db:migrate
+      - name: The newest migration rolls back and applies again
+        run: |
+          npx sequelize-cli db:migrate:undo
+          npx sequelize-cli db:migrate
+      - name: Seed the demo data
+        run: npx sequelize-cli db:seed:all
