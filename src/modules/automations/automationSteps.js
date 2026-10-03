@@ -62,6 +62,8 @@ const RUNNERS = {
     const whatsapp = require('../whatsapp/whatsappService');
     await whatsapp.sendMessage(workspaceId, {
       to: subject.phone,
+      // Lets the customer's quick-reply to this message find its order.
+      orderId: subject.kind === 'order' ? subject.order.id : null,
       template: { name: step.template, language: step.language || 'ar', params: (step.params || []).map((p) => render(p, subject.vars)) },
     });
     return `whatsapp_template ${step.template}`;

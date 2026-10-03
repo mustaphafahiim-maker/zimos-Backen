@@ -87,6 +87,8 @@ module.exports = {
       // or the funnel checkout step's) and prices the line itself
       // (checkout/orderBump.js).
       orderBump: Joi.object({ offerId: uuid.required() }).optional(),
+      // The product's own bumps the shopper ticked (modules/offers), at most three.
+      orderBumps: Joi.array().items(Joi.object({ offerId: uuid.required() })).max(3).optional(),
       // The bot guard's fields (risk/botProtection): the honeypot, the time
       // token from GET /checkout/guard, the challenge token. Deliberately
       // loose — the guard decides, and takes them off the body.

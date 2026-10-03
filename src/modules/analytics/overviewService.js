@@ -66,7 +66,7 @@ async function collectWindow(workspaceId, { start, end, tz, funnelId }) {
   const live = "(o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected')";
 
   const ORDERS = `
-    SELECT o.id, o.customer_id, o.created_at, o.total_amount, o.discount_amount, o.amount_refunded,
+    SELECT o.id, o.customer_id, o.created_at, coalesce(o.total_amount_base, o.total_amount) AS total_amount, o.discount_amount, o.amount_refunded,
            o.payment_method, o.confirmation_state, o.funnel_id, o.shipping_address_snapshot,
            ${live} AS live, ${STAGE_SQL} AS stage,
            ${cols.unseen || "(o.confirmation_state = 'pending' AND o.cancelled_at IS NULL)"} AS is_new,
@@ -346,13 +346,35 @@ async function getOverview(workspaceId, query = {}) {
     rateOfPrevious: i === 0 ? null : rate(row.sessions, all[i - 1].sessions),
   }));
 
+  // Currency switch (SPEC §11.5): the store-currency totals shown in another
+  // currency at today's rate. A presentation choice; an unknown currency is ignored.
+  const baseCurrency = (workspace && workspace.defaultCurrency) || 'EGP';
+  let currency = baseCurrency;
+  if (query.currency && query.currency !== baseCurrency) {
+    const fx = require('../currencies/fxService');
+    const fxRate = await fx.getRate(baseCurrency, query.currency);
+    if (fxRate !== null) {
+      currency = query.currency;
+      const to = (v) => (v === null || v === undefined ? v : fx.convertWithRate(Math.round(v), baseCurrency, currency, fxRate));
+      for (const key of MONEY_METRICS) metrics[key] = { value: to(metrics[key].value), previous: to(metrics[key].previous) };
+      for (const day of current.series) day.sales = to(day.sales);
+      for (const list of [breakdowns.offers, breakdowns.topSources, breakdowns.topGovernorates, breakdowns.topProducts, breakdowns.topFunnels]) {
+        for (const row of list) {
+          if (row.total !== undefined) row.total = to(row.total);
+          if (row.sales !== undefined) row.sales = to(row.sales);
+        }
+      }
+    }
+  }
+
   return {
     range: { from: start.toISOString(), to: end.toISOString(), timeZone: tz },
     previousRange: compare
       ? { from: previousWindow.start.toISOString(), to: previousWindow.end.toISOString() }
       : null,
     funnelId,
-    currency: (workspace && workspace.defaultCurrency) || 'EGP',
+    currency,
+    baseCurrency,
     moneyMetrics: MONEY_METRICS,
     metrics,
     series: current.series,
