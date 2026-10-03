@@ -75,6 +75,23 @@ module.exports = {
       acknowledgeManualCancel: Joi.boolean().optional(),
     }),
   },
+  // PATCH /:orderId/status — see orderStageChange.js for what each move does.
+  changeStatus: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    body: Joi.object({
+      status: Joi.string().valid(...STAGES).required(),
+      reason: Joi.string().trim().max(500).allow('', null).optional(),
+      // → needs_follow_up: which of the two it is. Defaults to unreachable.
+      followUp: Joi.string().valid('unreachable', 'postponed').optional(),
+      // → cancelled, on an order booked with a courier that has no cancel API.
+      acknowledgeManualCancel: Joi.boolean().optional(),
+      // A shipping stage on an order with no shipment yet: the manual
+      // shipment that is created to carry it.
+      carrierCode: Joi.string().trim().min(1).max(100).optional(),
+      waybillNumber: Joi.string().trim().max(100).allow('', null).optional(),
+      trackingUrl: Joi.string().uri().max(500).allow('', null).optional(),
+    }),
+  },
   confirm: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
     body: Joi.object({
