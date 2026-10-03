@@ -174,6 +174,23 @@ async function scanOnce({ now = new Date(), limit = BATCH_SIZE } = {}) {
       newSnapshots.push({ orderId: row.id, workspaceId: row.workspace_id, signature, state: current });
     }
 
+    // An endpoint with a filter only hears about its funnels / products.
+    if (pending.some((p) => p.endpoint.filter)) {
+      const { orderSubject } = require('./webhookFanout');
+      const { matchesFilter } = require('./webhookFilter');
+      const subjects = new Map();
+      const kept = [];
+      for (const p of pending) {
+        if (p.endpoint.filter) {
+          if (!subjects.has(p.row.id)) subjects.set(p.row.id, await orderSubject(p.row.workspace_id, p.row.id));
+          if (!matchesFilter(p.endpoint, subjects.get(p.row.id) || {})) continue;
+        }
+        kept.push(p);
+      }
+      pending.length = 0;
+      pending.push(...kept);
+    }
+
     // The order as the public API shows it, once per order however many
     // endpoints hear about it.
     const orderIds = [...new Set(pending.map((p) => p.row.id))];

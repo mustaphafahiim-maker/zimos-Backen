@@ -10,6 +10,12 @@ module.exports = (sequelize, DataTypes) => {
       events: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
       signingSecret: { type: DataTypes.STRING(100), allowNull: false, field: 'signing_secret' },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
+      // { funnelIds, productIds } — only events about these (webhookFilter.js). Null = all.
+      filter: { type: DataTypes.JSONB, allowNull: true },
+      // Start of the current unbroken run of failed deliveries (webhookHealth.js).
+      failingSince: { type: DataTypes.DATE, allowNull: true, field: 'failing_since' },
+      disabledAt: { type: DataTypes.DATE, allowNull: true, field: 'disabled_at' },
+      disabledReason: { type: DataTypes.STRING(60), allowNull: true, field: 'disabled_reason' },
     },
     { tableName: 'webhook_endpoints', indexes: [{ fields: ['workspace_id'] }] }
   );
