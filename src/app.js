@@ -63,6 +63,7 @@ const apiKeyRoutes = require('./modules/apiKeys/apiKeyRoutes');
 const webhookRoutes = require('./modules/webhooks/webhookRoutes');
 const publicApiRoutes = require('./modules/publicApi/publicApiRoutes');
 const merchantNotificationRoutes = require('./modules/notifications/merchantNotificationRoutes');
+const trackingPixelRoutes = require('./modules/marketing/trackingPixelRoutes');
 
 const app = express();
 
@@ -176,6 +177,7 @@ v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
 v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
+v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 // WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
 // body proves the sender.
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
