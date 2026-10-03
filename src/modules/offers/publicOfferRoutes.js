@@ -71,6 +71,27 @@ router.get(
   asyncHandler(async (req, res) => res.json({ exitDownsell: await rules.publicExitDownsell(req.publicWorkspace) }))
 );
 
+// Social proof from real orders, and the newsletter sign-up (engagement.js).
+const engagement = require('./engagement');
+router.get(
+  '/social-proof',
+  validate({ params: Joi.object({ workspaceId }) }),
+  asyncHandler(async (req, res) => {
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json({ socialProof: await engagement.publicSocialProof(req.publicWorkspace) });
+  })
+);
+router.get(
+  '/newsletter',
+  validate({ params: Joi.object({ workspaceId }) }),
+  asyncHandler(async (req, res) => res.json({ newsletter: await engagement.publicNewsletter(req.publicWorkspace) }))
+);
+router.post(
+  '/newsletter/subscribe',
+  validate({ params: Joi.object({ workspaceId }), body: engagement.schemas.subscribe }),
+  asyncHandler(async (req, res) => res.status(201).json(await engagement.subscribe(req.publicWorkspace, req.body)))
+);
+
 // What a coupon would take off these items (discounts/couponExtras.js): the code box and ?coupon= links.
 router.post(
   '/coupon-preview',

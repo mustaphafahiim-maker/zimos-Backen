@@ -38,6 +38,7 @@ const PERMISSIONS = Object.freeze({
   TAX_MANAGE: 'tax.manage',
   REFUNDS_MANAGE: 'refunds.manage',
   DISCOUNTS_MANAGE: 'discounts.manage',
+  AFFILIATES_MANAGE: 'affiliates.manage',
 
   ANALYTICS_VIEW: 'analytics.view',
   FINANCIAL_REPORTS_VIEW: 'financial_reports.view',
@@ -87,6 +88,7 @@ const SYSTEM_ROLES = Object.freeze({
       PERMISSIONS.TAX_MANAGE,
       PERMISSIONS.REFUNDS_MANAGE,
       PERMISSIONS.DISCOUNTS_MANAGE,
+      PERMISSIONS.AFFILIATES_MANAGE,
       PERMISSIONS.ANALYTICS_VIEW,
       PERMISSIONS.FINANCIAL_REPORTS_VIEW,
       PERMISSIONS.PROFIT_MANAGE,

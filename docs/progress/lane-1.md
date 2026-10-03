@@ -8,9 +8,9 @@
 - [x] 5. Bulk actions (`POST /orders/bulk`) — checked on :4101: add_tag / set_status / ship / archive / unarchive over three orders, by ids and by filter; orders that cannot take the action come back with their own code (STATUS_UNCHANGED, INVALID_STATUS_TRANSITION) while the rest go through; 422 for a missing payload, ids+filter together, or an empty selection. On :5201: ticked three rows, added a tag, then a status change that all three refused — the result dialog lists each order and why, in Arabic.
 - [x] 6. Manual order screen (§4.5) — checked on :4101 and :5201 in Arabic: `/orders/new` found the customer by phone, filled their last address, priced the summary on the server, created the order (source "manual") and opened its page; preview with a typed shipping amount, a bad coupon (422) and too many units (409) over the API.
 - [x] 7. Edit items / refund by lines / fulfill — checked on :4101: `POST /orders/:id/items/preview` shows before/after/difference and saves nothing, `PUT /orders/:id/items` reprices the order and moves the stock reservation (13 → 15 → 14 reserved), duplicate lines 422, 409 once shipped; `POST /orders/:id/refund-quote`; `POST /orders/:id/fulfill` refuses an unconfirmed order and ships a confirmed one with courier + tracking. On :5201: edited a quantity (250 → 750, difference shown), confirmed, "Mark as shipped" with a tracking number, timeline shows it all. The refund-by-items picker inside the refund dialog is typechecked and its endpoint checked, but was not clicked through (no paid order in the lane database).
+- [x] 8. Tracking import, bulk waybills, manifest (§12.4) — checked against `zimos_lane_1` and on :5201: a six-row CSV created shipments and moved two confirmed orders (shipped, delivered) and reported the other rows one by one (unconfirmed order, unknown number, missing number, unknown status); from the list, five ticked orders gave a 2-page A4×4 PDF, a 5-page 10×15 PDF and a manifest; "Today's manifest" and "Sync from file" in the header, the import result listed per line in Arabic. NOT eyeballed: the PDFs were checked for being valid and having the right page count, but nothing on this machine renders a PDF page to look at the label layout.
 
 ## Next
-- [ ] 8. `POST /orders/import-tracking` (CSV), bulk waybill PDF (A4 ×4 and 10×15), courier manifest (§12.4).
 - [ ] 9. Invoice PDF for an order; xlsx as a second export format.
 
 ## Decisions
@@ -34,6 +34,9 @@
 - 2026-10-03 Item editing is refused once money has been received (409 `ORDER_ALREADY_PAID`): a paid order is corrected with a refund. Kept lines keep their sold price; new lines are priced from the catalogue; stock moves with reference type `order_edited`, which counts towards what the order "was placed with" (`inventory/orderStock.js`). Orders older than stamped reservations are not specially handled.
 - 2026-10-03 "Refund by lines" is a quote (`POST /orders/:id/refund-quote`: line price × units less its share of the discount, no shipping) that fills the existing refund dialog's amount and reason; the refund itself stays Ziad's `POST /orders/:id/refunds`. "Notify customer" on a refund is left to lane 4's automations.
 - 2026-10-03 `POST /orders/:id/fulfill` is the move to `shipped` with tracking: it ships the waiting manual shipment or creates one; no partial fulfilment by items (one active shipment per order is Ziad's rule).
+- 2026-10-03 The tracking file is sent as text (`{ csv }`), parsed by a small reader in `orders/trackingImport.js` — no upload middleware, no CSV dependency. Each row goes through the order page's own operations, so an unconfirmed order cannot be shipped by a file either.
+- 2026-10-03 Bulk labels are a compact label drawn in `orders/orderDocuments.js` from the single waybill's model (same barcode value, same amount to collect); the A5 single waybill is untouched. PDFs answer `?as=base64` as JSON so the dashboard can fetch them through the shared `request()` (its `rawFetch` is private to `client.ts`).
+- 2026-10-03 The manifest lists the selected orders' live shipments, or with no selection every shipment created today (UTC), optionally one courier.
 - 2026-10-03 Frontend: lane-1 API calls live in `packages/api-client/src/endpoints/orders.ts`; lane-1 error wording in `pages/orders/orderErrors.ts` (the shared `ApiErrorCode` union is not extended).
 
 ## Blocked
@@ -42,7 +45,6 @@
 - Branch `lane-1` in both worktrees; everything listed under Done is merged into `origin/zimos-additions`.
 - Migrations used: 135, 136. Next free: 137.
 - Items 8 and 9 are file outputs: read `src/modules/waybill/waybillService.js` (pdfkit, `renderWaybillPdf(model)`) and `src/core/pdf` first; `orders/orderExportService.js` for the xlsx format (check whether an xlsx library is already in `package.json` before adding one).
-- Item 8 must also add "Print waybills" for the bulk bar (`components/OrderBulkBar.tsx`).
 - Dev servers: at most 5 per folder across all lanes — stop the dashboard before starting the storefront. The demo user's username is already set in `zimos_lane_1`.
 - Never put backticks inside a double-quoted `node -e "..."` in Git Bash (they run as commands and hang); write the script to a file. `git merge` needs `--no-edit`.
 - Scratch helpers are not in the repo: log in as `demo@zimos.test` on `http://localhost:4101/api/v1`, workspace from `GET /workspaces`, orders through `POST /workspaces/:id/orders` with an `Idempotency-Key` header.

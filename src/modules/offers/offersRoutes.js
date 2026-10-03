@@ -89,4 +89,37 @@ router.put(
   asyncHandler(async (req, res) => res.json({ orderRules: await couponExtras.saveOrderRules(ws(req), req.body, req) }))
 );
 
+// Social proof, the newsletter form and referral results (engagement.js).
+const engagement = require('./engagement');
+router.get(
+  '/social-proof',
+  validate({ params: wsParams }),
+  canView,
+  asyncHandler(async (req, res) => res.json(await engagement.getSocialProof(ws(req))))
+);
+router.put(
+  '/social-proof',
+  validate({ params: wsParams, body: engagement.schemas.socialProof }),
+  canManage,
+  asyncHandler(async (req, res) => res.json({ socialProof: await engagement.saveSocialProof(ws(req), req.body, req) }))
+);
+router.get(
+  '/newsletter',
+  validate({ params: wsParams }),
+  canView,
+  asyncHandler(async (req, res) => res.json({ newsletter: await engagement.getNewsletter(ws(req)) }))
+);
+router.put(
+  '/newsletter',
+  validate({ params: wsParams, body: engagement.schemas.newsletter }),
+  canManage,
+  asyncHandler(async (req, res) => res.json({ newsletter: await engagement.saveNewsletter(ws(req), req.body, req) }))
+);
+router.get(
+  '/referrals',
+  validate({ params: wsParams, query: Joi.object({ days: Joi.number().integer().min(1).max(365).default(30) }) }),
+  canView,
+  asyncHandler(async (req, res) => res.json({ referrals: await engagement.referralStats(ws(req), req.query.days) }))
+);
+
 module.exports = router;
