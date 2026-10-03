@@ -123,6 +123,8 @@ function view(s, extra = {}) {
     failedAttempts: s.failedAttempts,
     lastFailureReason: s.lastFailureReason,
     cancelledAt: s.cancelledAt,
+    // The customer's portal link is /subscriptions/<token> on the storefront.
+    portalToken: s.portalToken,
     createdAt: s.createdAt,
     ...extra,
   };

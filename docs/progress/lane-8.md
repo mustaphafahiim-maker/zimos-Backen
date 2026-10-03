@@ -7,10 +7,13 @@
 - [x] 4. Digital products (§18.2) — checked on :4108/:5208/:3208: file library upload (Arabic file name) and delete-in-use refusal; file / link / licence-code deliveries; a paid order got its grants and went `fulfilled`; the 3rd download was refused at a limit of 2; codes added later filled a short grant; renew/revoke; `/digital` (both tabs) and the order page's "Digital delivery" card in Arabic; the storefront download page showed the three codes.
 - [x] 5. AI module (§19) — checked on :4108/:5208: product, page, translate and policies jobs ran queued → succeeded on the `ai` queue; apply made a draft product and an unpublished page, a second apply answered 409; usage counted the requests; `/ai` generated a product draft in the browser with the "test provider" badge.
 - [x] 6. Affiliates (§20.3) — checked on :4108/:5208/:3208: an affiliate at 10%; two orders carrying `ref=hany10` got pending commissions; delivering one approved it, cancelling the other voided it; "Mark as paid" recorded a payout; `/affiliates` in Arabic; the storefront portal signed in with phone + SMS code (read from the local server log) and showed links, orders without customer data, balance and the payout.
+- [x] 7. Dashboard as a PWA (§20.1 first step) — checked on :5208: the manifest and its three icons load, the service worker registers and activates, and the install card shows in the layout when the browser fires `beforeinstallprompt` (dispatched by hand).
+- [x] 8a. Subscriptions and installments on the sandbox gateway (§18.1) — checked against the lane DB (scratch script through the real services) and on :5208/:3208: a card order with a monthly subscription and a 3-payment plan started both with the saved sandbox card; renewals made linked paid orders; the plan completed after its 3rd payment; a card that could not be charged was retried at +1, +3 and +7 days and then cancelled; `/subscriptions` (list, KPIs, product plans) in Arabic; the customer page showed the subscription and cancelled it.
 
 ## Next
-- [ ] 7. Dashboard as a PWA (§20.1 first step) — built and landed: `public/manifest.webmanifest` (Arabic, standalone, 192/512/maskable icons, three shortcuts), `public/sw.js` (no caching; an offline page for navigations only), theme-colour and iOS meta tags, `InstallAppPrompt` in the layout. Checked on :5208: the manifest and its three icons load, the worker registers and activates. **Still to do before ticking:** see the install card after login (dispatch `beforeinstallprompt` in the console, or open on Android Chrome) — only one dev-server slot was free, so the dashboard could not run with its backend.
-- [ ] 8. Subscriptions and installments on the sandbox gateway (§18.1); courses (§18.3); shoppable images (§7.9); services marketplace (§20.5).
+- [ ] 8b. Courses (§18.3): courses → modules → lessons, drip release, free preview, enrollment on purchase, student portal with OTP.
+- [ ] 8c. Shoppable images (§7.9).
+- [ ] 8d. Services marketplace (§20.5): `service_listings` managed from platform-admin, directory for merchants.
 
 ## Decisions
 - 2026-10-03 Contact `type`, `totalSpent`, `lastOrderAt` and the delivery rate are computed from the live orders (one CTE over the derived stage, `contacts/segmentRules.js`), not stored: no hook into the orders module, and nothing to drift. Stored on `customers`: `tags` and `source` only. `segments` (the old unused array) was copied into `tags` and left in place.
@@ -40,13 +43,18 @@
 
 - 2026-10-03 PWA: the service worker caches nothing (live orders and money must never come from a cache); it exists for installability and an honest offline page. Web push is left for the merchant-app step (it needs lane 4's notification channels and a push provider key). The install card is snoozed for 14 days when dismissed and never shows in standalone mode; on iPhone Safari it explains Share → Add to Home Screen.
 
+- 2026-10-03 Subscriptions: a product's `billing_plan` (subscription, or installments with N payments; weekly/monthly/yearly) is set from the Subscriptions screen (`PUT /subscriptions/plans/:productId`), not the product form. The variant price is what each payment charges, so the storefront shows one price and computes nothing. A subscription starts when a card order is paid (after commit, from the same hook as digital delivery) and the gateway can save the card; COD never starts one; with no saved card it starts `past_due`. Each renewal is a staff-style order linked to the first (`linked_from_order_id`) charged with lane 6's `savedMethodService.chargeOrder`; an unpaid renewal order is cancelled so stock is released.
+- 2026-10-03 Subscriptions not built: the free trial (needs a first order that charges nothing) and replacing the card from the portal (needs the gateway's hosted card form — integrations). The portal shows the state and lets a subscription (not an installment plan) be cancelled. Events for automations: `subscription.created|renewed|payment_failed|cancelled`.
+- 2026-10-03 The lane's own `.env` got a random `GATEWAY_CREDENTIALS_KEY` (untracked file) so the sandbox gateway can be connected in the lane DB.
+
 ## Blocked
 
 ## Handoff
 - Branch `lane-8` in both worktrees; everything under Done is merged into `origin/zimos-additions`.
-- Migrations used: 310–314. Next free: 315.
+- Migrations used: 310–315. Next free: 316.
 - Setup guide: `payment` is done whenever the storefront offers a method (COD counts); `domain` and `pixel` are optional and outside the percentage. Shortcuts live on `memberships.nav_shortcuts` (max 8 dashboard routes).
 - Lane DB has demo data: 4 customers with COD orders, 3 leads, 2 segments, a published site "Lane 8 site" with `/contact` carrying a form (`form1`), and a second store "Demo Store Copy" made by the duplicate endpoint. The demo user's username is `demo`.
 - Scratch API helper (not in the repo): log in as `demo@zimos.test` against `http://localhost:4108/api/v1`, workspace from `GET /workspaces`; POSTs to `/orders` need an `Idempotency-Key` header.
 - Lane DB also has: digital products `EBOOK-1` / `LICENCE-1` and a paid order `ORD-DIGI-…`; an affiliate "Hany Marketer" (`hany10`, phone 01066600077) with one paid and one void commission. A portal OTP is printed in the backend log (`otp_affiliate_portal`).
+- Lane DB also has: the sandbox gateway connected, products `CLUB-1` (monthly subscription) and `COURSE-3` (3 weekly payments), customer "Subscriber Samy" with one completed plan and one cancelled subscription.
 - The lane shares a 5-dev-server limit with other chats: stop the dashboard before starting the storefront.
