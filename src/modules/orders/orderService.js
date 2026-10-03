@@ -12,6 +12,7 @@ const blockedEntries = require('../fraud/blockedEntries');
 const visitorGate = require('../risk/visitorGate');
 const riskService = require('../risk/riskService');
 const networkStats = require('../risk/networkStats');
+const checkoutOtp = require('../risk/checkoutOtp');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -318,7 +319,7 @@ async function createOrder(
       : null;
 
     if (evaluateFraudRules) {
-      const { flags: ruleFlags } = await fraudRules.evaluateStorefrontOrder({
+      const { flags: ruleFlags, requireOtp } = await fraudRules.evaluateStorefrontOrder({
         workspaceId,
         customer,
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
@@ -333,6 +334,8 @@ async function createOrder(
         network,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
+      // A rule (or the store's "verify risky orders") wants the phone verified first — risk/checkoutOtp.
+      if (checkoutOtp.needsOtp(req, { requireOtp, riskLevel: risk.level, flags: ruleFlags })) throw new checkoutOtp.NeedsOtp();
     }
 
     // Price every line and consume/reserve inventory for it. Consuming
@@ -575,6 +578,8 @@ async function createOrder(
     return await (outerTransaction ? run(outerTransaction) : db.sequelize.transaction(run));
   } catch (err) {
     if (err instanceof fraudRules.OrderRejectedError) await recordRefusal(workspaceId, err.refusal, req);
+    // Nothing was saved; the shopper is sent a code and asked for it.
+    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone);
     throw err;
   }
 }
@@ -1240,6 +1245,7 @@ module.exports = {
   addLineToOpenOrder,
   getOrder,
   getOrderRef,
+  applySearchAndDates,
   listOrders,
   orderPipeline,
   resolveCursor,

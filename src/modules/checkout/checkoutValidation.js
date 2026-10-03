@@ -93,6 +93,8 @@ module.exports = {
       website: Joi.string().max(500).allow('', null).optional(),
       botToken: Joi.string().max(500).allow('', null).optional(),
       captchaToken: Joi.string().max(4000).allow('', null).optional(),
+      // Proof that the phone was verified (POST /checkout/otp/verify) — risk/checkoutOtp.
+      otpToken: Joi.string().max(500).allow('', null).optional(),
       // Answers to the purchase-form fields with no column of their own
       // (sa_national_address, custom_1…5) — checkout/checkoutForm.js.
       formFields: formFieldsBodySchema,

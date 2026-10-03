@@ -2,10 +2,10 @@
 
 ## Done
 - [x] 1. Contacts and segments (§18.4) — checked on :4108/:5208/:3208: orders and a hand-added lead show as customers/leads with tags, spend, last order and governorate; search, type/tag/segment filters, CSV export; segments saved with a live count (tags, orders, spend, governorate, product, consent rules each tried through `/segments/preview`); a `form` element on a published page submitted from the storefront creates a lead tagged from the page's own `tags` prop and lands in Form submissions; contact panel on the customer page (tags add/remove, forms, delivery rate) in Arabic and English.
+- [x] 2. All-my-stores overview and store switcher, duplicate store (§18.5) — checked on :4108/:5208: `GET /me/stores/overview` and the `/stores` cards (today's orders and sales, confirmation rate, money with couriers, alerts) in Arabic; `POST /workspaces/:id/duplicate` made "Demo Store Copy" with the product, variant and both site pages as drafts and no orders or customers; the Duplicate dialog and the "All my stores" entry in the header switcher.
+- [x] 3. Global search ⌘K, setup guide on real data, sidebar shortcuts (§18.6) — checked on :4108/:5208: Ctrl+K opens the palette, a phone fragment finds its orders and customer and Enter opens the order; empty query lists actions and pages; the home page guide shows 80% with shipping still open; pinned pages show above the sidebar and persist per member (`PUT /shortcuts`).
 
 ## Next
-- [ ] 2. All-my-stores overview and store switcher, duplicate store (§18.5). — built and landed; checked on :4108 by API (`GET /me/stores/overview`, `POST /workspaces/:id/duplicate` made "Demo Store Copy" with the product, variant and both site pages as drafts, no orders or customers); dashboard typechecks. **Still to do before ticking:** open `/stores` on :5208 (cards, "Open store", the Duplicate dialog, the "All my stores" entry in the header switcher) in Arabic and English — the browser check was not possible because the other lanes held 4 of the 5 dev-server slots.
-- [ ] 3. Global search ⌘K, setup guide on real data, sidebar shortcuts (§18.6). — backend landed and checked on :4108 (`GET /workspaces/:id/search?q=`, `GET /setup-guide`, `GET|PUT /shortcuts`; migration 311). **Still to build:** `packages/api-client/src/endpoints/dashboard.ts`, the ⌘K palette in `DashboardLayout` (records from the API + nav pages and commands matched client-side), the setup-guide card on the home page, pin/unpin in the sidebar.
 - [ ] 4. Digital products (§18.2): deliveries, licence codes, signed download links, file library.
 - [ ] 5. AI module (§19): provider interface + sandbox provider, usage counter, product generation, funnel/page generation, translation, store policies — output always a draft.
 - [ ] 6. Affiliates (§20.3): affiliates, commissions on delivered orders, a simple OTP portal.
@@ -26,6 +26,8 @@
 - 2026-10-03 Duplicate store goes through `workspaceService.createWorkspace` (plan store limit applies) and copies collections, non-archived products, variants (stock as a starting figure, nothing reserved), offers, websites and pages as drafts, shipping zones/rates/weight tiers, tax rates, theme and settings (minus `tracking_pixels`; `order_bump.offer_id` is remapped). Media rows, reviews, team, integrations, carrier/gateway accounts and domains are not copied. If the copy fails the new store is marked `closed`.
 - 2026-10-03 The header already had a store switcher; it gained an "All my stores" entry rather than being rebuilt.
 
+- 2026-10-03 ⌘K: records come from the API; pages and actions are matched in the dashboard in the current language. The setup guide hides itself at 100% and can be dismissed per browser (localStorage), not per account.
+
 ## Blocked
 
 ## Handoff
@@ -33,6 +35,5 @@
 - Migrations used: 310, 311. Next free: 312.
 - Setup guide: `payment` is done whenever the storefront offers a method (COD counts); `domain` and `pixel` are optional and outside the percentage. Shortcuts live on `memberships.nav_shortcuts` (max 8 dashboard routes).
 - Lane DB has demo data: 4 customers with COD orders, 3 leads, 2 segments, a published site "Lane 8 site" with `/contact` carrying a form (`form1`), and a second store "Demo Store Copy" made by the duplicate endpoint. The demo user's username is `demo`.
-- Item 2 is landed but unticked: only its browser check is owed (see Next).
 - Scratch API helper (not in the repo): log in as `demo@zimos.test` against `http://localhost:4108/api/v1`, workspace from `GET /workspaces`; POSTs to `/orders` need an `Idempotency-Key` header.
 - The lane shares a 5-dev-server limit with other chats: stop the dashboard before starting the storefront.
