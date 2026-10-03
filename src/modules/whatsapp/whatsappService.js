@@ -97,7 +97,7 @@ async function upsertConversation(workspaceId, phoneNormalized, { customerName, 
  * Sends a message from the store and records it (a failed send is recorded
  * as failed and re-thrown so the caller sees the WhatsApp error).
  */
-async function sendMessage(workspaceId, { to, text, template }, req) {
+async function sendMessage(workspaceId, { to, text, template, orderId = null }, req) {
   const integration = await requireConnected(workspaceId);
   const phoneNormalized = normalizePhone(to);
   if (!phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
@@ -120,6 +120,7 @@ async function sendMessage(workspaceId, { to, text, template }, req) {
     body: template ? [template.name, ...(template.params || [])].join(' · ') : text,
     templateName: template ? template.name : null,
     sentByUserId: req && req.user ? req.user.id : null,
+    orderId,
   };
 
   try {
@@ -230,6 +231,8 @@ async function handleWebhook(workspaceId, payload) {
           unreadCount: conversation.unreadCount + 1,
           status: 'open',
         });
+        // A tap on "Confirm order" / "Cancel" confirms or cancels the order (quickReplyConfirmation.js).
+        await require('./quickReplyConfirmation').enqueue(workspaceId, msg, phoneNormalized);
         result.messages += 1;
       }
 
