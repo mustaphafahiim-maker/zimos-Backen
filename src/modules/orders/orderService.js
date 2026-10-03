@@ -15,6 +15,7 @@ const visitorGate = require('../risk/visitorGate');
 const riskService = require('../risk/riskService');
 const networkStats = require('../risk/networkStats');
 const checkoutOtp = require('../risk/checkoutOtp');
+const aiOrderCheck = require('../risk/aiOrderCheck');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -272,6 +273,8 @@ async function createOrder(
     // The shopper's own IP and browser: a staff order carries the staff member's.
     const visitor = req && !req.user ? await visitorGate.describeVisitor(req) : { ip: null, ipCountry: null, isVpn: false };
     const visitorIp = visitor.ip;
+    const deviceId = req && !req.user && req.deviceId ? req.deviceId : null;
+    visitor.deviceId = deviceId;
     const visitorAgent = req && !req.user && req.headers ? req.headers['user-agent'] : null;
 
     const riskFlags = [];
@@ -285,7 +288,7 @@ async function createOrder(
         phoneNormalized: customer.phoneNormalized,
         email: contact.email,
         ip: visitorIp,
-        deviceId: payload.deviceId,
+        deviceId,
         fullName: contact.fullName,
         addressLine: shippingAddress && shippingAddress.addressLine,
       },
@@ -460,6 +463,7 @@ async function createOrder(
     const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction);
     const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
 
+    // (after the row exists, below) a moderate order may get the AI text check — risk/aiOrderCheck.
     const order = await db.Order.create(
       {
         id: orderId,
@@ -485,6 +489,7 @@ async function createOrder(
         riskFlags,
         ipAddress: visitorIp,
         ipCountry: visitor.ipCountry,
+        deviceId,
         riskScore: risk ? risk.score : null,
         riskLevel: risk ? risk.level : null,
         riskReasons: risk ? risk.reasons : [],
@@ -512,6 +517,7 @@ async function createOrder(
       },
       { transaction }
     );
+    if (risk) await aiOrderCheck.queueFor(workspaceId, order.id, risk.level, transaction);
 
     // Sequential, not Promise.all — see note in workspaceService: one
     // transaction = one pooled connection, so concurrent queries on it are unsafe.

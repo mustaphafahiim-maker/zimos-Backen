@@ -502,7 +502,7 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
   const { unknown } = await inquireOpenAttempts(order.id);
   if (unknown > 0) return 'unknown';
 
-  return db.sequelize.transaction(async (transaction) => {
+  const outcome = await db.sequelize.transaction(async (transaction) => {
     const locked = await db.Order.findOne({
       where: { id: orderId },
       transaction,
@@ -533,6 +533,10 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
     });
     return 'expired';
   });
+  // An order that was never paid is a lost order the merchant can win back (never throws).
+  // eslint-disable-next-line global-require
+  if (outcome === 'expired') await require('../checkoutSessions/lostOrderService').fileUnpaidOrder(orderId);
+  return outcome;
 }
 
 /**

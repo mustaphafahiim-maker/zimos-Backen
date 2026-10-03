@@ -42,7 +42,7 @@ const RECOVERY_STATUSES = ['not_contacted', 'contacted', 'recovered', 'lost'];
 const TABS = ['all', 'under_review', 'completed', 'recovered'];
 // Reasons a recovery message may follow. A blocked customer, a bot or a
 // refused country is never invited back.
-const RECOVERABLE_REASONS = ['otp_unverified', 'invalid_data'];
+const RECOVERABLE_REASONS = ['otp_unverified', 'invalid_data', 'payment_failed'];
 
 const DEFAULT_ABANDON_MINUTES = 15;
 const OTP_WAIT_MINUTES = 10;
@@ -592,6 +592,73 @@ async function fileRefusal(req, refusal) {
 }
 
 /**
+ * An online order whose payment never arrived and was cancelled
+ * (payments/onlinePaymentService.expireOrder): filed as a lost order with
+ * reason `payment_failed`, carrying what the order held, so the merchant can
+ * reach the shopper or convert it to cash on delivery. Never throws.
+ */
+async function fileUnpaidOrder(orderId) {
+  try {
+    const order = await db.Order.findByPk(orderId);
+    if (!order || order.isTest) return null;
+    const lines = await db.OrderItem.findAll({ where: { orderId } });
+    const contact = order.contactSnapshot || {};
+    const rawPhone = contact.phone ? String(contact.phone) : '';
+    const phoneNormalized = normalizePhone(rawPhone) || rawPhone.replace(/\D/g, '').slice(0, 32) || 'unknown';
+    const context = order.completionContext || {};
+    const values = {
+      contactFields: { fullName: contact.fullName || null, phone: rawPhone || null, email: contact.email || null },
+      phoneNormalized,
+      lostReason: 'payment_failed',
+      awaitingOtp: false,
+      reviewStatus: 'under_review',
+      checkoutPayload: {
+        contact,
+        shippingAddress: order.shippingAddressSnapshot || null,
+        items: lines.filter((l) => l.variantId).map((l) => ({ variantId: l.variantId, offerId: l.offerId || undefined, quantity: l.quantity })),
+        paymentMethod: order.paymentMethod,
+        notes: order.notes || null,
+        unpaidOrderId: order.id,
+      },
+      items: lines.map((l) => ({
+        productId: l.productId,
+        variantId: l.variantId,
+        productName: l.productNameSnapshot || '',
+        options: l.variantOptionsSnapshot || null,
+        offerName: l.offerNameSnapshot || null,
+        quantity: l.quantity,
+        lineTotalAmount: Number(l.lineTotalAmount || 0),
+      })),
+      subtotalAmount: order.subtotalAmount,
+      currency: order.currency,
+      ipAddress: order.ipAddress || null,
+      ipCountry: order.ipCountry || null,
+      source: order.funnelId ? 'funnel' : 'store',
+      lastActivityAt: new Date(),
+    };
+
+    let session = null;
+    if (isUuid(context.checkoutSessionId)) {
+      session = await db.CheckoutSession.findOne({ where: { id: context.checkoutSessionId, workspaceId: order.workspaceId, status: 'in_progress' } });
+    }
+    if (!session && phoneNormalized !== 'unknown') {
+      session = await db.CheckoutSession.findOne({
+        where: { workspaceId: order.workspaceId, phoneNormalized, status: 'in_progress' },
+        order: [['lastActivityAt', 'DESC']],
+      });
+    }
+    if (session) await session.update({ ...values, recoveryToken: session.recoveryToken || newToken() });
+    else session = await db.CheckoutSession.create({ workspaceId: order.workspaceId, ...values, recoveryToken: newToken() });
+
+    await outbox.record(null, 'lost_order.created', { workspaceId: order.workspaceId, checkoutSessionId: session.id, lostReason: 'payment_failed' });
+    return session.id;
+  } catch (err) {
+    logger.error('Could not file an unpaid order as a lost order', { orderId, message: err.message });
+    return null;
+  }
+}
+
+/**
  * Error middleware at the end of the storefront checkout route: a refusal
  * (ORDER_REJECTED, OTP_REQUIRED, an invalid phone) leaves a lost order behind,
  * then the error goes on to the shopper unchanged.
@@ -679,6 +746,7 @@ module.exports = {
   exportCsv,
   recover,
   fileRefusal,
+  fileUnpaidOrder,
   captureRefusal,
   afterConversion,
   detectAbandoned,
