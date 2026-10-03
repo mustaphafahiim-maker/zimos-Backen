@@ -317,6 +317,19 @@ async function getOverview(workspaceId, query = {}) {
   ]);
   const breakdowns = await collectBreakdowns(current.sql);
 
+  // Net profit is the real one (modules/profit): delivered revenue after goods,
+  // both shipping legs, fees and ad spend. The P&L has no funnel split, so a
+  // funnel-filtered overview keeps the simple estimate computed above.
+  if (!funnelId) {
+    const { getPnl } = require('../profit/pnlService');
+    const [now, before] = await Promise.all([
+      getPnl(workspaceId, { from: start, to: end }),
+      compare ? getPnl(workspaceId, { from: previousWindow.start, to: previousWindow.end }) : Promise.resolve(null),
+    ]);
+    current.totals.netProfit = now.totals.actual.netProfit;
+    if (previous && before) previous.totals.netProfit = before.totals.actual.netProfit;
+  }
+
   const metrics = {};
   for (const [key, value] of Object.entries(current.totals)) {
     metrics[key] = { value, previous: previous ? previous.totals[key] : null };
