@@ -128,6 +128,8 @@ module.exports = {
         social_links: socialLinksSchema.allow(null).optional(),
         floating_whatsapp: floatingWhatsappSchema.allow(null).optional(),
         store_seo: storeSeoSchema.allow(null).optional(),
+        // The extra languages the store offers (modules/translations). Sent whole.
+        store_languages: require('../translations/translations').storeLanguagesSchema.allow(null).optional(),
         // Storefront fraud rules — see modules/fraud/fraudRules.js. Same
         // merge semantics as checkout_settings: sub-keys merge, `null` on a
         // sub-key restores its default (a numeric rule's default is "off"),

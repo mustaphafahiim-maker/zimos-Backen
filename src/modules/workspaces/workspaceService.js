@@ -195,6 +195,8 @@ const MERCHANT_SETTINGS_KEYS = [
   'social_links',
   'floating_whatsapp',
   'store_seo',
+  // Replaced whole: the store's extra languages (modules/translations).
+  'store_languages',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one
