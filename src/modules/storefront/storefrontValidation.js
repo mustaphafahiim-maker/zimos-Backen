@@ -46,6 +46,11 @@ module.exports = {
   // Public order tracking. Both values are required and neither has a default:
   // a lookup that names only a phone must not return "their latest order".
   // `number` is capped at the width of orders.order_number (40).
+  // The signed tracking link: an unguessable token instead of phone + number.
+  trackLink: {
+    params: Joi.object({ workspaceId: workspaceIdParam }),
+    query: Joi.object({ token: Joi.string().required().regex(/^[A-Za-z0-9_-]{20,30}\.[A-Za-z0-9_-]{32}$/) }),
+  },
   track: {
     params: Joi.object({ workspaceId: workspaceIdParam }),
     query: Joi.object({

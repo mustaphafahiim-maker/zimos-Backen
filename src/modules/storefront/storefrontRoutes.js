@@ -54,6 +54,8 @@ router.get('/collections/:collectionId', validate(schemas.getCollection), contro
 // can't pass validation never reaches the database; it keys on the phone and
 // order number, not the IP (see rateLimiters.js).
 router.get('/orders/track', trackingLimiter, validate(schemas.track), controller.trackOrder);
+// The signed link the store's messages carry; covered by the storefront limiter like every /store call.
+router.get('/orders/track-link', validate(schemas.trackLink), controller.trackOrderByToken);
 
 // Checkout-form autosave for abandoned-checkout recovery. An upsert keyed on
 // the visitor, so a replay is harmless and it takes no Idempotency-Key.
