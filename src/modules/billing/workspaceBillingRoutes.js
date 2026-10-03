@@ -15,6 +15,14 @@ const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.BILLING_MANAGE));
 
 router.get('/', controller.getWorkspaceBilling);
+// What the store used this month and what its plan allows (usageCounters.js, planLimits.js).
+router.get('/usage', async (req, res, next) => {
+  try {
+    res.json(await require('./usageCounters').usageFor(req.tenant.workspaceId));
+  } catch (err) {
+    next(err);
+  }
+});
 router.patch('/', validate(schemas.setBillingCycle), controller.setBillingCycle);
 router.post('/referral-code', validate(schemas.attachReferralCode), controller.attachReferralCode);
 // Paying the charge online (billing/onlineBillingService), when

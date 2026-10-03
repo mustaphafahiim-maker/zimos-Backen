@@ -15,7 +15,8 @@ const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.DOMAIN_MANAGE));
 
 // Connecting a custom domain needs a store out of draft.
-router.post('/', validate(schemas.add), requireLive, controller.add);
+// The plan's number of custom domains, when it sets one (billing/planLimits.js).
+router.post('/', validate(schemas.add), requireLive, require('../billing/planLimits').requirePlanLimit('domains'), controller.add);
 router.get('/', validate(schemas.list), controller.list);
 router.post('/:domainId/verify', validate(schemas.verify), requireLive, controller.verify);
 router.delete('/:domainId', validate(schemas.remove), controller.remove);
