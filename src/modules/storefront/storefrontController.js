@@ -6,6 +6,10 @@ const shippingQuoteService = require('../shipping/shippingQuoteService');
 const cartService = require('../cart/cartService');
 const { AppError } = require('../../core/errors/AppError');
 
+// One legal policy, variables filled in (storefront/storeInfo.js); 404 when not written.
+const getPolicy = asyncHandler(async (req, res) =>
+  res.json({ policy: require('./storeInfo').publicLegalPolicy(req.publicWorkspace, req.params.key) })
+);
 const getStore = asyncHandler(async (req, res) => res.json({ store: await service.getStorefront(req.tenant.workspaceId) }));
 const listProducts = asyncHandler(async (req, res) => res.json(await service.listProducts(req.tenant.workspaceId, req.query)));
 const getProduct = asyncHandler(async (req, res) => res.json({ product: await service.getProductBySlugOrId(req.tenant.workspaceId, req.params.idOrSlug) }));
@@ -42,6 +46,7 @@ const shippingQuote = asyncHandler(async (req, res) => {
 
 module.exports = {
   getStore,
+  getPolicy,
   listProducts,
   getProduct,
   suggestProducts,

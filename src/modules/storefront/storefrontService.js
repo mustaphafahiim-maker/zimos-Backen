@@ -6,6 +6,8 @@ const { normalizePhone } = require('../../core/utils/phone');
 const reviewService = require('../reviews/reviewService');
 const { resolveCheckoutSettings } = require('../checkout/checkoutSettings');
 const { resolveThankYouPage } = require('./thankYouPage');
+const { publicStoreInfo, publicLegalIndex } = require('./storeInfo');
+const { publicNavPages } = require('../pages/pageFlags');
 const { resolveCatalogSettings } = require('./catalogSettings');
 const { presentStoreBump } = require('../checkout/orderBump');
 const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
@@ -85,6 +87,12 @@ async function getStorefront(workspaceId) {
     checkout: resolveCheckoutSettings(w),
     // What the thank-you page shows after an order (settings.thank_you_page).
     thankYou: resolveThankYouPage(w.settings),
+    // Contact details and trust cards (null while switched off), which legal
+    // policies exist (GET /store/:ws/policies/:key serves each), and the
+    // pages the merchant put in the header or footer.
+    storeInfo: publicStoreInfo(w.settings),
+    legal: publicLegalIndex(w.settings),
+    navPages: await publicNavPages(w.id),
     // The product listing's sidebar, filters and default sort.
     catalog: resolveCatalogSettings(w.settings),
     // The "add to your order" card the store's checkout offers, or null

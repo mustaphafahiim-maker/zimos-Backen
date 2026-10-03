@@ -18,6 +18,10 @@ module.exports = (sequelize, DataTypes) => {
       draftData: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'draft_data' },
       publishedData: { type: DataTypes.JSONB, allowNull: true, field: 'published_data' },
       seo: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // Live switches (modules/pages/pageFlags.js), not part of the published snapshot.
+      showInHeader: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'show_in_header' },
+      showInFooter: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'show_in_footer' },
+      isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
     },
     { tableName: 'website_pages', indexes: [{ unique: true, fields: ['website_id', 'path'] }] }
   );

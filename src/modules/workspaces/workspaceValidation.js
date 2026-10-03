@@ -7,6 +7,7 @@ const { workspaceSlug, SLUG_LOOKUP_MAX } = require('../../core/utils/workspaceSl
 const { CHECKOUT_FIELD_MODES, CHECKOUT_NOTES_MODES } = require('../checkout/checkoutSettings');
 const { checkoutFormSettingsKeys } = require('../checkout/checkoutForm');
 const { thankYouPageSchema } = require('../storefront/thankYouPage');
+const { storeInfoSchema, legalSchema } = require('../storefront/storeInfo');
 const { FRAUD_ACTIONS } = require('../fraud/fraudRules');
 const { catalogSettingsSchema } = require('../storefront/catalogSettings');
 const { orderBumpSettingsSchema } = require('../checkout/orderBump');
@@ -102,6 +103,10 @@ module.exports = {
         // The store's thank-you page (storefront/thankYouPage.js). Sent whole
         // and stored whole; `null` goes back to the built-in page.
         thank_you_page: thankYouPageSchema.allow(null).optional(),
+        // Store contact details and short policies, and the long legal
+        // policies (storefront/storeInfo.js). Each sent whole and stored whole.
+        store_info: storeInfoSchema.allow(null).optional(),
+        legal: legalSchema.allow(null).optional(),
         // Storefront fraud rules — see modules/fraud/fraudRules.js. Same
         // merge semantics as checkout_settings: sub-keys merge, `null` on a
         // sub-key restores its default (a numeric rule's default is "off"),
