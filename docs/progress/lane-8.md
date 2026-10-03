@@ -10,10 +10,10 @@
 - [x] 7. Dashboard as a PWA (§20.1 first step) — checked on :5208: the manifest and its three icons load, the service worker registers and activates, and the install card shows in the layout when the browser fires `beforeinstallprompt` (dispatched by hand).
 - [x] 8a. Subscriptions and installments on the sandbox gateway (§18.1) — checked against the lane DB (scratch script through the real services) and on :5208/:3208: a card order with a monthly subscription and a 3-payment plan started both with the saved sandbox card; renewals made linked paid orders; the plan completed after its 3rd payment; a card that could not be charged was retried at +1, +3 and +7 days and then cancelled; `/subscriptions` (list, KPIs, product plans) in Arabic; the customer page showed the subscription and cancelled it.
 - [x] 8d. Services marketplace (§20.5) — checked on :4108/:5208/:5308: listings created through `/admin/service-listings` (a listing with no contact is refused; a non-admin gets 403); the dashboard `/services` directory with category filter, price or "on request", and WhatsApp / email buttons in Arabic; the platform-admin "Service listings" page with its editor.
+- [x] 8c. Shoppable images (§7.9) — checked on :4108/:5208/:3208: in the dashboard a picture was added by link, a point placed by clicking it and linked to a product, and saved; the storefront page `/looks/living-room-look` showed the numbered point and the product with its server price. Not exercised in a browser: opening the point's pop-up card (the preview pane stopped drawing) and the `shoppable_image` builder element on a published page — both typecheck and share the component the public page uses.
 
 ## Next
 - [ ] 8b. Courses (§18.3): courses → modules → lessons, drip release, free preview, enrollment on purchase, student portal with OTP.
-- [ ] 8c. Shoppable images (§7.9).
 
 ## Decisions
 - 2026-10-03 Contact `type`, `totalSpent`, `lastOrderAt` and the delivery rate are computed from the live orders (one CTE over the derived stage, `contacts/segmentRules.js`), not stored: no hook into the orders module, and nothing to drift. Stored on `customers`: `tags` and `source` only. `segments` (the old unused array) was copied into `tags` and left in place.
@@ -49,11 +49,13 @@
 
 - 2026-10-03 Services marketplace: `service_listings` is platform-wide (no workspace), ten fixed categories from the spec, managed under two new platform permissions (`service_listings.view|manage`). No rating field: nobody rates providers yet, and an admin-typed rating would be a fake review (§21). The price is the provider's own, typed by the admin (nullable = "price on request"); payment stays outside ZIMOS. The mock `SuppliersPage` was left as it is.
 
+- 2026-10-03 Shoppable images: table `shoppable_images` (hotspots as `{x, y, productId}` percentages, max 20). Public page is `/looks/<slug>` (reserved path); the public API returns each point with its product in the storefront's usual public shape (`loadPublicProducts`), so prices come from the server and inactive products drop out. Builder element `shoppable_image` takes the image id (copied from the dashboard); it was added to `pageTree.js`, `PAGE_ELEMENT_TYPES` in the api-client `types.ts` (one line — the union lives there), the storefront renderer and the editor's block registry.
+
 ## Blocked
 
 ## Handoff
 - Branch `lane-8` in both worktrees; everything under Done is merged into `origin/zimos-additions`.
-- Migrations used: 310–316. Next free: 317.
+- Migrations used: 310–317. Next free: 318.
 - Setup guide: `payment` is done whenever the storefront offers a method (COD counts); `domain` and `pixel` are optional and outside the percentage. Shortcuts live on `memberships.nav_shortcuts` (max 8 dashboard routes).
 - Lane DB has demo data: 4 customers with COD orders, 3 leads, 2 segments, a published site "Lane 8 site" with `/contact` carrying a form (`form1`), and a second store "Demo Store Copy" made by the duplicate endpoint. The demo user's username is `demo`.
 - Scratch API helper (not in the repo): log in as `demo@zimos.test` against `http://localhost:4108/api/v1`, workspace from `GET /workspaces`; POSTs to `/orders` need an `Idempotency-Key` header.

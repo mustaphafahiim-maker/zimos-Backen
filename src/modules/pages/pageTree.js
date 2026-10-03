@@ -34,6 +34,8 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'map',
   'social_icons',
   'product_card',
+  // A picture with product hotspots (modules/shoppableImages).
+  'shoppable_image',
   'product_list',
   'collection_list',
   'cart',
@@ -179,6 +181,7 @@ function validateProps(props, rules, field, errors) {
 }
 
 const ELEMENT_PROP_RULES = {
+  shoppable_image: { imageId: check.uuid, title: check.string(300) },
   repeater: {
     title: check.string(300),
     source: check.oneOf(...REPEATER_SOURCES),
