@@ -1,0 +1,119 @@
+'use strict';
+
+/**
+ * Ready-made automations (SPEC §14.2), switched on with one click. Each is a
+ * normal rule the merchant can edit afterwards.
+ *
+ * `template` in a whatsapp_template step is the *name of the message template
+ * in the merchant's own WhatsApp account*: Meta only sends templates it has
+ * approved for that account, so ZIMOS cannot ship the text itself. `whatsapp`
+ * below is what the merchant should submit to Meta under that name — the
+ * dashboard shows it next to the rule. Until it is approved the step fails
+ * with Meta's own error in the run log.
+ */
+
+const TEMPLATES = [
+  {
+    key: 'order_confirmation',
+    trigger: 'order.created',
+    name: { ar: 'تأكيد الطلب عبر واتساب', en: 'Order confirmation on WhatsApp' },
+    description: {
+      ar: 'رسالة فورية عند إنشاء الطلب بزرّي "تأكيد الطلب" و"إلغاء". رد العميل يغيّر حالة الطلب تلقائيًا، وإذا لم يرد خلال ٦ ساعات يُنبَّه الفريق لتأكيده يدويًا.',
+      en: 'An instant message with "Confirm order" and "Cancel" buttons. The reply changes the order automatically; with no reply in 6 hours the team is told to confirm by hand.',
+    },
+    conditions: { paymentMethod: 'cod' },
+    steps: [
+      { type: 'whatsapp_template', template: 'order_confirmation', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{order_total}}'] },
+      { type: 'wait', amount: 6, unit: 'hours' },
+      { type: 'notify_team', message: 'العميل {{customer_name}} لم يرد على رسالة تأكيد الطلب {{order_number}} — يحتاج تأكيدًا يدويًا.' },
+    ],
+    whatsapp: {
+      name: 'order_confirmation',
+      body: 'مرحبًا {{1}}، استلمنا طلبك رقم {{2}} بإجمالي {{3}}. من فضلك أكّد الطلب لنبدأ تجهيزه.',
+      buttons: ['تأكيد الطلب', 'إلغاء'],
+    },
+  },
+  {
+    key: 'order_shipped',
+    trigger: 'order.shipped',
+    name: { ar: 'تم شحن الطلب', en: 'Order shipped' },
+    description: { ar: 'رقم البوليصة ورابط التتبع فور تسليم الطلب لشركة الشحن.', en: 'Waybill number and tracking link as soon as the courier has the order.' },
+    conditions: {},
+    steps: [{ type: 'whatsapp_template', template: 'order_shipped', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{waybill_number}}', '{{order_link}}'] }],
+    whatsapp: { name: 'order_shipped', body: 'مرحبًا {{1}}، تم شحن طلبك رقم {{2}}. رقم البوليصة: {{3}}. تابع الشحنة من هنا: {{4}}' },
+  },
+  {
+    key: 'out_for_delivery',
+    trigger: 'order.out_for_delivery',
+    name: { ar: 'المندوب في الطريق', en: 'Courier on the way' },
+    description: { ar: 'تنبيه للعميل ليجهّز المبلغ قبل وصول المندوب.', en: 'Tells the customer to have the amount ready before the courier arrives.' },
+    conditions: {},
+    steps: [{ type: 'whatsapp_template', template: 'out_for_delivery', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{order_total}}'] }],
+    whatsapp: { name: 'out_for_delivery', body: 'مرحبًا {{1}}، المندوب في الطريق إليك بطلبك رقم {{2}}. من فضلك جهّز مبلغ {{3}}.' },
+  },
+  {
+    key: 'delivered_review',
+    trigger: 'order.delivered',
+    name: { ar: 'تم التسليم + طلب تقييم', en: 'Delivered + review request' },
+    description: { ar: 'رسالة شكر عند التسليم، ثم طلب تقييم المنتج بعد ٣ أيام.', en: 'A thank-you on delivery, then a review request 3 days later.' },
+    conditions: { stopOnStatusChange: false },
+    steps: [
+      { type: 'whatsapp_template', template: 'order_delivered', language: 'ar', params: ['{{customer_name}}', '{{store_name}}'] },
+      { type: 'wait', amount: 3, unit: 'days' },
+      { type: 'whatsapp_template', template: 'review_request', language: 'ar', params: ['{{customer_name}}', '{{product_names}}', '{{review_link}}'] },
+    ],
+    whatsapp: { name: 'order_delivered', body: 'مرحبًا {{1}}، سعداء بوصول طلبك. شكرًا لثقتك في {{2}}.' },
+    whatsappExtra: [{ name: 'review_request', body: 'مرحبًا {{1}}، نتمنى أن يكون {{2}} قد أعجبك. رأيك يهمنا: {{3}}' }],
+  },
+  {
+    key: 'abandoned_cart',
+    trigger: 'checkout.abandoned',
+    name: { ar: 'استرجاع السلة المتروكة', en: 'Abandoned cart recovery' },
+    description: {
+      ar: 'تذكير بعد ساعة من ترك الطلب، ثم تذكير ثانٍ بعد يوم. يتوقف تلقائيًا إذا أكمل العميل الشراء.',
+      en: 'A reminder an hour after the order was left, then a second one a day later. Stops by itself once the customer buys.',
+    },
+    conditions: {},
+    steps: [
+      { type: 'wait', amount: 1, unit: 'hours' },
+      { type: 'whatsapp_template', template: 'cart_reminder', language: 'ar', params: ['{{customer_name}}', '{{store_name}}', '{{recovery_link}}'] },
+      { type: 'wait', amount: 1, unit: 'days' },
+      { type: 'whatsapp_template', template: 'cart_reminder_last', language: 'ar', params: ['{{customer_name}}', '{{recovery_link}}'] },
+    ],
+    whatsapp: { name: 'cart_reminder', body: 'مرحبًا {{1}}، طلبك من {{2}} في انتظارك. أكمله من هنا: {{3}}' },
+    whatsappExtra: [{ name: 'cart_reminder_last', body: 'مرحبًا {{1}}، ما زال طلبك محفوظًا. أكمله الآن: {{2}}' }],
+  },
+  {
+    key: 'payment_failed',
+    trigger: 'order.payment_failed',
+    name: { ar: 'فشل الدفع + رابط الدفع', en: 'Payment failed + payment link' },
+    description: { ar: 'رسالة برابط الدفع عند فشل عملية الدفع الإلكتروني.', en: 'A message with the payment link when an online payment fails.' },
+    conditions: {},
+    steps: [{ type: 'whatsapp_template', template: 'payment_failed', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{payment_link}}'] }],
+    whatsapp: { name: 'payment_failed', body: 'مرحبًا {{1}}، لم تكتمل عملية الدفع لطلبك رقم {{2}}. أعد المحاولة من هنا: {{3}}' },
+  },
+  {
+    key: 'unreachable',
+    trigger: 'order.unreachable',
+    name: { ar: 'لم يرد على الاتصال', en: 'Did not answer the call' },
+    description: { ar: 'رسالة "حاولنا التواصل معك" عندما لا يرد العميل على مكالمة التأكيد.', en: '"We tried to reach you" when the customer does not answer the confirmation call.' },
+    conditions: {},
+    steps: [{ type: 'whatsapp_template', template: 'tried_to_reach', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{store_name}}'] }],
+    whatsapp: { name: 'tried_to_reach', body: 'مرحبًا {{1}}، حاولنا التواصل معك لتأكيد طلبك رقم {{2}} من {{3}} ولم نتمكن. من فضلك رد على هذه الرسالة لتأكيد الطلب.' },
+  },
+];
+
+const byKey = (key) => TEMPLATES.find((t) => t.key === key) || null;
+
+/** What the dashboard lists. */
+const publicView = (t) => ({
+  key: t.key,
+  trigger: t.trigger,
+  name: t.name,
+  description: t.description,
+  conditions: t.conditions,
+  steps: t.steps,
+  whatsappTemplates: [t.whatsapp, ...(t.whatsappExtra || [])].filter(Boolean),
+});
+
+module.exports = { TEMPLATES, byKey, publicView };

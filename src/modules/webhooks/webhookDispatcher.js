@@ -103,6 +103,8 @@ async function attemptDelivery(deliveryId, { now = new Date() } = {}) {
   }
 
   await delivery.update({ ...changes, attemptCount, lastResponseStatus: result.status });
+  // Three days of nothing but failures switches the endpoint off (webhookHealth.js).
+  await require('./webhookHealth').recordOutcome(endpoint, ok, now);
   return delivery;
 }
 

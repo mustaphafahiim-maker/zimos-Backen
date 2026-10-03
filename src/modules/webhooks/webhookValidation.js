@@ -14,15 +14,21 @@ const events = Joi.array()
   .items(Joi.string().valid(...EVENT_NAMES, WILDCARD))
   .min(1);
 
+// Only events about these funnels / products (webhookFilter.js); null clears it.
+const filter = Joi.object({
+  funnelIds: Joi.array().items(uuid).max(50).default([]),
+  productIds: Joi.array().items(uuid).max(50).default([]),
+}).allow(null);
+
 module.exports = {
   list: { params: Joi.object(workspaceParam) },
   create: {
     params: Joi.object(workspaceParam),
-    body: Joi.object({ url: url.required(), events: events.required(), isActive: Joi.boolean().optional() }),
+    body: Joi.object({ url: url.required(), events: events.required(), isActive: Joi.boolean().optional(), filter: filter.optional() }),
   },
   update: {
     params: endpointParams,
-    body: Joi.object({ url: url.optional(), events: events.optional(), isActive: Joi.boolean().optional() }).min(1),
+    body: Joi.object({ url: url.optional(), events: events.optional(), isActive: Joi.boolean().optional(), filter: filter.optional() }).min(1),
   },
   byId: { params: endpointParams },
   deliveries: {
