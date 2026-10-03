@@ -3,11 +3,11 @@
 ## Done
 - [x] 1. `order_status_history` + transition guards — backend cd915b8 / frontend 17a6f60 — checked on :4101/:5201: a COD order walked new → follow up → new → ready → shipped → failed → out → delivered → returned through `PATCH /orders/:id/status`; `delivered → shipped` and a manual shipment patch `delivered → in_transit` both answer 409 `INVALID_STATUS_TRANSITION`; cancel + reopen; history rows carry actor and reason; the order page's "Change status" dialog and "Status history" card in Arabic and English.
 - [x] 2. Order fields (§4.2) + `order_notes` — migration 136 — backend 9336878 / frontend caad549 — checked on :4101: new order gets `source` (manual from the dashboard), `PATCH /orders/:id/meta` sets/adds/removes tags, test, seen, archive; `GET /orders/tags`; notes add/list/delete; list + pipeline + export accept `tag, source, paymentMethod, governorate, carrier, seen, test, archived` and hide archived orders by default; on :3201 the tracking page shows the public note and not the internal one.
+- [x] 3. Order page (§4.4) — backend 4bb95aa / frontend 8fa81e7 — checked on :5201 in Arabic: added a note and a tag, read them in the timeline with the status moves, archive + restore, cancel dialog lists the five reasons, the next arrow opens the next order of the list, source badge shown; `timeline` and `neighbors` also run against the lane database.
+- [x] 4. Orders list (§4.3) — checked on :5201: `?tag=&source=` filters the rows and the tab counts and shows removable chips, the column chooser adds Tags / Source / Governorate, page size 25/50/100 is remembered, a saved view is stored and re-applied, unseen orders show a dot and bold number.
+- [x] 5. Bulk actions (`POST /orders/bulk`) — checked on :4101: add_tag / set_status / ship / archive / unarchive over three orders, by ids and by filter; orders that cannot take the action come back with their own code (STATUS_UNCHANGED, INVALID_STATUS_TRANSITION) while the rest go through; 422 for a missing payload, ids+filter together, or an empty selection. On :5201: ticked three rows, added a tag, then a status change that all three refused — the result dialog lists each order and why, in Arabic.
 
 ## Next
-- [ ] 3. Order page (§4.4) — CODE LANDED, BROWSER CHECK PENDING (see Blocked). Built: `GET /orders/:id/timeline`, `GET /orders/:id/neighbors`, notes card, tags card, timeline card, prev/next arrows, copy customer link (tracking page pre-fills `?number=`), mark as test, archive/restore, cancel-reason list, mark seen on open. Timeline and neighbors were run against `zimos_lane_1` directly (correct order, prev/next match the list); dashboard and storefront typecheck.
-- [ ] 4. Orders list (§4.3): tag/source/payment/governorate/courier/seen filters, saved views, column chooser, page size.
-- [ ] 5. Bulk actions (`POST /orders/bulk`): set stage where allowed, add/remove tag, archive, print waybills, book courier.
 - [ ] 6. Manual order screen (§4.5) on the existing `POST /orders`.
 - [ ] 7. Edit order items with price preview before shipping; refund by lines; `POST /orders/:id/fulfill`.
 - [ ] 8. `POST /orders/import-tracking` (CSV), bulk waybill PDF (A4 ×4 and 10×15), courier manifest (§12.4).
@@ -28,16 +28,17 @@
 - 2026-10-03 Timeline is assembled per request (status history + audit log of the order and its shipments + notes + automation runs + webhook deliveries); audit rows the status rows already tell (create, cancel, reopen, shipment status moves) are left out.
 - 2026-10-03 Previous/next follow the list the merchant came from: the list stores its query in sessionStorage and the order page sends it to `/neighbors`.
 - 2026-10-03 Cancel reasons are a list in the dialog (customer cancelled, fake, duplicate, out of stock, other); the stored reason is the chosen label in the merchant's language plus any details.
+- 2026-10-03 Saved views, chosen columns and page size are kept in localStorage per workspace on the device (no table): a view is just the list's URL query under a name. A server-side per-user store can replace it without changing the screen.
+- 2026-10-03 Bulk runs each order through its single-order operation in its own transaction and always answers 200 with a per-order result; cap 500 orders. Actions: set_status, add_tag, remove_tag, archive, unarchive, mark_seen, mark_unseen, ship. "Print waybills" is a file download, so it is built with item 8 as its own endpoint rather than a bulk action.
 - 2026-10-03 Frontend: lane-1 API calls live in `packages/api-client/src/endpoints/orders.ts`; lane-1 error wording in `pages/orders/orderErrors.ts` (the shared `ApiErrorCode` union is not extended).
 
 ## Blocked
-- Item 3 browser check — `preview_start` refuses: "Maximum 5 dev servers per folder reached; 5 belong to other chats". Retry at the next wake-up: start `lane-1-backend` + `lane-1-dashboard`, open an order, add a note and a tag, archive/restore, use the arrows, cancel with a listed reason, read the timeline in Arabic; then tick item 3.
 
 ## Handoff
 - Branch `lane-1` in both worktrees; everything listed under Done is merged into `origin/zimos-additions`.
 - Migrations used: 135, 136. Next free: 137.
-- Item 3 starts from: the backend already has `GET/POST/DELETE /orders/:id/notes`, `PATCH /orders/:id/meta` (tags, isSeen, isTest, archived), `GET /orders/tags`, `GET /orders/:id/status-history`; the api-client has them in `endpoints/orders.ts` (`ordersMeta(order)` reads the fields off an Order). Still to build: `GET /orders/:id/timeline` (status history + audit_logs of the order and its shipments + automation_runs + webhook_deliveries), `GET /orders/:id/neighbors` (same filters as the list: `applySearchAndDates` + `orderFilters.applyOrderFilters` + `orderSort`), a cancel-reasons list in the cancel dialog, and the UI: notes card, tags editor, timeline card (replaces `StatusHistorySection`), prev/next arrows, copy customer tracking link, archive button, mark seen on open.
-- Item 4: the backend filters are done (`orders/orderFilters.js`); left is the list UI (filter bar, saved views, column chooser, page size 25/50/100).
+- Item 6 (manual order screen) starts from: `POST /orders` exists and already stamps `source=manual`; build the dashboard page (customer by phone, products + variants + offer, governorate with the shipping quote, coupon, payment method, notes), a "Create order" button on the list, the route in `App.tsx`.
+- Item 8 must also add "Print waybills" for the bulk bar (`components/OrderBulkBar.tsx`).
 - Dev servers: at most 5 per folder across all lanes — stop the dashboard before starting the storefront. The demo user's username is already set in `zimos_lane_1`.
 - Never put backticks inside a double-quoted `node -e "..."` in Git Bash (they run as commands and hang); write the script to a file. `git merge` needs `--no-edit`.
 - Scratch helpers are not in the repo: log in as `demo@zimos.test` on `http://localhost:4101/api/v1`, workspace from `GET /workspaces`, orders through `POST /workspaces/:id/orders` with an `Idempotency-Key` header.

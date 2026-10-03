@@ -15,6 +15,9 @@ const schemas = require('./webhookValidation');
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.WEBHOOKS_MANAGE));
 
+// The store-wide delivery log and "resend order" — before the /:endpointId routes.
+router.use(require('./webhookExtraRoutes'));
+
 router.get('/events', validate(schemas.list), controller.events);
 router.get('/', validate(schemas.list), controller.list);
 router.post('/', validate(schemas.create), controller.create);

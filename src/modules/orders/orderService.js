@@ -3,6 +3,8 @@
 const crypto = require('crypto');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
+const paymentRules = require('../payments/paymentRulesService');
+const fxService = require('../currencies/fxService');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
@@ -441,7 +443,9 @@ async function createOrder(
       shippingAmount,
     });
 
-    const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount;
+    // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
+    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction);
+    const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
 
     const order = await db.Order.create(
       {
@@ -458,6 +462,9 @@ async function createOrder(
         shippingAmount,
         taxAmount,
         totalAmount,
+        paymentAdjustmentAmount: paymentAdjustment.amount,
+        paymentAdjustmentLabel: paymentAdjustment.label,
+        ...(await fxService.baseFieldsFor(workspaceId, { currency: pricedLines[0].currency, totalAmount }, transaction)),
         contactSnapshot: contact,
         shippingAddressSnapshot: shippingAddress || null,
         discountsSnapshot,
@@ -689,7 +696,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
     shippingAmount: shipping.amount,
   });
-  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
+  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction);
+  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;
 
   const item = await db.OrderItem.create(
     {
@@ -719,6 +727,9 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       shippingAmount: shipping.amount,
       taxAmount,
       totalAmount,
+      paymentAdjustmentAmount: paymentAdjustment.amount,
+      paymentAdjustmentLabel: paymentAdjustment.label,
+      ...(await fxService.baseFieldsFor(workspaceId, { currency: order.currency, totalAmount }, transaction)),
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,

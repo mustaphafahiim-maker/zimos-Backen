@@ -8,6 +8,7 @@ const { checkUrl } = require('./webhookUrlGuard');
 const { generateSecret, secretHint } = require('./webhookSigning');
 const { EVENT_TYPES, TEST_EVENT, WILDCARD } = require('./webhookEvents');
 const { attemptDelivery } = require('./webhookDispatcher');
+const { normaliseFilter } = require('./webhookFilter');
 
 /**
  * A workspace's webhook endpoints, as the dashboard manages them.
@@ -26,6 +27,11 @@ function serializeEndpoint(endpoint) {
     url: endpoint.url,
     events: endpoint.events,
     isActive: endpoint.isActive,
+    filter: endpoint.filter || null,
+    failingSince: endpoint.failingSince || null,
+    // Set when the endpoint was switched off after three days of failures.
+    disabledAt: endpoint.disabledAt || null,
+    disabledReason: endpoint.disabledReason || null,
     secretHint: secretHint(endpoint.signingSecret),
     createdAt: endpoint.createdAt,
     updatedAt: endpoint.updatedAt,
@@ -73,7 +79,7 @@ async function listEndpoints(workspaceId) {
   return { endpoints: endpoints.map(serializeEndpoint), ...eventCatalogue() };
 }
 
-async function createEndpoint(workspaceId, { url, events, isActive = true }, req) {
+async function createEndpoint(workspaceId, { url, events, isActive = true, filter = null }, req) {
   const cleanUrl = checkUrl(url);
   return db.sequelize.transaction(async (transaction) => {
     const count = await db.WebhookEndpoint.count({ where: { workspaceId }, transaction });
@@ -86,7 +92,7 @@ async function createEndpoint(workspaceId, { url, events, isActive = true }, req
     }
     const signingSecret = generateSecret();
     const endpoint = await db.WebhookEndpoint.create(
-      { workspaceId, url: cleanUrl, events: normaliseEvents(events), signingSecret, isActive },
+      { workspaceId, url: cleanUrl, events: normaliseEvents(events), signingSecret, isActive, filter: normaliseFilter(filter) },
       { transaction }
     );
     await recordAudit({
@@ -111,6 +117,9 @@ async function updateEndpoint(workspaceId, endpointId, changes, req) {
     if (changes.url !== undefined) next.url = checkUrl(changes.url);
     if (changes.events !== undefined) next.events = normaliseEvents(changes.events);
     if (changes.isActive !== undefined) next.isActive = changes.isActive;
+    if (changes.filter !== undefined) next.filter = normaliseFilter(changes.filter);
+    // Turning it back on starts with a clean record.
+    if (changes.isActive === true) Object.assign(next, { failingSince: null, disabledAt: null, disabledReason: null });
     await endpoint.update(next, { transaction });
     await recordAudit({
       workspaceId,

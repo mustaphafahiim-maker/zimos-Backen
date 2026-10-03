@@ -49,6 +49,12 @@ module.exports = (sequelize, DataTypes) => {
       shippingAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'shipping_amount' },
       taxAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'tax_amount' },
       totalAmount: { type: DataTypes.BIGINT, allowNull: false, field: 'total_amount' },
+      // Fee (+) or discount (−) of the payment method, part of totalAmount (payments/paymentRulesService.js).
+      paymentAdjustmentAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'payment_adjustment_amount' },
+      paymentAdjustmentLabel: { type: DataTypes.STRING(100), allowNull: true, field: 'payment_adjustment_label' },
+      // Rate from `currency` to the store's base currency when the order was placed, and the total in base (currencies/fxService.js).
+      fxRateToBase: { type: DataTypes.DECIMAL(18, 8), allowNull: true, field: 'fx_rate_to_base' },
+      totalAmountBase: { type: DataTypes.BIGINT, allowNull: true, field: 'total_amount_base' },
       amountPaid: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'amount_paid' },
       amountRefunded: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'amount_refunded' },
 

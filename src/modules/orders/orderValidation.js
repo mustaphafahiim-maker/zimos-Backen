@@ -120,6 +120,34 @@ module.exports = {
     }).min(1),
   },
   listTags: { params: Joi.object({ workspaceId: uuid.required() }) },
+  // POST /bulk — orderBulkService.js. The orders are named, or are whatever
+  // the list shows for `filter` (its own query, without paging).
+  bulk: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({
+      action: Joi.string()
+        .valid('set_status', 'add_tag', 'remove_tag', 'archive', 'unarchive', 'mark_seen', 'mark_unseen', 'ship')
+        .required(),
+      orderIds: Joi.array().items(uuid).min(1).max(500).optional(),
+      filter: Joi.object({
+        sort: Joi.string()
+          .valid(...ORDER_SORT_KEYS)
+          .optional(),
+        stage: Joi.string().valid(...STAGES).optional(),
+        ...search,
+      })
+        .unknown(true)
+        .optional(),
+      payload: Joi.object({
+        status: Joi.string().valid(...STAGES).optional(),
+        reason: Joi.string().trim().max(500).allow('', null).optional(),
+        followUp: Joi.string().valid('unreachable', 'postponed').optional(),
+        tags: tagList.optional(),
+        carrierCode: Joi.string().trim().min(1).max(100).optional(),
+        notes: Joi.string().max(500).allow('', null).optional(),
+      }).default({}),
+    }).xor('orderIds', 'filter'),
+  },
   // GET /:orderId/neighbors — the list's own filters, search and sort.
   neighbors: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),

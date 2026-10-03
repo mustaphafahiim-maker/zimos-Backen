@@ -786,7 +786,9 @@ async function switchToCod(workspaceId, orderId, token, req) {
     const before = { paymentMethod: locked.paymentMethod };
 
     await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
-    await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null }, { transaction });
+    // The online method's fee or discount comes off; cash on delivery's goes on.
+    const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
+    await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced }, { transaction });
     await db.ConfirmationTask.create({ workspaceId, orderId: locked.id, status: 'queued' }, { transaction });
     await trackStage(workspaceId, locked.id, { transaction, actorType: 'customer', reason: 'switched_to_cod' });
 

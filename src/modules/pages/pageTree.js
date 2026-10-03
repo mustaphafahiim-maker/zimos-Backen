@@ -45,6 +45,20 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'scroll_story',
   'marquee',
   'comparison',
+  // Builder elements of SPEC §9.3 (lane 5). Structured props like the rest,
+  // each with a contract in ELEMENT_PROP_RULES.
+  'text_link',
+  'tabs',
+  'toggle',
+  'carousel',
+  'stars_display',
+  'price',
+  'reviews_list',
+  'cod_form',
+  'checkout_summary',
+  'order_summary',
+  'upsell_accept_button',
+  'upsell_decline_link',
 ]);
 
 const MAX_NODES = 10000;
@@ -103,6 +117,7 @@ const check = {
     (typeof v === 'string' && v.length <= 20) || (Number.isFinite(v) && v > 0)
       ? null
       : 'must be a size keyword or a positive number',
+  bool: (v) => (typeof v === 'boolean' ? null : 'must be true or false'),
   boolOrString: (max) => (v) =>
     typeof v === 'boolean' || (typeof v === 'string' && v.length <= max)
       ? null
@@ -135,6 +150,35 @@ function validateProps(props, rules, field, errors) {
 }
 
 const ELEMENT_PROP_RULES = {
+  // --- SPEC §9.3 builder elements ---------------------------------------
+  text_link: { text: check.string(300), href: check.url, newTab: check.bool },
+  tabs: {
+    title: check.string(300),
+    items: check.listOf(10, check.shape({ q: check.string(200), a: check.string(4000) })),
+  },
+  toggle: { title: check.string(300), body: check.string(4000), open: check.bool },
+  carousel: {
+    title: check.string(300),
+    images: check.listOf(20, check.url),
+    autoplay: check.bool,
+  },
+  stars_display: { rating: check.intRange(1, 5), label: check.string(200) },
+  // productId "" means "the page's product": the funnel step's product, or the
+  // store's newest one on a plain page.
+  price: { productId: check.uuid, showCompareAt: check.bool, size: check.oneOf('small', 'medium', 'large') },
+  reviews_list: { title: check.string(300), productId: check.uuid, limit: check.intRange(1, 50) },
+  cod_form: { title: check.string(300), productId: check.uuid },
+  checkout_summary: { title: check.string(300), buttonLabel: check.string(100) },
+  order_summary: { title: check.string(300) },
+  upsell_accept_button: { label: check.string(100) },
+  upsell_decline_link: { label: check.string(100) },
+  // The form's extra inputs (the original props stay free-form, as before).
+  form: {
+    extraFields: check.listOf(8, check.string(100)),
+    choiceLabel: check.string(100),
+    choices: check.listOf(20, check.string(80)),
+    checkboxLabel: check.string(200),
+  },
   shader_hero: {
     title: check.string(300),
     subtitle: check.string(600),

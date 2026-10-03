@@ -23,6 +23,9 @@ const checkoutOtp = require('../risk/checkoutOtp');
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
+// Order bumps, cross-sell, the thank-you upsell and the exit popup (modules/offers).
+router.use(require('../offers/publicOfferRoutes'));
+
 // What the checkout form needs to pass the bot guard (a fresh time token).
 router.get('/checkout/guard', botProtection.guardConfig);
 // The code-entry step of a checkout that answered 428 OTP_REQUIRED.
@@ -63,6 +66,14 @@ router.post(
   validate({ params: onlinePaymentSchemas.storeMethods.params, body: require('joi').object({ phone: require('joi').string().max(32).allow('', null) }) }),
   require('express-async-handler')(async (req, res) =>
     res.json({ deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, req.body || {}) })
+  )
+);
+// Display currencies and their rates — for showing converted prices only (currencies/fxService.js).
+router.get(
+  '/currencies',
+  validate({ params: onlinePaymentSchemas.storeMethods.params }),
+  require('express-async-handler')(async (req, res) =>
+    res.json({ currencies: await require('../currencies/fxService').getForStorefront(req.publicWorkspace) })
   )
 );
 router.get('/payment-methods', validate(onlinePaymentSchemas.storeMethods), onlinePaymentController.storefrontMethods);
