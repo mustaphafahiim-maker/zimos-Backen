@@ -48,6 +48,29 @@ module.exports = {
     }),
   },
 
+  // A top-up transfer, multipart: the amount the merchant sent, minor units
+  // (the limits are walletService's), the method, the sender and the `file`.
+  submitTopup: {
+    body: Joi.object({
+      requestedAmount: Joi.number().integer().min(1).max(1e12).required(),
+      methodCode: Joi.string().pattern(METHOD_CODE).required(),
+      senderPhone: Joi.string().trim().min(6).max(32).required(),
+    }),
+  },
+  walletLedger: {
+    query: Joi.object({
+      page: Joi.number().integer().min(1).max(10000).default(1),
+      pageSize: Joi.number().integer().min(1).max(50).default(20),
+    }),
+  },
+  adminWorkspaceWallet: {
+    params: Joi.object({ workspaceId: Joi.string().guid().required() }),
+    query: Joi.object({
+      page: Joi.number().integer().min(1).max(10000).default(1),
+      pageSize: Joi.number().integer().min(1).max(50).default(20),
+    }),
+  },
+
   // --- the console: payment methods and proofs
   adminUpdatePaymentMethod: {
     params: Joi.object({ code: Joi.string().pattern(METHOD_CODE).required() }),

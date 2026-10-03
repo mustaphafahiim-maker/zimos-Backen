@@ -5,6 +5,7 @@ const asyncHandler = require('express-async-handler');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const paymentMethods = require('./paymentMethodService');
 const proofs = require('./paymentProofService');
+const wallet = require('./walletService');
 const { verifyProofImageLink } = require('./proofLinks');
 
 const upload = multer({
@@ -50,6 +51,39 @@ const submitInvoiceProof = asyncHandler(async (req, res) => {
     req
   );
   res.status(201).json({ proof });
+});
+
+// --- the prepaid balance (billing/walletService)
+
+const getWallet = asyncHandler(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ wallet: await wallet.summary(req.tenant.workspaceId) });
+});
+
+const getWalletLedger = asyncHandler(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await wallet.ledger(req.tenant.workspaceId, req.query));
+});
+
+// POST /workspaces/:workspaceId/billing/wallet/topups — multipart.
+const submitTopup = asyncHandler(async (req, res) => {
+  const proof = await proofs.submitTopup(
+    req.tenant.workspaceId,
+    { requestedAmount: req.body.requestedAmount, methodCode: req.body.methodCode, senderPhone: req.body.senderPhone, file: req.file },
+    req
+  );
+  res.status(201).json({ proof });
+});
+
+const choosePayPerOrder = asyncHandler(async (req, res) => {
+  res.json(await wallet.choosePayPerOrder(req.tenant.workspaceId, req));
+});
+
+const adminWorkspaceWallet = asyncHandler(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const { workspaceId } = req.params;
+  const [summary, entries] = await Promise.all([wallet.summary(workspaceId), wallet.ledger(workspaceId, req.query)]);
+  res.json({ wallet: summary, ledger: entries });
 });
 
 const listPaymentProofs = asyncHandler(async (req, res) => {
@@ -127,6 +161,11 @@ module.exports = {
   openInvoice,
   submitInvoiceProof,
   listPaymentProofs,
+  getWallet,
+  getWalletLedger,
+  submitTopup,
+  choosePayPerOrder,
+  adminWorkspaceWallet,
   adminListPaymentMethods,
   adminUpdatePaymentMethod,
   adminReorderPaymentMethods,
