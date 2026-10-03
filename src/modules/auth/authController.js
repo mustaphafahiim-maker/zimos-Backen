@@ -7,6 +7,8 @@ const { AppError } = require('../../core/errors/AppError');
 const env = require('../../config/env');
 const usernameService = require('../users/usernameService');
 const signupPolicy = require('./signupPolicy');
+const accountService = require('./accountService');
+const { accountLimiter } = require('../../core/middleware/accountLimiter');
 
 const register = asyncHandler(async (req, res) => {
   const result = await authService.register(req.body, req);
@@ -136,8 +138,11 @@ const me = [
     const user = req.user.toSafeJSON();
     const needsPlan = await signupPolicy.needsPlan(req.user);
     const confirmed = signupPolicy.isVerified(req.user);
-    if (user.username) return res.json({ user, needsPlan, confirmed });
-    return res.json({ user, needsPlan, confirmed, suggestedUsername: await usernameService.suggestFor(user.email) });
+    // What the account settings can offer: a password to confirm changes
+    // with (else a code to the current email), and the phone change switch.
+    const account = { hasPassword: Boolean(req.user.passwordHash), phoneChange: env.account.phoneChangeEnabled === true };
+    if (user.username) return res.json({ user, needsPlan, confirmed, account });
+    return res.json({ user, needsPlan, confirmed, account, suggestedUsername: await usernameService.suggestFor(user.email) });
   }),
 ];
 
@@ -146,9 +151,61 @@ const usernameAvailable = asyncHandler(async (req, res) => {
   res.json(await usernameService.availability(req.query.u));
 });
 
+// --- Account settings (auth/accountService): always the signed-in account's own.
+
+const changeName = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    const user = await accountService.changeName(req.user, req.body.fullName, req);
+    res.json({ user: user.toSafeJSON() });
+  }),
+];
+
+const sendReauthCode = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json({ sent: true, ...(await accountService.sendReauthCode(req.user, req.body, req)) });
+  }),
+];
+
+const requestEmailChange = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json({ sent: true, ...(await accountService.requestEmailChange(req.user, req.body, req)) });
+  }),
+];
+
+const confirmEmailChange = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json(await accountService.confirmEmailChange(req.user, req.body.code, req));
+  }),
+];
+
+const requestPhoneChange = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json({ sent: true, ...(await accountService.requestPhoneChange(req.user, req.body, req)) });
+  }),
+];
+
+const confirmPhoneChange = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json(await accountService.confirmPhoneChange(req.user, req.body.code, req));
+  }),
+];
+
 // PATCH /auth/me/username — the first choice, or a change (once per 30 days).
 const changeUsername = [
   authenticate,
+  accountLimiter,
   asyncHandler(async (req, res) => {
     const user = await usernameService.changeUsername(req.user.id, req.body.username, req);
     res.json({ user: user.toSafeJSON() });
@@ -226,6 +283,12 @@ module.exports = {
   me,
   usernameAvailable,
   changeUsername,
+  changeName,
+  sendReauthCode,
+  requestEmailChange,
+  confirmEmailChange,
+  requestPhoneChange,
+  confirmPhoneChange,
   requestPasswordReset,
   resetPassword,
   requestPhoneVerification,

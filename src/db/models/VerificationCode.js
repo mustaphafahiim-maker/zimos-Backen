@@ -19,6 +19,9 @@ module.exports = (sequelize, DataTypes) => {
       consumedAt: { type: DataTypes.DATE, allowNull: true, field: 'consumed_at' },
       supersededAt: { type: DataTypes.DATE, allowNull: true, field: 'superseded_at' },
       requestIp: { type: DataTypes.STRING(64), allowNull: true, field: 'request_ip' },
+      // signup | reauth | email_change | phone_change (migration 132). Only
+      // sign-up codes count against the per-address and per-IP limits.
+      purpose: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'signup' },
     },
     { tableName: 'verification_codes' }
   );

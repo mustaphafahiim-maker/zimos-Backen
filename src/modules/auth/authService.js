@@ -681,6 +681,8 @@ async function resetPasswordSms(phone, code, newPassword) {
 }
 
 module.exports = {
+  // A fresh access token and session for `user` (auth/accountService, after an email change).
+  issueTokenPair,
   register,
   sendVerificationCode,
   confirmVerificationCode,

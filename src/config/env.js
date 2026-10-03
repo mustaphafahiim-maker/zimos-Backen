@@ -226,6 +226,13 @@ const env = {
     enabled: process.env.NODE_ENV !== 'test' && process.env.WALLET_ENABLED === 'true',
   },
 
+  // Account settings (auth/accountService). Changing the phone number by an
+  // SMS code is off unless exactly "true": off, a request is answered the
+  // same way and nothing is sent or changed.
+  account: {
+    phoneChangeEnabled: process.env.NODE_ENV !== 'test' && process.env.PHONE_CHANGE_ENABLED === 'true',
+  },
+
   // How the backend recognises our own Next.js storefront server. The secret is
   // sent server-to-server only (never to a browser); a request carrying it may
   // forward the shopper's IP for rate limiting. STOREFRONT_SERVER_IP
