@@ -111,6 +111,31 @@ ${codeHtml}
     };
   },
 
+  // A store's email to its customer about an order (orderEmailService.js):
+  // the merchant's subject and text under the store's logo and colour.
+  order_email(data = {}) {
+    const subject = String(data.subject || data.storeName || '');
+    const color = /^#[0-9a-f]{6}$/i.test(data.color || '') ? data.color : '#2563EB';
+    const store = escapeHtml(data.storeName || '');
+    // Plain text in, safe HTML out: escaped, links made clickable, blank lines as paragraphs.
+    const linkify = (text) => text.replace(/(https?:\/\/[^\s<]+)/g, (url) => `<a href="${url}" style="color:${color}">${url}</a>`);
+    const paragraphs = String(data.body || '')
+      .split(/\n{2,}/)
+      .map((p) => `<p style="margin:0 0 14px">${linkify(escapeHtml(p)).replace(/\n/g, '<br />')}</p>`)
+      .join('\n');
+    const logo = data.logoUrl && /^https?:\/\//.test(data.logoUrl) ? `<img src="${escapeHtml(data.logoUrl)}" alt="${store}" style="max-height:48px;max-width:180px" />` : `<strong style="font-size:18px">${store}</strong>`;
+    return {
+      subject,
+      ...wrap(
+        `<div style="border-top:4px solid ${color};padding-top:18px;margin-bottom:18px">${logo}</div>
+${paragraphs}
+<p style="color:#6b7280;margin:18px 0 0">${store}</p>`,
+        [data.body, data.storeName].filter(Boolean).join('\n\n'),
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
   // An automation's email step (modules/automations): the merchant's own
   // subject and text, to their customer, signed with the store's name.
   automation_message(data = {}) {

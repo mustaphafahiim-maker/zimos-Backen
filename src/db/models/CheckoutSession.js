@@ -33,6 +33,15 @@ module.exports = (sequelize, DataTypes) => {
       contactedAt: { type: DataTypes.DATE, allowNull: true, field: 'contacted_at' },
       convertedOrderId: { type: DataTypes.UUID, allowNull: true, field: 'converted_order_id' },
       lastActivityAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'last_activity_at' },
+      // Lost orders (migration 164, checkoutSessions/lostOrderService).
+      lostReason: { type: DataTypes.STRING(30), allowNull: true, field: 'lost_reason' },
+      reviewStatus: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'under_review', field: 'review_status' },
+      recoveryToken: { type: DataTypes.STRING(64), allowNull: true, field: 'recovery_token' },
+      awaitingOtp: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'awaiting_otp' },
+      checkoutPayload: { type: DataTypes.JSONB, allowNull: true, field: 'checkout_payload' },
+      ipAddress: { type: DataTypes.STRING(45), allowNull: true, field: 'ip_address' },
+      ipCountry: { type: DataTypes.STRING(2), allowNull: true, field: 'ip_country' },
+      abandonedEventAt: { type: DataTypes.DATE, allowNull: true, field: 'abandoned_event_at' },
     },
     {
       tableName: 'checkout_sessions',
