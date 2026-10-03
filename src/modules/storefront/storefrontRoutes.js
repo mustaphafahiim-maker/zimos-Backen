@@ -18,12 +18,16 @@ const checkoutSessionSchemas = require('../checkoutSessions/checkoutSessionValid
 const onlinePaymentController = require('../payments/onlinePaymentController');
 const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
 const botProtection = require('../risk/botProtection');
+const checkoutOtp = require('../risk/checkoutOtp');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
 // What the checkout form needs to pass the bot guard (a fresh time token).
 router.get('/checkout/guard', botProtection.guardConfig);
+// The code-entry step of a checkout that answered 428 OTP_REQUIRED.
+router.post('/checkout/otp/verify', checkoutOtp.verify);
+router.post('/checkout/otp/resend', checkoutOtp.resend);
 
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
 router.get('/policies/:key', validate(schemas.getPolicy), controller.getPolicy);
@@ -81,6 +85,8 @@ router.post(
   // Honeypot, time token, optional challenge — modules/risk/botProtection.
   botProtection.guardCheckout,
   refuseDraftOrders,
+  // Phone verification, when the store asks for it — modules/risk/checkoutOtp.
+  checkoutOtp.guardCheckout,
   idempotent('storefront.checkout')(checkoutController.checkout)
 );
 
