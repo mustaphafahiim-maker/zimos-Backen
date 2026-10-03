@@ -9,7 +9,7 @@ const logger = require('../../core/utils/logger');
 const { recordAudit } = require('../audit/auditService');
 const orderStock = require('../inventory/orderStock');
 const { completeOrderInTransaction, afterOrderCompleted } = require('../orders/orderCompletion');
-const { setFinancialState } = require('../orders/orderStateService');
+const { setFinancialState, trackStage } = require('../orders/orderStateService');
 const fraudRules = require('../fraud/fraudRules');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const gateways = require('./gateways');
@@ -379,6 +379,9 @@ async function recordPaymentTransaction(account, tx) {
         transaction
       );
     }
+    // A payment that reopened or cancelled the order without changing its
+    // financial state still moved its stage.
+    await trackStage(order.workspaceId, order.id, { transaction, reason: platformBlock ? BLOCKED_REASON : null });
 
     // The order becomes a sale now — unless it stays cancelled (the merchant
     // refunds it), was cancelled just now (platform blocklist) or was already
@@ -518,6 +521,7 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
       { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction }
     );
     await locked.update({ cancelledAt: new Date(), cancellationReason: EXPIRED_REASON }, { transaction });
+    await trackStage(locked.workspaceId, locked.id, { transaction, reason: EXPIRED_REASON });
     await recordAudit({
       workspaceId: locked.workspaceId,
       actorUserId: null,
@@ -764,7 +768,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
   const rules = fraudRules.resolveFraudRules(workspace.settings);
   const ruleFlags = Object.values(fraudRules.FLAGS);
   const flagged = (order.riskFlags || []).filter((f) => ruleFlags.includes(f));
-  if (rules.action === 'block' && flagged.length > 0) {
+  if (fraudRules.refusesFlags(rules, flagged)) {
     await recordAudit({
       workspaceId,
       action: 'order.blocked',
@@ -782,8 +786,11 @@ async function switchToCod(workspaceId, orderId, token, req) {
     const before = { paymentMethod: locked.paymentMethod };
 
     await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
-    await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null }, { transaction });
+    // The online method's fee or discount comes off; cash on delivery's goes on.
+    const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
+    await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced }, { transaction });
     await db.ConfirmationTask.create({ workspaceId, orderId: locked.id, status: 'queued' }, { transaction });
+    await trackStage(workspaceId, locked.id, { transaction, actorType: 'customer', reason: 'switched_to_cod' });
 
     const context = locked.completionContext || {};
     await completeOrderInTransaction(locked, { discount: context.discount || null, lateRedemption: true }, transaction);

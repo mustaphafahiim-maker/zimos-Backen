@@ -29,7 +29,10 @@ module.exports = {
         .required(),
     }),
   },
-  storeMethods: { params: Joi.object({ workspaceId: workspaceRef().required() }) },
+  storeMethods: {
+    params: Joi.object({ workspaceId: workspaceRef().required() }),
+    query: Joi.object({ funnelId: Joi.string().uuid().optional() }),
+  },
   shopperStatus: {
     params: storeOrderParam,
     query: Joi.object({ refresh: Joi.string().valid('0', '1', 'true', 'false').optional() }),

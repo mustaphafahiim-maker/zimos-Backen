@@ -20,6 +20,16 @@ const workspaceRoutes = require('./modules/workspaces/workspaceRoutes');
 const catalogRoutes = require('./modules/catalog/catalogRoutes');
 const inventoryRoutes = require('./modules/inventory/inventoryRoutes');
 const customerRoutes = require('./modules/customers/customerRoutes');
+const contactRoutes = require('./modules/contacts/contactRoutes');
+const storesRoutes = require('./modules/stores/storesRoutes');
+const dashboardRoutes = require('./modules/dashboard/dashboardRoutes');
+const digitalRoutes = require('./modules/digital/digitalRoutes');
+const aiRoutes = require('./modules/ai/aiRoutes');
+const affiliateRoutes = require('./modules/affiliates/affiliateRoutes');
+const customerSubscriptionRoutes = require('./modules/subscriptions/subscriptionRoutes');
+const serviceListingRoutes = require('./modules/serviceListings/serviceListingRoutes');
+const shoppableImageRoutes = require('./modules/shoppableImages/shoppableImageRoutes');
+const courseRoutes = require('./modules/courses/courseRoutes');
 const orderRoutes = require('./modules/orders/orderRoutes');
 const returnRoutes = require('./modules/returns/returnRoutes');
 const confirmationRoutes = require('./modules/cod/confirmationRoutes');
@@ -58,10 +68,16 @@ const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
 const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
 const automationRoutes = require('./modules/automations/automationRoutes');
 const settlementRoutes = require('./modules/settlements/settlementRoutes');
+const profitRoutes = require('./modules/profit/profitRoutes');
 const serverPixelsRoutes = require('./modules/marketing/serverPixelsRoutes');
 const apiKeyRoutes = require('./modules/apiKeys/apiKeyRoutes');
 const webhookRoutes = require('./modules/webhooks/webhookRoutes');
 const publicApiRoutes = require('./modules/publicApi/publicApiRoutes');
+const merchantNotificationRoutes = require('./modules/notifications/merchantNotificationRoutes');
+const trackingPixelRoutes = require('./modules/marketing/trackingPixelRoutes');
+const inboxRoutes = require('./modules/whatsapp/inboxRoutes');
+const orderEmailRoutes = require('./modules/notifications/orderEmailRoutes');
+const whatsappCampaignRoutes = require('./modules/whatsapp/campaignRoutes');
 
 const app = express();
 
@@ -147,16 +163,36 @@ v1.use('/workspaces', workspaceRoutes);
 v1.use('/workspaces/:workspaceId/catalog', catalogRoutes);
 v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
+v1.use('/workspaces/:workspaceId/contacts', contactRoutes.staff);
+v1.use('/workspaces/:workspaceId/duplicate', storesRoutes.duplicate);
+v1.use('/me/stores', storesRoutes.me);
+v1.use('/service-listings', serviceListingRoutes.merchant);
+v1.use('/admin/service-listings', serviceListingRoutes.admin);
+v1.use('/workspaces/:workspaceId/digital', digitalRoutes.staff);
+v1.use('/workspaces/:workspaceId/ai', aiRoutes);
+v1.use('/workspaces/:workspaceId/affiliates', affiliateRoutes.staff);
+v1.use('/workspaces/:workspaceId/subscriptions', customerSubscriptionRoutes.staff);
+v1.use('/workspaces/:workspaceId/shoppable-images', shoppableImageRoutes.staff);
+v1.use('/workspaces/:workspaceId/courses', courseRoutes.staff);
+v1.use('/workspaces/:workspaceId', dashboardRoutes);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
 v1.use('/workspaces/:workspaceId/confirmation-tasks', confirmationRoutes);
 v1.use('/workspaces/:workspaceId', paymentRoutes);
 v1.use('/workspaces/:workspaceId/discounts', discountRoutes);
+v1.use('/workspaces/:workspaceId/bundles', require('./modules/bundles/bundleRoutes'));
+v1.use('/workspaces/:workspaceId/offers', require('./modules/offers/offersRoutes'));
+// Product feeds for ad channels: /feeds/:workspaceSlug/:channel.xml|csv (public, no auth).
+v1.use('/feeds', require('./modules/offers/productFeed').publicRouter);
 v1.use('/workspaces/:workspaceId/shipping', shippingRoutes);
 v1.use('/workspaces/:workspaceId/tax-rates', taxRoutes);
 v1.use('/workspaces/:workspaceId/websites', pagesRoutes);
 v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
+// Code customizations: the merchant's own HTML/CSS/JS slots (website.publish).
+v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').router);
+// Page sections saved for reuse across pages and funnels (website.edit).
+v1.use('/workspaces/:workspaceId/saved-sections', require('./modules/savedSections/savedSectionsRoutes'));
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
@@ -171,9 +207,29 @@ v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
 v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
+v1.use('/workspaces/:workspaceId/profit', profitRoutes);
+v1.use('/workspaces/:workspaceId/manual-transfers', require('./modules/payments/manualTransferRoutes'));
+v1.use('/workspaces/:workspaceId/payment-rules', require('./modules/payments/paymentRulesRoutes'));
+v1.use('/workspaces/:workspaceId/currencies', require('./modules/currencies/currencyRoutes'));
+v1.use('/workspaces/:workspaceId/saved-payment-methods', require('./modules/payments/savedMethods/savedMethodRoutes'));
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
 v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
+// Lane 7: the app store, the app install link and dropshipping providers.
+v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
+v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
+// Lane 7: the simple invite (sections → permissions) and support access.
+v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
+v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);
+v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
+v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
+v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
+v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
+v1.use('/workspaces/:workspaceId/whatsapp-campaigns', whatsappCampaignRoutes);
+// The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
+v1.use('/inbox-stream', inboxRoutes.stream);
+// The analytics live view's SSE stream — opened with a ticket, like the inbox stream.
+v1.use('/analytics-stream', require('./modules/analytics/realtimeStream').streamRouter);
 // WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
 // body proves the sender.
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
@@ -185,6 +241,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
+// The sandbox gateway's hosted payment page — only where that gateway is registered.
+if (require('./modules/payments/gateways').isGateway('sandbox')) v1.use('/sandbox-pay', require('./modules/payments/sandboxPayRoutes'));
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.
@@ -194,12 +252,24 @@ v1.use('/admin', platformAdminRoutes);
 // Orders and their statuses for merchants' own integrations; see
 // docs/public-api.md. Outbound webhooks are sent by modules/webhooks.
 v1.use('/public', publicApiRoutes);
+// The same API under the path the spec and other platforms' docs use.
+app.use('/api/public/v1', publicApiRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
+// Which store a custom domain belongs to — before the :workspaceId routes,
+// which would otherwise read "resolve-host" as a store.
+v1.use('/store/resolve-host', require('./modules/domains/domainSettings').publicRouter);
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
+v1.use('/store/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').publicRouter);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
 // Storefront visit tracking (page views, cart, checkout, purchase).
 v1.use('/store/:workspaceId/events', eventsPublicRoutes);
+v1.use('/store/:workspaceId/forms', contactRoutes.store);
+v1.use('/store/:workspaceId/downloads', digitalRoutes.store);
+v1.use('/store/:workspaceId/affiliate', affiliateRoutes.portal);
+v1.use('/store/:workspaceId/subscriptions', customerSubscriptionRoutes.portal);
+v1.use('/store/:workspaceId/shoppable-images', shoppableImageRoutes.store);
+v1.use('/store/:workspaceId/learn', courseRoutes.portal);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 
@@ -216,6 +286,12 @@ app.use('/shop/:workspaceId', quickstartPublicRoutes);
 const openapiSpec = require('../docs/openapi.json');
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec));
 app.get('/docs.json', (req, res) => res.json(openapiSpec));
+// The public API (modules/publicApi) has its own description, for merchants'
+// developers and partners: docs/public-openapi.json, written by
+// scripts/build-public-openapi.js.
+const publicOpenapiSpec = require('../docs/public-openapi.json');
+app.use('/public-docs', swaggerUi.serveFiles(publicOpenapiSpec), swaggerUi.setup(publicOpenapiSpec, { customSiteTitle: 'ZIMOS Public API' }));
+app.get('/public-docs.json', (req, res) => res.json(publicOpenapiSpec));
 
 app.use(notFoundHandler);
 app.use(errorHandler);

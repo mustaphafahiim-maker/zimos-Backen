@@ -3,11 +3,18 @@
 const crypto = require('crypto');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
+const paymentRules = require('../payments/paymentRulesService');
+const fxService = require('../currencies/fxService');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
+const blockedEntries = require('../fraud/blockedEntries');
+const visitorGate = require('../risk/visitorGate');
+const riskService = require('../risk/riskService');
+const networkStats = require('../risk/networkStats');
+const checkoutOtp = require('../risk/checkoutOtp');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -17,7 +24,7 @@ const { calculateShippingAmount } = require('../shipping/shippingPricing');
 const { calculateTax } = require('../tax/taxService');
 const { completeOrderInTransaction } = require('./orderCompletion');
 const { recordAudit } = require('../audit/auditService');
-const { setConfirmationState } = require('./orderStateService');
+const { setConfirmationState, trackStage, nextStages } = require('./orderStateService');
 const { STAGES, STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('./orderStage');
 const { orderSort, orderByClause, afterAnchorClause, anchorValue } = require('./orderSort');
 const gateways = require('../payments/gateways');
@@ -27,8 +34,11 @@ const confirmationService = require('../cod/confirmationService');
 const { resolveCustomizations, attachUploads } = require('../catalog/customFields');
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { orderBumpUnavailable } = require('../checkout/orderBump');
-const automationEngine = require('../automations/automationEngine');
-const pixelEvents = require('../marketing/pixelEvents');
+const outbox = require('../../core/outbox/outbox');
+const orderMeta = require('./orderMetaService');
+const { applyOrderFilters } = require('./orderFilters');
+const { effectiveVariantPrice } = require('../catalog/productPage');
+const { applyBundleTiers } = require('../bundles/bundlePricing');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -100,7 +110,9 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     };
   }
 
-  const lineTotal = variant.priceAmount * quantity;
+  // A countdown offer that has ended sells at the full price (catalog/productPage.js).
+  const unitPriceAmount = effectiveVariantPrice(variant, variant.product).priceAmount;
+  const lineTotal = unitPriceAmount * quantity;
   return {
     productId: variant.productId,
     productName: variant.product.name,
@@ -110,7 +122,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     offerId: null,
     offerName: null,
     quantity,
-    unitPriceAmount: variant.priceAmount,
+    unitPriceAmount,
     unitCostAmount: variant.costAmount,
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
@@ -223,6 +235,7 @@ async function createOrder(
     customFields = {},
     confirmationAvailableAt = null,
     shippingOverride = null,
+    source = null,
   } = {}
 ) {
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
@@ -232,6 +245,10 @@ async function createOrder(
   }
 
   const evaluateFraudRules = !req.user && !skipFraudRules;
+  // SPEC §4.2: where the order came from, and whether it is the merchant
+  // trying their own store (kept out of sales figures and ad pixels).
+  const orderSource = source || orderMeta.sourceFor(req, { funnelId });
+  const isTest = orderMeta.isTestRequest(req, workspaceId);
 
   const run = async (transaction) => {
     // Chosen now so the reservations below can name the order they hold stock
@@ -252,20 +269,75 @@ async function createOrder(
     );
     if (platformBlock) throw platformBlocklist.rejection(customer.id, platformBlock);
 
+    // The shopper's own IP and browser: a staff order carries the staff member's.
+    const visitor = req && !req.user ? await visitorGate.describeVisitor(req) : { ip: null, ipCountry: null, isVpn: false };
+    const visitorIp = visitor.ip;
+    const visitorAgent = req && !req.user && req.headers ? req.headers['user-agent'] : null;
+
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
+    // The store's blocked_entries (scope orders). The IP is the shopper's only
+    // on a storefront order; a staff order carries the staff member's.
+    const blockedEntry = await blockedEntries.findMatch(
+      workspaceId,
+      'orders',
+      {
+        phoneNormalized: customer.phoneNormalized,
+        email: contact.email,
+        ip: visitorIp,
+        deviceId: payload.deviceId,
+        fullName: contact.fullName,
+        addressLine: shippingAddress && shippingAddress.addressLine,
+      },
+      transaction
+    );
+    if (blockedEntry && !riskFlags.includes('blacklisted_customer')) riskFlags.push('blacklisted_customer');
+    // A phone blocked before it ever ordered: its customer row exists only now.
+    if (blockedEntry && blockedEntry.type === 'phone' && !customer.isBlacklisted) {
+      await customer.update(
+        { isBlacklisted: true, blacklistReason: blockedEntry.reason, blacklistedAt: blockedEntry.createdAt },
+        { transaction }
+      );
+    }
 
     // Before any inventory is touched, so a refusal has nothing to undo but
     // the customer lookup.
+    // Risk score and data quality of a storefront order (risk/riskService):
+    // a marker only, unless the store's high_risk rule acts on it.
+    // The customer's platform-wide delivery numbers; null unless the store has the feature.
+    const network = evaluateFraudRules ? await networkStats.forPhone(workspaceId, customer.phoneNormalized, transaction) : null;
+    const risk = evaluateFraudRules
+      ? await riskService.score(
+          { contact, shippingAddress },
+          {
+            workspaceId,
+            country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale'], transaction })),
+            visitor,
+            secondsOnPage: req && typeof req.secondsOnPage === 'number' ? req.secondsOnPage : null,
+            network,
+            transaction,
+          }
+        )
+      : null;
+
     if (evaluateFraudRules) {
-      const ruleFlags = await fraudRules.evaluateStorefrontOrder({
+      const { flags: ruleFlags, requireOtp } = await fraudRules.evaluateStorefrontOrder({
         workspaceId,
         customer,
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
         transaction,
         onlinePayment: Boolean(awaitingPayment),
+        blockedEntry,
+        items,
+        paymentMethod,
+        phone: contact.phone,
+        visitor,
+        riskLevel: risk.level,
+        network,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
+      // A rule (or the store's "verify risky orders") wants the phone verified first — risk/checkoutOtp.
+      if (checkoutOtp.needsOtp(req, { requireOtp, riskLevel: risk.level, flags: ruleFlags })) throw new checkoutOtp.NeedsOtp();
     }
 
     // Price every line and consume/reserve inventory for it. Consuming
@@ -322,6 +394,10 @@ async function createOrder(
       }
     }
 
+    // Quantity bundles (modules/bundles): lowers the totals of the lines they
+    // cover, before anything else looks at the subtotal.
+    const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
+
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     const productIds = pricedLines.map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
@@ -343,6 +419,21 @@ async function createOrder(
       discountRecord = evaluation.discount;
       discountsSnapshot = [{ code: discountCode, type: evaluation.discount.type, amount: discountAmount }];
     }
+    const couponExtras = require('../discounts/couponExtras');
+    if (!discountCode) {
+      // No code typed: the store's best automatic discount, when one applies.
+      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
+      if (automatic) {
+        discountAmount = automatic.amount;
+        discountRecord = automatic.discount;
+        discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
+      }
+    }
+    // The store's minimum order amount binds shoppers, not staff typing an
+    // order in, and not an add-on order that follows another one.
+    if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
+    // Kept apart from the coupon: the bundle's saving is already in the line totals.
+    discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
     // Always priced, even without an address (amount 0 then): the weight
     // and tier are stored on the order either way.
@@ -365,7 +456,9 @@ async function createOrder(
       shippingAmount,
     });
 
-    const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount;
+    // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
+    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction);
+    const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
 
     const order = await db.Order.create(
       {
@@ -382,11 +475,26 @@ async function createOrder(
         shippingAmount,
         taxAmount,
         totalAmount,
+        paymentAdjustmentAmount: paymentAdjustment.amount,
+        paymentAdjustmentLabel: paymentAdjustment.label,
+        ...(await fxService.baseFieldsFor(workspaceId, { currency: pricedLines[0].currency, totalAmount }, transaction)),
         contactSnapshot: contact,
         shippingAddressSnapshot: shippingAddress || null,
         discountsSnapshot,
         notes: notes || null,
         riskFlags,
+        ipAddress: visitorIp,
+        ipCountry: visitor.ipCountry,
+        riskScore: risk ? risk.score : null,
+        riskLevel: risk ? risk.level : null,
+        riskReasons: risk ? risk.reasons : [],
+        dataQuality: risk ? risk.dataQuality : null,
+        userAgent: visitorAgent ? String(visitorAgent).slice(0, 400) : null,
+        source: orderSource,
+        isTest,
+        // An order staff typed in themselves is not news to them.
+        isSeen: Boolean(req.user),
+        seenAt: req.user ? new Date() : null,
         totalWeightGrams: shipping.weightGrams,
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
@@ -423,6 +531,7 @@ async function createOrder(
             quantity: line.quantity,
             unitPriceAmount: line.unitPriceAmount,
             unitCostAmount: line.unitCostAmount,
+            lineDiscountAmount: line.lineDiscountAmount || 0,
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,
@@ -443,6 +552,9 @@ async function createOrder(
         { transaction }
       );
     }
+
+    // The first row of the order's status history: nothing → where it starts.
+    await trackStage(workspaceId, order.id, { req, transaction, fallbackActor: 'customer' });
 
     order.items = orderItems;
     // Invoice, discount redemption, customer.totalOrders — the order is a
@@ -470,8 +582,8 @@ async function createOrder(
     // Merchant automations (WhatsApp templates) and server-side ad-platform
     // conversions run after commit and never fail the order. An order waiting
     // for its online payment is not a purchase yet, so it sends no conversion.
-    transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
-    if (!awaitingPayment) transaction.afterCommit(() => pixelEvents.emit(workspaceId, 'order.created', order.id));
+    // They hang off the order.created event in the outbox (see each module's jobs.js).
+    await outbox.record(transaction, 'order.created', { workspaceId, orderId: order.id, awaitingPayment: Boolean(awaitingPayment), isTest: Boolean(isTest) });
 
     return { order, items: orderItems };
   };
@@ -486,6 +598,8 @@ async function createOrder(
     return await (outerTransaction ? run(outerTransaction) : db.sequelize.transaction(run));
   } catch (err) {
     if (err instanceof fraudRules.OrderRejectedError) await recordRefusal(workspaceId, err.refusal, req);
+    // Nothing was saved; the shopper is sent a code and asked for it.
+    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone);
     throw err;
   }
 }
@@ -595,7 +709,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
     shippingAmount: shipping.amount,
   });
-  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
+  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction);
+  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;
 
   const item = await db.OrderItem.create(
     {
@@ -625,6 +740,9 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       shippingAmount: shipping.amount,
       taxAmount,
       totalAmount,
+      paymentAdjustmentAmount: paymentAdjustment.amount,
+      paymentAdjustmentLabel: paymentAdjustment.label,
+      ...(await fxService.baseFieldsFor(workspaceId, { currency: order.currency, totalAmount }, transaction)),
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,
@@ -698,14 +816,24 @@ async function getOrder(workspaceId, orderId) {
   const linkedFrom = order.linkedFromOrderId
     ? await db.Order.findOne({ where: { workspaceId, id: order.linkedFromOrderId }, attributes: ['id', 'orderNumber'] })
     : null;
+  const stage = await stageForOrder(order.id);
   return {
     ...json,
     paymentProvider: providers.get(order.id) || null,
-    stage: await stageForOrder(order.id),
+    stage,
+    // The stages PATCH /orders/:id/status accepts from here (orderStageChange.js).
+    nextStages: nextStages(stage),
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
     linkedOrders: linkedOrders.map((o) => o.toJSON()),
     linkedFromOrder: linkedFrom ? linkedFrom.toJSON() : null,
   };
+}
+
+/** The order's id and number, or 404 — the check every per-order endpoint starts with. */
+async function getOrderRef(workspaceId, orderId) {
+  const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'orderNumber'] });
+  if (!order) throw new NotFoundError('Order');
+  return order;
 }
 
 // `%` and `_` are wildcards in LIKE, and a backslash escapes them: a merchant
@@ -869,10 +997,11 @@ async function paymentProviders(orders) {
  */
 async function listOrders(
   workspaceId,
-  { limit = 50, cursor, sort: sortKey, confirmationState, financialState, fulfillmentState, stage, q, from, to } = {}
+  { limit = 50, cursor, sort: sortKey, confirmationState, financialState, fulfillmentState, stage, q, from, to, ...filters } = {}
 ) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId, limit: limit + 1 };
+  applyOrderFilters(conditions, bind, filters);
   const sort = orderSort(sortKey);
 
   if (confirmationState) {
@@ -930,9 +1059,10 @@ async function listOrders(
  * at zero, so the client renders a stable row of tabs instead of tabs that
  * appear and vanish as orders move.
  */
-async function orderPipeline(workspaceId, { q, from, to } = {}) {
+async function orderPipeline(workspaceId, { q, from, to, ...filters } = {}) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId };
+  applyOrderFilters(conditions, bind, filters);
   applySearchAndDates(conditions, bind, { q, from, to });
 
   const rows = await db.sequelize.query(
@@ -970,7 +1100,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       throw new AppError('ORDER_ALREADY_CANCELLED', 'This order is already cancelled', 409);
     }
     await assertNotShipped(order, transaction);
-    transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.cancelled', order.id));
+    await outbox.record(transaction, 'order.cancelled', { workspaceId, orderId: order.id });
 
     // Whatever the order still holds: nothing more if a rejection already gave it back.
     await orderStock.releaseOrderStock(
@@ -1001,6 +1131,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
 
     const before = { confirmationState: order.confirmationState, cancelledAt: order.cancelledAt };
     await order.update({ cancelledAt: new Date(), cancellationReason: reason }, { transaction });
+    await trackStage(workspaceId, order.id, { req, transaction, reason });
     if (order.confirmationState !== 'rejected') {
       await setConfirmationState(workspaceId, order.id, 'rejected', req, transaction);
     }
@@ -1093,6 +1224,8 @@ async function createShipment(workspaceId, orderId, data, req) {
       },
       transaction
     );
+    // A new shipment for an order whose last parcel came back: ready to ship again.
+    await trackStage(workspaceId, order.id, { req, transaction });
 
     await recordAudit({
       workspaceId,
@@ -1125,7 +1258,8 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
       workspaceId,
       shipment,
       { status: data.status, waybillNumber: data.waybillNumber, trackingUrl: data.trackingUrl, ...extra },
-      { transaction, req, actorUserId: req.user.id }
+      // A status set by hand must be a move the order may make (409 otherwise).
+      { transaction, req, actorUserId: req.user.id, enforceStageGuard: true }
     );
   });
 }
@@ -1134,6 +1268,8 @@ module.exports = {
   createOrder,
   addLineToOpenOrder,
   getOrder,
+  getOrderRef,
+  applySearchAndDates,
   listOrders,
   orderPipeline,
   resolveCursor,

@@ -6,6 +6,14 @@ const shippingQuoteService = require('../shipping/shippingQuoteService');
 const cartService = require('../cart/cartService');
 const { AppError } = require('../../core/errors/AppError');
 
+// One legal policy, variables filled in (storefront/storeInfo.js); 404 when not written.
+const getPolicy = asyncHandler(async (req, res) =>
+  res.json({ policy: require('./storeInfo').publicLegalPolicy(req.publicWorkspace, req.params.key) })
+);
+// Every public path of the store, for the storefront's sitemap.xml.
+const getSitemap = asyncHandler(async (req, res) =>
+  res.json({ entries: await require('./generalSettings').storeSitemap(req.publicWorkspace) })
+);
 const getStore = asyncHandler(async (req, res) => res.json({ store: await service.getStorefront(req.tenant.workspaceId) }));
 const listProducts = asyncHandler(async (req, res) => res.json(await service.listProducts(req.tenant.workspaceId, req.query)));
 const getProduct = asyncHandler(async (req, res) => res.json({ product: await service.getProductBySlugOrId(req.tenant.workspaceId, req.params.idOrSlug) }));
@@ -14,6 +22,9 @@ const suggestProducts = asyncHandler(async (req, res) =>
   res.json(await service.suggestProducts(req.tenant.workspaceId, req.query.q))
 );
 const getCollection = asyncHandler(async (req, res) => res.json({ collection: await service.getCollection(req.tenant.workspaceId, req.params.collectionId) }));
+// The signed tracking link (…/track?t=<token>): the same answer, no phone number needed.
+const trackOrderByToken = asyncHandler(async (req, res) => res.json({ result: await service.trackOrderByToken(req.tenant.workspaceId, req.query.token) }));
+
 // Always 200, with `result: null` when nothing matches — see service.trackOrder.
 const trackOrder = asyncHandler(async (req, res) => res.json({ result: await service.trackOrder(req.tenant.workspaceId, req.query.phone, req.query.number) }));
 
@@ -42,11 +53,14 @@ const shippingQuote = asyncHandler(async (req, res) => {
 
 module.exports = {
   getStore,
+  getPolicy,
+  getSitemap,
   listProducts,
   getProduct,
   suggestProducts,
   listCollections,
   getCollection,
   trackOrder,
+  trackOrderByToken,
   shippingQuote,
 };

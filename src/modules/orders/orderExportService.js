@@ -313,4 +313,57 @@ async function* csvChunks(workspaceId, filters, { columns: requested, rowPer = '
   if (cursor) yield line([`Stopped at ${MAX_ORDERS} orders — narrow the date range to export the rest.`]);
 }
 
-module.exports = { csvChunks, columnCatalogue, COLUMN_KEYS, MAX_ORDERS };
+// Columns that are amounts or counts: numeric cells in a spreadsheet, so they
+// can be summed. Everything else stays text (a phone keeps its leading zero).
+const NUMERIC_COLUMNS = new Set([
+  'subtotal',
+  'discount',
+  'shipping',
+  'tax',
+  'total',
+  'amountPaid',
+  'amountRefunded',
+  'itemsCount',
+  'quantity',
+  'unitPrice',
+  'lineTotal',
+]);
+
+/**
+ * The same table as csvChunks, as rows of cells (header first), for the xlsx
+ * format. Built in memory: the spreadsheet is one zipped document, so there
+ * is nothing to stream; MAX_ORDERS bounds it as it bounds the CSV.
+ */
+async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone } = {}) {
+  const columns = resolveColumns(requested, rowPer);
+  const x = exportContext({ lang, timezone });
+  const rows = [columns.map((c) => (lang === 'ar' ? c.ar : c.en))];
+  const asCell = (column, value) => {
+    if (value === null || value === undefined) return '';
+    if (NUMERIC_COLUMNS.has(column.key) && /^-?\d+(\.\d+)?$/.test(String(value))) return Number(value);
+    return String(value);
+  };
+
+  const query = { ...filters, limit: PAGE_SIZE };
+  delete query.cursor;
+  let exported = 0;
+  let cursor;
+  do {
+    const page = await orderService.listOrders(workspaceId, { ...query, cursor });
+    const shipments = await shipmentsFor(
+      workspaceId,
+      page.orders.map((o) => o.id)
+    );
+    for (const order of page.orders) {
+      const row = { ...order, shipment: shipments.get(order.id) || null };
+      const items = rowPer === 'item' && row.items && row.items.length > 0 ? row.items : [null];
+      for (const item of items) rows.push(columns.map((c) => asCell(c, c.value(row, item, x))));
+    }
+    exported += page.orders.length;
+    cursor = page.nextCursor;
+  } while (cursor && exported < MAX_ORDERS);
+  if (cursor) rows.push([`Stopped at ${MAX_ORDERS} orders — narrow the date range to export the rest.`]);
+  return rows;
+}
+
+module.exports = { csvChunks, tableRows, columnCatalogue, COLUMN_KEYS, MAX_ORDERS };

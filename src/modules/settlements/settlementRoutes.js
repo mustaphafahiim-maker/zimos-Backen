@@ -32,6 +32,8 @@ const WRITE = requirePermission(PERMISSIONS.REFUNDS_MANAGE);
 // Mounted at /api/v1/workspaces/:workspaceId/settlements
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
+// Courier statement import and money held by couriers (settlementStatementRoutes.js).
+router.use(require('./settlementStatementRoutes'));
 
 router.get('/summary', READ, validate({ params: Joi.object(ws) }), asyncHandler(async (req, res) => res.json({ summary: await service.summary(req.tenant.workspaceId) })));
 router.get(

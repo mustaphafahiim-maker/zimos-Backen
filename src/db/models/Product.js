@@ -47,6 +47,16 @@ module.exports = (sequelize, DataTypes) => {
       shippingExtraAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'shipping_extra_amount' },
       // Fields the shopper fills in when ordering (catalog/customFields.js), at most five.
       customFields: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'custom_fields' },
+      // SPEC §7.1–7.4 — see migration 185 and catalog/productPage.js.
+      priority: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+      specialOfferText: { type: DataTypes.STRING(200), allowNull: true, field: 'special_offer_text' },
+      externalRefs: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'external_refs' },
+      pageSettings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'page_settings' },
+      cms: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // null = sold once; otherwise a subscription or installments plan (migration 315, modules/subscriptions).
+      billingPlan: { type: DataTypes.JSONB, allowNull: true, field: 'billing_plan' },
+      // The quantity bundle this product sells with (migration 189, modules/bundles).
+      bundleId: { type: DataTypes.UUID, allowNull: true, field: 'bundle_id' },
     },
     {
       tableName: 'products',

@@ -39,7 +39,7 @@ const storefrontCors = cors({
   // X-Store-Preview: a staff preview token that unlocks test-mode payments.
   // X-Visitor-Id: the storefront's anonymous visitor, which owns the photos it
   // uploads for custom fields (customerUploads).
-  allowedHeaders: ['Content-Type', 'X-Cart-Token', 'Idempotency-Key', 'X-Payment-Token', 'X-Store-Preview', 'X-Visitor-Id'],
+  allowedHeaders: ['Content-Type', 'X-Cart-Token', 'Idempotency-Key', 'X-Payment-Token', 'X-Store-Preview', 'X-Visitor-Id', 'X-Affiliate-Token', 'X-Student-Token'],
   // The storefront reads Retry-After on a 429 to tell the shopper when to retry.
   exposedHeaders: ['Retry-After'],
   maxAge: 7200,

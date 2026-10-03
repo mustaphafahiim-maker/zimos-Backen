@@ -3,6 +3,7 @@
 const Joi = require('joi');
 const { PRODUCT_SHIPPING_MODES } = require('../shipping/shippingRules');
 const { customFieldsSchema } = require('./customFields');
+const { optionSchema, productPageFields } = require('./productPage');
 
 const uuid = Joi.string().uuid();
 
@@ -27,7 +28,7 @@ const productFields = {
   description: Joi.string().allow('').max(20000),
   productType: Joi.string().valid('physical', 'digital', 'service'),
   status: productStatus,
-  options: Joi.array().items(Joi.object({ name: Joi.string().required(), values: Joi.array().items(Joi.string()) })),
+  options: Joi.array().items(optionSchema),
   media: Joi.array().items(Joi.object()),
   tags: Joi.array().items(Joi.string()),
   seo: Joi.object(),
@@ -40,6 +41,8 @@ const productFields = {
   // What the shopper fills in when ordering: at most five text / textarea /
   // image fields (catalog/customFields.js). Sent whole; [] removes them all.
   customFields: customFieldsSchema,
+  // Priority, special offer line, external refs, page settings and content.
+  ...productPageFields,
 };
 
 const product = {
@@ -95,6 +98,11 @@ const productList = {
       )
       .optional(),
     collectionId: uuid.optional(),
+    // Name contains / a variant's SKU contains / type / can still be sold or not.
+    q: Joi.string().trim().max(100).allow('').optional(),
+    sku: Joi.string().trim().max(100).allow('').optional(),
+    productType: Joi.string().valid('physical', 'digital', 'service').optional(),
+    stock: Joi.string().valid('in', 'out').optional(),
     limit: Joi.number().integer().min(1).max(200).default(50),
     cursor: uuid.optional(),
   }),
@@ -214,6 +222,8 @@ const collection = {
     // Absent puts it after its siblings.
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
+    showInHeader: Joi.boolean().optional(),
+    hidden: Joi.boolean().optional(),
   }),
 };
 
@@ -234,6 +244,8 @@ const collectionUpdate = {
     parentId: uuid.allow(null).optional(),
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
+    showInHeader: Joi.boolean().optional(),
+    hidden: Joi.boolean().optional(),
   }).min(1),
 };
 

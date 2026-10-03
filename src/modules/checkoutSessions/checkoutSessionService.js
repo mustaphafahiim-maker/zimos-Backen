@@ -151,7 +151,11 @@ async function convertForOrder(workspaceId, order, { checkoutSessionId } = {}) {
  */
 async function convertAfterOrder(workspaceId, order, options = {}) {
   try {
-    return await module.exports.convertForOrder(workspaceId, order, options);
+    const converted = await module.exports.convertForOrder(workspaceId, order, options);
+    // Lost orders: clears the waiting-for-code mark and announces a recovered checkout (never throws).
+    // eslint-disable-next-line global-require
+    if (converted) await require('./lostOrderService').afterConversion(workspaceId, order);
+    return converted;
   } catch (err) {
     logger.error('Could not convert checkout sessions for an order', {
       workspaceId,

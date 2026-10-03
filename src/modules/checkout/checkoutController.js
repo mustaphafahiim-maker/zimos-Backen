@@ -1,11 +1,14 @@
 'use strict';
 const asyncHandler = require('express-async-handler');
+const manualCheckout = require('./manualCheckout');
+const paymentRules = require('../payments/paymentRulesService');
 const env = require('../../config/env');
 const cartService = require('../cart/cartService');
 const orderService = require('../orders/orderService');
 const { afterOrderCompleted } = require('../orders/orderCompletion');
 const { AppError, ValidationError } = require('../../core/errors/AppError');
 const { assertRequiredCheckoutFields } = require('./checkoutSettings');
+const { saveCheckoutAnswers } = require('./checkoutForm');
 const methodsService = require('../payments/paymentMethodsService');
 const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
@@ -30,7 +33,7 @@ const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, checkoutSessionId, paymentProvider, returnUrl, orderBump, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -38,7 +41,11 @@ const checkout = asyncHandler(async (req, res) => {
   // cart work so a rejected checkout costs nothing.
   assertRequiredCheckoutFields(workspace, req.body);
 
-  const isOnline = orderBody.paymentMethod !== 'cod';
+  // A manual transfer (the whole order, or a COD order's deposit) is checked
+  // here, before any cart work; it is not an online (gateway) payment.
+  const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
+  const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
+  if (orderBody.paymentMethod === 'cod') paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: 'cod' });
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -47,7 +54,8 @@ const checkout = asyncHandler(async (req, res) => {
   let prepared = null;
   if (isOnline) {
     prepared = await online.prepareOnlineCheckout(workspace, { ...orderBody, paymentProvider, returnUrl }, req);
-  } else if (env.payments.onlineEnabled) {
+    paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: `${prepared.method.provider}:${prepared.method.method}` });
+  } else if (env.payments.onlineEnabled && orderBody.paymentMethod === 'cod') {
     // The merchant may have switched cash on delivery off.
     await methodsService.resolveStorefrontMethod(workspace, { paymentMethod: 'cod' }, {
       preview: methodsService.isPreviewRequest(req, workspaceId),
@@ -64,7 +72,12 @@ const checkout = asyncHandler(async (req, res) => {
     if (!cart) throw new AppError('CART_NOT_FOUND', 'No active cart found for this token', 404);
     ({ items } = await cartService.toOrderItems(workspaceId, cart.id));
   } else if (item) {
-    items = [{ variantId: item.variantId, offerId: item.offerId, quantity: item.quantity || 1, customizations: item.customizations }];
+    items = [item, ...(extraItems || [])].map((line) => ({
+      variantId: line.variantId,
+      offerId: line.offerId,
+      quantity: line.quantity || 1,
+      customizations: line.customizations,
+    }));
   } else {
     throw new AppError(
       'CART_TOKEN_OR_ITEM_REQUIRED',
@@ -77,6 +90,12 @@ const checkout = asyncHandler(async (req, res) => {
   // server from the configured offer (422 when it is not that offer).
   if (orderBump) {
     items = [...items, await resolveOrderBumpItem(workspace, { offerId: orderBump.offerId, funnelId: orderBody.funnelId })];
+  }
+
+  // The product's own bumps: lines built by the server from the rules of the products being bought.
+  if (orderBumps && orderBumps.length > 0) {
+    const bumpItems = await require('../offers/offerRules').resolveBumpItems(workspace, orderBumps.map((b) => b.offerId), items);
+    items = [...items, ...bumpItems.filter((b) => !items.some((i) => i.offerId === b.offerId))];
   }
 
   // Stock held by overdue unpaid online orders goes back first.
@@ -102,8 +121,10 @@ const checkout = asyncHandler(async (req, res) => {
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
+    await saveCheckoutAnswers(order, workspace, formFields);
     await afterOrderCompleted(workspaceId, order, context);
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems } });
+    const transferPayment = await manualCheckout.record(order, manualTransfer);
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -119,6 +140,8 @@ const checkout = asyncHandler(async (req, res) => {
       },
     }
   );
+
+  await saveCheckoutAnswers(order, workspace, formFields);
 
   const attempt = await online.startAttempt(order, {
     provider: prepared.method.provider,

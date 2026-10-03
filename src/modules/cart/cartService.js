@@ -1,5 +1,7 @@
 'use strict';
 
+const { effectiveVariantPrice } = require('../catalog/productPage');
+
 const crypto = require('crypto');
 const db = require('../../db/models');
 const { NotFoundError, AppError } = require('../../core/errors/AppError');
@@ -28,10 +30,21 @@ async function getOrCreateCart(workspaceId, guestToken) {
 async function getCart(workspaceId, cartId) {
   const cart = await db.Cart.findOne({
     where: { id: cartId, workspaceId },
-    include: [{ model: db.CartItem, as: 'items', include: [{ model: db.ProductVariant, as: 'variant' }, { model: db.Offer, as: 'offer' }] }],
+    include: [
+      {
+        model: db.CartItem,
+        as: 'items',
+        include: [
+          // The product rides along for its countdown offer (catalog/productPage.js).
+          { model: db.ProductVariant, as: 'variant', include: [{ model: db.Product, as: 'product', attributes: ['id', 'pageSettings'] }] },
+          { model: db.Offer, as: 'offer' },
+        ],
+      },
+    ],
   });
   if (!cart) throw new NotFoundError('Cart');
-  return withComputedTotals(cart);
+  // Quantity bundles lower the lines they cover, as they will on the order.
+  return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart));
 }
 
 /**
@@ -43,7 +56,9 @@ async function getCart(workspaceId, cartId) {
  */
 function withComputedTotals(cart) {
   const items = (cart.items || []).map((item) => {
-    const currentUnitPrice = item.offer ? item.offer.priceAmount : item.variant.priceAmount;
+    const currentUnitPrice = item.offer
+      ? item.offer.priceAmount
+      : effectiveVariantPrice(item.variant, item.variant.product).priceAmount;
     return {
       id: item.id,
       variantId: item.variantId,

@@ -3,6 +3,7 @@ const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
 const { workspaceRef } = require('../../core/utils/workspaceSlug');
 const { customizationsInputSchema } = require('../catalog/customFields');
+const { formFieldsBodySchema } = require('./checkoutForm');
 
 const contact = Joi.object({
   fullName: Joi.string().max(200).required(),
@@ -14,8 +15,10 @@ const contact = Joi.object({
 const address = Joi.object({
   country: Joi.string().length(2).required(),
   province: Joi.string().max(100).allow(null, '').optional(),
-  city: Joi.string().max(100).required(),
-  addressLine: Joi.string().max(500).required(),
+  // Required unless the store's purchase form switched them off — enforced
+  // per store in checkoutForm.assertCheckoutForm.
+  city: Joi.string().max(100).allow(null, '').optional(),
+  addressLine: Joi.string().max(500).allow(null, '').optional(),
   postalCode: Joi.string().max(20).allow(null, '').optional(),
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
@@ -34,7 +37,15 @@ module.exports = {
       // with it off the checkout takes cash on delivery only, as it always
       // has. Staff order creation (orders/orderValidation.js) accepts every
       // method — a merchant recording a bank transfer they received is real.
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet').required(),
+      // 'bank_transfer' is a manual transfer with a receipt (payments/
+      // manualTransferService.js); it does not depend on the gateway flag.
+      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').required(),
+      // The shopper's transfer: for 'bank_transfer', or the deposit a COD order needs.
+      transfer: Joi.object({
+        methodId: Joi.string().max(80).required(),
+        receiptUploadId: uuid.allow(null).optional(),
+        senderReference: Joi.string().max(100).allow('', null).optional(),
+      }).optional(),
       // Which gateway, when more than one offers the method. Optional.
       paymentProvider: Joi.string().max(50).optional(),
       // Where the gateway sends the shopper back to (online methods only).
@@ -58,11 +69,37 @@ module.exports = {
         // Answers to the product's custom fields (see cartValidation.addItem).
         customizations: customizationsInputSchema.optional(),
       }).optional(),
+      // More "Buy Now" lines beside `item`: a quantity bundle with a variant
+      // chosen per unit (one red, one blue). Priced by the server like `item`.
+      extraItems: Joi.array()
+        .items(
+          Joi.object({
+            variantId: uuid.required(),
+            offerId: uuid.optional(),
+            quantity: Joi.number().integer().min(1).default(1),
+            customizations: customizationsInputSchema.optional(),
+          })
+        )
+        .max(20)
+        .optional(),
       // The shopper ticked the order bump. Only the offer is named: the server
       // accepts it only when it is the bump this checkout offers (the store's,
       // or the funnel checkout step's) and prices the line itself
       // (checkout/orderBump.js).
       orderBump: Joi.object({ offerId: uuid.required() }).optional(),
+      // The product's own bumps the shopper ticked (modules/offers), at most three.
+      orderBumps: Joi.array().items(Joi.object({ offerId: uuid.required() })).max(3).optional(),
+      // The bot guard's fields (risk/botProtection): the honeypot, the time
+      // token from GET /checkout/guard, the challenge token. Deliberately
+      // loose — the guard decides, and takes them off the body.
+      website: Joi.string().max(500).allow('', null).optional(),
+      botToken: Joi.string().max(500).allow('', null).optional(),
+      captchaToken: Joi.string().max(4000).allow('', null).optional(),
+      // Proof that the phone was verified (POST /checkout/otp/verify) — risk/checkoutOtp.
+      otpToken: Joi.string().max(500).allow('', null).optional(),
+      // Answers to the purchase-form fields with no column of their own
+      // (sa_national_address, custom_1…5) — checkout/checkoutForm.js.
+      formFields: formFieldsBodySchema,
     }),
   },
 };

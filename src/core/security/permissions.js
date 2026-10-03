@@ -32,17 +32,22 @@ const PERMISSIONS = Object.freeze({
   CUSTOMERS_VIEW: 'customers.view',
   CUSTOMERS_MANAGE: 'customers.manage',
   CUSTOMERS_REVEAL_SENSITIVE: 'customers.reveal_sensitive',
+  FORM_SUBMISSIONS_VIEW: 'form_submissions.view',
 
   SHIPPING_MANAGE: 'shipping.manage',
   TAX_MANAGE: 'tax.manage',
   REFUNDS_MANAGE: 'refunds.manage',
   DISCOUNTS_MANAGE: 'discounts.manage',
+  AFFILIATES_MANAGE: 'affiliates.manage',
 
   ANALYTICS_VIEW: 'analytics.view',
   FINANCIAL_REPORTS_VIEW: 'financial_reports.view',
+  PROFIT_MANAGE: 'profit.manage',
 
   API_KEYS_MANAGE: 'api_keys.manage',
   WEBHOOKS_MANAGE: 'webhooks.manage',
+  // Lane 7: install/uninstall apps, approve an app install link, dropshipping providers.
+  APPS_MANAGE: 'apps.manage',
   AUTOMATIONS_MANAGE: 'automations.manage',
 
   BILLING_MANAGE: 'billing.manage',
@@ -78,14 +83,18 @@ const SYSTEM_ROLES = Object.freeze({
       PERMISSIONS.ORDERS_MANAGE,
       PERMISSIONS.CUSTOMERS_VIEW,
       PERMISSIONS.CUSTOMERS_MANAGE,
+      PERMISSIONS.FORM_SUBMISSIONS_VIEW,
       PERMISSIONS.SHIPPING_MANAGE,
       PERMISSIONS.TAX_MANAGE,
       PERMISSIONS.REFUNDS_MANAGE,
       PERMISSIONS.DISCOUNTS_MANAGE,
+      PERMISSIONS.AFFILIATES_MANAGE,
       PERMISSIONS.ANALYTICS_VIEW,
       PERMISSIONS.FINANCIAL_REPORTS_VIEW,
+      PERMISSIONS.PROFIT_MANAGE,
       PERMISSIONS.API_KEYS_MANAGE,
       PERMISSIONS.WEBHOOKS_MANAGE,
+      PERMISSIONS.APPS_MANAGE,
       PERMISSIONS.AUTOMATIONS_MANAGE,
       PERMISSIONS.AUDIT_LOG_VIEW,
     ],
@@ -119,6 +128,13 @@ const SYSTEM_ROLES = Object.freeze({
     name: 'Confirmation Agent',
     permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ORDERS_CONFIRM, PERMISSIONS.CUSTOMERS_VIEW],
   },
+  // Shipping and printing only (SPEC §17.1): sees orders, books couriers,
+  // prints waybills — cannot confirm, cancel, refund or see customers' lists.
+  fulfillment: {
+    key: 'fulfillment',
+    name: 'Fulfillment',
+    permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.SHIPPING_MANAGE, PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.PRODUCTS_VIEW],
+  },
   accountant: {
     key: 'accountant',
     name: 'Accountant',
@@ -127,10 +143,31 @@ const SYSTEM_ROLES = Object.freeze({
       PERMISSIONS.REFUNDS_MANAGE,
       PERMISSIONS.TAX_MANAGE,
       PERMISSIONS.FINANCIAL_REPORTS_VIEW,
+      PERMISSIONS.PROFIT_MANAGE,
       PERMISSIONS.ANALYTICS_VIEW,
       PERMISSIONS.BILLING_MANAGE,
     ],
   },
 });
 
-module.exports = { PERMISSIONS, ALL_PERMISSIONS, SYSTEM_ROLES };
+/**
+ * The invite dialog's sections (SPEC §17.1): each checkbox a merchant ticks
+ * for a teammate stands for a group of permissions. The dialog's "Advanced"
+ * view shows the permissions themselves.
+ */
+const ACCESS_SECTIONS = Object.freeze([
+  { key: 'orders', permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.ORDERS_CONFIRM, PERMISSIONS.REFUNDS_MANAGE] },
+  { key: 'shipping', permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.SHIPPING_MANAGE] },
+  { key: 'products', permissions: [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE, PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.INVENTORY_MANAGE] },
+  { key: 'customers', permissions: [PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.CUSTOMERS_MANAGE, PERMISSIONS.FORM_SUBMISSIONS_VIEW] },
+  { key: 'discounts', permissions: [PERMISSIONS.DISCOUNTS_MANAGE] },
+  { key: 'store', permissions: [PERMISSIONS.WEBSITE_EDIT, PERMISSIONS.WEBSITE_PUBLISH, PERMISSIONS.TEMPLATE_MANAGE, PERMISSIONS.DOMAIN_MANAGE] },
+  { key: 'funnels', permissions: [PERMISSIONS.FUNNELS_MANAGE, PERMISSIONS.FUNNELS_PUBLISH] },
+  { key: 'analytics', permissions: [PERMISSIONS.ANALYTICS_VIEW] },
+  { key: 'finance', permissions: [PERMISSIONS.FINANCIAL_REPORTS_VIEW, PERMISSIONS.PROFIT_MANAGE, PERMISSIONS.TAX_MANAGE] },
+  { key: 'messaging', permissions: [PERMISSIONS.AUTOMATIONS_MANAGE] },
+  { key: 'apps', permissions: [PERMISSIONS.APPS_MANAGE, PERMISSIONS.API_KEYS_MANAGE, PERMISSIONS.WEBHOOKS_MANAGE] },
+  { key: 'settings', permissions: [PERMISSIONS.WORKSPACE_MANAGE, PERMISSIONS.USERS_MANAGE, PERMISSIONS.ROLES_MANAGE, PERMISSIONS.AUDIT_LOG_VIEW] },
+]);
+
+module.exports = { PERMISSIONS, ALL_PERMISSIONS, SYSTEM_ROLES, ACCESS_SECTIONS };

@@ -11,6 +11,8 @@ const twilioSmsProvider = require('./twilioSmsProvider');
 // { minutes, locale }); anything else falls back to a terse template-name +
 // data dump so nothing sends blank.
 function smsBody(template, data = {}) {
+  // A ready text (automations' SMS step): sent as written.
+  if (typeof data.body === 'string' && data.body.trim()) return data.body;
   if (data.code) {
     const minutes = Number(data.minutes) || 5;
     if (data.locale === 'ar') return `رمز التحقق في Zimos: ${data.code}. صالح لمدة ${minutes} دقائق.`;
@@ -54,7 +56,7 @@ async function sendEmail({ recipient, template, data, workspaceId = null }) {
     if (provider === 'console') {
       logger.info(`[notification:email] ${template} -> ${recipient} :: ${subject}`, { data: loggable(data) });
     } else if (provider === 'brevo') {
-      const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text });
+      const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text, fromName: data && data.fromName ? String(data.fromName).slice(0, 100) : undefined });
       attempts = sent.attempts || attempts;
     } else {
       throw new Error(`Email provider "${provider}" is not configured`);

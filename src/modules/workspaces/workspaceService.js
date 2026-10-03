@@ -184,6 +184,17 @@ const MERCHANT_SETTINGS_KEYS = [
   'funnel_offer_window_minutes',
   // Replaced whole: the browser ad-pixel IDs (public, no secrets).
   'tracking_pixels',
+  // Replaced whole: the thank-you page (storefront/thankYouPage.js).
+  'thank_you_page',
+  // Replaced whole: store details + short policies, and the legal policies
+  // (storefront/storeInfo.js).
+  'store_info',
+  'legal',
+  // Replaced whole: storefront/generalSettings.js.
+  'general',
+  'social_links',
+  'floating_whatsapp',
+  'store_seo',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one

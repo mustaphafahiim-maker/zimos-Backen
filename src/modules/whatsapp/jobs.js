@@ -1,0 +1,14 @@
+'use strict';
+
+const quickReply = require('./quickReplyConfirmation');
+const campaigns = require('./campaignService');
+
+/** Background work of the WhatsApp module (core/queue finds this file by its name). */
+module.exports = {
+  // A customer's tap on "Confirm order" / "Cancel" confirms or cancels the order.
+  processors: [
+    { queue: 'notifications', name: quickReply.JOB, handle: (job) => quickReply.process(job) },
+    // One batch of a WhatsApp campaign; it queues itself again until nobody is pending.
+    { queue: 'notifications', name: campaigns.TICK_JOB, handle: (job) => campaigns.tick(job) },
+  ],
+};

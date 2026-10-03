@@ -110,6 +110,91 @@ ${codeHtml}
       ),
     };
   },
+
+  // The second step of a sign-in (modules/auth/twoFactorService.js).
+  login_code(data = {}) {
+    const code = String(data.code || '');
+    const minutes = Number(data.minutes) || 10;
+    const codeHtml = `<p dir="ltr" style="font-size:30px;font-weight:700;letter-spacing:8px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</p>`;
+    if (data.locale === 'en') {
+      return {
+        subject: 'Your Zimos sign-in code',
+        ...wrap(
+          `<p>Someone is signing in to your Zimos account from a new device. Enter this code to finish:</p>
+${codeHtml}
+<p>It is valid for ${minutes} minutes and works once.</p>
+<p style="color:#6b7280">If this was not you, change your password now: someone knows it.</p>`,
+          `Your Zimos sign-in code: ${code}\n\nIt is valid for ${minutes} minutes and works once.\n\nIf this was not you, change your password now.`
+        ),
+      };
+    }
+    return {
+      subject: 'رمز تسجيل الدخول إلى Zimos',
+      ...wrap(
+        `<p>في محاولة تسجيل دخول لحسابك على Zimos من جهاز جديد. اكتب الرمز ده عشان تكمل:</p>
+${codeHtml}
+<p>الرمز صالح لمدة ${minutes} دقائق ويُستخدم مرة واحدة.</p>
+<p style="color:#6b7280">لو مش إنت، غيّر كلمة السر حالًا: في حد عارفها.</p>`,
+        `رمز تسجيل الدخول إلى Zimos: ${code}\n\nصالح لمدة ${minutes} دقائق ويُستخدم مرة واحدة.\n\nلو مش إنت، غيّر كلمة السر حالًا.`
+      ),
+    };
+  },
+
+  // A store's email to its customer about an order (orderEmailService.js):
+  // the merchant's subject and text under the store's logo and colour.
+  order_email(data = {}) {
+    const subject = String(data.subject || data.storeName || '');
+    const color = /^#[0-9a-f]{6}$/i.test(data.color || '') ? data.color : '#2563EB';
+    const store = escapeHtml(data.storeName || '');
+    // Plain text in, safe HTML out: escaped, links made clickable, blank lines as paragraphs.
+    const linkify = (text) => text.replace(/(https?:\/\/[^\s<]+)/g, (url) => `<a href="${url}" style="color:${color}">${url}</a>`);
+    const paragraphs = String(data.body || '')
+      .split(/\n{2,}/)
+      .map((p) => `<p style="margin:0 0 14px">${linkify(escapeHtml(p)).replace(/\n/g, '<br />')}</p>`)
+      .join('\n');
+    const logo = data.logoUrl && /^https?:\/\//.test(data.logoUrl) ? `<img src="${escapeHtml(data.logoUrl)}" alt="${store}" style="max-height:48px;max-width:180px" />` : `<strong style="font-size:18px">${store}</strong>`;
+    return {
+      subject,
+      ...wrap(
+        `<div style="border-top:4px solid ${color};padding-top:18px;margin-bottom:18px">${logo}</div>
+${paragraphs}
+<p style="color:#6b7280;margin:18px 0 0">${store}</p>`,
+        [data.body, data.storeName].filter(Boolean).join('\n\n'),
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  // An automation's email step (modules/automations): the merchant's own
+  // subject and text, to their customer, signed with the store's name.
+  automation_message(data = {}) {
+    const subject = String(data.subject || data.storeName || '');
+    const paragraphs = String(data.body || '')
+      .split(/\n{2,}/)
+      .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br />')}</p>`)
+      .join('\n');
+    const signature = data.storeName ? `<p style="color:#6b7280">${escapeHtml(data.storeName)}</p>` : '';
+    return {
+      subject,
+      ...wrap(`${paragraphs}\n${signature}`, [data.body, data.storeName].filter(Boolean).join('\n\n'), { dir: 'rtl', arabicFooter: true }),
+    };
+  },
+
+  // A merchant notification sent by email (merchantNotificationService): the
+  // same title and body the dashboard bell shows, with a link to the page.
+  merchant_notification(data = {}) {
+    const title = String(data.title || '');
+    const body = data.body ? String(data.body) : '';
+    const url = data.link ? `${env.frontendUrl.replace(/\/$/, '')}${data.link}` : null;
+    return {
+      subject: title,
+      ...wrap(
+        `<p><strong>${escapeHtml(title)}</strong></p>${body ? `<p>${escapeHtml(body)}</p>` : ''}${url ? `<p><a href="${url}">فتح في لوحة التحكم</a></p>` : ''}`,
+        [title, body, url].filter(Boolean).join('\n\n'),
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
 };
 
 function render(template, data) {

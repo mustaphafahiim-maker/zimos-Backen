@@ -10,6 +10,8 @@ const ingest = asyncHandler(async (req, res) => {
     userAgent: req.get('user-agent'),
     getHeader: (name) => req.get(name),
   });
+  // Conversion events also go to the store's server-side pixels (queued; never delays or fails this answer).
+  if (!result.bot) void require('../marketing/browserEventRelay').relay(req.tenant.workspaceId, req.body, { clientIp: req.ip, userAgent: req.get('user-agent') });
   res.status(202).json(result);
 });
 

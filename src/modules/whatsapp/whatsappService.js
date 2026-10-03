@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 const db = require('../../db/models');
+const inboxEvents = require('./inboxEvents');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const secretBox = require('../../core/utils/secretBox');
@@ -97,7 +98,7 @@ async function upsertConversation(workspaceId, phoneNormalized, { customerName, 
  * Sends a message from the store and records it (a failed send is recorded
  * as failed and re-thrown so the caller sees the WhatsApp error).
  */
-async function sendMessage(workspaceId, { to, text, template }, req) {
+async function sendMessage(workspaceId, { to, text, template, orderId = null }, req) {
   const integration = await requireConnected(workspaceId);
   const phoneNormalized = normalizePhone(to);
   if (!phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
@@ -120,6 +121,7 @@ async function sendMessage(workspaceId, { to, text, template }, req) {
     body: template ? [template.name, ...(template.params || [])].join(' · ') : text,
     templateName: template ? template.name : null,
     sentByUserId: req && req.user ? req.user.id : null,
+    orderId,
   };
 
   try {
@@ -128,6 +130,7 @@ async function sendMessage(workspaceId, { to, text, template }, req) {
       : await cloud.sendText(phoneNumberId, accessToken, phoneNormalized, text);
     const message = await db.WhatsappMessage.create({ ...record, waMessageId: sent.waMessageId, status: 'sent' });
     await conversation.update({ lastMessageAt: new Date(), lastMessagePreview: (record.body || '').slice(0, 300) });
+    inboxEvents.publish(workspaceId, { conversationId: conversation.id, reason: 'message_out' });
     return message;
   } catch (err) {
     await db.WhatsappMessage.create({ ...record, status: 'failed', error: String(err.message).slice(0, 500) });
@@ -180,6 +183,7 @@ async function listMessages(workspaceId, conversationId, { limit = 100, before }
 async function setConversationStatus(workspaceId, conversationId, status) {
   const c = await getConversation(workspaceId, conversationId);
   await c.update({ status });
+  inboxEvents.publish(workspaceId, { conversationId: c.id, reason: 'conversation' });
   return { id: c.id, status: c.status };
 }
 
@@ -230,6 +234,11 @@ async function handleWebhook(workspaceId, payload) {
           unreadCount: conversation.unreadCount + 1,
           status: 'open',
         });
+        // A tap on "Confirm order" / "Cancel" confirms or cancels the order (quickReplyConfirmation.js).
+        await require('./quickReplyConfirmation').enqueue(workspaceId, msg, phoneNormalized);
+        // A reply to a campaign is counted, and STOP withdraws marketing consent (campaignService.js).
+        await require('./campaignService').handleInbound(workspaceId, msg, phoneNormalized);
+        inboxEvents.publish(workspaceId, { conversationId: conversation.id, reason: 'message_in' });
         result.messages += 1;
       }
 
@@ -239,6 +248,7 @@ async function handleWebhook(workspaceId, payload) {
         if ((STATUS_RANK[st.status] || 0) > (STATUS_RANK[message.status] || 0)) {
           const error = st.errors && st.errors[0] ? `${st.errors[0].code}: ${st.errors[0].title || st.errors[0].message || ''}` : null;
           await message.update({ status: st.status, error: error ? error.slice(0, 500) : message.error });
+          inboxEvents.publish(workspaceId, { conversationId: message.conversationId, reason: 'status' });
         }
         result.statuses += 1;
       }
