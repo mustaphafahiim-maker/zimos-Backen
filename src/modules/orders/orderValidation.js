@@ -78,8 +78,45 @@ module.exports = {
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
       notes: Joi.string().max(2000).allow('').optional(),
+      // Staff may set the shipping themselves (minor units); omitted, it is calculated.
+      shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
     }),
   },
+  // POST /manual/preview — the same body, priced and not saved; the customer may still be blank.
+  manualPreview: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({
+      items: Joi.array()
+        .items(
+          Joi.object({
+            variantId: uuid.required(),
+            offerId: uuid.optional(),
+            quantity: Joi.number().integer().min(1).required(),
+          })
+        )
+        .min(1)
+        .required(),
+      contact: Joi.object({ fullName: Joi.string().max(200).allow(''), phone: Joi.string().max(32).allow('') })
+        .unknown(true)
+        .optional(),
+      shippingAddress: Joi.object({
+        country: Joi.string().length(2).required(),
+        province: Joi.string().max(100).allow(null, '').optional(),
+        city: Joi.string().max(100).allow('').optional(),
+        addressLine: Joi.string().max(500).allow('').optional(),
+      })
+        .unknown(true)
+        .optional(),
+      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').default('cod'),
+      discountCode: Joi.string().max(100).optional(),
+      shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
+    }),
+  },
+  manualCustomer: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    query: Joi.object({ phone: Joi.string().trim().min(6).max(32).required() }),
+  },
+  manualOptions: { params: Joi.object({ workspaceId: uuid.required() }) },
   get: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }) },
   cancel: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
@@ -120,6 +157,34 @@ module.exports = {
     }).min(1),
   },
   listTags: { params: Joi.object({ workspaceId: uuid.required() }) },
+  // POST /bulk — orderBulkService.js. The orders are named, or are whatever
+  // the list shows for `filter` (its own query, without paging).
+  bulk: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({
+      action: Joi.string()
+        .valid('set_status', 'add_tag', 'remove_tag', 'archive', 'unarchive', 'mark_seen', 'mark_unseen', 'ship')
+        .required(),
+      orderIds: Joi.array().items(uuid).min(1).max(500).optional(),
+      filter: Joi.object({
+        sort: Joi.string()
+          .valid(...ORDER_SORT_KEYS)
+          .optional(),
+        stage: Joi.string().valid(...STAGES).optional(),
+        ...search,
+      })
+        .unknown(true)
+        .optional(),
+      payload: Joi.object({
+        status: Joi.string().valid(...STAGES).optional(),
+        reason: Joi.string().trim().max(500).allow('', null).optional(),
+        followUp: Joi.string().valid('unreachable', 'postponed').optional(),
+        tags: tagList.optional(),
+        carrierCode: Joi.string().trim().min(1).max(100).optional(),
+        notes: Joi.string().max(500).allow('', null).optional(),
+      }).default({}),
+    }).xor('orderIds', 'filter'),
+  },
   // GET /:orderId/neighbors — the list's own filters, search and sort.
   neighbors: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),

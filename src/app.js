@@ -23,6 +23,7 @@ const customerRoutes = require('./modules/customers/customerRoutes');
 const contactRoutes = require('./modules/contacts/contactRoutes');
 const storesRoutes = require('./modules/stores/storesRoutes');
 const dashboardRoutes = require('./modules/dashboard/dashboardRoutes');
+const digitalRoutes = require('./modules/digital/digitalRoutes');
 const orderRoutes = require('./modules/orders/orderRoutes');
 const returnRoutes = require('./modules/returns/returnRoutes');
 const confirmationRoutes = require('./modules/cod/confirmationRoutes');
@@ -68,6 +69,7 @@ const webhookRoutes = require('./modules/webhooks/webhookRoutes');
 const publicApiRoutes = require('./modules/publicApi/publicApiRoutes');
 const merchantNotificationRoutes = require('./modules/notifications/merchantNotificationRoutes');
 const trackingPixelRoutes = require('./modules/marketing/trackingPixelRoutes');
+const inboxRoutes = require('./modules/whatsapp/inboxRoutes');
 
 const app = express();
 
@@ -156,6 +158,7 @@ v1.use('/workspaces/:workspaceId/customers', customerRoutes);
 v1.use('/workspaces/:workspaceId/contacts', contactRoutes.staff);
 v1.use('/workspaces/:workspaceId/duplicate', storesRoutes.duplicate);
 v1.use('/me/stores', storesRoutes.me);
+v1.use('/workspaces/:workspaceId/digital', digitalRoutes.staff);
 v1.use('/workspaces/:workspaceId', dashboardRoutes);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
@@ -188,11 +191,21 @@ v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/manual-transfers', require('./modules/payments/manualTransferRoutes'));
 v1.use('/workspaces/:workspaceId/payment-rules', require('./modules/payments/paymentRulesRoutes'));
+v1.use('/workspaces/:workspaceId/currencies', require('./modules/currencies/currencyRoutes'));
+v1.use('/workspaces/:workspaceId/saved-payment-methods', require('./modules/payments/savedMethods/savedMethodRoutes'));
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
 v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
+// Lane 7: the app store, the app install link and dropshipping providers.
+v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
+v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
 v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
+v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
+// The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
+v1.use('/inbox-stream', inboxRoutes.stream);
+// The analytics live view's SSE stream — opened with a ticket, like the inbox stream.
+v1.use('/analytics-stream', require('./modules/analytics/realtimeStream').streamRouter);
 // WhatsApp Cloud API webhook — public; Meta's X-Hub-Signature-256 over the raw
 // body proves the sender.
 v1.use('/webhooks/whatsapp', whatsappRoutes.webhook);
@@ -228,6 +241,7 @@ v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
 // Storefront visit tracking (page views, cart, checkout, purchase).
 v1.use('/store/:workspaceId/events', eventsPublicRoutes);
 v1.use('/store/:workspaceId/forms', contactRoutes.store);
+v1.use('/store/:workspaceId/downloads', digitalRoutes.store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 

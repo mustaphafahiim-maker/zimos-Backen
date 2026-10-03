@@ -55,6 +55,8 @@ module.exports = {
       utm_content: Joi.string().max(255).optional(),
     }),
   },
+  live: { params: wsParams, query: Joi.object({ funnelId: Joi.string().uuid().optional() }) },
+  liveTicket: { params: wsParams },
   summary: {
     params: Joi.object({ workspaceId: Joi.string().uuid().required() }),
     query: rangeQuery,

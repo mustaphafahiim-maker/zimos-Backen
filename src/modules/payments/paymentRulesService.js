@@ -59,13 +59,16 @@ async function adjustmentForWorkspace(workspaceId, paymentMethod, base, transact
  * Returns the fields to write on the order.
  */
 async function repriceForMethod(order, paymentMethod, transaction) {
-  const base = Number(order.subtotalAmount) - Number(order.discountAmount) + Number(order.shippingAmount);
-  const next = await adjustmentForWorkspace(order.workspaceId, paymentMethod, base, transaction);
+  const goods = Number(order.subtotalAmount) - Number(order.discountAmount) + Number(order.shippingAmount);
+  const next = await adjustmentForWorkspace(order.workspaceId, paymentMethod, goods, transaction);
   const withoutOld = Number(order.totalAmount) - Number(order.paymentAdjustmentAmount || 0);
+  const totalAmount = withoutOld + next.amount;
+  const base = await require('../currencies/fxService').baseFieldsFor(order.workspaceId, { currency: order.currency, totalAmount }, transaction);
   return {
     paymentAdjustmentAmount: next.amount,
     paymentAdjustmentLabel: next.label,
-    totalAmount: withoutOld + next.amount,
+    totalAmount,
+    ...base,
   };
 }
 

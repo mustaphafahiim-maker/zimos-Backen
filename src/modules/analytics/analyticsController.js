@@ -56,3 +56,18 @@ const attribution = asyncHandler(async (req, res) => {
 });
 
 Object.assign(module.exports, { attribution });
+
+// --- Live view over SSE (SPEC §15.2) -----------------------------------------
+const realtimeStream = require('./realtimeStream');
+
+const live = asyncHandler(async (req, res) => {
+  res.json(await realtimeStream.snapshot(req.tenant.workspaceId, { funnelId: req.query.funnelId }));
+});
+const liveTicket = asyncHandler(async (req, res) => {
+  res.status(201).json({
+    ticket: realtimeStream.issueTicket(req.tenant.workspaceId, req.user.id),
+    expiresInSeconds: realtimeStream.TICKET_TTL_MS / 1000,
+  });
+});
+
+Object.assign(module.exports, { live, liveTicket });

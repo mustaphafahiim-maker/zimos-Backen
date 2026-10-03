@@ -45,6 +45,8 @@ const PERMISSIONS = Object.freeze({
 
   API_KEYS_MANAGE: 'api_keys.manage',
   WEBHOOKS_MANAGE: 'webhooks.manage',
+  // Lane 7: install/uninstall apps, approve an app install link, dropshipping providers.
+  APPS_MANAGE: 'apps.manage',
   AUTOMATIONS_MANAGE: 'automations.manage',
 
   BILLING_MANAGE: 'billing.manage',
@@ -90,6 +92,7 @@ const SYSTEM_ROLES = Object.freeze({
       PERMISSIONS.PROFIT_MANAGE,
       PERMISSIONS.API_KEYS_MANAGE,
       PERMISSIONS.WEBHOOKS_MANAGE,
+      PERMISSIONS.APPS_MANAGE,
       PERMISSIONS.AUTOMATIONS_MANAGE,
       PERMISSIONS.AUDIT_LOG_VIEW,
     ],
