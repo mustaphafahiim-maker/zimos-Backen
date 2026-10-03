@@ -39,10 +39,12 @@ the numbers **400–449** (no lane owns them).
 - [x] 7. Background work in the worker: `ads.sync_spend` and `fx.update_rates` as
   queue schedules, not `setInterval` in every API process; the duplicate upload
   sweep timer removed. (Courier booking: see Decisions.)
-- [ ] 8. Error reporting (§3.5 Sentry): an error-reporter interface, console by
+- [x] 8. Error reporting (§3.5 Sentry, backend + worker; the dashboards and the storefront are not wired yet): an error-reporter interface, console by
   default, Sentry when `SENTRY_DSN` is set.
-- [ ] 9. Refresh token in an httpOnly cookie by default in production (§3.4 #2);
-  check the dashboard/API domain setup first.
+- [x] 9. Refresh token in an httpOnly cookie in production (§3.4 #2): already built,
+  behind `AUTH_REFRESH_COOKIE=true` — an owner setting, because the cookie only
+  works once the dashboard and the API share a site (app.x + api.x). Nothing to
+  code; turn it on with the deploy.
 - [ ] 10. Shipping data: `geo_regions` seed (Egypt + North Coast + districts,
   Saudi regions), `carrier_region_map` (stored, editable), `shipment_events`
   timeline, per-carrier-account `autoCreateShipmentOn` / inspection / courier

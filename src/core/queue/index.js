@@ -35,7 +35,17 @@ function every(name, everyMs, fn) {
 
 async function route(job) {
   // Every log line of the job carries its id and store (core/utils/requestContext).
-  return requestContext.run({ jobId: `${job.queue}/${job.name}:${job.id}`, ...(job.workspaceId ? { workspaceId: job.workspaceId } : {}) }, () => routeIn(job));
+  return requestContext.run({ jobId: `${job.queue}/${job.name}:${job.id}`, ...(job.workspaceId ? { workspaceId: job.workspaceId } : {}) }, async () => {
+    try {
+      return await routeIn(job);
+    } catch (err) {
+      // Its last attempt (or a permanent failure): nothing will retry it.
+      if (err.permanent || !job.maxAttempts || job.attempts >= job.maxAttempts) {
+        require('../errors/errorReporter').report(err, { queue: job.queue, job: job.name, attempts: job.attempts });
+      }
+      throw err;
+    }
+  });
 }
 
 async function routeIn(job) {

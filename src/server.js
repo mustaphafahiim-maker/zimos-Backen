@@ -86,6 +86,7 @@ async function start() {
 
   process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled promise rejection', { reason: reason && reason.message ? reason.message : reason });
+    require('./core/errors/errorReporter').report(reason, { source: 'unhandledRejection' });
   });
 }
 

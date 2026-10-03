@@ -2,6 +2,7 @@
 
 const { AppError } = require('../errors/AppError');
 const logger = require('../utils/logger');
+const errorReporter = require('../errors/errorReporter');
 const env = require('../../config/env');
 
 const BODY_ERROR_CODES = {
@@ -22,6 +23,7 @@ function errorHandler(err, req, res, next) {
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
       logger.error(err.message, { code: err.code, requestId, stack: err.stack });
+      errorReporter.report(err, { code: err.code });
     } else if (err.statusCode === 424) {
       // A courier or payment gateway failed us (CARRIER_ERROR, GATEWAY_ERROR,
       // CARRIER_BOOKING_NOT_SAVED). Below 500 only so no edge proxy replaces
@@ -75,6 +77,7 @@ function errorHandler(err, req, res, next) {
 
   // Unexpected/unknown error: never leak internals.
   logger.error('Unhandled error', { message: err.message, stack: err.stack, requestId });
+  errorReporter.report(err, { route: `${req.method} ${req.route ? req.route.path : req.path}` });
   return res.status(500).json({
     error: {
       code: 'INTERNAL_SERVER_ERROR',
