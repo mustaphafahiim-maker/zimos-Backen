@@ -11,9 +11,10 @@
 - [x] 8a. Subscriptions and installments on the sandbox gateway (§18.1) — checked against the lane DB (scratch script through the real services) and on :5208/:3208: a card order with a monthly subscription and a 3-payment plan started both with the saved sandbox card; renewals made linked paid orders; the plan completed after its 3rd payment; a card that could not be charged was retried at +1, +3 and +7 days and then cancelled; `/subscriptions` (list, KPIs, product plans) in Arabic; the customer page showed the subscription and cancelled it.
 - [x] 8d. Services marketplace (§20.5) — checked on :4108/:5208/:5308: listings created through `/admin/service-listings` (a listing with no contact is refused; a non-admin gets 403); the dashboard `/services` directory with category filter, price or "on request", and WhatsApp / email buttons in Arabic; the platform-admin "Service listings" page with its editor.
 - [x] 8c. Shoppable images (§7.9) — checked on :4108/:5208/:3208: in the dashboard a picture was added by link, a point placed by clicking it and linked to a product, and saved; the storefront page `/looks/living-room-look` showed the numbered point and the product with its server price. Not exercised in a browser: opening the point's pop-up card (the preview pane stopped drawing) and the `shoppable_image` builder element on a published page — both typecheck and share the component the public page uses.
+- [x] 8b. Courses (§18.3) — checked on :4108/:5208/:3208: a course with two chapters and three lessons saved and re-saved (lesson ids kept); publishing an empty course refused; a visitor opened the free preview and was refused a paid lesson; a manual enrollment and a paid order both enrolled their customer (once); the student signed in with phone + code, saw the outline, opened a lesson, was refused the drip lesson with its release date, and marked a lesson done; the dashboard course editor and Students tab in Arabic; the storefront `/learn` and `/learn/<slug>` pages. Not exercised in a browser: the OTP sign-in form itself (the API was; the page was opened with a token from the API walk) and a file lesson's download.
 
 ## Next
-- [ ] 8b. Courses (§18.3): courses → modules → lessons, drip release, free preview, enrollment on purchase, student portal with OTP.
+Every item of lane 8 is ticked.
 
 ## Decisions
 - 2026-10-03 Contact `type`, `totalSpent`, `lastOrderAt` and the delivery rate are computed from the live orders (one CTE over the derived stage, `contacts/segmentRules.js`), not stored: no hook into the orders module, and nothing to drift. Stored on `customers`: `tags` and `source` only. `segments` (the old unused array) was copied into `tags` and left in place.
@@ -51,15 +52,18 @@
 
 - 2026-10-03 Shoppable images: table `shoppable_images` (hotspots as `{x, y, productId}` percentages, max 20). Public page is `/looks/<slug>` (reserved path); the public API returns each point with its product in the storefront's usual public shape (`loadPublicProducts`), so prices come from the server and inactive products drop out. Builder element `shoppable_image` takes the image id (copied from the dashboard); it was added to `pageTree.js`, `PAGE_ELEMENT_TYPES` in the api-client `types.ts` (one line — the union lives there), the storefront renderer and the editor's block registry.
 
+- 2026-10-03 Courses: sold through one product (`courses.product_id`); a paid order enrolls the buyer from the same after-commit hook as subscriptions. The outline is saved whole (`PUT /courses/:id/outline`): rows sent with their id are kept so progress stays attached. A video lesson is a link to an external player (YouTube/Vimeo/Bunny are embedded, anything else opens as a link) — protected streaming is the spec's open decision and is not built. File lessons use the digital file library and are streamed by the API. Student sign-in: phone + OTP (`student_portal`), a 30-day HMAC token sent only as the `X-Student-Token` header (added to storefront CORS), kept in the browser's localStorage. `/learn` is a reserved storefront path.
+
 ## Blocked
 
 ## Handoff
 - Branch `lane-8` in both worktrees; everything under Done is merged into `origin/zimos-additions`.
-- Migrations used: 310–317. Next free: 318.
+- Migrations used: 310–318. Next free: 319.
 - Setup guide: `payment` is done whenever the storefront offers a method (COD counts); `domain` and `pixel` are optional and outside the percentage. Shortcuts live on `memberships.nav_shortcuts` (max 8 dashboard routes).
 - Lane DB has demo data: 4 customers with COD orders, 3 leads, 2 segments, a published site "Lane 8 site" with `/contact` carrying a form (`form1`), and a second store "Demo Store Copy" made by the duplicate endpoint. The demo user's username is `demo`.
 - Scratch API helper (not in the repo): log in as `demo@zimos.test` against `http://localhost:4108/api/v1`, workspace from `GET /workspaces`; POSTs to `/orders` need an `Idempotency-Key` header.
 - Lane DB also has: digital products `EBOOK-1` / `LICENCE-1` and a paid order `ORD-DIGI-…`; an affiliate "Hany Marketer" (`hany10`, phone 01066600077) with one paid and one void commission. A portal OTP is printed in the backend log (`otp_affiliate_portal`).
 - Lane DB also has: the sandbox gateway connected, products `CLUB-1` (monthly subscription) and `COURSE-3` (3 weekly payments), customer "Subscriber Samy" with one completed plan and one cancelled subscription.
 - In the lane DB the demo user was made a platform `creator` (so `/admin` routes and the admin app on :5308 work with the same login), and two service listings exist.
+- Lane DB also has: a published course "From Zero To Profit" (linked to `EBOOK-1`) with two students, and a shoppable image "Living room look".
 - The lane shares a 5-dev-server limit with other chats: stop the dashboard before starting the storefront.

@@ -101,7 +101,8 @@ staff.post(
 // Mounted at /api/v1/store/:workspaceId/learn
 const portal = Router({ mergeParams: true });
 portal.use(createIpMinuteLimiter('student-portal', 60, { skip: () => env.isTest }), resolvePublicWorkspace);
-const tokenOf = (req) => String(req.headers['x-student-token'] || req.query.token || '');
+// Header only: a token in a link would end up in browser history and logs.
+const tokenOf = (req) => String(req.headers['x-student-token'] || '');
 const noStore = (res) => res.set('Cache-Control', 'private, no-store');
 
 portal.post(
