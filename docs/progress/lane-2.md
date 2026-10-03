@@ -27,4 +27,6 @@
 ## Blocked
 
 ## Handoff
-Item 1 is landed. Nothing half-done. Test helper used so far (not in the repo): log in as the demo user on :4102, workspace id from `GET /workspaces`; storefront checkout needs an `Idempotency-Key` header.
+Items 1 and 2 are landed on zimos-additions (backend and frontend); nothing is half-done. Next is item 3: `modules/risk/ipIntel` (interface + sandbox adapter + README), fill `orders.ip_country` (column exists, migration 161) and pass `visitor: { ip, ipCountry, isVpn }` to `fraudRules.evaluateStorefrontOrder` in `orderService.createOrder` (it already takes them), then a public store check that hides the store from blocked countries and from `blocked_entries` of scope `visit`. Migrations used so far: 160, 161.
+
+Working notes: only one preview server fits (other lanes hold 4 of 5), so run the API with `node src/server.js` in the background and verify through HTTP: log in as the demo user on :4102, workspace id from `GET /workspaces`, storefront checkout needs an `Idempotency-Key` header. Every merge conflicts in `packages/api-client/src/index.ts` (keep both lines); `orderService.js` and `workspaceValidation.js` are edited by other lanes too, so keep edits there to a few lines.
