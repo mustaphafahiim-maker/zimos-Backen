@@ -93,6 +93,8 @@ module.exports = (sequelize, DataTypes) => {
       paymentExpiresAt: { type: DataTypes.DATE, allowNull: true, field: 'payment_expires_at' },
       paymentTokenHash: { type: DataTypes.STRING(64), allowNull: true, field: 'payment_token_hash' },
       completionContext: { type: DataTypes.JSONB, allowNull: true, field: 'completion_context' },
+      // Answers to the purchase-form fields with no column (checkout/checkoutForm.js).
+      checkoutFields: { type: DataTypes.JSONB, allowNull: true, field: 'checkout_fields' },
     },
     {
       tableName: 'orders',

@@ -8,6 +8,7 @@ const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
+const blockedEntries = require('../fraud/blockedEntries');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -31,6 +32,7 @@ const automationEngine = require('../automations/automationEngine');
 const pixelEvents = require('../marketing/pixelEvents');
 const orderMeta = require('./orderMetaService');
 const { applyOrderFilters } = require('./orderFilters');
+const { effectiveVariantPrice } = require('../catalog/productPage');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -102,7 +104,9 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     };
   }
 
-  const lineTotal = variant.priceAmount * quantity;
+  // A countdown offer that has ended sells at the full price (catalog/productPage.js).
+  const unitPriceAmount = effectiveVariantPrice(variant, variant.product).priceAmount;
+  const lineTotal = unitPriceAmount * quantity;
   return {
     productId: variant.productId,
     productName: variant.product.name,
@@ -112,7 +116,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     offerId: null,
     offerName: null,
     quantity,
-    unitPriceAmount: variant.priceAmount,
+    unitPriceAmount,
     unitCostAmount: variant.costAmount,
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
@@ -261,6 +265,29 @@ async function createOrder(
 
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
+    // The store's blocked_entries (scope orders). The IP is the shopper's only
+    // on a storefront order; a staff order carries the staff member's.
+    const blockedEntry = await blockedEntries.findMatch(
+      workspaceId,
+      'orders',
+      {
+        phoneNormalized: customer.phoneNormalized,
+        email: contact.email,
+        ip: req && !req.user ? req.ip : null,
+        deviceId: payload.deviceId,
+        fullName: contact.fullName,
+        addressLine: shippingAddress && shippingAddress.addressLine,
+      },
+      transaction
+    );
+    if (blockedEntry && !riskFlags.includes('blacklisted_customer')) riskFlags.push('blacklisted_customer');
+    // A phone blocked before it ever ordered: its customer row exists only now.
+    if (blockedEntry && blockedEntry.type === 'phone' && !customer.isBlacklisted) {
+      await customer.update(
+        { isBlacklisted: true, blacklistReason: blockedEntry.reason, blacklistedAt: blockedEntry.createdAt },
+        { transaction }
+      );
+    }
 
     // Before any inventory is touched, so a refusal has nothing to undo but
     // the customer lookup.
@@ -271,6 +298,7 @@ async function createOrder(
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
         transaction,
         onlinePayment: Boolean(awaitingPayment),
+        blockedEntry,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
@@ -486,6 +514,7 @@ async function createOrder(
     // conversions run after commit and never fail the order. An order waiting
     // for its online payment is not a purchase yet, so it sends no conversion.
     transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
+    transaction.afterCommit(() => require('../notifications/merchantNotificationEvents').emit(workspaceId, 'order.created', order.id));
     if (!awaitingPayment && !isTest) {
       transaction.afterCommit(() => pixelEvents.emit(workspaceId, 'order.created', order.id));
     }
