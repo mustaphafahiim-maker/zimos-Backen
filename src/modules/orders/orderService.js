@@ -34,6 +34,7 @@ const outbox = require('../../core/outbox/outbox');
 const orderMeta = require('./orderMetaService');
 const { applyOrderFilters } = require('./orderFilters');
 const { effectiveVariantPrice } = require('../catalog/productPage');
+const { applyBundleTiers } = require('../bundles/bundlePricing');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -383,6 +384,10 @@ async function createOrder(
       }
     }
 
+    // Quantity bundles (modules/bundles): lowers the totals of the lines they
+    // cover, before anything else looks at the subtotal.
+    const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
+
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     const productIds = pricedLines.map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
@@ -404,6 +409,8 @@ async function createOrder(
       discountRecord = evaluation.discount;
       discountsSnapshot = [{ code: discountCode, type: evaluation.discount.type, amount: discountAmount }];
     }
+    // Kept apart from the coupon: the bundle's saving is already in the line totals.
+    discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
     // Always priced, even without an address (amount 0 then): the weight
     // and tier are stored on the order either way.
@@ -496,6 +503,7 @@ async function createOrder(
             quantity: line.quantity,
             unitPriceAmount: line.unitPriceAmount,
             unitCostAmount: line.unitCostAmount,
+            lineDiscountAmount: line.lineDiscountAmount || 0,
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,

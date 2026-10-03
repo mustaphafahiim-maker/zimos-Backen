@@ -31,7 +31,7 @@ const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, ...orderBody } = req.body;
+  const { item, extraItems, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -65,7 +65,12 @@ const checkout = asyncHandler(async (req, res) => {
     if (!cart) throw new AppError('CART_NOT_FOUND', 'No active cart found for this token', 404);
     ({ items } = await cartService.toOrderItems(workspaceId, cart.id));
   } else if (item) {
-    items = [{ variantId: item.variantId, offerId: item.offerId, quantity: item.quantity || 1, customizations: item.customizations }];
+    items = [item, ...(extraItems || [])].map((line) => ({
+      variantId: line.variantId,
+      offerId: line.offerId,
+      quantity: line.quantity || 1,
+      customizations: line.customizations,
+    }));
   } else {
     throw new AppError(
       'CART_TOKEN_OR_ITEM_REQUIRED',
