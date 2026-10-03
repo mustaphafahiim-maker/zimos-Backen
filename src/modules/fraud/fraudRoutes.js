@@ -21,6 +21,14 @@ router.post(
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
   controller.approve
 );
+// "Block and cancel": the order is cancelled and its phone and IP blocked.
+router.post(
+  '/flagged-orders/:orderId/block',
+  validate(schemas.blockAndCancel),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.blockAndCancel
+);
+router.get('/stats', validate(schemas.stats), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.stats);
 router.get('/blocklist', validate(schemas.listBlocklist), requirePermission(PERMISSIONS.CUSTOMERS_VIEW), controller.listBlocklist);
 router.post('/blocklist', validate(schemas.block), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), controller.block);
 router.post(

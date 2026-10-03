@@ -13,9 +13,35 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { TRIGGERS, TOKENS } = require('./automationEngine');
+const { STEP_TYPES, WAIT_UNITS } = require('./automationSteps');
+const templates = require('./automationTemplates');
 
 const uuid = Joi.string().uuid();
 const ws = { workspaceId: uuid.required() };
+
+const text = (max) => Joi.string().trim().min(1).max(max);
+// One step of the sequence; the shape depends on its type (automationSteps.js).
+const step = Joi.alternatives().conditional('.type', {
+  switch: [
+    { is: 'wait', then: Joi.object({ type: Joi.valid('wait').required(), amount: Joi.number().integer().min(1).max(720).required(), unit: Joi.string().valid(...Object.keys(WAIT_UNITS)).required() }) },
+    {
+      is: 'whatsapp_template',
+      then: Joi.object({
+        type: Joi.valid('whatsapp_template').required(),
+        template: Joi.string().pattern(/^[a-z0-9_]{1,512}$/).required(),
+        language: Joi.string().pattern(/^[a-z]{2,3}(_[A-Z]{2})?$/).default('ar'),
+        params: Joi.array().items(Joi.string().max(1000)).max(20).default([]),
+      }),
+    },
+    { is: 'sms', then: Joi.object({ type: Joi.valid('sms').required(), body: text(600).required() }) },
+    { is: 'email', then: Joi.object({ type: Joi.valid('email').required(), subject: text(200).required(), body: text(5000).required() }) },
+    { is: 'webhook', then: Joi.object({ type: Joi.valid('webhook').required(), url: Joi.string().uri({ scheme: ['https', 'http'] }).max(2000).required() }) },
+    { is: 'add_tag', then: Joi.object({ type: Joi.valid('add_tag').required(), tag: text(40).required() }) },
+    { is: 'set_status', then: Joi.object({ type: Joi.valid('set_status').required(), status: Joi.string().valid('confirmed', 'cancelled').required() }) },
+    { is: 'notify_team', then: Joi.object({ type: Joi.valid('notify_team').required(), message: text(500).required() }) },
+  ],
+  otherwise: Joi.object({ type: Joi.string().valid(...STEP_TYPES).required() }),
+});
 
 const ruleBody = {
   name: Joi.string().min(2).max(200),
@@ -24,18 +50,30 @@ const ruleBody = {
   conditions: Joi.object({
     paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').allow(null),
     minTotalAmount: Joi.number().integer().min(0).allow(null),
+    productIds: Joi.array().items(uuid).max(50),
+    governorates: Joi.array().items(Joi.string().trim().max(100)).max(40),
+    source: Joi.string().valid('store', 'funnel').allow(null),
+    funnelIds: Joi.array().items(uuid).max(50),
+    riskLevel: Joi.array().items(Joi.string().valid('low', 'medium', 'high')).max(3),
+    isFirstOrder: Joi.boolean().allow(null),
+    tags: Joi.array().items(Joi.string().trim().max(40)).max(20),
+    // Stop a waiting sequence when the order's status changed meanwhile (default true).
+    stopOnStatusChange: Joi.boolean(),
+    // review.request: days after delivery (default 3).
+    delayDays: Joi.number().integer().min(1).max(60),
+    // The value of {{coupon_code}} in this rule's messages.
+    couponCode: Joi.string().trim().max(100).allow(null, ''),
   }).default({}),
+  // An ordered sequence; it may not end on a wait, and needs at least one step that does something.
   actions: Joi.array()
-    .items(
-      Joi.object({
-        type: Joi.string().valid('whatsapp_template').required(),
-        template: Joi.string().pattern(/^[a-z0-9_]{1,512}$/).required(),
-        language: Joi.string().pattern(/^[a-z]{2,3}(_[A-Z]{2})?$/).default('ar'),
-        params: Joi.array().items(Joi.string().max(1000)).max(20).default([]),
-      })
-    )
+    .items(step)
     .min(1)
-    .max(5),
+    .max(12)
+    .custom((value, helpers) => {
+      if (value.every((s) => s.type === 'wait')) return helpers.message('The sequence needs at least one step besides waiting');
+      if (value[value.length - 1].type === 'wait') return helpers.message('The sequence cannot end with a wait');
+      return value;
+    }),
 };
 
 const view = (r, stats = {}) => ({
@@ -43,6 +81,7 @@ const view = (r, stats = {}) => ({
   name: r.name,
   trigger: r.trigger,
   isActive: r.isActive,
+  templateKey: r.templateKey || null,
   conditions: r.conditions && !Array.isArray(r.conditions) ? r.conditions : {},
   actions: r.actions || [],
   createdAt: r.createdAt,
@@ -67,7 +106,7 @@ const list = asyncHandler(async (req, res) => {
     s[r.status] = Number(r.count);
     if (!s.lastRunAt || new Date(r.lastRunAt) > new Date(s.lastRunAt)) s.lastRunAt = r.lastRunAt;
   }
-  res.json({ rules: rules.map((r) => view(r, stats[r.id])), triggers: TRIGGERS, tokens: TOKENS });
+  res.json({ rules: rules.map((r) => view(r, stats[r.id])), triggers: TRIGGERS, tokens: TOKENS, stepTypes: STEP_TYPES });
 });
 
 const create = asyncHandler(async (req, res) => {
@@ -104,15 +143,48 @@ const runs = asyncHandler(async (req, res) => {
   const orders = orderIds.length ? await db.Order.findAll({ where: { id: orderIds }, attributes: ['id', 'orderNumber'] }) : [];
   const byId = new Map(orders.map((o) => [o.id, o.orderNumber]));
   res.json({
-    runs: rows.map((r) => ({ id: r.id, ruleId: r.ruleId, trigger: r.trigger, status: r.status, detail: r.detail, createdAt: r.createdAt, order: r.orderId ? { id: r.orderId, orderNumber: byId.get(r.orderId) || null } : null })),
+    runs: rows.map((r) => ({ id: r.id, ruleId: r.ruleId, trigger: r.trigger, status: r.status, detail: r.detail, stepIndex: r.stepIndex, stepType: r.stepType, executionId: r.executionId, createdAt: r.createdAt, order: r.orderId ? { id: r.orderId, orderNumber: byId.get(r.orderId) || null } : null })),
     nextCursor: rows.length === limit ? rows[rows.length - 1].createdAt.toISOString() : null,
   });
+});
+
+/** The ready-made automations, each with whether this store already switched it on. */
+const listTemplates = asyncHandler(async (req, res) => {
+  const rules = await db.AutomationRule.findAll({ where: { workspaceId: req.tenant.workspaceId, templateKey: { [Op.ne]: null } }, attributes: ['id', 'templateKey'] });
+  const enabled = new Map(rules.map((r) => [r.templateKey, r.id]));
+  res.json({ templates: templates.TEMPLATES.map((t) => ({ ...templates.publicView(t), ruleId: enabled.get(t.key) || null })) });
+});
+
+/** One click: the template becomes a rule of this store (a second click returns the same rule). */
+const enableTemplate = asyncHandler(async (req, res) => {
+  const { workspaceId } = req.tenant;
+  const template = templates.byKey(req.params.key);
+  if (!template) throw new NotFoundError('AutomationTemplate');
+  const existing = await db.AutomationRule.findOne({ where: { workspaceId, templateKey: template.key } });
+  if (existing) return res.json({ rule: view(existing), created: false });
+  const rule = await db.AutomationRule.create({
+    workspaceId,
+    name: template.name[req.body.locale === 'en' ? 'en' : 'ar'],
+    trigger: template.trigger,
+    conditions: template.conditions,
+    actions: template.steps,
+    isActive: true,
+    templateKey: template.key,
+  });
+  await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'automation.create', entityType: 'AutomationRule', entityId: rule.id, after: view(rule), metadata: { templateKey: template.key }, req });
+  return res.status(201).json({ rule: view(rule), created: true });
 });
 
 // Mounted at /api/v1/workspaces/:workspaceId/automations
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.AUTOMATIONS_MANAGE));
 router.get('/', validate({ params: Joi.object(ws) }), list);
+router.get('/templates', validate({ params: Joi.object(ws) }), listTemplates);
+router.post(
+  '/templates/:key/enable',
+  validate({ params: Joi.object({ ...ws, key: Joi.string().max(60).required() }), body: Joi.object({ locale: Joi.string().valid('ar', 'en').default('ar') }).default({}) }),
+  enableTemplate
+);
 router.get(
   '/runs',
   validate({

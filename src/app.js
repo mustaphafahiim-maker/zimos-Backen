@@ -186,6 +186,7 @@ v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/manual-transfers', require('./modules/payments/manualTransferRoutes'));
+v1.use('/workspaces/:workspaceId/payment-rules', require('./modules/payments/paymentRulesRoutes'));
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
 v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
@@ -217,6 +218,9 @@ v1.use('/public', publicApiRoutes);
 app.use('/api/public/v1', publicApiRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------
+// Which store a custom domain belongs to — before the :workspaceId routes,
+// which would otherwise read "resolve-host" as a store.
+v1.use('/store/resolve-host', require('./modules/domains/domainSettings').publicRouter);
 v1.use('/store/:workspaceId/pages', pagesPublicRoutes);
 v1.use('/store/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').publicRouter);
 v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);

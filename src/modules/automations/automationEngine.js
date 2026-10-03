@@ -1,10 +1,23 @@
 'use strict';
 
-const db = require('../../db/models');
 const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
+const context = require('./automationContext');
 
-const TRIGGERS = [
+/**
+ * Merchant automations: "when this happens to an order, do these steps".
+ * This file is the module's front door — the trigger and token lists, and
+ * run()/emit() as the rest of the code has always called them. The sequence
+ * logic lives in automationExecutor.js, the steps in automationSteps.js.
+ *
+ * Triggers (SPEC §14.2). The first seven are recorded in the outbox today;
+ * the rest become live as the lanes that own those moments record them
+ * (`order.unreachable`, `order.postponed`, `order.returned`,
+ * `order.payment_failed`, `checkout.abandoned`, `lost_order.created`,
+ * `lead.created`, `subscription.renewal_failed`). `review.request` is
+ * `order.delivered` plus a wait (conditions.delayDays, default 3).
+ */
+const ORDER_TRIGGERS = [
   'order.created',
   'order.confirmed',
   'order.rejected',
@@ -12,85 +25,44 @@ const TRIGGERS = [
   'order.shipped',
   'order.out_for_delivery',
   'order.delivered',
+  'order.unreachable',
+  'order.postponed',
+  'order.returned',
+  'order.payment_failed',
 ];
+const CHECKOUT_TRIGGERS = ['checkout.abandoned', 'lost_order.created'];
+const OTHER_TRIGGERS = ['review.request', 'lead.created', 'subscription.renewal_failed'];
+const TRIGGERS = [...ORDER_TRIGGERS, ...CHECKOUT_TRIGGERS, ...OTHER_TRIGGERS];
 
-const TOKENS = ['customer_name', 'order_number', 'order_total', 'store_name', 'tracking_url', 'city'];
+// The outbox events the automations consumer listens to (review.request is derived).
+const EVENTS = TRIGGERS.filter((t) => t !== 'review.request');
 
-function formatTotal(amountMinor, currency) {
-  const major = Number(amountMinor || 0) / 100;
-  return `${major.toLocaleString('en-US', { minimumFractionDigits: major % 1 ? 2 : 0, maximumFractionDigits: 2 })} ${currency}`;
-}
+const { TOKENS, render } = context;
 
-/** Replaces {{token}} placeholders with real order data. Unknown tokens become empty. */
-function render(value, ctx) {
-  return String(value).replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (_, token) => (ctx[token] !== undefined && ctx[token] !== null ? String(ctx[token]) : ''));
-}
-
-function conditionsPass(conditions, order) {
-  const c = conditions && !Array.isArray(conditions) ? conditions : {};
-  if (c.paymentMethod && order.paymentMethod !== c.paymentMethod) return `payment method is ${order.paymentMethod}`;
-  if (c.minTotalAmount !== undefined && c.minTotalAmount !== null && Number(order.totalAmount) < Number(c.minTotalAmount)) return 'order total below the minimum';
+/** What an outbox payload is about: an order, or a lost checkout. */
+function targetOf(payloadOrOrderId) {
+  if (typeof payloadOrOrderId === 'string') return { orderId: payloadOrOrderId };
+  const p = payloadOrOrderId || {};
+  if (p.orderId) return { orderId: p.orderId };
+  if (p.checkoutSessionId) return { checkoutSessionId: p.checkoutSessionId };
   return null;
 }
 
-async function run(workspaceId, trigger, orderId) {
-  const rules = await db.AutomationRule.findAll({ where: { workspaceId, trigger, isActive: true } });
-  if (rules.length === 0) return [];
-
-  const order = await db.Order.findOne({
-    where: { id: orderId, workspaceId },
-    include: [{ model: db.Shipment, as: 'shipments', required: false }],
-  });
-  if (!order) return [];
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['name'] });
-  const contact = order.contactSnapshot || {};
-  const shipments = (order.shipments || []).slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  const ctx = {
-    customer_name: contact.fullName || '',
-    order_number: order.orderNumber,
-    order_total: formatTotal(order.totalAmount, order.currency),
-    store_name: workspace ? workspace.name : '',
-    tracking_url: shipments[0] && shipments[0].trackingUrl ? shipments[0].trackingUrl : '',
-    city: (order.shippingAddressSnapshot || {}).city || '',
-  };
-
-  // Lazy require: whatsappService → orders modules would otherwise be circular.
-  const whatsapp = require('../whatsapp/whatsappService');
-  const results = [];
-  for (const rule of rules) {
-    const skip = conditionsPass(rule.conditions, order);
-    if (skip) {
-      results.push(await db.AutomationRun.create({ workspaceId, ruleId: rule.id, trigger, orderId, status: 'skipped', detail: skip }));
-      continue;
-    }
-    for (const action of rule.actions || []) {
-      if (action.type !== 'whatsapp_template') continue;
-      try {
-        if (!contact.phone) throw new Error('order has no phone number');
-        await whatsapp.sendMessage(workspaceId, {
-          to: contact.phone,
-          template: { name: action.template, language: action.language || 'ar', params: (action.params || []).map((p) => render(p, ctx)) },
-        });
-        results.push(await db.AutomationRun.create({ workspaceId, ruleId: rule.id, trigger, orderId, status: 'sent', detail: `whatsapp_template ${action.template}` }));
-      } catch (err) {
-        results.push(await db.AutomationRun.create({ workspaceId, ruleId: rule.id, trigger, orderId, status: 'failed', detail: String(err.message).slice(0, 500) }));
-      }
-    }
-  }
-  return results;
+/** Runs every active rule of this trigger. `subject` is an order id or an outbox payload. */
+async function run(workspaceId, trigger, subject) {
+  const target = targetOf(subject);
+  if (!target) return [];
+  // Lazy: the executor pulls in the queue, which loads every module's jobs.js.
+  return require('./automationExecutor').trigger(workspaceId, trigger, target);
 }
 
 /**
- * Fire-and-forget: automations never block or fail the business action that
- * triggered them. Call from `transaction.afterCommit` so the order exists.
- *
- * Under test the work is handed back, so the afterCommit hook waits for it:
- * the suite truncates every table between tests, and a query still running
- * from the previous test would fight that TRUNCATE for its locks.
+ * Fire-and-forget, for callers outside the outbox. Under test the work is
+ * handed back so the caller's afterCommit hook can wait for it.
  */
-function emit(workspaceId, trigger, orderId) {
-  const work = run(workspaceId, trigger, orderId).catch((err) => logger.error(`[automations] ${trigger} for order ${orderId} failed: ${err.message}`));
+function emit(workspaceId, trigger, subject) {
+  const work = run(workspaceId, trigger, subject).catch((err) => logger.error(`[automations] ${trigger} failed: ${err.message}`));
   return env.isTest ? work : undefined;
 }
 
-module.exports = { TRIGGERS, TOKENS, emit, run, render };
+module.exports = { TRIGGERS, EVENTS, ORDER_TRIGGERS, CHECKOUT_TRIGGERS, TOKENS, emit, run, render };
