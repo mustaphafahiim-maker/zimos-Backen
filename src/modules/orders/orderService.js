@@ -8,6 +8,7 @@ const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
+const blockedEntries = require('../fraud/blockedEntries');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -17,7 +18,7 @@ const { calculateShippingAmount } = require('../shipping/shippingPricing');
 const { calculateTax } = require('../tax/taxService');
 const { completeOrderInTransaction } = require('./orderCompletion');
 const { recordAudit } = require('../audit/auditService');
-const { setConfirmationState } = require('./orderStateService');
+const { setConfirmationState, trackStage, nextStages } = require('./orderStateService');
 const { STAGES, STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('./orderStage');
 const { orderSort, orderByClause, afterAnchorClause, anchorValue } = require('./orderSort');
 const gateways = require('../payments/gateways');
@@ -254,6 +255,29 @@ async function createOrder(
 
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
+    // The store's blocked_entries (scope orders). The IP is the shopper's only
+    // on a storefront order; a staff order carries the staff member's.
+    const blockedEntry = await blockedEntries.findMatch(
+      workspaceId,
+      'orders',
+      {
+        phoneNormalized: customer.phoneNormalized,
+        email: contact.email,
+        ip: req && !req.user ? req.ip : null,
+        deviceId: payload.deviceId,
+        fullName: contact.fullName,
+        addressLine: shippingAddress && shippingAddress.addressLine,
+      },
+      transaction
+    );
+    if (blockedEntry && !riskFlags.includes('blacklisted_customer')) riskFlags.push('blacklisted_customer');
+    // A phone blocked before it ever ordered: its customer row exists only now.
+    if (blockedEntry && blockedEntry.type === 'phone' && !customer.isBlacklisted) {
+      await customer.update(
+        { isBlacklisted: true, blacklistReason: blockedEntry.reason, blacklistedAt: blockedEntry.createdAt },
+        { transaction }
+      );
+    }
 
     // Before any inventory is touched, so a refusal has nothing to undo but
     // the customer lookup.
@@ -264,6 +288,7 @@ async function createOrder(
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
         transaction,
         onlinePayment: Boolean(awaitingPayment),
+        blockedEntry,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
@@ -444,6 +469,9 @@ async function createOrder(
       );
     }
 
+    // The first row of the order's status history: nothing → where it starts.
+    await trackStage(workspaceId, order.id, { req, transaction, fallbackActor: 'customer' });
+
     order.items = orderItems;
     // Invoice, discount redemption, customer.totalOrders — the order is a
     // sale from this moment (see orderCompletion.js). An order paid online
@@ -471,6 +499,7 @@ async function createOrder(
     // conversions run after commit and never fail the order. An order waiting
     // for its online payment is not a purchase yet, so it sends no conversion.
     transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
+    transaction.afterCommit(() => require('../notifications/merchantNotificationEvents').emit(workspaceId, 'order.created', order.id));
     if (!awaitingPayment) transaction.afterCommit(() => pixelEvents.emit(workspaceId, 'order.created', order.id));
 
     return { order, items: orderItems };
@@ -698,14 +727,24 @@ async function getOrder(workspaceId, orderId) {
   const linkedFrom = order.linkedFromOrderId
     ? await db.Order.findOne({ where: { workspaceId, id: order.linkedFromOrderId }, attributes: ['id', 'orderNumber'] })
     : null;
+  const stage = await stageForOrder(order.id);
   return {
     ...json,
     paymentProvider: providers.get(order.id) || null,
-    stage: await stageForOrder(order.id),
+    stage,
+    // The stages PATCH /orders/:id/status accepts from here (orderStageChange.js).
+    nextStages: nextStages(stage),
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
     linkedOrders: linkedOrders.map((o) => o.toJSON()),
     linkedFromOrder: linkedFrom ? linkedFrom.toJSON() : null,
   };
+}
+
+/** The order's id and number, or 404 — the check every per-order endpoint starts with. */
+async function getOrderRef(workspaceId, orderId) {
+  const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'orderNumber'] });
+  if (!order) throw new NotFoundError('Order');
+  return order;
 }
 
 // `%` and `_` are wildcards in LIKE, and a backslash escapes them: a merchant
@@ -1001,6 +1040,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
 
     const before = { confirmationState: order.confirmationState, cancelledAt: order.cancelledAt };
     await order.update({ cancelledAt: new Date(), cancellationReason: reason }, { transaction });
+    await trackStage(workspaceId, order.id, { req, transaction, reason });
     if (order.confirmationState !== 'rejected') {
       await setConfirmationState(workspaceId, order.id, 'rejected', req, transaction);
     }
@@ -1093,6 +1133,8 @@ async function createShipment(workspaceId, orderId, data, req) {
       },
       transaction
     );
+    // A new shipment for an order whose last parcel came back: ready to ship again.
+    await trackStage(workspaceId, order.id, { req, transaction });
 
     await recordAudit({
       workspaceId,
@@ -1125,7 +1167,8 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
       workspaceId,
       shipment,
       { status: data.status, waybillNumber: data.waybillNumber, trackingUrl: data.trackingUrl, ...extra },
-      { transaction, req, actorUserId: req.user.id }
+      // A status set by hand must be a move the order may make (409 otherwise).
+      { transaction, req, actorUserId: req.user.id, enforceStageGuard: true }
     );
   });
 }
@@ -1134,6 +1177,7 @@ module.exports = {
   createOrder,
   addLineToOpenOrder,
   getOrder,
+  getOrderRef,
   listOrders,
   orderPipeline,
   resolveCursor,
