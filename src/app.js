@@ -245,6 +245,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 v1.use('/webhooks/payments', paymentWebhookRoutes);
 // The sandbox gateway's hosted payment page — only where that gateway is registered.
 if (require('./modules/payments/gateways').isGateway('sandbox')) v1.use('/sandbox-pay', require('./modules/payments/sandboxPayRoutes'));
+// The sandbox courier's "advance the parcel" endpoint — only where that courier is registered.
+if (require('./modules/shipping/carriers').getAdapter('sandbox')) v1.use('/dev/sandbox', require('./modules/shipping/sandboxCarrierRoutes'));
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.

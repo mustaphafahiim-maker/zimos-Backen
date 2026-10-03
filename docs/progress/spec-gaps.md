@@ -12,6 +12,7 @@ the numbers **400–449** (no lane owns them).
 - Marketing = `checkout.abandoned`, `lost_order.created`, `review.request`, `lead.created` (automations/marketingGuard.js). Order updates still go to a phone that said STOP: the customer asked for them by ordering.
 - A STOP is stored per phone in `marketing_opt_outs`, not on customers: an abandoned checkout has no customer row. A newsletter sign-up by that phone removes it; a staff edit of the customer does not.
 - A marketing SMS gets "للإيقاف أرسل: إيقاف" appended unless it already says how to stop. WhatsApp template texts carry it in their body. Email has no unsubscribe link yet (no email reply handling).
+- The sandbox courier exists outside production for every store; in production only with `CARRIERS_SANDBOX=true` and the FeatureFlag `sandbox_integrations` (shared check: `core/utils/featureFlags.js`). Its parcel state lives on the shipment (`carrier_response.sandboxStatus`), so it survives restarts and the poller sees it.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -28,7 +29,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 3. Automations on customers, not only orders: `lead.created` (newsletter,
   forms, funnel opt-in) and `subscription.renewal_failed` (the service records
   `subscription.payment_failed`) reach the automations engine.
-- [ ] 4. Carrier sandbox adapter + README of the carrier contract +
+- [x] 4. Carrier sandbox adapter + README of the carrier contract +
   `POST /dev/sandbox/shipments/:id/advance` (Gate 2 depends on it).
 - [ ] 5. `requestId` on every log line (request context in the logger).
 - [ ] 6. Storefront cache: 60 s on `GET /store/:ws` and products, invalidated on

@@ -5,6 +5,8 @@ const env = require('../../../config/env');
 const bosta = require('./bosta');
 const mylerz = require('./mylerz');
 const jtexpress = require('./jtexpress');
+const sandbox = require('./sandbox');
+const featureFlags = require('../../../core/utils/featureFlags');
 const { defineAdapter } = require('./adapterContract');
 const { AppError, ValidationError } = require('../../../core/errors/AppError');
 
@@ -90,13 +92,24 @@ const { AppError, ValidationError } = require('../../../core/errors/AppError');
 // Registering an adapter does not switch it on: only CARRIERS_ENABLED /
 // CARRIERS_BETA make it exist on a server (rollout below). Every carrier
 // after Bosta ships as beta first.
-const REGISTERED = new Map([bosta, mylerz, jtexpress].map((adapter) => [adapter.code, adapter]));
+//
+// The sandbox courier (./sandbox.js) is not in that rollout: it exists outside
+// production for every store, and in production only with CARRIERS_SANDBOX=true
+// and only for the stores whose FeatureFlag `sandbox_integrations` is on.
+const SANDBOX_ON = !env.isProduction || process.env.CARRIERS_SANDBOX === 'true';
+const REGISTERED = new Map([bosta, mylerz, jtexpress, ...(SANDBOX_ON ? [sandbox] : [])].map((adapter) => [adapter.code, adapter]));
+
+async function sandboxAllowedFor(workspaceId) {
+  if (!SANDBOX_ON) return false;
+  return !env.isProduction || featureFlags.isOn('sandbox_integrations', workspaceId);
+}
 
 const MANUAL = 'manual';
 
-/** 'enabled' | 'beta' | null for a registered adapter code. */
+/** 'enabled' | 'beta' | 'sandbox' | null for a registered adapter code. */
 function rollout(code) {
   if (!code || !REGISTERED.has(code)) return null;
+  if (code === sandbox.code) return 'sandbox';
   if (env.carriers.enabled.includes(code)) return 'enabled';
   if (env.carriers.beta.includes(code)) return 'beta';
   return null;
@@ -156,6 +169,7 @@ async function availableFor(adapter, workspaceId) {
   const state = adapter ? rollout(adapter.code) : null;
   if (state === 'enabled') return true;
   if (state === 'beta') return workspaceInBeta(workspaceId);
+  if (state === 'sandbox') return sandboxAllowedFor(workspaceId);
   return false;
 }
 
@@ -172,7 +186,12 @@ async function adapterFor(code, workspaceId) {
  */
 async function resolveAdaptersFor(workspaceId) {
   const { slug, inBeta } = await betaMembership(workspaceId);
-  const adapters = listAdapters().filter((adapter) => rollout(adapter.code) === 'enabled' || inBeta);
+  const withSandbox = await sandboxAllowedFor(workspaceId);
+  const adapters = listAdapters().filter((adapter) => {
+    const state = rollout(adapter.code);
+    if (state === 'sandbox') return withSandbox;
+    return state === 'enabled' || inBeta;
+  });
   return { adapters, slug, inBeta };
 }
 
