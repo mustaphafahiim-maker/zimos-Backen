@@ -84,6 +84,20 @@ function csvList(raw, fallback) {
     .filter(Boolean);
 }
 
+// A whole number of 1 or more from the environment. Unset or blank uses the
+// fallback; anything else refuses to start, naming the variable, so a typo
+// cannot quietly switch a limit off. Under NODE_ENV=test the fallback always
+// wins, so a dev .env can't change what the suite sees.
+function positiveInt(name, fallback) {
+  const raw = process.env[name];
+  if (process.env.NODE_ENV === 'test' || isBlank(raw)) return fallback;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new Error(`${name} must be a whole number of 1 or more (unset, it is ${fallback})`);
+  }
+  return Number(value);
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
@@ -176,6 +190,17 @@ const env = {
     // Password reset requests (POST /auth/password-reset/request), per IP per
     // hour — on top of the per-account limit kept in the database (authService).
     passwordResetHourMax: parseInt(process.env.PASSWORD_RESET_RATE_LIMIT_PER_HOUR || '10', 10),
+  },
+
+  // The 6-digit codes' ceilings per IP (otp/verificationCodeService), counted
+  // in the database over every code sent from one IP: at sign-up, at sign-in
+  // while unconfirmed, by the resend button, and to confirm a signed-in
+  // account's email. The limits per address and per account, the wait
+  // between two codes and the wrong guesses allowed are constants there.
+  verificationCodes: {
+    ipPerHour: positiveInt('VERIFICATION_CODES_PER_IP_PER_HOUR', 20),
+    ipPerDay: positiveInt('VERIFICATION_CODES_PER_IP_PER_DAY', 50),
+    smsPerIpPerDay: positiveInt('VERIFICATION_SMS_PER_IP_PER_DAY', 5),
   },
 
   // Public endpoints that stay closed until their identity checks are

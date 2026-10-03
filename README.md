@@ -371,6 +371,15 @@ SMS reset gives the same answer for any number without sending anything.
 `AUTH_IP_RATE_LIMIT_MAX` / `AUTH_IP_RATE_LIMIT_WINDOW_MS` (default 50 per 15
 minutes) cap sign-in failures, sign-up, password reset and resend-verification
 per IP, on top of the per-email `AUTH_RATE_LIMIT_MAX`.
+The 6-digit sign-up and confirmation codes are capped per IP in the database
+(`src/modules/otp/verificationCodeService.js`), over every code sent from that
+IP: `VERIFICATION_CODES_PER_IP_PER_HOUR` (default 20),
+`VERIFICATION_CODES_PER_IP_PER_DAY` (default 50) and
+`VERIFICATION_SMS_PER_IP_PER_DAY` (default 5). Unset uses the default; a value
+that isn't a whole number of 1 or more refuses to start. Everyone behind one IP
+shares these, so raise them if the API sees one address for many people. The
+limits per address (5 an hour, 10 a day), per account (3 SMS a day), the
+60-second wait between two codes and the 5 wrong guesses stay fixed.
 
 ### Image storage
 
