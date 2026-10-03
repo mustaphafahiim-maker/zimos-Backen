@@ -123,6 +123,8 @@ async function submit(workspaceId, body, req) {
         transaction,
       });
       customer = row;
+      // A phone the store did not know is a new lead (automations, webhooks).
+      if (created) await outbox.record(transaction, 'lead.created', { workspaceId, customerId: row.id, source: 'form' });
       if (!created) {
         const updates = {};
         if (fullName && !row.fullName) updates.fullName = fullName;

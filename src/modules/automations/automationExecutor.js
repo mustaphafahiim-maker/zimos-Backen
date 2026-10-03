@@ -38,11 +38,21 @@ const logRun = (execution, fields) =>
     detail: fields.detail ? String(fields.detail).slice(0, 500) : null,
   });
 
-function loadSubject(workspaceId, { orderId, checkoutSessionId }) {
+function loadSubject(workspaceId, { orderId, checkoutSessionId, subscriptionId, customerId }) {
   if (orderId) return context.loadOrderSubject(workspaceId, orderId);
   if (checkoutSessionId) return context.loadCheckoutSubject(workspaceId, checkoutSessionId);
+  if (subscriptionId) return context.loadSubscriptionSubject(workspaceId, subscriptionId);
+  if (customerId) return context.loadCustomerSubject(workspaceId, customerId);
   return null;
 }
+
+// An execution keeps its order or checkout in columns; a subscription or a
+// customer (no column of its own) in context.target.
+const targetOfExecution = (execution) => ({
+  orderId: execution.orderId,
+  checkoutSessionId: execution.checkoutSessionId,
+  ...((execution.context && execution.context.target) || {}),
+});
 
 async function finish(execution, status) {
   await execution.update({ status, finishedAt: new Date(), resumeAt: null });
@@ -50,7 +60,7 @@ async function finish(execution, status) {
 
 /** Runs the execution from its next step until it ends or waits. */
 async function advance(execution, { resumed = false } = {}) {
-  const subject = await loadSubject(execution.workspaceId, execution);
+  const subject = await loadSubject(execution.workspaceId, targetOfExecution(execution));
   if (!subject) {
     await logRun(execution, { status: 'skipped', detail: 'the order no longer exists' });
     return finish(execution, 'stopped');
@@ -107,13 +117,19 @@ async function startRule(rule, trigger, target, subject, { leadingWaitDays = 0 }
     ...base,
     checkoutSessionId: target.checkoutSessionId || null,
     steps: list,
-    context: { signature: subject.signature, stopOnStatusChange: conditions.stopOnStatusChange !== false, couponCode: conditions.couponCode || null },
+    context: {
+      signature: subject.signature,
+      stopOnStatusChange: conditions.stopOnStatusChange !== false,
+      couponCode: conditions.couponCode || null,
+      target: target.subscriptionId ? { subscriptionId: target.subscriptionId } : target.customerId ? { customerId: target.customerId } : null,
+    },
   });
   return advance(execution);
 }
 
 /**
- * An event happened. `target` is { orderId } or { checkoutSessionId }.
+ * An event happened. `target` is { orderId }, { checkoutSessionId },
+ * { subscriptionId } or { customerId }.
  * Returns what was started (executions) or skipped (run rows).
  */
 async function trigger(workspaceId, eventName, target) {

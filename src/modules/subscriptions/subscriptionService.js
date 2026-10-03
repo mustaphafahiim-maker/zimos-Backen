@@ -230,7 +230,7 @@ async function failRenewal(sub, reason) {
     nextRenewalAt: new Date(Date.now() + retryDays * 24 * 3600 * 1000),
   });
   // Automations send the customer the message with their portal link.
-  await outbox.record(null, 'subscription.payment_failed', { workspaceId: sub.workspaceId, subscriptionId: sub.id, customerId: sub.customerId, attempt });
+  await outbox.record(null, 'subscription.renewal_failed', { workspaceId: sub.workspaceId, subscriptionId: sub.id, customerId: sub.customerId, attempt });
   return 'past_due';
 }
 

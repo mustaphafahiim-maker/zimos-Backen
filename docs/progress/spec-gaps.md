@@ -25,7 +25,7 @@ the numbers **400–449** (no lane owns them).
   recovery / review-request / lead automations skip opted-out and blocked
   phones; recovery tokens `{{product_name}}`, `{{cart_total}}` work for lost
   checkouts; ready-made recovery text says how to stop.
-- [ ] 3. Automations on customers, not only orders: `lead.created` (newsletter,
+- [x] 3. Automations on customers, not only orders: `lead.created` (newsletter,
   forms, funnel opt-in) and `subscription.renewal_failed` (the service records
   `subscription.payment_failed`) reach the automations engine.
 - [ ] 4. Carrier sandbox adapter + README of the carrier contract +
@@ -56,7 +56,7 @@ the numbers **400–449** (no lane owns them).
   coupon + bundle discount card; cancel with refund + notify; refund notify.
 - [ ] 13. Lost orders capture on a name or any valid phone for the store's
   country, 800 ms debounce.
-- [ ] 14. Webhook topics `checkout.created` / `checkout.updated`; `lead.created`.
+- [ ] 14. Webhook topics `checkout.created` / `checkout.updated` (`lead.created` is recorded since item 3).
 - [ ] 15. Payments: funnel currency applied to orders, storefront display
   currency switcher, `currency_converter` element, base amounts in
   attribution/P&L; shopper consent to save a card and one-click upsell charge.

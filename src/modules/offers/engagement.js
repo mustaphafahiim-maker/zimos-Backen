@@ -234,7 +234,7 @@ async function subscribe(workspace, body) {
       tags: [...new Set([...(existing.tags || []), 'newsletter'])],
     });
   } else {
-    await db.Customer.create({
+    const lead = await db.Customer.create({
       workspaceId: workspace.id,
       phoneNormalized,
       phoneRaw: body.phone,
@@ -244,6 +244,8 @@ async function subscribe(workspace, body) {
       tags: ['newsletter'],
       source: 'newsletter',
     });
+    // A new lead (automations, webhooks).
+    await require('../../core/outbox/outbox').record(null, 'lead.created', { workspaceId: workspace.id, customerId: lead.id, source: 'newsletter' });
   }
   // Signing up again is opting back in to marketing after an earlier STOP (whatsapp/optOut.js).
   await db.MarketingOptOut.destroy({ where: { workspaceId: workspace.id, phoneNormalized } });

@@ -137,6 +137,68 @@ async function loadCheckoutSubject(workspaceId, checkoutSessionId) {
   };
 }
 
+const EMPTY_ORDER_VARS = {
+  order_number: '',
+  order_total: '',
+  cart_total: '',
+  tracking_url: '',
+  city: '',
+  product_names: '',
+  product_name: '',
+  items_count: '',
+  shipping_amount: '',
+  carrier_name: '',
+  waybill_number: '',
+  order_link: '',
+  recovery_link: '',
+  review_link: '',
+  payment_link: '',
+};
+
+/** A customer with no order in hand (lead.created). */
+async function loadCustomerSubject(workspaceId, customerId) {
+  const customer = await db.Customer.findOne({ where: { id: customerId, workspaceId } });
+  if (!customer) return null;
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name', 'slug'] });
+  return {
+    kind: 'customer',
+    customer,
+    workspace,
+    phone: customer.phoneRaw || customer.phoneNormalized || null,
+    email: customer.email || null,
+    vars: { ...EMPTY_ORDER_VARS, customer_name: customer.fullName || '', store_name: workspace ? workspace.name : '' },
+    // Nothing for a wait to watch: a lead's sequence runs to its end.
+    signature: 'customer',
+  };
+}
+
+/**
+ * A subscription whose renewal could not be charged
+ * (subscription.renewal_failed). {{payment_link}} is the customer's portal,
+ * where the subscription and its state are shown.
+ */
+async function loadSubscriptionSubject(workspaceId, subscriptionId) {
+  const sub = await db.CustomerSubscription.findOne({ where: { id: subscriptionId, workspaceId } });
+  if (!sub) return null;
+  const subject = await loadCustomerSubject(workspaceId, sub.customerId);
+  if (!subject) return null;
+  const base = storeBase(subject.workspace);
+  return {
+    ...subject,
+    kind: 'subscription',
+    subscription: sub,
+    vars: {
+      ...subject.vars,
+      product_names: sub.productName,
+      product_name: sub.productName,
+      order_total: formatAmount(sub.amount, sub.currency),
+      payment_link: base && sub.portalToken ? `${base}/subscriptions/${sub.portalToken}` : '',
+    },
+    // The sequence stops once the subscription is paid again or cancelled.
+    signature: sub.status,
+  };
+}
+
 const asList = (value) => (Array.isArray(value) ? value : value === undefined || value === null || value === '' ? [] : [value]);
 
 /** Null when the rule applies; otherwise the reason it was skipped. */
@@ -183,4 +245,4 @@ async function conditionsFail(conditions, subject) {
   return null;
 }
 
-module.exports = { TOKENS, render, formatAmount, loadOrderSubject, loadCheckoutSubject, conditionsFail };
+module.exports = { TOKENS, render, formatAmount, loadOrderSubject, loadCheckoutSubject, loadCustomerSubject, loadSubscriptionSubject, conditionsFail };

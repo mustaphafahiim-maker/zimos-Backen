@@ -45,6 +45,9 @@ function targetOf(payloadOrOrderId) {
   const p = payloadOrOrderId || {};
   if (p.orderId) return { orderId: p.orderId };
   if (p.checkoutSessionId) return { checkoutSessionId: p.checkoutSessionId };
+  // subscription.renewal_failed carries the subscription; lead.created the customer.
+  if (p.subscriptionId) return { subscriptionId: p.subscriptionId };
+  if (p.customerId) return { customerId: p.customerId };
   return null;
 }
 
