@@ -29,6 +29,8 @@ const { DESTINATION_INDEPENDENT, RULES, settingsPriceShipping } = require('./shi
 async function quote(workspaceId, { country, region, items }) {
   const lines = [];
   for (const item of items) lines.push(await priceLine(workspaceId, item));
+  // The same bundle pricing the order will get, so the quote's subtotal is the real one.
+  const bundles = await require('../bundles/bundlePricing').applyBundleTiers(workspaceId, lines);
 
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const shipping = await calculateShippingAmount(workspaceId, {
@@ -46,6 +48,9 @@ async function quote(workspaceId, { country, region, items }) {
     amount: Number(shipping.amount),
     currency: lines[0].currency,
     subtotal,
+    // What quantity bundles took off (already out of `subtotal`), and which.
+    bundleDiscountAmount: bundles.reduce((sum, b) => sum + b.amount, 0),
+    bundles,
     weightGrams: shipping.weightGrams,
     weightEstimated: shipping.weightEstimated,
     tier: shipping.tier,

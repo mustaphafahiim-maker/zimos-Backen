@@ -69,6 +69,19 @@ module.exports = {
         // Answers to the product's custom fields (see cartValidation.addItem).
         customizations: customizationsInputSchema.optional(),
       }).optional(),
+      // More "Buy Now" lines beside `item`: a quantity bundle with a variant
+      // chosen per unit (one red, one blue). Priced by the server like `item`.
+      extraItems: Joi.array()
+        .items(
+          Joi.object({
+            variantId: uuid.required(),
+            offerId: uuid.optional(),
+            quantity: Joi.number().integer().min(1).default(1),
+            customizations: customizationsInputSchema.optional(),
+          })
+        )
+        .max(20)
+        .optional(),
       // The shopper ticked the order bump. Only the offer is named: the server
       // accepts it only when it is the bump this checkout offers (the store's,
       // or the funnel checkout step's) and prices the line itself
