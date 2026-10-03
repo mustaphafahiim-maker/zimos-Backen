@@ -8,6 +8,7 @@ const { resolveCheckoutSettings } = require('../checkout/checkoutSettings');
 const { resolveThankYouPage } = require('./thankYouPage');
 const { publicStoreInfo, publicLegalIndex } = require('./storeInfo');
 const { publicNavPages } = require('../pages/pageFlags');
+const { publicGeneralSettings } = require('./generalSettings');
 const { resolveCatalogSettings } = require('./catalogSettings');
 const { presentStoreBump } = require('../checkout/orderBump');
 const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
@@ -98,6 +99,8 @@ async function getStorefront(workspaceId) {
     navPages: await publicNavPages(w.id),
     // Collections flagged "show in header" (catalog → collections).
     headerCollections: await headerCollections(w.id),
+    // general, social, floatingWhatsapp, seo (storefront/generalSettings.js).
+    ...publicGeneralSettings(w.settings),
     // The product listing's sidebar, filters and default sort.
     catalog: resolveCatalogSettings(w.settings),
     // The "add to your order" card the store's checkout offers, or null
