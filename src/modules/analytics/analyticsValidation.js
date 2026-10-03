@@ -36,6 +36,14 @@ module.exports = {
   },
   webWeekly: { params: wsParams, query: webQuery },
   webRealtime: { params: wsParams, query: Joi.object({ tz: Joi.string().max(64).optional(), ...webFilters }) },
+  overview: {
+    params: wsParams,
+    query: rangeQuery.keys({
+      compare: Joi.string().valid('previous', 'none').optional(),
+      funnelId: Joi.string().uuid().optional(),
+      currency: Joi.string().length(3).uppercase().optional(),
+    }),
+  },
   summary: {
     params: Joi.object({ workspaceId: Joi.string().uuid().required() }),
     query: rangeQuery,

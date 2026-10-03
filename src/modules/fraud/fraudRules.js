@@ -158,11 +158,13 @@ async function ordersInLastDay(workspaceId, customerId, transaction) {
  * The platform blocklist is not evaluated here: orderService.createOrder
  * refuses a platform match before any store rule runs.
  */
-async function evaluateStorefrontOrder({ workspaceId, customer, variantIds, transaction, onlinePayment = false }) {
+async function evaluateStorefrontOrder({ workspaceId, customer, variantIds, transaction, onlinePayment = false, blockedEntry = null }) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'], transaction });
   const rules = resolveFraudRules(workspace && workspace.settings);
 
-  if (rules.block_blacklisted && customer.isBlacklisted) {
+  // blockedEntry: a blocked_entries row (IP, email, device, name + address, or
+  // a phone that never ordered) matched this order — as good as a blacklisted customer.
+  if (rules.block_blacklisted && (customer.isBlacklisted || blockedEntry)) {
     throw new OrderRejectedError({ customerId: customer.id, flags: ['blacklisted_customer'] });
   }
   if (!hasCountingRule(rules)) return [];

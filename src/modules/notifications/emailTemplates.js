@@ -110,6 +110,22 @@ ${codeHtml}
       ),
     };
   },
+
+  // A merchant notification sent by email (merchantNotificationService): the
+  // same title and body the dashboard bell shows, with a link to the page.
+  merchant_notification(data = {}) {
+    const title = String(data.title || '');
+    const body = data.body ? String(data.body) : '';
+    const url = data.link ? `${env.frontendUrl.replace(/\/$/, '')}${data.link}` : null;
+    return {
+      subject: title,
+      ...wrap(
+        `<p><strong>${escapeHtml(title)}</strong></p>${body ? `<p>${escapeHtml(body)}</p>` : ''}${url ? `<p><a href="${url}">فتح في لوحة التحكم</a></p>` : ''}`,
+        [title, body, url].filter(Boolean).join('\n\n'),
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
 };
 
 function render(template, data) {

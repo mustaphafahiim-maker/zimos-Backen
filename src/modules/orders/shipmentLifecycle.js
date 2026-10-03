@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const db = require('../../db/models');
 const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { setFulfillmentState } = require('./orderStateService');
+const { setFulfillmentState, trackStage } = require('./orderStateService');
 
 // A shipment past this point means the parcel has left the merchant's hands.
 const SHIPMENT_IN_MOTION = ['picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'returned'];
@@ -65,9 +65,19 @@ async function insertShipment(values, transaction) {
  *                          and the carrier bookkeeping of migration 102
  *                          (cancelMode, cancelAcknowledgedBy/At, nextPollAt,
  *                          pollFailures)
- * @param {object} ctx      { transaction, req, actorUserId, metadata }
+ * @param {object} ctx      { transaction, req, actorUserId, metadata,
+ *                          enforceStageGuard } — the last one refuses a
+ *                          status that would move the order to a stage it
+ *                          may not reach (orderStateService.STAGE_TRANSITIONS);
+ *                          set for a status a person typed in, never for a
+ *                          courier's report
  */
-async function transitionShipment(workspaceId, shipment, updates, { transaction, req = null, actorUserId = null, metadata = null }) {
+async function transitionShipment(
+  workspaceId,
+  shipment,
+  updates,
+  { transaction, req = null, actorUserId = null, metadata = null, enforceStageGuard = false }
+) {
   const before = shipment.toJSON();
 
   const changes = {};
@@ -89,6 +99,19 @@ async function transitionShipment(workspaceId, shipment, updates, { transaction,
   }
   if (updates.status === 'delivered' && !shipment.deliveredAt) changes.deliveredAt = new Date();
   await shipment.update(changes, { transaction });
+
+  // The order's stage follows its latest shipment (orderStage.js): record the
+  // move, as the courier's when the status came from one.
+  await trackStage(workspaceId, shipment.orderId, {
+    req,
+    transaction,
+    ...(actorUserId
+      ? { actorType: 'user', actorId: actorUserId }
+      : metadata && metadata.source === 'carrier'
+        ? { actorType: 'carrier' }
+        : {}),
+    enforce: enforceStageGuard,
+  });
 
   const nextFulfillment = updates.status ? SHIPMENT_FULFILLMENT[updates.status] : null;
   if (nextFulfillment) {

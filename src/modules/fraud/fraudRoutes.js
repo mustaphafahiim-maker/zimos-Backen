@@ -8,7 +8,8 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./fraudController');
 const schemas = require('./fraudValidation');
 
-// Unblocking stays on PATCH /customers/:customerId/blacklist.
+// The blocklist is blocked_entries (./blockedEntries.js). PATCH /customers/:customerId/blacklist
+// still works and writes the same (phone, orders) entry.
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
 
@@ -21,5 +22,17 @@ router.post(
 );
 router.get('/blocklist', validate(schemas.listBlocklist), requirePermission(PERMISSIONS.CUSTOMERS_VIEW), controller.listBlocklist);
 router.post('/blocklist', validate(schemas.block), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), controller.block);
+router.post(
+  '/blocklist/import',
+  validate(schemas.importBlocklist),
+  requirePermission(PERMISSIONS.CUSTOMERS_MANAGE),
+  controller.importBlocklist
+);
+router.delete(
+  '/blocklist/:entryId',
+  validate(schemas.unblock),
+  requirePermission(PERMISSIONS.CUSTOMERS_MANAGE),
+  controller.unblock
+);
 
 module.exports = router;
