@@ -36,6 +36,26 @@ router.get('/pipeline', validate(schemas.pipeline), requirePermission(PERMISSION
 // '/:orderId' for the same reason as '/pipeline'.
 router.get('/export/columns', validate(exportSchemas.columns), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.columns);
 router.get('/export', validate(exportSchemas.exportCsv), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.exportCsv);
+// The "Create order" screen: price a draft without saving it, find the
+// customer by phone, the governorate list.
+router.post(
+  '/manual/preview',
+  validate(schemas.manualPreview),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.manualPreview
+);
+router.get(
+  '/manual/customer',
+  validate(schemas.manualCustomer),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.manualCustomer
+);
+router.get(
+  '/manual/options',
+  validate(schemas.manualOptions),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.manualOptions
+);
 // One action over many orders; the answer reports each order on its own.
 // Shipping needs a live store, like the single-order shipment route.
 router.post(
