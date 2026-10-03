@@ -120,6 +120,17 @@ module.exports = {
     }).min(1),
   },
   listTags: { params: Joi.object({ workspaceId: uuid.required() }) },
+  // GET /:orderId/neighbors — the list's own filters, search and sort.
+  neighbors: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    query: Joi.object({
+      sort: Joi.string()
+        .valid(...ORDER_SORT_KEYS)
+        .default(DEFAULT_ORDER_SORT),
+      stage: Joi.string().valid(...STAGES).optional(),
+      ...search,
+    }),
+  },
   addNote: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
     body: Joi.object({

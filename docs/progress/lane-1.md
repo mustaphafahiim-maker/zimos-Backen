@@ -5,7 +5,7 @@
 - [x] 2. Order fields (§4.2) + `order_notes` — migration 136 — backend 9336878 / frontend caad549 — checked on :4101: new order gets `source` (manual from the dashboard), `PATCH /orders/:id/meta` sets/adds/removes tags, test, seen, archive; `GET /orders/tags`; notes add/list/delete; list + pipeline + export accept `tag, source, paymentMethod, governorate, carrier, seen, test, archived` and hide archived orders by default; on :3201 the tracking page shows the public note and not the internal one.
 
 ## Next
-- [ ] 3. Order page (§4.4): notes card, tags, full timeline endpoint (`/orders/:id/timeline`), previous/next (`/neighbors`), copy customer link, archive, cancel reasons list, mark seen on open.
+- [ ] 3. Order page (§4.4) — CODE LANDED, BROWSER CHECK PENDING (see Blocked). Built: `GET /orders/:id/timeline`, `GET /orders/:id/neighbors`, notes card, tags card, timeline card, prev/next arrows, copy customer link (tracking page pre-fills `?number=`), mark as test, archive/restore, cancel-reason list, mark seen on open. Timeline and neighbors were run against `zimos_lane_1` directly (correct order, prev/next match the list); dashboard and storefront typecheck.
 - [ ] 4. Orders list (§4.3): tag/source/payment/governorate/courier/seen filters, saved views, column chooser, page size.
 - [ ] 5. Bulk actions (`POST /orders/bulk`): set stage where allowed, add/remove tag, archive, print waybills, book courier.
 - [ ] 6. Manual order screen (§4.5) on the existing `POST /orders`.
@@ -25,9 +25,13 @@
 - 2026-10-03 One endpoint for tags/seen/test/archive (`PATCH /orders/:id/meta`) instead of four; a body of only `isSeen` needs `orders.view`, the rest `orders.manage`. Marking seen does not touch `updated_at` and is not audited.
 - 2026-10-03 The list filters of item 4 were built with item 2 in `orders/orderFilters.js` (shared by list, counts, export). Archive = hidden from lists unless `archived=only|include`; nothing is deleted.
 - 2026-10-03 Storefront strings for lane-1 additions live beside their component (`TrackOrderNotes.tsx`), not in the shared `lib/i18n.ts`.
+- 2026-10-03 Timeline is assembled per request (status history + audit log of the order and its shipments + notes + automation runs + webhook deliveries); audit rows the status rows already tell (create, cancel, reopen, shipment status moves) are left out.
+- 2026-10-03 Previous/next follow the list the merchant came from: the list stores its query in sessionStorage and the order page sends it to `/neighbors`.
+- 2026-10-03 Cancel reasons are a list in the dialog (customer cancelled, fake, duplicate, out of stock, other); the stored reason is the chosen label in the merchant's language plus any details.
 - 2026-10-03 Frontend: lane-1 API calls live in `packages/api-client/src/endpoints/orders.ts`; lane-1 error wording in `pages/orders/orderErrors.ts` (the shared `ApiErrorCode` union is not extended).
 
 ## Blocked
+- Item 3 browser check — `preview_start` refuses: "Maximum 5 dev servers per folder reached; 5 belong to other chats". Retry at the next wake-up: start `lane-1-backend` + `lane-1-dashboard`, open an order, add a note and a tag, archive/restore, use the arrows, cancel with a listed reason, read the timeline in Arabic; then tick item 3.
 
 ## Handoff
 - Branch `lane-1` in both worktrees; everything listed under Done is merged into `origin/zimos-additions`.

@@ -1232,6 +1232,7 @@ module.exports = {
   addLineToOpenOrder,
   getOrder,
   getOrderRef,
+  applySearchAndDates,
   listOrders,
   orderPipeline,
   resolveCursor,
