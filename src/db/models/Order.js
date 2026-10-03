@@ -69,6 +69,8 @@ module.exports = (sequelize, DataTypes) => {
       ipAddress: { type: DataTypes.STRING(45), allowNull: true, field: 'ip_address' },
       ipCountry: { type: DataTypes.STRING(2), allowNull: true, field: 'ip_country' },
       userAgent: { type: DataTypes.STRING(400), allowNull: true, field: 'user_agent' },
+      // The browser's own id, from the storefront — migration 165.
+      deviceId: { type: DataTypes.STRING(128), allowNull: true, field: 'device_id' },
       // risk/riskService: points, low | moderate | high, the reasons, good | low — migration 162.
       riskScore: { type: DataTypes.INTEGER, allowNull: true, field: 'risk_score' },
       riskLevel: { type: DataTypes.STRING(10), allowNull: true, field: 'risk_level' },

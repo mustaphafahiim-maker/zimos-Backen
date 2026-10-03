@@ -86,16 +86,16 @@ function isDisposableEmail(email) {
   return Boolean(domain && DISPOSABLE_DOMAINS.has(domain));
 }
 
-/** Orders from this IP in the last hour (orders_ws_ip_created_idx). */
-async function ordersFromIpLastHour(workspaceId, ip, transaction) {
+/** Orders from this IP or this device in the last hour (orders_ws_ip_created_idx, orders_ws_device_created_idx). */
+async function ordersFromIpLastHour(workspaceId, ip, transaction, deviceId = null) {
   const [row] = await db.sequelize.query(
     `SELECT COUNT(*)::int AS count
        FROM orders o
       WHERE o.workspace_id = $workspaceId
-        AND o.ip_address = $ip
+        AND (o.ip_address = $ip OR ($deviceId::varchar IS NOT NULL AND o.device_id = $deviceId))
         AND o.created_at >= $since::timestamptz`,
     {
-      bind: { workspaceId, ip, since: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
+      bind: { workspaceId, ip: ip || null, deviceId, since: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
       type: QueryTypes.SELECT,
       transaction,
     }
@@ -129,7 +129,13 @@ async function score(orderDraft, context = {}) {
   if (visitor.ipCountry && String(visitor.ipCountry).toUpperCase() !== country) add('foreign_ip');
   if (visitor.isVpn) add('vpn_ip');
   if (typeof secondsOnPage === 'number' && secondsOnPage < FAST_SECONDS) add('too_fast');
-  if (visitor.ip && workspaceId && (await ordersFromIpLastHour(workspaceId, visitor.ip, transaction)) >= 2) add('ip_burst');
+  if (
+    (visitor.ip || visitor.deviceId) &&
+    workspaceId &&
+    (await ordersFromIpLastHour(workspaceId, visitor.ip, transaction, visitor.deviceId || null)) >= 2
+  ) {
+    add('ip_burst');
+  }
   if (network) {
     if (network.rate != null && network.total >= 3 && network.rate < 40) add('low_delivery_rate');
     if (network.spamReports > 0) add('spam_report', Math.min(SPAM_REPORTS_CAP, network.spamReports * WEIGHTS.spam_report));

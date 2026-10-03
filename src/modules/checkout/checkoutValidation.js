@@ -93,6 +93,8 @@ module.exports = {
       // token from GET /checkout/guard, the challenge token. Deliberately
       // loose — the guard decides, and takes them off the body.
       website: Joi.string().max(500).allow('', null).optional(),
+      // The browser's own id (kept by the storefront in localStorage): device blocklist and risk.
+      deviceId: Joi.string().trim().min(8).max(128).allow('', null).optional(),
       botToken: Joi.string().max(500).allow('', null).optional(),
       captchaToken: Joi.string().max(4000).allow('', null).optional(),
       // Proof that the phone was verified (POST /checkout/otp/verify) — risk/checkoutOtp.

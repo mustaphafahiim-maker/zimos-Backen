@@ -121,7 +121,18 @@ function policies({ input }) {
       };
 }
 
-const HANDLERS = { product, page, translate, policies };
+// risk/aiOrderCheck (lane 2): fixed rules standing in for a model's judgement.
+function orderCheck({ input }) {
+  const letters = String(input.name || '').replace(/[^\p{L}]/gu, '');
+  const text = `${input.name || ''} ${input.address || ''} ${input.notes || ''}`.toLowerCase();
+  return {
+    is_gibberish: letters.length < 3 || (/^[a-z]{5,}$/i.test(letters) && !/[aeiouy]/i.test(letters)) || /(.)\1{4,}/u.test(letters),
+    is_abusive: /\b(fuck|shit|bitch)\b/.test(text) || /(كلب|حمار|زفت)/.test(text),
+    address_complete: String(input.address || '').split(/[\s,،]+/).filter(Boolean).length >= 4,
+  };
+}
+
+const HANDLERS = { product, page, translate, policies, order_check: orderCheck };
 
 module.exports = {
   name: 'sandbox',
