@@ -58,6 +58,10 @@ const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
     });
   }
 
+  // A visitor the store has blocked (their IP, or their country) sees the
+  // same "unavailable" answer — modules/risk/visitorGate.
+  await require('../../modules/risk/visitorGate').refuseBlockedVisitor(req, workspace);
+
   req.publicWorkspace = workspace;
   req.tenant = { workspaceId: workspace.id, hasPermission: () => false };
   next();

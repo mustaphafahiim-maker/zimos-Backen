@@ -125,6 +125,8 @@ module.exports = {
           block_outside_country: fraudRule(Joi.boolean()),
           allowed_countries: Joi.array().items(Joi.string().length(2).uppercase()).max(60).unique().allow(null).optional(),
           block_vpn: fraudRule(Joi.boolean()),
+          // Visitors from these countries do not see the store at all (risk/visitorGate).
+          blocked_countries: Joi.array().items(Joi.string().length(2).uppercase()).max(250).unique().allow(null).optional(),
           min_network_delivery_rate: fraudRule(Joi.number().integer().min(1).max(100)),
           high_risk: fraudRule(Joi.boolean()),
           phone_validation: Joi.string().valid(...PHONE_VALIDATION_MODES).allow(null).optional(),
