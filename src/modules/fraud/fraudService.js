@@ -31,6 +31,11 @@ function toFlaggedOrder(row) {
     currency: row.currency,
     confirmationState: row.confirmation_state,
     cancelled: row.cancelled,
+    riskScore: row.risk_score,
+    riskLevel: row.risk_level,
+    riskReasons: row.risk_reasons || [],
+    ipAddress: row.ip_address,
+    ipCountry: row.ip_country,
   };
 }
 
@@ -68,6 +73,11 @@ async function listFlaggedOrders(workspaceId, { limit = 30, before, includeResol
             o.total_amount,
             o.currency,
             o.confirmation_state,
+            o.risk_score,
+            o.risk_level,
+            o.risk_reasons,
+            o.ip_address,
+            o.ip_country,
             (${STAGE_SQL}) = 'cancelled' AS cancelled
        FROM ${ORDERS_WITH_STAGE_FROM}
       WHERE ${conditions.join(' AND ')}
