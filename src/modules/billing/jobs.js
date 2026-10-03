@@ -18,5 +18,12 @@ module.exports = {
       // eslint-disable-next-line global-require
       handle: () => require('./onlineBillingService').sweep({ limit: 50 }),
     },
+    {
+      // usage_counters: what each store used this month (usageCounters.js).
+      name: 'usage.recount',
+      everyMs: 15 * MINUTE,
+      // eslint-disable-next-line global-require
+      handle: () => require('./usageCounters').recountDue(),
+    },
   ],
 };

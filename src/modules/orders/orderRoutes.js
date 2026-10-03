@@ -36,6 +36,27 @@ router.get('/pipeline', validate(schemas.pipeline), requirePermission(PERMISSION
 // '/:orderId' for the same reason as '/pipeline'.
 router.get('/export/columns', validate(exportSchemas.columns), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.columns);
 router.get('/export', validate(exportSchemas.exportCsv), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.exportCsv);
+// Printed paper for many orders: labels (A4 ×4 or 10×15 cm) and the courier
+// handover manifest. And a courier's sheet of waybill numbers and statuses.
+router.post(
+  '/documents/waybills',
+  validate(schemas.waybillsPdf),
+  requirePermission(PERMISSIONS.ORDERS_VIEW),
+  controller.waybillsPdf
+);
+router.post(
+  '/documents/manifest',
+  validate(schemas.manifestPdf),
+  requirePermission(PERMISSIONS.ORDERS_VIEW),
+  controller.manifestPdf
+);
+router.post(
+  '/import-tracking',
+  validate(schemas.importTracking),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  requireLive,
+  controller.importTracking
+);
 // The "Create order" screen: price a draft without saving it, find the
 // customer by phone, the governorate list.
 router.post(
@@ -80,6 +101,8 @@ router.patch(
     )(req, res, next),
   controller.updateMeta
 );
+// The order's invoice as a printable page.
+router.get('/:orderId/invoice.pdf', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.invoicePdf);
 // Edit the order's items before it ships: see the new totals, then save.
 router.post(
   '/:orderId/items/preview',

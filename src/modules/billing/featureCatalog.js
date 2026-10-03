@@ -34,7 +34,8 @@ const featureDefinition = (key) => byKey.get(key) || null;
  */
 function planFeatureKeys(features) {
   if (Array.isArray(features)) return features.filter((k) => typeof k === 'string');
-  if (features && typeof features === 'object') return Object.keys(features).filter((k) => features[k]);
+  // 'limits' holds the plan's numbers (planLimits.js), it is not a feature.
+  if (features && typeof features === 'object') return Object.keys(features).filter((k) => k !== 'limits' && features[k]);
   return [];
 }
 

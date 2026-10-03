@@ -62,4 +62,13 @@ async function sendTemplate(phoneNumberId, token, to, { name, language, params =
   return { waMessageId: data && data.messages && data.messages[0] ? data.messages[0].id : null };
 }
 
-module.exports = { verifyPhoneNumber, sendText, sendTemplate };
+// A store connected with the phone number id `sandbox` talks to whatsappSandbox.js
+// (no network, refused in production) instead of Meta — same three calls.
+const sandbox = require('./whatsappSandbox');
+const orSandbox = (real, fake) => (phoneNumberId, ...rest) => (sandbox.isSandbox(phoneNumberId) ? fake(phoneNumberId, ...rest) : real(phoneNumberId, ...rest));
+
+module.exports = {
+  verifyPhoneNumber: orSandbox(verifyPhoneNumber, sandbox.verifyPhoneNumber),
+  sendText: orSandbox(sendText, sandbox.sendText),
+  sendTemplate: orSandbox(sendTemplate, sandbox.sendTemplate),
+};

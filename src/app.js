@@ -73,6 +73,7 @@ const merchantNotificationRoutes = require('./modules/notifications/merchantNoti
 const trackingPixelRoutes = require('./modules/marketing/trackingPixelRoutes');
 const inboxRoutes = require('./modules/whatsapp/inboxRoutes');
 const orderEmailRoutes = require('./modules/notifications/orderEmailRoutes');
+const whatsappCampaignRoutes = require('./modules/whatsapp/campaignRoutes');
 
 const app = express();
 
@@ -172,6 +173,8 @@ v1.use('/workspaces/:workspaceId', paymentRoutes);
 v1.use('/workspaces/:workspaceId/discounts', discountRoutes);
 v1.use('/workspaces/:workspaceId/bundles', require('./modules/bundles/bundleRoutes'));
 v1.use('/workspaces/:workspaceId/offers', require('./modules/offers/offersRoutes'));
+// Product feeds for ad channels: /feeds/:workspaceSlug/:channel.xml|csv (public, no auth).
+v1.use('/feeds', require('./modules/offers/productFeed').publicRouter);
 v1.use('/workspaces/:workspaceId/shipping', shippingRoutes);
 v1.use('/workspaces/:workspaceId/tax-rates', taxRoutes);
 v1.use('/workspaces/:workspaceId/websites', pagesRoutes);
@@ -179,6 +182,8 @@ v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 // Code customizations: the merchant's own HTML/CSS/JS slots (website.publish).
 v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').router);
+// Page sections saved for reuse across pages and funnels (website.edit).
+v1.use('/workspaces/:workspaceId/saved-sections', require('./modules/savedSections/savedSectionsRoutes'));
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);
@@ -211,6 +216,7 @@ v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
 v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
 v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
+v1.use('/workspaces/:workspaceId/whatsapp-campaigns', whatsappCampaignRoutes);
 // The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
 v1.use('/inbox-stream', inboxRoutes.stream);
 // The analytics live view's SSE stream — opened with a ticket, like the inbox stream.
