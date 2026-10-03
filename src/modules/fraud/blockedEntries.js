@@ -7,6 +7,7 @@ const db = require('../../db/models');
 const { NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const { recordAudit } = require('../audit/auditService');
+const visitorGate = require('../risk/visitorGate');
 
 /**
  * The store's blacklist (`blocked_entries`, migration 160).
@@ -258,6 +259,9 @@ async function addEntry(workspaceId, { type = 'phone', value, name, address, sco
       entries.push(entry);
     }
     return { created: anyCreated, entries: entries.map((e) => serializeEntry(e, e.type === 'phone' ? customerId : null)) };
+  }).then((result) => {
+    visitorGate.forgetWorkspace(workspaceId);
+    return result;
   });
 }
 
@@ -281,6 +285,9 @@ async function removeEntry(workspaceId, entryId, req) {
       transaction,
     });
     return { success: true };
+  }).then((result) => {
+    visitorGate.forgetWorkspace(workspaceId);
+    return result;
   });
 }
 
@@ -407,6 +414,7 @@ async function importCsv(workspaceId, { csv, type: defaultType = 'phone', scope:
       transaction,
     });
   });
+  visitorGate.forgetWorkspace(workspaceId);
   return result;
 }
 

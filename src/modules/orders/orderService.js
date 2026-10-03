@@ -9,6 +9,7 @@ const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
 const blockedEntries = require('../fraud/blockedEntries');
+const visitorGate = require('../risk/visitorGate');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -263,7 +264,8 @@ async function createOrder(
     if (platformBlock) throw platformBlocklist.rejection(customer.id, platformBlock);
 
     // The shopper's own IP and browser: a staff order carries the staff member's.
-    const visitorIp = req && !req.user ? blockedEntries.normalizeIp(req.ip) : null;
+    const visitor = req && !req.user ? await visitorGate.describeVisitor(req) : { ip: null, ipCountry: null, isVpn: false };
+    const visitorIp = visitor.ip;
     const visitorAgent = req && !req.user && req.headers ? req.headers['user-agent'] : null;
 
     const riskFlags = [];
@@ -305,7 +307,7 @@ async function createOrder(
         items,
         paymentMethod,
         phone: contact.phone,
-        visitor: { ip: visitorIp },
+        visitor,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
@@ -430,6 +432,7 @@ async function createOrder(
         notes: notes || null,
         riskFlags,
         ipAddress: visitorIp,
+        ipCountry: visitor.ipCountry,
         userAgent: visitorAgent ? String(visitorAgent).slice(0, 400) : null,
         source: orderSource,
         isTest,
