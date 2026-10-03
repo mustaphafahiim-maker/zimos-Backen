@@ -5,6 +5,8 @@ const joiEmail = require('../../core/utils/joiEmail');
 const { ALL_PERMISSIONS } = require('../../core/security/permissions');
 const { workspaceSlug, SLUG_LOOKUP_MAX } = require('../../core/utils/workspaceSlug');
 const { CHECKOUT_FIELD_MODES, CHECKOUT_NOTES_MODES } = require('../checkout/checkoutSettings');
+const { checkoutFormSettingsKeys } = require('../checkout/checkoutForm');
+const { thankYouPageSchema } = require('../storefront/thankYouPage');
 const { FRAUD_ACTIONS } = require('../fraud/fraudRules');
 const { catalogSettingsSchema } = require('../storefront/catalogSettings');
 const { orderBumpSettingsSchema } = require('../checkout/orderBump');
@@ -91,9 +93,15 @@ module.exports = {
           email: Joi.string().valid(...CHECKOUT_FIELD_MODES).allow(null).optional(),
           postal_code: Joi.string().valid(...CHECKOUT_FIELD_MODES).allow(null).optional(),
           notes: Joi.string().valid(...CHECKOUT_NOTES_MODES).allow(null).optional(),
+          // The purchase form builder: the ordered field list and the form's
+          // options (checkout/checkoutForm.js).
+          ...checkoutFormSettingsKeys,
         })
           .allow(null)
           .optional(),
+        // The store's thank-you page (storefront/thankYouPage.js). Sent whole
+        // and stored whole; `null` goes back to the built-in page.
+        thank_you_page: thankYouPageSchema.allow(null).optional(),
         // Storefront fraud rules — see modules/fraud/fraudRules.js. Same
         // merge semantics as checkout_settings: sub-keys merge, `null` on a
         // sub-key restores its default (a numeric rule's default is "off"),
