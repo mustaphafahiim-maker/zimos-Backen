@@ -16,6 +16,8 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 'active',
       },
       invitedEmail: { type: DataTypes.STRING, allowNull: true, field: 'invited_email' },
+      // Dashboard routes this member pinned in the sidebar (migration 311).
+      navShortcuts: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'nav_shortcuts' },
     },
     {
       tableName: 'memberships',

@@ -5,7 +5,7 @@
 
 ## Next
 - [ ] 2. All-my-stores overview and store switcher, duplicate store (§18.5). — built and landed; checked on :4108 by API (`GET /me/stores/overview`, `POST /workspaces/:id/duplicate` made "Demo Store Copy" with the product, variant and both site pages as drafts, no orders or customers); dashboard typechecks. **Still to do before ticking:** open `/stores` on :5208 (cards, "Open store", the Duplicate dialog, the "All my stores" entry in the header switcher) in Arabic and English — the browser check was not possible because the other lanes held 4 of the 5 dev-server slots.
-- [ ] 3. Global search ⌘K, setup guide on real data, sidebar shortcuts (§18.6).
+- [ ] 3. Global search ⌘K, setup guide on real data, sidebar shortcuts (§18.6). — backend landed and checked on :4108 (`GET /workspaces/:id/search?q=`, `GET /setup-guide`, `GET|PUT /shortcuts`; migration 311). **Still to build:** `packages/api-client/src/endpoints/dashboard.ts`, the ⌘K palette in `DashboardLayout` (records from the API + nav pages and commands matched client-side), the setup-guide card on the home page, pin/unpin in the sidebar.
 - [ ] 4. Digital products (§18.2): deliveries, licence codes, signed download links, file library.
 - [ ] 5. AI module (§19): provider interface + sandbox provider, usage counter, product generation, funnel/page generation, translation, store policies — output always a draft.
 - [ ] 6. Affiliates (§20.3): affiliates, commissions on delivered orders, a simple OTP portal.
@@ -30,7 +30,8 @@
 
 ## Handoff
 - Branch `lane-8` in both worktrees; everything under Done is merged into `origin/zimos-additions`.
-- Migrations used: 310. Next free: 311.
+- Migrations used: 310, 311. Next free: 312.
+- Setup guide: `payment` is done whenever the storefront offers a method (COD counts); `domain` and `pixel` are optional and outside the percentage. Shortcuts live on `memberships.nav_shortcuts` (max 8 dashboard routes).
 - Lane DB has demo data: 4 customers with COD orders, 3 leads, 2 segments, a published site "Lane 8 site" with `/contact` carrying a form (`form1`), and a second store "Demo Store Copy" made by the duplicate endpoint. The demo user's username is `demo`.
 - Item 2 is landed but unticked: only its browser check is owed (see Next).
 - Scratch API helper (not in the repo): log in as `demo@zimos.test` against `http://localhost:4108/api/v1`, workspace from `GET /workspaces`; POSTs to `/orders` need an `Idempotency-Key` header.
