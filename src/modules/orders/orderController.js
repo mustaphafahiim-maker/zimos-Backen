@@ -8,6 +8,8 @@ const orderMeta = require('./orderMetaService');
 const orderTimeline = require('./orderTimeline');
 const orderBulk = require('./orderBulkService');
 const manualOrder = require('./manualOrder');
+const itemsEdit = require('./orderItemsEdit');
+const orderFulfill = require('./orderFulfill');
 
 const create = asyncHandler(async (req, res) => {
   const { shippingAmount, ...body } = req.body;
@@ -65,6 +67,22 @@ const listStatusHistory = asyncHandler(async (req, res) => {
   // 404 for an order of another workspace, before any history is read.
   await service.getOrderRef(req.tenant.workspaceId, req.params.orderId);
   res.json({ history: await statusHistory.listForOrder(req.tenant.workspaceId, req.params.orderId) });
+});
+
+const previewItems = asyncHandler(async (req, res) => {
+  res.json({ preview: await itemsEdit.previewItems(req.tenant.workspaceId, req.params.orderId, req.body, req) });
+});
+
+const updateItems = asyncHandler(async (req, res) => {
+  res.json({ order: await itemsEdit.updateItems(req.tenant.workspaceId, req.params.orderId, req.body, req) });
+});
+
+const refundQuote = asyncHandler(async (req, res) => {
+  res.json({ quote: await itemsEdit.refundQuote(req.tenant.workspaceId, req.params.orderId, req.body) });
+});
+
+const fulfill = asyncHandler(async (req, res) => {
+  res.json({ order: await orderFulfill.fulfill(req.tenant.workspaceId, req.params.orderId, req.body, req) });
 });
 
 const bulk = asyncHandler(async (req, res) => {
@@ -137,6 +155,10 @@ module.exports = {
   confirm,
   changeStatus,
   listStatusHistory,
+  previewItems,
+  updateItems,
+  refundQuote,
+  fulfill,
   manualPreview,
   manualCustomer,
   manualOptions,

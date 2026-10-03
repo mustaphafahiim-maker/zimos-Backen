@@ -31,6 +31,7 @@ const inventoryService = require('./inventoryService');
 const ORDER_REFERENCE_TYPES = [
   'order_pending', // createOrder
   'order_upsell', // an upsell joined to the order (orderService.addLineToOpenOrder)
+  'order_edited', // items added to or removed from the order (orders/orderItemsEdit.js)
   'order_reconfirmed',
   'order_reopened',
   'order_rejected',
@@ -39,7 +40,8 @@ const ORDER_REFERENCE_TYPES = [
   'order_customer_blocked',
 ];
 /** The reservations an order is placed with (its lines, then any joined upsell). */
-const INITIAL_TYPES = ['order_pending', 'order_upsell'];
+// An edit moves what the order is placed with, up or down.
+const INITIAL_TYPES = ['order_pending', 'order_upsell', 'order_edited'];
 
 function addTo(map, variantId, quantity) {
   map.set(variantId, (map.get(variantId) || 0) + quantity);
