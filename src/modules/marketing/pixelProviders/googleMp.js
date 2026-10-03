@@ -100,4 +100,4 @@ async function sendPurchase({ measurementId, secrets, order, eventId }) {
   return call(measurementId, secrets.googleApiSecret, body);
 }
 
-module.exports = { PROVIDER, sendPurchase, pseudoClientId };
+module.exports = { PROVIDER, sendPurchase, pseudoClientId, call };
