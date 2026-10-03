@@ -14,6 +14,8 @@ module.exports = (sequelize, DataTypes) => {
       lastMessageAt: { type: DataTypes.DATE, allowNull: true, field: 'last_message_at' },
       lastInboundAt: { type: DataTypes.DATE, allowNull: true, field: 'last_inbound_at' },
       lastMessagePreview: { type: DataTypes.STRING(300), allowNull: true, field: 'last_message_preview' },
+      // The teammate who owns the chat (migration 216, whatsapp/inboxService.js).
+      assignedToUserId: { type: DataTypes.UUID, allowNull: true, field: 'assigned_to_user_id' },
     },
     { tableName: 'whatsapp_conversations', indexes: [{ unique: true, fields: ['workspace_id', 'phone_normalized'] }] }
   );

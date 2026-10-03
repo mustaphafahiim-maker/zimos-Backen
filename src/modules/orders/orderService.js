@@ -419,6 +419,19 @@ async function createOrder(
       discountRecord = evaluation.discount;
       discountsSnapshot = [{ code: discountCode, type: evaluation.discount.type, amount: discountAmount }];
     }
+    const couponExtras = require('../discounts/couponExtras');
+    if (!discountCode) {
+      // No code typed: the store's best automatic discount, when one applies.
+      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
+      if (automatic) {
+        discountAmount = automatic.amount;
+        discountRecord = automatic.discount;
+        discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
+      }
+    }
+    // The store's minimum order amount binds shoppers, not staff typing an
+    // order in, and not an add-on order that follows another one.
+    if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
