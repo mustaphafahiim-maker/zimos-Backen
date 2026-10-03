@@ -43,7 +43,8 @@ async function getCart(workspaceId, cartId) {
     ],
   });
   if (!cart) throw new NotFoundError('Cart');
-  return withComputedTotals(cart);
+  // Quantity bundles lower the lines they cover, as they will on the order.
+  return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart));
 }
 
 /**
