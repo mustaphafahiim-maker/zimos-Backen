@@ -93,18 +93,22 @@ async function getStorefront(workspaceId) {
     // (none set, or its offer is archived / out of stock).
     orderBump: await presentStoreBump(w),
     // The browser ad-pixel IDs; the rest of settings stays private.
-    tracking: publicTrackingPixels(w.settings),
+    ...(await publicTracking(w.id)),
   };
 }
 
-function publicTrackingPixels(settings) {
-  const pixels = (settings && settings.tracking_pixels) || {};
+// The browser pixels (tracking_pixels table, marketing/trackingPixelService):
+// `trackingPixels` is the full list with each pixel's scope; `tracking` keeps
+// the older one-ID-per-platform shape (the first store-wide pixel of each).
+async function publicTracking(workspaceId) {
+  const trackingPixels = await require('../marketing/trackingPixelService').publicPixels(workspaceId);
+  const legacyKey = { meta: 'meta', tiktok: 'tiktok', snapchat: 'snapchat', google: 'googleTag' };
   const tracking = {};
-  if (pixels.meta) tracking.meta = pixels.meta;
-  if (pixels.tiktok) tracking.tiktok = pixels.tiktok;
-  if (pixels.snapchat) tracking.snapchat = pixels.snapchat;
-  if (pixels.google_tag) tracking.googleTag = pixels.google_tag;
-  return tracking;
+  for (const p of trackingPixels) {
+    const key = legacyKey[p.platform];
+    if (key && p.scope.type === 'all' && !tracking[key]) tracking[key] = p.pixelId;
+  }
+  return { tracking, trackingPixels };
 }
 
 const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl'];
@@ -238,6 +242,8 @@ async function trackOrder(workspaceId, phone, orderNumber) {
     shippingAmount: String(order.shippingAmount),
     totalAmount: String(order.totalAmount),
     currency: order.currency,
+    // What the store wrote for the customer (order notes marked public).
+    notes: await require('../orders/orderMetaService').publicNotes(order.id),
   };
 }
 

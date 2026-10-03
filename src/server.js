@@ -12,6 +12,7 @@ const { startAdsSync } = require('./modules/profit/adsSyncJob');
 const signupPolicy = require('./modules/auth/signupPolicy');
 const { releaseDraftsWhenOff } = require('./modules/billing/goLiveService');
 const webhookWorker = require('./modules/webhooks/webhookWorker');
+const workerRuntime = require('./core/workerRuntime');
 
 async function start() {
   try {
@@ -67,10 +68,17 @@ async function start() {
   // (WEBHOOKS_IN_PROCESS=false leaves it to scripts/dispatch-webhooks.js).
   if (env.webhooks.inProcess) webhookWorker.start();
 
+  // Background jobs and domain events (core/queue, core/outbox): run here
+  // unless a separate worker does (WORKER_IN_PROCESS=false + npm run worker).
+  if (env.queue.inProcess) {
+    workerRuntime.start().catch((err) => logger.error('Could not start the in-process worker', { message: err.message }));
+  }
+
   const shutdown = (signal) => {
     logger.info(`Received ${signal}, shutting down gracefully`);
     webhookWorker.stop();
     server.close(async () => {
+      await workerRuntime.stop();
       await db.sequelize.close();
       process.exit(0);
     });
