@@ -6,10 +6,12 @@ const logger = require('../../core/utils/logger');
 const { recordAudit } = require('../audit/auditService');
 
 /**
- * A customer who answers a WhatsApp message with STOP (or an Arabic form of
- * it) no longer gets marketing messages from the store: their
- * customers.marketingConsent goes false. Recovery and other marketing
- * automations read that flag before sending.
+ * A person who answers a WhatsApp message with STOP (or an Arabic form of it)
+ * no longer gets marketing messages from the store: the phone is recorded in
+ * marketing_opt_outs — whether or not it belongs to a customer, an abandoned
+ * checkout has none — and a customer's marketingConsent goes false.
+ * Recovery, review-request and lead automations skip it
+ * (automations/marketingGuard.js).
  */
 
 const normalise = (text) =>
@@ -30,9 +32,14 @@ async function handleInbound(workspaceId, msg, phoneNormalized) {
     const quotesOrder = msg.context && msg.context.id ? await db.WhatsappMessage.count({ where: { workspaceId, waMessageId: msg.context.id, orderId: { [Op.ne]: null } } }) : 0;
     if (quotesOrder) return { optOut: false };
 
+    const word = String(text).slice(0, 40);
+    const [, created] = await db.MarketingOptOut.findOrCreate({
+      where: { workspaceId, phoneNormalized },
+      defaults: { workspaceId, phoneNormalized, source: 'whatsapp', word },
+    });
     const [updated] = await db.Customer.update({ marketingConsent: false }, { where: { workspaceId, phoneNormalized, marketingConsent: true } });
-    if (updated) {
-      await recordAudit({ workspaceId, actorUserId: null, action: 'customer.marketing_consent.withdrawn', entityType: 'Customer', entityId: null, metadata: { phoneNormalized, via: 'whatsapp', word: String(text).slice(0, 40) } });
+    if (created || updated) {
+      await recordAudit({ workspaceId, actorUserId: null, action: 'customer.marketing_consent.withdrawn', entityType: 'Customer', entityId: null, metadata: { phoneNormalized, via: 'whatsapp', word } });
     }
     return { optOut: true };
   } catch (err) {

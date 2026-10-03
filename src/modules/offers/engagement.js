@@ -245,6 +245,8 @@ async function subscribe(workspace, body) {
       source: 'newsletter',
     });
   }
+  // Signing up again is opting back in to marketing after an earlier STOP (whatsapp/optOut.js).
+  await db.MarketingOptOut.destroy({ where: { workspaceId: workspace.id, phoneNormalized } });
   await recordAudit({
     workspaceId: workspace.id,
     actorUserId: null,

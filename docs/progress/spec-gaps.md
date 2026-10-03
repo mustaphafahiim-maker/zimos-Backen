@@ -7,6 +7,12 @@ Worked top to bottom on `claude/gracious-cori-p3g4hr`, one feature per commit,
 verified by running it on a scratch database. Migrations for this queue use
 the numbers **400–449** (no lane owns them).
 
+## Decisions
+
+- Marketing = `checkout.abandoned`, `lost_order.created`, `review.request`, `lead.created` (automations/marketingGuard.js). Order updates still go to a phone that said STOP: the customer asked for them by ordering.
+- A STOP is stored per phone in `marketing_opt_outs`, not on customers: an abandoned checkout has no customer row. A newsletter sign-up by that phone removes it; a staff edit of the customer does not.
+- A marketing SMS gets "للإيقاف أرسل: إيقاف" appended unless it already says how to stop. WhatsApp template texts carry it in their body. Email has no unsubscribe link yet (no email reply handling).
+
 ## P0 — correctness, compliance, launch gates
 
 - [x] 1. Events that never fire: record `order.unreachable`, `order.postponed`
@@ -14,7 +20,7 @@ the numbers **400–449** (no lane owns them).
   `order.payment_failed` (online payment failed); send the server Purchase of an
   online-paid order on `order.paid`; the digital-delivery email listens for
   `digital.delivered` but the event is `order.digital_delivered`.
-- [ ] 2. Marketing messages respect opt-out and the blocklist: a STOP reply is
+- [x] 2. Marketing messages respect opt-out and the blocklist: a STOP reply is
   recorded even for a customer who never opted in (`customers.marketing_opted_out_at`);
   recovery / review-request / lead automations skip opted-out and blocked
   phones; recovery tokens `{{product_name}}`, `{{cart_total}}` work for lost

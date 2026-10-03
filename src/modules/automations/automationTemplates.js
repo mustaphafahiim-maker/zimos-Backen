@@ -80,8 +80,8 @@ const TEMPLATES = [
       { type: 'wait', amount: 1, unit: 'days' },
       { type: 'whatsapp_template', template: 'cart_reminder_last', language: 'ar', params: ['{{customer_name}}', '{{recovery_link}}'] },
     ],
-    whatsapp: { name: 'cart_reminder', body: 'مرحبًا {{1}}، طلبك من {{2}} في انتظارك. أكمله من هنا: {{3}}' },
-    whatsappExtra: [{ name: 'cart_reminder_last', body: 'مرحبًا {{1}}، ما زال طلبك محفوظًا. أكمله الآن: {{2}}' }],
+    whatsapp: { name: 'cart_reminder', body: 'مرحبًا {{1}}، طلبك من {{2}} في انتظارك. أكمله من هنا: {{3}}\nللإيقاف أرسل: إيقاف' },
+    whatsappExtra: [{ name: 'cart_reminder_last', body: 'مرحبًا {{1}}، ما زال طلبك محفوظًا. أكمله الآن: {{2}}\nللإيقاف أرسل: إيقاف' }],
   },
   {
     key: 'payment_failed',

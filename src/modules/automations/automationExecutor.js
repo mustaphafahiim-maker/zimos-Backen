@@ -5,6 +5,7 @@ const queue = require('../../core/queue');
 const logger = require('../../core/utils/logger');
 const context = require('./automationContext');
 const steps = require('./automationSteps');
+const marketingGuard = require('./marketingGuard');
 
 /**
  * Runs automation rules as ordered sequences (SPEC §14.2).
@@ -18,6 +19,9 @@ const steps = require('./automationSteps');
  */
 
 const RESUME_JOB = 'automations.resume';
+
+// Steps that message the customer (a webhook or a tag is not a message).
+const MESSAGE_STEPS = new Set(['whatsapp_template', 'sms', 'email']);
 
 // A trigger that is really another event plus a delay: "ask for a review N
 // days after delivery" listens to order.delivered and waits first.
@@ -71,6 +75,14 @@ async function advance(execution, { resumed = false } = {}) {
       await execution.update({ status: 'waiting', nextStepIndex: i + 1, resumeAt: new Date(Date.now() + delayMs) });
       await queue.add('notifications', RESUME_JOB, { executionId: execution.id }, { workspaceId: execution.workspaceId, delayMs, dedupeKey: `aut:${execution.id}:${i}` });
       return execution;
+    }
+    // Checked before every message, not only at the start: a STOP during a wait counts.
+    if (MESSAGE_STEPS.has(step.type) && marketingGuard.isMarketing(execution.trigger)) {
+      const refused = await marketingGuard.refusal(execution.workspaceId, subject.phone);
+      if (refused) {
+        await logRun(execution, { status: 'skipped', stepIndex: i, stepType: step.type, detail: `stopped: ${refused}` });
+        return finish(execution, 'stopped');
+      }
     }
     try {
       const detail = await steps.runStep(step, subject, { workspaceId: execution.workspaceId, trigger: execution.trigger, rule });
