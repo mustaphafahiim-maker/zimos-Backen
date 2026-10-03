@@ -9,7 +9,7 @@
 - [x] 6. Affiliates (§20.3) — checked on :4108/:5208/:3208: an affiliate at 10%; two orders carrying `ref=hany10` got pending commissions; delivering one approved it, cancelling the other voided it; "Mark as paid" recorded a payout; `/affiliates` in Arabic; the storefront portal signed in with phone + SMS code (read from the local server log) and showed links, orders without customer data, balance and the payout.
 
 ## Next
-- [ ] 7. Dashboard as a PWA (manifest, install prompt) (§20.1 first step).
+- [ ] 7. Dashboard as a PWA (§20.1 first step) — built and landed: `public/manifest.webmanifest` (Arabic, standalone, 192/512/maskable icons, three shortcuts), `public/sw.js` (no caching; an offline page for navigations only), theme-colour and iOS meta tags, `InstallAppPrompt` in the layout. Checked on :5208: the manifest and its three icons load, the worker registers and activates. **Still to do before ticking:** see the install card after login (dispatch `beforeinstallprompt` in the console, or open on Android Chrome) — only one dev-server slot was free, so the dashboard could not run with its backend.
 - [ ] 8. Subscriptions and installments on the sandbox gateway (§18.1); courses (§18.3); shoppable images (§7.9); services marketplace (§20.5).
 
 ## Decisions
@@ -37,6 +37,8 @@
 
 - 2026-10-03 Affiliates: an order belongs to the affiliate whose code is in `orders.attribution` (`last.ref`, then `first.ref` — the storefront's touch cookie). Attribution arrives after the order, so `commissionService.syncOrder` is idempotent and `reconcile` sweeps recent orders (on list, on the portal, and every 15 minutes). delivered → approved; cancelled/returned → void; `paid` is final. Percent commissions are on the value of the allowed products' lines, not on shipping.
 - 2026-10-03 Affiliate portal: phone + OTP (existing `otpService`, purpose `affiliate_portal`), then a 12-hour HMAC token sent as `X-Affiliate-Token` (added to the storefront CORS allow-list). `request-code` answers the same for unknown phones. New permission `affiliates.manage` (owner, workspace manager). `affiliate` is a reserved storefront path.
+
+- 2026-10-03 PWA: the service worker caches nothing (live orders and money must never come from a cache); it exists for installability and an honest offline page. Web push is left for the merchant-app step (it needs lane 4's notification channels and a push provider key). The install card is snoozed for 14 days when dismissed and never shows in standalone mode; on iPhone Safari it explains Share → Add to Home Screen.
 
 ## Blocked
 
