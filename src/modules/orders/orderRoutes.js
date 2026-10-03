@@ -80,6 +80,29 @@ router.patch(
     )(req, res, next),
   controller.updateMeta
 );
+// Edit the order's items before it ships: see the new totals, then save.
+router.post(
+  '/:orderId/items/preview',
+  validate(schemas.editItems),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.previewItems
+);
+router.put('/:orderId/items', validate(schemas.editItems), requirePermission(PERMISSIONS.ORDERS_MANAGE), controller.updateItems);
+// What refunding these lines comes to (the refund itself is POST /orders/:id/refunds).
+router.post(
+  '/:orderId/refund-quote',
+  validate(schemas.refundQuote),
+  requirePermission(PERMISSIONS.REFUNDS_MANAGE),
+  controller.refundQuote
+);
+// "Shipped" by hand, with a tracking number and link.
+router.post(
+  '/:orderId/fulfill',
+  validate(schemas.fulfill),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  requireLive,
+  controller.fulfill
+);
 // Everything that happened to the order, and the orders next to it in the list.
 router.get('/:orderId/timeline', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.timeline);
 router.get(
