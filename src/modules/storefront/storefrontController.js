@@ -15,13 +15,32 @@ const getSitemap = asyncHandler(async (req, res) =>
   res.json({ entries: await require('./generalSettings').storeSitemap(req.publicWorkspace) })
 );
 const getStore = asyncHandler(async (req, res) => res.json({ store: await service.getStorefront(req.tenant.workspaceId) }));
-const listProducts = asyncHandler(async (req, res) => res.json(await service.listProducts(req.tenant.workspaceId, req.query)));
-const getProduct = asyncHandler(async (req, res) => res.json({ product: await service.getProductBySlugOrId(req.tenant.workspaceId, req.params.idOrSlug) }));
-const listCollections = asyncHandler(async (req, res) => res.json({ collections: await service.listCollections(req.tenant.workspaceId) }));
+// Products and collections come back in the shopper's language when the store
+// has it translated (X-Store-Locale; modules/translations) — originals otherwise.
+const i18n = require('../translations/translations');
+const plain = (row) => (row && typeof row.toJSON === 'function' ? row.toJSON() : row);
+const listProducts = asyncHandler(async (req, res) => {
+  const result = await service.listProducts(req.tenant.workspaceId, req.query);
+  if (result && Array.isArray(result.products)) await i18n.localizeProducts(req, result.products);
+  res.json(result);
+});
+const getProduct = asyncHandler(async (req, res) => {
+  const product = await service.getProductBySlugOrId(req.tenant.workspaceId, req.params.idOrSlug);
+  await i18n.localizeProducts(req, [product]);
+  res.json({ product });
+});
+const listCollections = asyncHandler(async (req, res) => {
+  const collections = (await service.listCollections(req.tenant.workspaceId)).map(plain);
+  res.json({ collections: await i18n.localizeCollections(req, collections) });
+});
 const suggestProducts = asyncHandler(async (req, res) =>
   res.json(await service.suggestProducts(req.tenant.workspaceId, req.query.q))
 );
-const getCollection = asyncHandler(async (req, res) => res.json({ collection: await service.getCollection(req.tenant.workspaceId, req.params.collectionId) }));
+const getCollection = asyncHandler(async (req, res) => {
+  const collection = plain(await service.getCollection(req.tenant.workspaceId, req.params.collectionId));
+  await i18n.localizeCollections(req, [collection]);
+  res.json({ collection });
+});
 // The signed tracking link (…/track?t=<token>): the same answer, no phone number needed.
 const trackOrderByToken = asyncHandler(async (req, res) => res.json({ result: await service.trackOrderByToken(req.tenant.workspaceId, req.query.token) }));
 

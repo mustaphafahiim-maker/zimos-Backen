@@ -195,6 +195,8 @@ v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/cus
 v1.use('/workspaces/:workspaceId/saved-sections', require('./modules/savedSections/savedSectionsRoutes'));
 // Split tests on funnel steps (funnels.manage).
 v1.use('/workspaces/:workspaceId/experiments', require('./modules/funnels/splitTests').router);
+// Translations of the merchant's own content, and the languages overview (website.edit).
+v1.use('/workspaces/:workspaceId/translations', require('./modules/translations/translations').router);
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);

@@ -83,10 +83,12 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
 async function getStorefront(workspaceId) {
   const w = await db.Workspace.findOne({
     where: { id: workspaceId },
-    attributes: ['id', 'name', 'slug', 'logoUrl', 'tagline', 'themeSettings', 'defaultCurrency', 'settings'],
+    attributes: ['id', 'name', 'slug', 'logoUrl', 'tagline', 'themeSettings', 'defaultCurrency', 'defaultLocale', 'settings'],
   });
   if (!w) throw new NotFoundError('Workspace');
   return {
+    // The store's own language and the ones it offers besides (modules/translations).
+    ...require('../translations/translations').languagesOf(w),
     id: w.id,
     name: w.name,
     slug: w.slug,
