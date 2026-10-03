@@ -66,6 +66,12 @@ module.exports = {
       // or the funnel checkout step's) and prices the line itself
       // (checkout/orderBump.js).
       orderBump: Joi.object({ offerId: uuid.required() }).optional(),
+      // The bot guard's fields (risk/botProtection): the honeypot, the time
+      // token from GET /checkout/guard, the challenge token. Deliberately
+      // loose — the guard decides, and takes them off the body.
+      website: Joi.string().max(500).allow('', null).optional(),
+      botToken: Joi.string().max(500).allow('', null).optional(),
+      captchaToken: Joi.string().max(4000).allow('', null).optional(),
       // Answers to the purchase-form fields with no column of their own
       // (sa_national_address, custom_1…5) — checkout/checkoutForm.js.
       formFields: formFieldsBodySchema,

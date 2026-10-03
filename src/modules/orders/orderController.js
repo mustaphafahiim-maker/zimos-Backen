@@ -18,7 +18,8 @@ const get = asyncHandler(async (req, res) => {
 
 const list = asyncHandler(async (req, res) => {
   const result = await service.listOrders(req.tenant.workspaceId, req.query);
-  res.json(result);
+  // Phones in the list are masked for roles without customers.reveal_sensitive.
+  res.json(require('../../core/utils/phoneMask').forViewer(req, result));
 });
 
 const pipeline = asyncHandler(async (req, res) => {

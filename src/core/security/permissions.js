@@ -32,6 +32,7 @@ const PERMISSIONS = Object.freeze({
   CUSTOMERS_VIEW: 'customers.view',
   CUSTOMERS_MANAGE: 'customers.manage',
   CUSTOMERS_REVEAL_SENSITIVE: 'customers.reveal_sensitive',
+  FORM_SUBMISSIONS_VIEW: 'form_submissions.view',
 
   SHIPPING_MANAGE: 'shipping.manage',
   TAX_MANAGE: 'tax.manage',
@@ -79,6 +80,7 @@ const SYSTEM_ROLES = Object.freeze({
       PERMISSIONS.ORDERS_MANAGE,
       PERMISSIONS.CUSTOMERS_VIEW,
       PERMISSIONS.CUSTOMERS_MANAGE,
+      PERMISSIONS.FORM_SUBMISSIONS_VIEW,
       PERMISSIONS.SHIPPING_MANAGE,
       PERMISSIONS.TAX_MANAGE,
       PERMISSIONS.REFUNDS_MANAGE,

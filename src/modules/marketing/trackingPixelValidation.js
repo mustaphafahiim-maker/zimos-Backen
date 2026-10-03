@@ -33,6 +33,15 @@ const shared = {
 
 module.exports = {
   list: { params: Joi.object(workspaceParam) },
+  events: {
+    params: Joi.object(workspaceParam),
+    query: Joi.object({
+      limit: Joi.number().integer().min(1).max(100).default(50),
+      cursor: Joi.date().iso(),
+      status: Joi.string().valid('sent', 'failed'),
+      trackingPixelId: uuid,
+    }),
+  },
   create: {
     params: Joi.object(workspaceParam),
     body: Joi.object({

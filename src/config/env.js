@@ -13,6 +13,32 @@ function required(name, fallback) {
   return value;
 }
 
+// Production must not start on a secret anyone can read in this repository
+// (SPEC §3.4): the three keys below have to be set, at least 32 characters
+// long, and not one of the placeholders from .env.example / docker-compose.
+// Uploads must go to R2 — the local disk of a container is lost on redeploy —
+// unless ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true says the disk is a real volume.
+function assertProductionConfig() {
+  if (process.env.NODE_ENV !== 'production') return;
+  const problems = [];
+  for (const name of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'INTEGRATIONS_ENCRYPTION_KEY']) {
+    const value = (process.env[name] || '').trim();
+    if (!value) problems.push(`${name} is not set`);
+    else if (value.length < 32) problems.push(`${name} is shorter than 32 characters`);
+    else if (/^(dev_only_|change_me)/i.test(value)) problems.push(`${name} is still a placeholder value`);
+  }
+  const storage = (process.env.STORAGE_PROVIDER || 'local').trim().toLowerCase();
+  if (storage !== 'r2' && process.env.ALLOW_LOCAL_STORAGE_IN_PRODUCTION !== 'true') {
+    problems.push('STORAGE_PROVIDER must be r2 in production (or set ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true for a persistent volume)');
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      ['Refusing to start in production:', ...problems.map((p) => ` - ${p}`), 'Generate a secret with: openssl rand -hex 32'].join('\n')
+    );
+  }
+}
+assertProductionConfig();
+
 // A single DATABASE_URL (Railway / Heroku) wins over the separate DB_* vars,
 // except under NODE_ENV=test — tests always use the dedicated test database
 // so a deploy's DATABASE_URL can never point them at a live one.
@@ -66,6 +92,25 @@ const env = {
     refreshSecret: required('JWT_REFRESH_SECRET', 'dev_only_refresh_secret_change_me_32chars'),
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
+  },
+
+  // The refresh token as an httpOnly cookie on /api/v1/auth for browser
+  // clients (modules/auth/refreshCookie.js). On by default outside
+  // production. In production it is opt-in (AUTH_REFRESH_COOKIE=true)
+  // because it only works when the dashboard and the API are on the same
+  // site (app.zimos.co + api.zimos.co): with SameSite=Lax a cross-site
+  // dashboard would never send the cookie back and every reload would sign
+  // the merchant out. AUTH_COOKIE_SAMESITE=none (always Secure) covers a
+  // cross-site setup where third-party cookies are still allowed.
+  authCookie: {
+    enabled:
+      process.env.AUTH_REFRESH_COOKIE !== undefined
+        ? process.env.AUTH_REFRESH_COOKIE === 'true'
+        : process.env.NODE_ENV !== 'production',
+    sameSite: ['lax', 'strict', 'none'].includes((process.env.AUTH_COOKIE_SAMESITE || '').toLowerCase())
+      ? process.env.AUTH_COOKIE_SAMESITE.toLowerCase()
+      : 'lax',
+    secure: process.env.NODE_ENV === 'production' || (process.env.AUTH_COOKIE_SAMESITE || '').toLowerCase() === 'none',
   },
 
   google: {

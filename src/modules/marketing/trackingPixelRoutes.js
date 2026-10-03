@@ -16,7 +16,9 @@ const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.WORKSPACE_MANAGE));
 
 router.get('/', validate(schemas.list), controller.list);
+router.get('/events', validate(schemas.events), controller.events);
 router.post('/', validate(schemas.create), controller.create);
+router.post('/:pixelId/test', validate(schemas.remove), controller.sendTest);
 router.patch('/:pixelId', validate(schemas.update), controller.update);
 router.delete('/:pixelId', validate(schemas.remove), controller.remove);
 

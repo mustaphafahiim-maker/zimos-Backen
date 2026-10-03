@@ -4,9 +4,9 @@
 - [x] 1. Dashboard home KPIs (§15.1): `GET /analytics/overview` (all KPIs + previous period, per-day series, conversion funnel, offers table, top sources/governorates/devices/products/funnels, funnel filter) and the home page built on it (`pages/home/StoreOverview.tsx`) — checked on :4106 / :5206 with seeded orders and events, in English and Arabic.
 - [x] 2. Sales attribution (§15.3): `GET /analytics/attribution` (group by source/medium/campaign/content, UTM and funnel filters, delivered column, spend/ROAS when ad spend exists) and `/analytics/attribution` page — checked on :5206 with seeded UTM traffic.
 - [x] 3. Real profit (§15.4): migrations 260–261 (`product_economics`, `ad_spend_daily`), `modules/profit` (P&L actual/projected by day/product/campaign with max CPA, economics defaults + per-product overrides, ad spend manual + CSV import with error report, campaigns report, `ads.sync_spend` hourly job on the sandbox adapter + README), permission `profit.manage`; pages `/profit`, `/profit/costs`, `/ads` — checked on :4106 / :5206 (import of 42 rows with 2 rejected, P&L, campaigns).
+- [x] 4. Settlements (§15.5): migration 262 (`cod_settlements.statement_report`), `POST /settlements/statement/match` (dry run) and `/statement/import` (draft settlement from the matching rows, report saved), `GET /settlements/held` (per courier, by age), `GET /settlements/:id/statement-report`; settlements page got the held-by-couriers table and the import dialog — checked on :4106 / :5206 with a 6-row statement (3 ok, 1 amount mismatch, 1 duplicate, 1 not found).
 
 ## Next
-- [ ] 4. Settlements (§15.5): import courier statement, match waybills, discrepancies, money held by couriers.
 - [ ] 5. Payments: gateway adapter README + `sandbox` gateway; manual transfer with receipt image and confirm/reject (§11.3); deposits.
 - [ ] 6. Payment rules (§11.4): fee/discount per method, gateways per funnel, failed-payment retry link.
 - [ ] 7. Currencies (§11.5): `fx_rates`, sandbox rates adapter, display currencies, `fxRateToBase` on orders, currency switch in analytics.
@@ -27,8 +27,9 @@
 - 2026-10-03 ZIMOS fees in the P&L come from the plan's `transactionFeeBp` / `codFeeBp` (Ziad's billing), nothing new stored.
 - 2026-10-03 Ad spend CSV is sent as text in a JSON body (`{ csv }`), no multipart; amounts are in the store currency.
 - 2026-10-03 `/analytics/pnl` (the spec's path) redirects 307 to `/profit/pnl`. The old gross-profit `ProfitPage.tsx` is left in place but `/profit` now renders `RealProfitPage`.
+- 2026-10-03 Courier statements are imported as CSV (Excel → Save as CSV): neither repo has an xlsx library and adding one was not worth a dependency. A row claiming more than the order is due is capped at the due amount; the difference stays in the saved report.
 
 ## Blocked
 
 ## Handoff
-Items 1–3 landed. Scratch helpers used for checking (not in the repo): a seed script that fills `zimos_lane_6` with ~135 `L6-` orders, sessions and events over 21 days, plus imported ad spend. Next is item 4 (settlement statement import) on top of `modules/settlements`. Migrations used: 260, 261.
+Items 1–4 landed. Scratch helpers used for checking (not in the repo): a seed script that fills `zimos_lane_6` with ~135 `L6-` orders, sessions and events over 21 days, plus imported ad spend. Next is item 5 (payments: adapter README + sandbox gateway, manual transfer with receipt, deposits). Migrations used: 260–262.
