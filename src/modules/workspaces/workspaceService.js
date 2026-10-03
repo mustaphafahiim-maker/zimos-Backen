@@ -190,6 +190,11 @@ const MERCHANT_SETTINGS_KEYS = [
   // (storefront/storeInfo.js).
   'store_info',
   'legal',
+  // Replaced whole: storefront/generalSettings.js.
+  'general',
+  'social_links',
+  'floating_whatsapp',
+  'store_seo',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one

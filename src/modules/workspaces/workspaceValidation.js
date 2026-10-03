@@ -8,6 +8,12 @@ const { CHECKOUT_FIELD_MODES, CHECKOUT_NOTES_MODES } = require('../checkout/chec
 const { checkoutFormSettingsKeys } = require('../checkout/checkoutForm');
 const { thankYouPageSchema } = require('../storefront/thankYouPage');
 const { storeInfoSchema, legalSchema } = require('../storefront/storeInfo');
+const {
+  generalSchema,
+  socialLinksSchema,
+  floatingWhatsappSchema,
+  storeSeoSchema,
+} = require('../storefront/generalSettings');
 const { FRAUD_ACTIONS, PHONE_VALIDATION_MODES } = require('../fraud/fraudRules');
 
 // A fraud rule is stored as its bare value (the older shape) or as { value, action }.
@@ -115,6 +121,12 @@ module.exports = {
         // policies (storefront/storeInfo.js). Each sent whole and stored whole.
         store_info: storeInfoSchema.allow(null).optional(),
         legal: legalSchema.allow(null).optional(),
+        // Favicon and country, social links, the floating WhatsApp button and
+        // store-level SEO (storefront/generalSettings.js). Each sent whole.
+        general: generalSchema.allow(null).optional(),
+        social_links: socialLinksSchema.allow(null).optional(),
+        floating_whatsapp: floatingWhatsappSchema.allow(null).optional(),
+        store_seo: storeSeoSchema.allow(null).optional(),
         // Storefront fraud rules — see modules/fraud/fraudRules.js. Same
         // merge semantics as checkout_settings: sub-keys merge, `null` on a
         // sub-key restores its default (a numeric rule's default is "off"),
