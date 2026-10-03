@@ -24,6 +24,8 @@ const STEP_TYPES = new Set([
   'downsell',
   'thank_you',
   'custom',
+  // An advertorial before the product page (SPEC §9.2).
+  'article',
 ]);
 
 // Steps that sell an offer when the visitor accepts them.

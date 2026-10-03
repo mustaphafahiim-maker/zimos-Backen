@@ -20,7 +20,8 @@ const stepTypeEnum = Joi.string().valid(
   'upsell',
   'downsell',
   'thank_you',
-  'custom'
+  'custom',
+  'article'
 );
 
 const seo = Joi.object({
@@ -40,7 +41,11 @@ const treeData = Joi.any();
 const condition = Joi.alternatives()
   .try(
     Joi.valid(null),
-    Joi.object({ type: Joi.string().valid('always', 'completed_checkout', 'accepted_offer', 'declined_offer').required() }).unknown(true)
+    Joi.object({
+      type: Joi.string().valid('always', 'completed_checkout', 'accepted_offer', 'declined_offer', 'clicked_through').required(),
+      // A link drawn from one button of the page (funnelRouting.js).
+      sourceElementId: Joi.string().max(120).optional(),
+    }).unknown(true)
   );
 
 // --- staff ---------------------------------------------------------------
@@ -179,6 +184,8 @@ const advance = {
         .valid('completed_checkout', 'accepted_offer', 'declined_offer', 'clicked_through')
         .required(),
       orderId: uuid.optional(),
+      // Which button was pressed, for edges drawn from a page element.
+      sourceElementId: Joi.string().max(120).optional(),
     }).required(),
   }),
 };
