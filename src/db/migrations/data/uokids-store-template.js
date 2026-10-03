@@ -324,8 +324,11 @@ const themeSettings = {
     logo: { size: 'lg' },
     show: { theme: false, language: false, trackOrder: false },
   },
+  mobileToolbar: true,
+  floating: { whatsapp: '201007591211', language: true },
   footer: {
-    text: 'شارع الفيروز، الشيخ زايد · info@uokids.com · 01007591211',
+    layout: 'rich',
+    contact: { address: 'شارع الفيروز، الشيخ زايد', email: 'info@uokids.com', phone: '01007591211' },
     groups: [
       {
         title: 'الاقسام',
@@ -363,7 +366,6 @@ const themeSettings = {
       { platform: 'instagram', url: 'https://www.instagram.com/uokids.store' },
       { platform: 'tiktok', url: 'https://www.tiktok.com/@uokidsofficial' },
     ],
-    whatsapp: '201007591211',
   },
 };
 
