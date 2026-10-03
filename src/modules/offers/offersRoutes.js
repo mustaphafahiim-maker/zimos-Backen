@@ -122,4 +122,26 @@ router.get(
   asyncHandler(async (req, res) => res.json({ referrals: await engagement.referralStats(ws(req), req.query.days) }))
 );
 
+// The product feed, the Google Merchant checklist and the hub's numbers (productFeed.js).
+const productFeed = require('./productFeed');
+router.get('/feed', validate({ params: wsParams }), canView, asyncHandler(async (req, res) => res.json(await productFeed.getFeed(ws(req)))));
+router.put(
+  '/feed',
+  validate({ params: wsParams, body: productFeed.feedSchema }),
+  canManage,
+  asyncHandler(async (req, res) => res.json(await productFeed.saveFeed(ws(req), req.body, req)))
+);
+router.get(
+  '/merchant-checklist',
+  validate({ params: wsParams }),
+  canView,
+  asyncHandler(async (req, res) => res.json(await productFeed.merchantChecklist(ws(req))))
+);
+router.get(
+  '/summary',
+  validate({ params: wsParams, query: Joi.object({ days: Joi.number().integer().min(1).max(365).default(30) }) }),
+  canView,
+  asyncHandler(async (req, res) => res.json({ summary: await productFeed.offersSummary(ws(req), req.query.days) }))
+);
+
 module.exports = router;
