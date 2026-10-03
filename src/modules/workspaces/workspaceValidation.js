@@ -125,6 +125,9 @@ module.exports = {
           block_outside_country: fraudRule(Joi.boolean()),
           allowed_countries: Joi.array().items(Joi.string().length(2).uppercase()).max(60).unique().allow(null).optional(),
           block_vpn: fraudRule(Joi.boolean()),
+          // Checkout bot guard (risk/botProtection): on/off, and the invisible challenge.
+          bot_protection: Joi.boolean().allow(null).optional(),
+          bot_captcha: Joi.boolean().allow(null).optional(),
           // Visitors from these countries do not see the store at all (risk/visitorGate).
           blocked_countries: Joi.array().items(Joi.string().length(2).uppercase()).max(250).unique().allow(null).optional(),
           min_network_delivery_rate: fraudRule(Joi.number().integer().min(1).max(100)),
