@@ -31,5 +31,7 @@ router.get('/web/realtime', validate(schemas.webRealtime), controller.webRealtim
 // ticket that opens the stream at /api/v1/analytics-stream/:workspaceId (realtimeStream.js).
 router.get('/live', validate(schemas.live), controller.live);
 router.post('/live/stream-ticket', validate(schemas.liveTicket), controller.liveTicket);
+// Sales, products, delivery and customers reports, insights and CSV export.
+router.use('/reports', require('./reportsRoutes'));
 
 module.exports = router;
