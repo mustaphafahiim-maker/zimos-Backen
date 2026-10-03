@@ -9,26 +9,29 @@ const { sanitizeGatewayMessage } = require('../payments/gateways/gatewayErrors')
 const { recordAudit } = require('../audit/auditService');
 const charges = require('./subscriptionChargeService');
 const fawaterakConfig = require('./fawaterak/config');
-const fawaterak = require('./fawaterak/client');
-const { toMajor, toMinor } = require('./fawaterak/amounts');
+const { toMajor } = require('./fawaterak/amounts');
 const { verifyWebhook } = require('./fawaterak/signature');
+const gateways = require('./gateways/registry');
+const paymentMethods = require('./paymentMethodService');
 
 /**
- * A merchant paying their subscription charge online, through Zimos's
- * Fawaterak account. Nothing here is shared with the stores' own gateways
- * (modules/payments).
+ * A merchant paying their subscription charge online, through a gateway of
+ * Zimos's own (billing/gateways: Fawaterak today, each gateway an adapter).
+ * Nothing here is shared with the stores' own gateways (modules/payments).
  *
  *   1. `startPayment` (the merchant's Pay button): the pending charge
  *      (createCharge, which reuses an open one), its price as payable now
- *      frozen on a new attempt, and a hosted checkout link from
- *      createTransaction. EGP charges only; ONLINE_BILLING_ENABLED gates it.
+ *      frozen on a new attempt, and a hosted checkout link from the
+ *      adapter's createPayment. Fawaterak: EGP charges only, and
+ *      ONLINE_BILLING_ENABLED gates it.
  *
- *   2. `confirmAttempt` is the only place a payment is believed: it asks
- *      getTransactionData, never a webhook body (Fawaterak's signature
- *      doesn't cover the status or the amount). Paid means `paid === 1`, the
- *      intent and pay_load name this attempt, and the total and currency are
- *      exactly the frozen price. Webhooks, the sweep and the merchant's
- *      status read all end here.
+ *   2. `confirmAttempt` is the only place a payment is believed: it asks the
+ *      gateway's own API (the adapter's fetchPayment, Fawaterak's
+ *      getTransactionData), never a webhook body (Fawaterak's signature
+ *      doesn't cover the status or the amount). Paid means the gateway says
+ *      paid, the intent and the carried reference name this attempt, and the
+ *      total and currency are exactly the frozen price. Webhooks, the sweep
+ *      and the merchant's status read all end here.
  *
  *   3. `settleConfirmed` locks the charge, then the attempt, and goes
  *      through settlePaid — the charge-paid path a payment recorded by hand
@@ -54,21 +57,15 @@ const STATUS_READ_EVERY_MS = 10 * 1000;
 
 const now = () => new Date();
 
-function currencyNotSupported(currency) {
+function currencyNotSupported(currency, adapter) {
   return new ConflictError(
-    `Online payment is only available for plans priced in ${ONLINE_CURRENCY}. This plan is priced in ${currency}; pay it another way.`,
+    `Online payment is only available for plans priced in ${adapter.currencies.join(' or ')}. This plan is priced in ${currency}; pay it another way.`,
     'ONLINE_PAYMENT_CURRENCY_UNSUPPORTED'
   );
 }
 
-function requireConfig() {
-  const config = fawaterakConfig.readyConfig();
-  if (!config) throw new fawaterak.OnlineBillingUnavailableError();
-  return config;
-}
-
-function webhookUrl(config, kind) {
-  return `${env.appUrl.replace(/\/+$/, '')}/api/${env.apiVersion}/billing/fawaterak/${config.webhookToken}/${kind}`;
+function unavailable() {
+  return new AppError('ONLINE_BILLING_UNAVAILABLE', 'Online payment is not available right now.', 503);
 }
 
 /**
@@ -83,38 +80,12 @@ function returnUrl(attempt, result) {
   return `${base}/settings?payment=${attempt.id}&workspace=${attempt.workspaceId}&result=${result}`;
 }
 
-function itemName(plan, billingCycle) {
-  const cycle = billingCycle === 'yearly' ? 'annual' : 'monthly';
-  return `ZIMOS ${plan ? plan.name : 'subscription'} (${cycle})`.slice(0, 120);
-}
-
-/** The createTransaction body: a hosted checkout (no payment_method_id) for exactly the frozen amount. */
-function transactionRequest(config, attempt, { plan, billingCycle, user, lang }) {
-  const total = toMajor(attempt.amount);
-  const [first, ...rest] = String(user.fullName || '').trim().split(/\s+/).filter(Boolean);
-  const firstName = (first || 'ZIMOS').slice(0, 60);
+function returnUrls(attempt) {
   return {
-    cartTotal: total,
-    currency: attempt.currency,
-    customer: {
-      first_name: firstName,
-      last_name: (rest.join(' ') || firstName).slice(0, 60),
-      email: user.email,
-    },
-    cartItems: [{ name: itemName(plan, billingCycle), price: total, quantity: 1 }],
-    pay_load: { attemptId: attempt.id, billingInvoiceId: attempt.billingInvoiceId, workspaceId: attempt.workspaceId },
-    redirectionUrls: {
-      successUrl: returnUrl(attempt, 'success'),
-      failUrl: returnUrl(attempt, 'fail'),
-      pendingUrl: returnUrl(attempt, 'pending'),
-      backUrl: returnUrl(attempt, 'back'),
-      webhookUrl: webhookUrl(config, 'paid_json'),
-    },
-    sendEmail: false,
-    sendSMS: false,
-    authAndCapture: 0,
-    tr_number: attempt.id,
-    lang: lang === 'en' ? 'en' : 'ar',
+    success: returnUrl(attempt, 'success'),
+    fail: returnUrl(attempt, 'fail'),
+    pending: returnUrl(attempt, 'pending'),
+    back: returnUrl(attempt, 'back'),
   };
 }
 
@@ -144,23 +115,36 @@ function serializeForMerchant(attempt) {
 // ------------------------------------------------------------ start a payment
 
 /**
+ * The gateway a Pay press goes through. Without `method`, Fawaterak, as
+ * before payment methods existed (what an older dashboard sends); with one,
+ * a gateway the merchant is offered: its payment_methods row enabled and its
+ * adapter configured (paymentMethodService), or 404.
+ */
+async function startingGateway(method) {
+  if (!method) return gateways.get(PROVIDER);
+  const adapter = await paymentMethods.offeredGateway(method);
+  if (!adapter) throw new AppError('PAYMENT_METHOD_NOT_AVAILABLE', 'This payment method is not available.', 404);
+  return adapter;
+}
+
+/**
  * The merchant's Pay button. Resolves { payment, reused }: `reused` when the
  * same checkout is handed back for a second press within a minute. An older
  * checkout still in progress is superseded (its link may still be paid: that
  * payment still settles the charge, or is caught as a duplicate).
  */
-async function startPayment(workspaceId, { lang } = {}, req) {
-  if (env.billing.online.enabled !== true) {
-    throw new AppError('ONLINE_BILLING_DISABLED', 'Online payment is not enabled.', 404);
-  }
-  const config = requireConfig();
+async function startPayment(workspaceId, { lang, method } = {}, req) {
+  const adapter = await startingGateway(method);
+  adapter.assertCanStart();
 
   const subscription = await db.Subscription.findOne({ where: { workspaceId }, include: [{ model: db.Plan, as: 'plan' }] });
   if (!subscription) throw new NotFoundError('Subscription');
-  if (subscription.plan && subscription.plan.currency !== ONLINE_CURRENCY) throw currencyNotSupported(subscription.plan.currency);
+  if (subscription.plan && !adapter.currencies.includes(subscription.plan.currency)) {
+    throw currencyNotSupported(subscription.plan.currency, adapter);
+  }
 
   const { invoice } = await charges.createCharge(workspaceId, { req, byMerchant: true });
-  if (invoice.currency !== ONLINE_CURRENCY) throw currencyNotSupported(invoice.currency);
+  if (!adapter.currencies.includes(invoice.currency)) throw currencyNotSupported(invoice.currency, adapter);
 
   const { attempt, reused } = await db.sequelize.transaction(async (transaction) => {
     const locked = await db.BillingInvoice.findByPk(invoice.id, { transaction, lock: transaction.LOCK.UPDATE });
@@ -171,7 +155,7 @@ async function startPayment(workspaceId, { lang } = {}, req) {
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
-    if (current && now().getTime() - new Date(current.createdAt).getTime() < REPRESS_WINDOW_MS) {
+    if (current && current.provider === adapter.code && now().getTime() - new Date(current.createdAt).getTime() < REPRESS_WINDOW_MS) {
       if (current.status === 'created') {
         throw new ConflictError('A payment is being started for this charge. Try again in a moment.', 'PAYMENT_STARTING');
       }
@@ -186,7 +170,7 @@ async function startPayment(workspaceId, { lang } = {}, req) {
         billingInvoiceId: locked.id,
         workspaceId,
         subscriptionId: locked.subscriptionId,
-        provider: PROVIDER,
+        provider: adapter.code,
         status: 'created',
         grossAmount: payable.grossAmount,
         discountAmount: payable.discountAmount,
@@ -204,7 +188,7 @@ async function startPayment(workspaceId, { lang } = {}, req) {
       entityType: 'BillingPaymentAttempt',
       entityId: created.id,
       after: { amount: payable.amount, currency: locked.currency, discountAmount: payable.discountAmount },
-      metadata: { billingInvoiceId: locked.id, provider: PROVIDER, superseded: current ? current.id : null },
+      metadata: { billingInvoiceId: locked.id, provider: adapter.code, superseded: current ? current.id : null },
       req,
       transaction,
     });
@@ -214,14 +198,18 @@ async function startPayment(workspaceId, { lang } = {}, req) {
 
   let link;
   try {
-    link = await fawaterak.createTransaction(
-      config,
-      transactionRequest(config, attempt, { plan: subscription.plan, billingCycle: subscription.billingCycle, user: req.user, lang })
-    );
+    link = await adapter.createPayment({
+      attempt,
+      plan: subscription.plan,
+      billingCycle: subscription.billingCycle,
+      user: req.user,
+      lang,
+      returnUrls: returnUrls(attempt),
+    });
   } catch (err) {
     await attempt.update({ status: 'error', failureReason: reasonOf(err) });
-    logger.error(`billing payment attempt ${attempt.id}: no checkout from Fawaterak: ${reasonOf(err)}`);
-    if (err instanceof fawaterak.OnlineBillingUnavailableError) throw err;
+    logger.error(`billing payment attempt ${attempt.id}: no checkout from ${adapter.name}: ${reasonOf(err)}`);
+    if (err && err.code === 'ONLINE_BILLING_UNAVAILABLE') throw err;
     throw new AppError(
       'ONLINE_PAYMENT_START_FAILED',
       'The payment page could not be opened. Try again in a few minutes, or pay another way.',
@@ -229,8 +217,8 @@ async function startPayment(workspaceId, { lang } = {}, req) {
     );
   }
 
-  const expiresAt = new Date(Date.now() + (link.expiresIn || FALLBACK_LINK_SECONDS) * 1000);
-  await attempt.update({ providerIntentKey: link.intentKey, checkoutUrl: link.url, expiresAt });
+  const expiresAt = new Date(Date.now() + (link.expiresInSeconds || FALLBACK_LINK_SECONDS) * 1000);
+  await attempt.update({ providerIntentKey: link.providerRef, checkoutUrl: link.checkoutUrl, expiresAt });
   // Only a checkout still being made becomes open: one superseded meanwhile
   // keeps that status (its link can still settle the charge if paid).
   await db.BillingPaymentAttempt.update({ status: 'open' }, { where: { id: attempt.id, status: 'created' } });
@@ -241,53 +229,29 @@ async function startPayment(workspaceId, { lang } = {}, req) {
 
 // ------------------------------------------------------- confirm and settle
 
-function parsePayLoad(value) {
-  if (value && typeof value === 'object') return value;
-  if (typeof value !== 'string' || !value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch (err) {
-    return null;
-  }
-}
-
-const shortText = (value, max) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
-
-/** What getTransactionData says about a paid intent, checked against the attempt. */
-function verifyPaid(attempt, data) {
-  const verifiedAmount = toMinor(data.total);
-  const currency = typeof data.currency === 'string' ? data.currency.trim().toUpperCase() : '';
-  const payLoad = parsePayLoad(data.pay_load);
+/**
+ * What the gateway says about a paid payment (the adapter's fetchPayment),
+ * checked against the attempt: the same rules for every gateway.
+ */
+function verifyPaid(attempt, payment) {
   const problems = [];
-  if (data.intent_key !== undefined && data.intent_key !== attempt.providerIntentKey) problems.push('the intent key differs');
-  if (!payLoad || payLoad.attemptId !== attempt.id) problems.push('pay_load does not name this attempt');
-  if (currency !== attempt.currency) problems.push(`currency ${currency || '(none)'} instead of ${attempt.currency}`);
-  if (verifiedAmount !== Number(attempt.amount)) problems.push(`total ${String(data.total)} instead of ${toMajor(attempt.amount)}`);
-  const transactionId = Number(data.transaction_id);
+  if (payment.providerRef !== undefined && payment.providerRef !== attempt.providerIntentKey) problems.push('the intent key differs');
+  if (payment.attemptRef !== attempt.id) problems.push('pay_load does not name this attempt');
+  if (payment.currency !== attempt.currency) problems.push(`currency ${payment.currency || '(none)'} instead of ${attempt.currency}`);
+  if (payment.amount !== Number(attempt.amount)) problems.push(`total ${payment.amountText} instead of ${toMajor(attempt.amount)}`);
   return {
     problems,
     fields: {
-      verifiedAmount: Number.isNaN(verifiedAmount) ? null : verifiedAmount,
-      verifiedCurrency: /^[A-Z]{3}$/.test(currency) ? currency : null,
-      providerTransactionId: Number.isSafeInteger(transactionId) && transactionId > 0 ? transactionId : null,
-      paymentMethod: shortText(data.payment_method, 100) || attempt.paymentMethod,
-      // The reference does not say which time zone paid_at is in, so the
-      // charge is dated when we confirmed it; Fawaterak's text is audited.
+      verifiedAmount: Number.isNaN(payment.amount) ? null : payment.amount,
+      verifiedCurrency: /^[A-Z]{3}$/.test(payment.currency) ? payment.currency : null,
+      providerTransactionId: payment.transactionId,
+      paymentMethod: payment.paymentMethod || attempt.paymentMethod,
+      // The gateway's own paid-at may not say its time zone, so the charge
+      // is dated when we confirmed it; the gateway's text is audited.
       paidAt: now(),
     },
-    gatewayPaidAt: shortText(String(data.paid_at || ''), 40),
+    gatewayPaidAt: payment.gatewayPaidAt,
   };
-}
-
-/** The latest provider reference (a Fawry code) in getTransactionData's history. */
-function referenceOf(data) {
-  const history = Array.isArray(data.transaction_history) ? data.transaction_history : [];
-  for (let i = history.length - 1; i >= 0; i -= 1) {
-    const reference = history[i] && shortText(history[i].reference, 100);
-    if (reference) return reference;
-  }
-  return null;
 }
 
 /**
@@ -314,7 +278,7 @@ async function settleConfirmed(attemptId, verification, { source }) {
         after: { status: attempt.status, verifiedAmount: fields.verifiedAmount, verifiedCurrency: fields.verifiedCurrency },
         metadata: {
           billingInvoiceId: invoice.id,
-          provider: PROVIDER,
+          provider: attempt.provider,
           providerTransactionId: fields.providerTransactionId,
           gatewayPaidAt,
           source,
@@ -326,7 +290,7 @@ async function settleConfirmed(attemptId, verification, { source }) {
     if (problems.length > 0) {
       await attempt.update({ status: 'mismatch', ...fields, failureReason: problems.join('; ').slice(0, 300) }, { transaction });
       await audit('billing_payment.mismatch', { problems });
-      logger.error(`billing payment attempt ${attempt.id}: Fawaterak reports it paid, but ${problems.join('; ')}. The charge was not settled.`);
+      logger.error(`billing payment attempt ${attempt.id}: ${attempt.provider} reports it paid, but ${problems.join('; ')}. The charge was not settled.`);
       return { outcome: 'mismatch', attempt };
     }
 
@@ -345,7 +309,7 @@ async function settleConfirmed(attemptId, verification, { source }) {
       {
         paidAt: fields.paidAt,
         amountPaid: fields.verifiedAmount,
-        externalReference: `${PROVIDER}:${fields.providerTransactionId || attempt.providerIntentKey}`,
+        externalReference: `${attempt.provider}:${fields.providerTransactionId || attempt.providerIntentKey}`,
         source: 'gateway',
         frozen: { discountAmount: attempt.discountAmount, amount: attempt.amount, referralCodeId: attempt.referralCodeId },
       },
@@ -362,12 +326,11 @@ async function settleConfirmed(attemptId, verification, { source }) {
   });
 }
 
-/** Records what an unpaid intent shows (the method, a reference) without settling anything. */
-async function noteUnpaid(attempt, data) {
-  const reference = referenceOf(data);
+/** Records what an unpaid payment shows (the method, a reference) without settling anything. */
+async function noteUnpaid(attempt, payment) {
+  const reference = payment.reference;
   const changes = {};
-  const method = shortText(data.payment_method, 100);
-  if (method) changes.paymentMethod = method;
+  if (payment.paymentMethod) changes.paymentMethod = payment.paymentMethod;
   if (reference) changes.referenceNumber = reference;
   if (Object.keys(changes).length > 0) {
     await db.BillingPaymentAttempt.update(changes, { where: { id: attempt.id, status: { [db.Sequelize.Op.notIn]: SETTLED } } });
@@ -378,23 +341,24 @@ async function noteUnpaid(attempt, data) {
 }
 
 /**
- * Asks Fawaterak whether `attempt` is paid and acts on the answer. Resolves
- * { outcome }: paid | duplicate | mismatch | already_settled | not_paid |
- * unknown_intent. Throws when Fawaterak gave no answer (the caller retries
- * later). `retry` retries the read itself — not on a webhook, which should
- * be answered promptly.
+ * Asks the attempt's gateway whether it is paid and acts on the answer.
+ * Resolves { outcome }: paid | duplicate | mismatch | already_settled |
+ * not_paid | unknown_intent. Throws when the gateway gave no answer (the
+ * caller retries later). `retry` retries the read itself — not on a webhook,
+ * which should be answered promptly.
  */
 async function confirmAttempt(attempt, { retry = false, source }) {
-  const config = requireConfig();
+  const adapter = gateways.get(attempt.provider);
+  if (!adapter || !adapter.canConfirm()) throw unavailable();
   if (!attempt.providerIntentKey) return { outcome: 'unknown_intent' };
   await db.BillingPaymentAttempt.update(
     { lastCheckedAt: now(), checkCount: db.sequelize.literal('check_count + 1') },
     { where: { id: attempt.id } }
   );
-  const answer = await fawaterak.getTransactionData(config, attempt.providerIntentKey, { retry });
-  if (!answer.found) return { outcome: 'unknown_intent' };
-  if (Number(answer.data.paid) !== 1) return noteUnpaid(attempt, answer.data);
-  return settleConfirmed(attempt.id, verifyPaid(attempt, answer.data), { source });
+  const payment = await adapter.fetchPayment(attempt, { retry });
+  if (!payment.found) return { outcome: 'unknown_intent' };
+  if (!payment.paid) return noteUnpaid(attempt, payment);
+  return settleConfirmed(attempt.id, verifyPaid(attempt, payment), { source });
 }
 
 // --------------------------------------------------------------- webhooks
@@ -612,11 +576,12 @@ async function getPayment(workspaceId, attemptId) {
   if (!attempt) throw new NotFoundError('Payment');
   const askable = ['open', 'pending', 'superseded'].includes(attempt.status) && attempt.providerIntentKey;
   const recently = attempt.lastCheckedAt && now().getTime() - new Date(attempt.lastCheckedAt).getTime() < STATUS_READ_EVERY_MS;
-  if (askable && !recently && fawaterakConfig.readyConfig()) {
+  const adapter = gateways.get(attempt.provider);
+  if (askable && !recently && adapter && adapter.canConfirm()) {
     try {
       await confirmAttempt(attempt, { retry: true, source: 'status_read' });
     } catch (err) {
-      logger.warn(`billing payment attempt ${attempt.id}: status read could not reach Fawaterak: ${reasonOf(err)}`);
+      logger.warn(`billing payment attempt ${attempt.id}: status read could not reach ${adapter.name}: ${reasonOf(err)}`);
     }
     await attempt.reload();
   }
@@ -666,7 +631,11 @@ function askEvery(ageMs) {
 }
 
 async function sweep({ limit = 50, at = now() } = {}) {
-  if (!fawaterakConfig.readyConfig()) return { skipped: 'not_configured' };
+  const providers = gateways
+    .all()
+    .filter((adapter) => adapter.canConfirm())
+    .map((adapter) => adapter.code);
+  if (providers.length === 0) return { skipped: 'not_configured' };
   const { Op } = db.Sequelize;
   const result = { events: 0, stuck: 0, asked: 0, settled: 0, expired: 0, errors: 0 };
 
@@ -693,6 +662,7 @@ async function sweep({ limit = 50, at = now() } = {}) {
   const candidates = await db.BillingPaymentAttempt.findAll({
     where: {
       status: ASKED,
+      provider: providers,
       providerIntentKey: { [Op.ne]: null },
       createdAt: { [Op.lt]: new Date(at.getTime() - LEAVE_TO_WEBHOOK_MS) },
       [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: new Date(at.getTime() - ASK_AFTER_EXPIRY_MS) } }],
@@ -718,7 +688,7 @@ async function sweep({ limit = 50, at = now() } = {}) {
       }
     } catch (err) {
       result.errors += 1;
-      logger.warn(`billing payment attempt ${attempt.id}: the sweep could not ask Fawaterak: ${reasonOf(err)}`);
+      logger.warn(`billing payment attempt ${attempt.id}: the sweep could not ask ${attempt.provider}: ${reasonOf(err)}`);
     }
   }
   return result;

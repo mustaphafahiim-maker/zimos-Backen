@@ -2,14 +2,20 @@
 
 const db = require('../../db/models');
 const env = require('../../config/env');
+const walletService = require('../billing/walletService');
 
 /**
- * Whether a store is restricted, and why. Two independent reasons, either of
+ * Whether a store is restricted, and why. Three independent reasons, any of
  * which is enough:
  *
  *   billing    the subscription is unpaid and its grace day is over;
  *   suspended  a platform admin suspended the store by hand (workspaces.status
- *              = 'suspended', see platformAdmin/workspaceSuspensionService).
+ *              = 'suspended', see platformAdmin/workspaceSuspensionService);
+ *   balance    on the pay-per-order plan while WALLET_ENABLED is on, the
+ *              prepaid balance can't pay the next order's fee within the
+ *              overdraft (billing/walletService). Always applied, whatever
+ *              BILLING_RESTRICTIONS says (Q17); topping up lifts it. Product
+ *              and funnel creation stay open: only selling stops.
  *
  * Neither touches the other: paying lifts only the billing reason, and
  * reactivating only the suspension.
@@ -116,7 +122,7 @@ async function accessFor(workspaceId, { now = new Date(), workspace, subscriptio
     subscription === undefined
       ? await db.Subscription.findOne({
           where: { workspaceId },
-          attributes: ['id', 'status', 'currentPeriodEnd', 'billingCycle'],
+          attributes: ['id', 'status', 'currentPeriodEnd', 'billingCycle', 'planId'],
         })
       : subscription;
 
@@ -124,13 +130,18 @@ async function accessFor(workspaceId, { now = new Date(), workspace, subscriptio
   const enforced = env.billing.restrictions === 'enforce';
   const billingRestricted = billing.restricted && enforced;
   const suspended = Boolean(ws && ws.status === 'suspended');
+  // Only when WALLET_ENABLED is on and the store is on a fee plan; otherwise
+  // null without a query.
+  const wallet = await walletService.accessState(workspaceId, sub);
   const reasons = [];
   if (suspended) reasons.push('suspended');
   if (billingRestricted) reasons.push('billing');
+  if (wallet && wallet.phase === 'exhausted') reasons.push('balance');
 
   return {
     restricted: reasons.length > 0,
     reasons,
+    wallet,
     draft: billing.phase === 'draft',
     billing: { ...billing, enforced },
     suspension: suspended ? { suspended: true, since: ws.suspendedAt || null } : { suspended: false, since: null },
@@ -155,6 +166,9 @@ function serializeAccess(access) {
       enforced: b.enforced,
     },
     suspension: access.suspension,
+    // The pay-per-order balance: { phase: ok | low | overdraft | exhausted,
+    // balance, fee, ordersLeft, … } — null when the store pays no order fee.
+    wallet: access.wallet || null,
   };
 }
 

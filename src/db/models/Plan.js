@@ -26,6 +26,9 @@ module.exports = (sequelize, DataTypes) => {
       // Listed on the marketing site and offered at sign-up (GET /plans/public).
       isPublic: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_public' },
       displayOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'display_order' },
+      // The pay-per-order plan's fee for one order, from the store's prepaid
+      // balance (migration 131, billing/walletService). 0 = no fee.
+      perOrderFeeAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'per_order_fee_amount' },
     },
     { tableName: 'plans' }
   );
