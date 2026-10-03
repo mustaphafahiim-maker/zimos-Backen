@@ -218,6 +218,14 @@ const env = {
     smsEnabled: process.env.NODE_ENV !== 'test' && process.env.PASSWORD_RESET_SMS_ENABLED === 'true',
   },
 
+  // The prepaid balance and the pay-per-order plan (billing/walletService).
+  // Off unless exactly "true"; off charges no order fee, offers no plan with
+  // a fee and takes no top-up, as before it existed. Under NODE_ENV=test it
+  // starts off whatever the .env says; a test that needs it sets it here.
+  wallet: {
+    enabled: process.env.NODE_ENV !== 'test' && process.env.WALLET_ENABLED === 'true',
+  },
+
   // How the backend recognises our own Next.js storefront server. The secret is
   // sent server-to-server only (never to a browser); a request carrying it may
   // forward the shopper's IP for rate limiting. STOREFRONT_SERVER_IP

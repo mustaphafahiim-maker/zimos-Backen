@@ -284,7 +284,8 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req }, transa
       funnelId,
     },
     { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
-    { transaction, skipFraudRules: true, shippingOverride: { amount: 0 } }
+    // One purchase split in two: no second pay-per-order fee (Q14).
+    { transaction, skipFraudRules: true, shippingOverride: { amount: 0 }, chargeFee: false }
   );
   await db.Order.update({ linkedFromOrderId: order.id }, { where: { id: followOn.id, workspaceId }, transaction });
   await db.FunnelOfferAcceptance.create(
