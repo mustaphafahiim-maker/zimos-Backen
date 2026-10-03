@@ -294,6 +294,8 @@ async function trackOrder(workspaceId, phone, orderNumber) {
     currency: order.currency,
     // What the store wrote for the customer (order notes marked public).
     notes: await require('../orders/orderMetaService').publicNotes(order.id),
+    // Download links of the digital products in a paid order (modules/digital).
+    downloads: await require('../digital/digitalService').publicGrantsForOrder(workspaceId, order.id),
   };
 }
 
