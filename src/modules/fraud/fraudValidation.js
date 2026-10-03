@@ -42,6 +42,10 @@ module.exports = {
       fullName: Joi.string().trim().max(200).allow(null, '').optional(),
     }),
   },
+  networkScores: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({ customerIds: Joi.array().items(uuid).min(1).max(200).unique().required() }),
+  },
   unblock: { params: Joi.object({ workspaceId: uuid.required(), entryId: uuid.required() }) },
   importBlocklist: {
     params: Joi.object({ workspaceId: uuid.required() }),

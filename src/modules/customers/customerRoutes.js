@@ -7,6 +7,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./customerController');
 const schemas = require('./customerValidation');
+const networkController = require('../risk/networkController');
 
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
@@ -17,5 +18,9 @@ router.patch('/:customerId', validate(schemas.update), requirePermission(PERMISS
 router.patch('/:customerId/blacklist', validate(schemas.blacklist), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), controller.blacklist);
 router.post('/:customerId/addresses', validate(schemas.addAddress), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), controller.addAddress);
 router.patch('/:customerId/addresses/:addressId', validate(schemas.updateAddress), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), controller.updateAddress);
+
+// Platform-wide delivery rate and "report as spam" — modules/risk/networkStats.
+router.get('/:customerId/network-score', validate(schemas.get), requirePermission(PERMISSIONS.CUSTOMERS_VIEW), networkController.score);
+router.post('/:customerId/report-spam', validate(schemas.get), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), networkController.reportSpam);
 
 module.exports = router;

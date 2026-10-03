@@ -11,6 +11,7 @@ const fraudRules = require('../fraud/fraudRules');
 const blockedEntries = require('../fraud/blockedEntries');
 const visitorGate = require('../risk/visitorGate');
 const riskService = require('../risk/riskService');
+const networkStats = require('../risk/networkStats');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -299,6 +300,8 @@ async function createOrder(
     // the customer lookup.
     // Risk score and data quality of a storefront order (risk/riskService):
     // a marker only, unless the store's high_risk rule acts on it.
+    // The customer's platform-wide delivery numbers; null unless the store has the feature.
+    const network = evaluateFraudRules ? await networkStats.forPhone(workspaceId, customer.phoneNormalized, transaction) : null;
     const risk = evaluateFraudRules
       ? await riskService.score(
           { contact, shippingAddress },
@@ -307,6 +310,7 @@ async function createOrder(
             country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale'], transaction })),
             visitor,
             secondsOnPage: req && typeof req.secondsOnPage === 'number' ? req.secondsOnPage : null,
+            network,
             transaction,
           }
         )
@@ -325,6 +329,7 @@ async function createOrder(
         phone: contact.phone,
         visitor,
         riskLevel: risk.level,
+        network,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
     }
