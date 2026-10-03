@@ -297,6 +297,28 @@ const home = [
     heightMobile: 390,
     wave: true,
   }),
+
+  // Customer reviews of the newest product (the builder's own reviews_list
+  // element); it draws nothing until the product has approved reviews.
+  {
+    id: 'reviews',
+    type: 'section',
+    settings: { padding: 'roomy' },
+    rows: [
+      {
+        id: 'reviews-r',
+        type: 'row',
+        columns: [
+          {
+            id: 'reviews-c',
+            type: 'column',
+            span: 12,
+            elements: [el('reviews-e', 'reviews_list', { title: 'آراء عملائنا', productId: 'baby-bouncer-uokids', limit: 6 })],
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 /**
