@@ -67,7 +67,16 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
 
   // Approved reviews with author, photos and the verified-buyer flag.
   const { rating, reviews } = await require('../reviews/manualReviews').publicReviews(workspaceId, product.id);
-  return { ...toPublicProduct(product), rating, reviews };
+  const publicProduct = toPublicProduct(product);
+  // The product's quantity bundle, every tier priced for every variant (null when it has none).
+  const bundlePricing = require('../bundles/bundlePricing');
+  const bundle = (await bundlePricing.bundlesForProducts(workspaceId, [product.id])).get(product.id);
+  return {
+    ...publicProduct,
+    bundle: bundle ? bundlePricing.presentBundle(bundle, publicProduct.variants) : null,
+    rating,
+    reviews,
+  };
 }
 
 /** Public store metadata: branding + the opaque themeSettings blob. */

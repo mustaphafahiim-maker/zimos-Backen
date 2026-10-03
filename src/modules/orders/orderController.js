@@ -5,6 +5,7 @@ const confirmationService = require('../cod/confirmationService');
 const stageChange = require('./orderStageChange');
 const statusHistory = require('./orderStatusHistory');
 const orderMeta = require('./orderMetaService');
+const orderTimeline = require('./orderTimeline');
 
 const create = asyncHandler(async (req, res) => {
   const { order, items } = await service.createOrder(req.tenant.workspaceId, req.body, req);
@@ -47,6 +48,16 @@ const listStatusHistory = asyncHandler(async (req, res) => {
   // 404 for an order of another workspace, before any history is read.
   await service.getOrderRef(req.tenant.workspaceId, req.params.orderId);
   res.json({ history: await statusHistory.listForOrder(req.tenant.workspaceId, req.params.orderId) });
+});
+
+const timeline = asyncHandler(async (req, res) => {
+  res.json({ events: await orderTimeline.timeline(req.tenant.workspaceId, req.params.orderId) });
+});
+
+const neighbors = asyncHandler(async (req, res) => {
+  res.json(
+    await orderTimeline.neighbors(req.tenant.workspaceId, req.params.orderId, req.query, service.applySearchAndDates)
+  );
 });
 
 const updateMeta = asyncHandler(async (req, res) => {
@@ -105,6 +116,8 @@ module.exports = {
   confirm,
   changeStatus,
   listStatusHistory,
+  timeline,
+  neighbors,
   updateMeta,
   listTags,
   listNotes,

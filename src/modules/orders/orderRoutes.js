@@ -51,6 +51,14 @@ router.patch(
     )(req, res, next),
   controller.updateMeta
 );
+// Everything that happened to the order, and the orders next to it in the list.
+router.get('/:orderId/timeline', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.timeline);
+router.get(
+  '/:orderId/neighbors',
+  validate(schemas.neighbors),
+  requirePermission(PERMISSIONS.ORDERS_VIEW),
+  controller.neighbors
+);
 router.get('/:orderId/notes', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.listNotes);
 router.post('/:orderId/notes', validate(schemas.addNote), requirePermission(PERMISSIONS.ORDERS_MANAGE), controller.addNote);
 router.delete(
