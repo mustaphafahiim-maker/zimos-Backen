@@ -273,7 +273,17 @@ async function trackOrder(workspaceId, phone, orderNumber) {
     order: [['createdAt', 'DESC']],
   });
   if (!order) return null;
+  return presentTrackedOrder(workspaceId, order);
+}
 
+/** The same answer for an order reached through its signed tracking link (orderTrackingExtras.js). */
+async function trackOrderByToken(workspaceId, token) {
+  const order = await require('./orderTrackingExtras').orderFromToken(workspaceId, token);
+  return order ? presentTrackedOrder(workspaceId, order) : null;
+}
+
+/** What the shopper sees of one of their orders. No contact details, address or internal state. */
+async function presentTrackedOrder(workspaceId, order) {
   const shipments = order.shipments || [];
   const stage = trackingStage(order, shipments);
   const updatedAt = trackingUpdatedAt(order, shipments, stage);
@@ -292,6 +302,9 @@ async function trackOrder(workspaceId, phone, orderNumber) {
     shippingAmount: String(order.shippingAmount),
     totalAmount: String(order.totalAmount),
     currency: order.currency,
+    // The five steps with their times, whether the order stopped (cancelled,
+    // returned), the courier and waybill, and the signed tracking link's token.
+    ...require('./orderTrackingExtras').extras(order, shipments),
     // What the store wrote for the customer (order notes marked public).
     notes: await require('../orders/orderMetaService').publicNotes(order.id),
     // Download links of the digital products in a paid order (modules/digital).
@@ -307,5 +320,6 @@ module.exports = {
   getCollection,
   suggestProducts,
   trackOrder,
+  trackOrderByToken,
   toPublicVariant,
 };
