@@ -16,6 +16,10 @@ router.use(authenticate, resolveTenant);
 const MANAGE = requirePermission(PERMISSIONS.FUNNELS_MANAGE);
 const PUBLISH = requirePermission(PERMISSIONS.FUNNELS_PUBLISH);
 
+// Share code, import by code, the map's draft and the issues list. Registered
+// first so `/import` is not read as a funnel id.
+require('./funnelExtras').mount(router, { MANAGE, requireCreationAllowed });
+
 // --- funnels ---
 // Creating a funnel is refused while the store is restricted (unpaid past its
 // grace day, or suspended); editing, publishing and pausing are not.
