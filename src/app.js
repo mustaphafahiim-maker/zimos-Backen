@@ -24,6 +24,8 @@ const contactRoutes = require('./modules/contacts/contactRoutes');
 const storesRoutes = require('./modules/stores/storesRoutes');
 const dashboardRoutes = require('./modules/dashboard/dashboardRoutes');
 const digitalRoutes = require('./modules/digital/digitalRoutes');
+const aiRoutes = require('./modules/ai/aiRoutes');
+const affiliateRoutes = require('./modules/affiliates/affiliateRoutes');
 const orderRoutes = require('./modules/orders/orderRoutes');
 const returnRoutes = require('./modules/returns/returnRoutes');
 const confirmationRoutes = require('./modules/cod/confirmationRoutes');
@@ -160,6 +162,8 @@ v1.use('/workspaces/:workspaceId/contacts', contactRoutes.staff);
 v1.use('/workspaces/:workspaceId/duplicate', storesRoutes.duplicate);
 v1.use('/me/stores', storesRoutes.me);
 v1.use('/workspaces/:workspaceId/digital', digitalRoutes.staff);
+v1.use('/workspaces/:workspaceId/ai', aiRoutes);
+v1.use('/workspaces/:workspaceId/affiliates', affiliateRoutes.staff);
 v1.use('/workspaces/:workspaceId', dashboardRoutes);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
@@ -202,6 +206,9 @@ v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
 // Lane 7: the app store, the app install link and dropshipping providers.
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
+// Lane 7: the simple invite (sections → permissions) and support access.
+v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
+v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
 v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
@@ -246,6 +253,7 @@ v1.use('/store/:workspaceId/funnels', funnelsPublicRoutes);
 v1.use('/store/:workspaceId/events', eventsPublicRoutes);
 v1.use('/store/:workspaceId/forms', contactRoutes.store);
 v1.use('/store/:workspaceId/downloads', digitalRoutes.store);
+v1.use('/store/:workspaceId/affiliate', affiliateRoutes.portal);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 

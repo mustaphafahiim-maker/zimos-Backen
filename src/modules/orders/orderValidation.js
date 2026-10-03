@@ -157,6 +157,61 @@ module.exports = {
     }).min(1),
   },
   listTags: { params: Joi.object({ workspaceId: uuid.required() }) },
+  // POST /import-tracking — the CSV file's text (trackingImport.js).
+  importTracking: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({ csv: Joi.string().min(1).max(1500000).required() }),
+  },
+  // POST /documents/waybills and /documents/manifest — PDFs (orderDocuments.js).
+  waybillsPdf: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({
+      orderIds: Joi.array().items(uuid).min(1).max(200).required(),
+      format: Joi.string().valid('a4x4', '10x15').default('a4x4'),
+    }),
+  },
+  manifestPdf: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({
+      orderIds: Joi.array().items(uuid).min(1).max(200).optional(),
+      date: Joi.date().iso().optional(),
+      carrier: Joi.string().trim().max(100).optional(),
+    }),
+  },
+  // POST /:orderId/items/preview and PUT /:orderId/items — the whole new list of lines.
+  editItems: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    body: Joi.object({
+      items: Joi.array()
+        .items(
+          Joi.object({
+            variantId: uuid.required(),
+            offerId: uuid.allow(null).optional(),
+            quantity: Joi.number().integer().min(1).max(10000).required(),
+          })
+        )
+        .min(1)
+        .max(100)
+        .required(),
+    }),
+  },
+  refundQuote: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    body: Joi.object({
+      lines: Joi.array()
+        .items(Joi.object({ orderItemId: uuid.required(), quantity: Joi.number().integer().min(1).required() }))
+        .min(1)
+        .required(),
+    }),
+  },
+  fulfill: {
+    params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
+    body: Joi.object({
+      carrierCode: Joi.string().trim().min(1).max(100).optional(),
+      trackingNumber: Joi.string().trim().max(100).allow('', null).optional(),
+      trackingUrl: Joi.string().uri().max(500).allow('', null).optional(),
+    }),
+  },
   // POST /bulk — orderBulkService.js. The orders are named, or are whatever
   // the list shows for `filter` (its own query, without paging).
   bulk: {

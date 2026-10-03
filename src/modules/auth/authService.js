@@ -207,6 +207,17 @@ async function login({ email, password, locale }, req) {
     if (user.status === 'pending_verification') await user.update({ status: 'active' });
   }
 
+  // Two-step sign-in (twoFactorService.js): from a browser that is not
+  // remembered the answer is a challenge, and POST /auth/two-factor/verify
+  // finishes the sign-in through completeLogin.
+  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req, { locale });
+  if (challenge) return challenge;
+
+  return completeLogin(user, req);
+}
+
+/** The last step of every password sign-in: stamp it, audit it, hand out the tokens. */
+async function completeLogin(user, req) {
   await user.update({ lastLoginAt: new Date() });
   await recordAudit({ actorUserId: user.id, action: 'user.login', entityType: 'User', entityId: user.id, req });
 
@@ -465,6 +476,7 @@ module.exports = {
   verifyEmail,
   resendVerificationEmail,
   login,
+  completeLogin,
   getGoogleAuthUrl,
   loginWithGoogle,
   refresh,

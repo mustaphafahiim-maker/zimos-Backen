@@ -8,6 +8,10 @@ const orderMeta = require('./orderMetaService');
 const orderTimeline = require('./orderTimeline');
 const orderBulk = require('./orderBulkService');
 const manualOrder = require('./manualOrder');
+const itemsEdit = require('./orderItemsEdit');
+const orderFulfill = require('./orderFulfill');
+const orderDocuments = require('./orderDocuments');
+const trackingImport = require('./trackingImport');
 
 const create = asyncHandler(async (req, res) => {
   const { shippingAmount, ...body } = req.body;
@@ -65,6 +69,46 @@ const listStatusHistory = asyncHandler(async (req, res) => {
   // 404 for an order of another workspace, before any history is read.
   await service.getOrderRef(req.tenant.workspaceId, req.params.orderId);
   res.json({ history: await statusHistory.listForOrder(req.tenant.workspaceId, req.params.orderId) });
+});
+
+const previewItems = asyncHandler(async (req, res) => {
+  res.json({ preview: await itemsEdit.previewItems(req.tenant.workspaceId, req.params.orderId, req.body, req) });
+});
+
+const updateItems = asyncHandler(async (req, res) => {
+  res.json({ order: await itemsEdit.updateItems(req.tenant.workspaceId, req.params.orderId, req.body, req) });
+});
+
+const refundQuote = asyncHandler(async (req, res) => {
+  res.json({ quote: await itemsEdit.refundQuote(req.tenant.workspaceId, req.params.orderId, req.body) });
+});
+
+const fulfill = asyncHandler(async (req, res) => {
+  res.json({ order: await orderFulfill.fulfill(req.tenant.workspaceId, req.params.orderId, req.body, req) });
+});
+
+// `?as=base64` answers JSON { filename, contentType, base64 } for clients
+// that can only make JSON calls (the dashboard's shared request helper).
+const sendPdf = (res, pdf, name) => {
+  if (res.req.query.as === 'base64') {
+    return res.json({ filename: `${name}.pdf`, contentType: 'application/pdf', base64: pdf.toString('base64') });
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${name}.pdf"`);
+  res.setHeader('Content-Length', pdf.length);
+  return res.send(pdf);
+};
+
+const waybillsPdf = asyncHandler(async (req, res) => {
+  sendPdf(res, await orderDocuments.waybillsPdf(req.tenant.workspaceId, req.body), 'waybills');
+});
+
+const manifestPdf = asyncHandler(async (req, res) => {
+  sendPdf(res, await orderDocuments.manifestPdf(req.tenant.workspaceId, req.body), 'manifest');
+});
+
+const importTracking = asyncHandler(async (req, res) => {
+  res.json(await trackingImport.importTracking(req.tenant.workspaceId, req.body, req));
 });
 
 const bulk = asyncHandler(async (req, res) => {
@@ -137,6 +181,13 @@ module.exports = {
   confirm,
   changeStatus,
   listStatusHistory,
+  waybillsPdf,
+  manifestPdf,
+  importTracking,
+  previewItems,
+  updateItems,
+  refundQuote,
+  fulfill,
   manualPreview,
   manualCustomer,
   manualOptions,
