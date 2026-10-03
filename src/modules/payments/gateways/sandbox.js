@@ -136,9 +136,36 @@ async function refund() {
   return { status: 'processed', providerRefundReference: `sbxref_${crypto.randomBytes(8).toString('hex')}`, failureReason: null };
 }
 
+// --- Saved payment methods (../savedMethods/README.md) -----------------------
+
+/** A token for the card behind a paid sandbox payment: `sbxtok.<id>.<signature>`. */
+async function tokenize(creds, { payment }) {
+  const id = crypto.randomBytes(12).toString('hex');
+  const expiresAt = new Date(Date.now() + 2 * 365 * 24 * 60 * 60 * 1000);
+  return {
+    token: `sbxtok.${id}.${hmacHex(creds.signingSecret, `token|${id}`)}`,
+    brand: 'Sandbox',
+    last4: '4242',
+    expiresAt,
+    sourceTransactionId: payment.providerTransactionId || null,
+  };
+}
+
+/** Approves any charge of a token this account signed. */
+async function chargeSaved(creds, { token }) {
+  const [prefix, id, signature] = String(token || '').split('.');
+  if (prefix !== 'sbxtok' || !id || !safeEqualHex(hmacHex(creds.signingSecret, `token|${id}`), signature || '')) {
+    return { status: 'failed', failureReason: 'Unknown saved card' };
+  }
+  return { status: 'paid', transactionId: `sbxtxn_${crypto.randomBytes(8).toString('hex')}` };
+}
+
 module.exports = {
   code,
   name,
+  supportsTokenization: true,
+  tokenize,
+  chargeSaved,
   methods: METHODS,
   currencies: CURRENCIES,
   credentialFields,
