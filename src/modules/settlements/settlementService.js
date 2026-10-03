@@ -10,8 +10,6 @@ const n = (v) => Number(v || 0);
 
 /** Delivered COD orders not yet on any settlement, with their delivering carrier. */
 async function listUnsettled(workspaceId, { carrierCode } = {}) {
-  const settled = await db.CodSettlementLine.findAll({ where: { workspaceId }, attributes: ['orderId'], raw: true });
-  const settledIds = settled.map((s) => s.orderId);
   const orders = await db.Order.findAll({
     where: {
       workspaceId,
@@ -19,7 +17,12 @@ async function listUnsettled(workspaceId, { carrierCode } = {}) {
       fulfillmentState: { [Op.in]: ['fulfilled', 'partially_fulfilled'] },
       cancelledAt: null,
       financialState: { [Op.in]: ['pending', 'partially_paid'] },
-      ...(settledIds.length ? { id: { [Op.notIn]: settledIds } } : {}),
+      // NOT EXISTS, not a NOT IN over every settled id: that list only grows.
+      [Op.and]: [
+        db.Sequelize.literal(
+          'NOT EXISTS (SELECT 1 FROM cod_settlement_lines l WHERE l.order_id = "Order"."id" AND l.workspace_id = "Order"."workspace_id")'
+        ),
+      ],
     },
     include: [{ model: db.Shipment, as: 'shipments', required: true, where: { status: 'delivered' } }],
     order: [['createdAt', 'ASC']],

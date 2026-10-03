@@ -2,7 +2,10 @@
 const asyncHandler = require('express-async-handler');
 const service = require('./customerService');
 
-const list = asyncHandler(async (req, res) => res.json(await service.listCustomers(req.tenant.workspaceId, req.query)));
+const { forViewer } = require('../../core/utils/phoneMask');
+
+// Phones in the list are masked for roles without customers.reveal_sensitive.
+const list = asyncHandler(async (req, res) => res.json(forViewer(req, await service.listCustomers(req.tenant.workspaceId, req.query))));
 const get = asyncHandler(async (req, res) => {
   const canRevealSensitive = req.tenant.hasPermission('customers.reveal_sensitive');
   const customer = canRevealSensitive
