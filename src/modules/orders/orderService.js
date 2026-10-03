@@ -28,8 +28,7 @@ const confirmationService = require('../cod/confirmationService');
 const { resolveCustomizations, attachUploads } = require('../catalog/customFields');
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { orderBumpUnavailable } = require('../checkout/orderBump');
-const automationEngine = require('../automations/automationEngine');
-const pixelEvents = require('../marketing/pixelEvents');
+const outbox = require('../../core/outbox/outbox');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -498,9 +497,8 @@ async function createOrder(
     // Merchant automations (WhatsApp templates) and server-side ad-platform
     // conversions run after commit and never fail the order. An order waiting
     // for its online payment is not a purchase yet, so it sends no conversion.
-    transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.created', order.id));
-    transaction.afterCommit(() => require('../notifications/merchantNotificationEvents').emit(workspaceId, 'order.created', order.id));
-    if (!awaitingPayment) transaction.afterCommit(() => pixelEvents.emit(workspaceId, 'order.created', order.id));
+    // They hang off the order.created event in the outbox (see each module's jobs.js).
+    await outbox.record(transaction, 'order.created', { workspaceId, orderId: order.id, awaitingPayment: Boolean(awaitingPayment) });
 
     return { order, items: orderItems };
   };
@@ -1009,7 +1007,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       throw new AppError('ORDER_ALREADY_CANCELLED', 'This order is already cancelled', 409);
     }
     await assertNotShipped(order, transaction);
-    transaction.afterCommit(() => automationEngine.emit(workspaceId, 'order.cancelled', order.id));
+    await outbox.record(transaction, 'order.cancelled', { workspaceId, orderId: order.id });
 
     // Whatever the order still holds: nothing more if a rejection already gave it back.
     await orderStock.releaseOrderStock(
