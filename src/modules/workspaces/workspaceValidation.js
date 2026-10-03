@@ -7,7 +7,22 @@ const { workspaceSlug, SLUG_LOOKUP_MAX } = require('../../core/utils/workspaceSl
 const { CHECKOUT_FIELD_MODES, CHECKOUT_NOTES_MODES } = require('../checkout/checkoutSettings');
 const { checkoutFormSettingsKeys } = require('../checkout/checkoutForm');
 const { thankYouPageSchema } = require('../storefront/thankYouPage');
-const { FRAUD_ACTIONS } = require('../fraud/fraudRules');
+const { storeInfoSchema, legalSchema } = require('../storefront/storeInfo');
+const {
+  generalSchema,
+  socialLinksSchema,
+  floatingWhatsappSchema,
+  storeSeoSchema,
+} = require('../storefront/generalSettings');
+const { FRAUD_ACTIONS, PHONE_VALIDATION_MODES } = require('../fraud/fraudRules');
+
+// A fraud rule is stored as its bare value (the older shape) or as { value, action }.
+const fraudAction = Joi.string().valid(...FRAUD_ACTIONS);
+const fraudRule = (value) =>
+  Joi.alternatives()
+    .try(value, Joi.object({ value: value.allow(null).required(), action: fraudAction.allow(null).optional() }))
+    .allow(null)
+    .optional();
 const { catalogSettingsSchema } = require('../storefront/catalogSettings');
 const { orderBumpSettingsSchema } = require('../checkout/orderBump');
 
@@ -102,6 +117,16 @@ module.exports = {
         // The store's thank-you page (storefront/thankYouPage.js). Sent whole
         // and stored whole; `null` goes back to the built-in page.
         thank_you_page: thankYouPageSchema.allow(null).optional(),
+        // Store contact details and short policies, and the long legal
+        // policies (storefront/storeInfo.js). Each sent whole and stored whole.
+        store_info: storeInfoSchema.allow(null).optional(),
+        legal: legalSchema.allow(null).optional(),
+        // Favicon and country, social links, the floating WhatsApp button and
+        // store-level SEO (storefront/generalSettings.js). Each sent whole.
+        general: generalSchema.allow(null).optional(),
+        social_links: socialLinksSchema.allow(null).optional(),
+        floating_whatsapp: floatingWhatsappSchema.allow(null).optional(),
+        store_seo: storeSeoSchema.allow(null).optional(),
         // Storefront fraud rules — see modules/fraud/fraudRules.js. Same
         // merge semantics as checkout_settings: sub-keys merge, `null` on a
         // sub-key restores its default (a numeric rule's default is "off"),
@@ -109,9 +134,22 @@ module.exports = {
         fraud_rules: Joi.object({
           action: Joi.string().valid(...FRAUD_ACTIONS).allow(null).optional(),
           block_blacklisted: Joi.boolean().allow(null).optional(),
-          duplicate_window_minutes: Joi.number().integer().min(1).max(10080).allow(null).optional(),
-          max_orders_per_phone_per_day: Joi.number().integer().min(1).max(100).allow(null).optional(),
-          high_rejection_threshold: Joi.number().integer().min(1).max(100).allow(null).optional(),
+          duplicate_window_minutes: fraudRule(Joi.number().integer().min(1).max(10080)),
+          max_orders_per_phone_per_day: fraudRule(Joi.number().integer().min(1).max(100)),
+          high_rejection_threshold: fraudRule(Joi.number().integer().min(1).max(100)),
+          max_items_per_order: fraudRule(Joi.number().integer().min(0).max(1000)),
+          min_minutes_between_cod_orders_per_ip: fraudRule(Joi.number().integer().min(1).max(10080)),
+          block_outside_country: fraudRule(Joi.boolean()),
+          allowed_countries: Joi.array().items(Joi.string().length(2).uppercase()).max(60).unique().allow(null).optional(),
+          block_vpn: fraudRule(Joi.boolean()),
+          // Checkout bot guard (risk/botProtection): on/off, and the invisible challenge.
+          bot_protection: Joi.boolean().allow(null).optional(),
+          bot_captcha: Joi.boolean().allow(null).optional(),
+          // Visitors from these countries do not see the store at all (risk/visitorGate).
+          blocked_countries: Joi.array().items(Joi.string().length(2).uppercase()).max(250).unique().allow(null).optional(),
+          min_network_delivery_rate: fraudRule(Joi.number().integer().min(1).max(100)),
+          high_risk: fraudRule(Joi.boolean()),
+          phone_validation: Joi.string().valid(...PHONE_VALIDATION_MODES).allow(null).optional(),
         })
           .allow(null)
           .optional(),

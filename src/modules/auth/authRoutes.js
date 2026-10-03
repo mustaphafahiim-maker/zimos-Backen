@@ -8,6 +8,9 @@ const schemas = require('./authValidation');
 
 const router = Router();
 
+// The refresh token travels as an httpOnly cookie for browser clients.
+router.use(require('./refreshCookie').attach);
+
 router.post('/register', authLimiter, validate(schemas.register), controller.register);
 // What the sign-up form must ask for right now (plan, terms, a code).
 router.get('/signup-options', publicPlansLimiter, controller.signupOptions);

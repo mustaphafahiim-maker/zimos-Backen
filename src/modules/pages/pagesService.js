@@ -7,6 +7,7 @@ const { AppError, NotFoundError, ConflictError, ValidationError } = require('../
 const { recordAudit } = require('../audit/auditService');
 const slugify = require('../../core/utils/slugify');
 const { validatePageTree, EMPTY_TREE } = require('./pageTree');
+const { pickPageFlags, assertPageActive } = require('./pageFlags');
 
 const Op = db.Sequelize.Op;
 
@@ -47,7 +48,7 @@ function normalizePath(input) {
 // [workspaceId]/*). Next.js serves those before the catch-all that renders
 // merchant pages, so a page at "/cart" or "/products/sale" would be saved,
 // published — and never shown. The whole first segment is reserved.
-const RESERVED_PAGE_SEGMENTS = Object.freeze(['f', 'cart', 'checkout', 'products', 'orders', 'offer', 'track', 'preview', 'pay']);
+const RESERVED_PAGE_SEGMENTS = Object.freeze(['f', 'cart', 'checkout', 'products', 'orders', 'offer', 'track', 'preview', 'pay', 'policies', 'sitemap.xml', 'robots.txt']);
 
 /** 422 PAGE_PATH_RESERVED when a normalised path would be shadowed by a storefront route. */
 function assertPathNotReserved(path) {
@@ -251,6 +252,7 @@ async function createPage(workspaceId, websiteId, data, req) {
     draftData,
     publishedData: null,
     seo: data.seo || {},
+    ...pickPageFlags(data),
   });
 
   // A freshly (re)created path must resolve to this page, not keep redirecting.
@@ -292,7 +294,7 @@ async function updatePage(workspaceId, websiteId, pageId, data, req) {
     const page = await loadPage(workspaceId, websiteId, pageId, t);
     const before = page.toJSON();
 
-    const patch = {};
+    const patch = { ...pickPageFlags(data) };
     if (data.title !== undefined) patch.title = data.title;
     if (data.pageType !== undefined) patch.pageType = data.pageType;
     if (data.seo !== undefined) patch.seo = data.seo;
@@ -609,6 +611,8 @@ async function getPublishedPageForStore(workspaceId, rawPath) {
   const snapPages = Array.isArray(snapshot.pages) ? snapshot.pages : [];
   const match = snapPages.find((p) => p.path === path);
   if (match) {
+    // A page the merchant switched off is gone from the store at once.
+    await assertPageActive(website.id, path);
     return { kind: 'page', data: buildRenderData(website, snapshot, match, path) };
   }
 

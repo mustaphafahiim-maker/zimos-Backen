@@ -44,6 +44,13 @@ module.exports = (sequelize, DataTypes) => {
       expiresAt: { type: DataTypes.DATE, allowNull: true, field: 'expires_at' },
       paidAt: { type: DataTypes.DATE, allowNull: true, field: 'paid_at' },
       lastInquiredAt: { type: DataTypes.DATE, allowNull: true, field: 'last_inquired_at' },
+      // Manual transfers (provider `manual`) — see migration 263 and payments/manualTransferService.js.
+      receiptUploadId: { type: DataTypes.UUID, allowNull: true, field: 'receipt_upload_id' },
+      senderReference: { type: DataTypes.STRING(100), allowNull: true, field: 'sender_reference' },
+      manualMethodName: { type: DataTypes.STRING(100), allowNull: true, field: 'manual_method_name' },
+      purpose: { type: DataTypes.STRING(20), allowNull: true }, // full | deposit
+      reviewedByUserId: { type: DataTypes.UUID, allowNull: true, field: 'reviewed_by_user_id' },
+      reviewedAt: { type: DataTypes.DATE, allowNull: true, field: 'reviewed_at' },
     },
     { tableName: 'payments', indexes: [{ fields: ['workspace_id'] }, { fields: ['order_id'] }] }
   );

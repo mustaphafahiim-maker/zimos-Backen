@@ -59,6 +59,15 @@ module.exports = (sequelize, DataTypes) => {
       discountsSnapshot: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'discounts_snapshot' },
       notes: { type: DataTypes.TEXT, allowNull: true },
       riskFlags: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [], field: 'risk_flags' },
+      // The shopper's IP, its country and their browser (storefront orders only) — migration 161.
+      ipAddress: { type: DataTypes.STRING(45), allowNull: true, field: 'ip_address' },
+      ipCountry: { type: DataTypes.STRING(2), allowNull: true, field: 'ip_country' },
+      userAgent: { type: DataTypes.STRING(400), allowNull: true, field: 'user_agent' },
+      // risk/riskService: points, low | moderate | high, the reasons, good | low — migration 162.
+      riskScore: { type: DataTypes.INTEGER, allowNull: true, field: 'risk_score' },
+      riskLevel: { type: DataTypes.STRING(10), allowNull: true, field: 'risk_level' },
+      riskReasons: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'risk_reasons' },
+      dataQuality: { type: DataTypes.STRING(10), allowNull: true, field: 'data_quality' },
       idempotencyKey: { type: DataTypes.STRING(200), allowNull: true, field: 'idempotency_key' },
       // Set when a merchant cancels the order directly (distinct from a COD
       // confirmation rejection, though both land on confirmationState 'rejected').
@@ -71,6 +80,11 @@ module.exports = (sequelize, DataTypes) => {
       // the order came from, the merchant's labels, whether anyone opened it,
       // a test order (kept out of sales figures and pixels), and the archive.
       source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'store' },
+      // SPEC §13.3/§13.4 (migration 213, modules/marketing): first/last touch,
+      // the visitor's stats before buying, and when Purchase was reported.
+      attribution: { type: DataTypes.JSONB, allowNull: true },
+      sessionStats: { type: DataTypes.JSONB, allowNull: true, field: 'session_stats' },
+      purchaseEventSentAt: { type: DataTypes.DATE, allowNull: true, field: 'purchase_event_sent_at' },
       tags: { type: DataTypes.ARRAY(DataTypes.TEXT), allowNull: false, defaultValue: [] },
       isSeen: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_seen' },
       seenAt: { type: DataTypes.DATE, allowNull: true, field: 'seen_at' },

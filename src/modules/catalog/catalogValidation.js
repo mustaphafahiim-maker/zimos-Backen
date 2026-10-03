@@ -98,6 +98,11 @@ const productList = {
       )
       .optional(),
     collectionId: uuid.optional(),
+    // Name contains / a variant's SKU contains / type / can still be sold or not.
+    q: Joi.string().trim().max(100).allow('').optional(),
+    sku: Joi.string().trim().max(100).allow('').optional(),
+    productType: Joi.string().valid('physical', 'digital', 'service').optional(),
+    stock: Joi.string().valid('in', 'out').optional(),
     limit: Joi.number().integer().min(1).max(200).default(50),
     cursor: uuid.optional(),
   }),
@@ -217,6 +222,8 @@ const collection = {
     // Absent puts it after its siblings.
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
+    showInHeader: Joi.boolean().optional(),
+    hidden: Joi.boolean().optional(),
   }),
 };
 
@@ -237,6 +244,8 @@ const collectionUpdate = {
     parentId: uuid.allow(null).optional(),
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
+    showInHeader: Joi.boolean().optional(),
+    hidden: Joi.boolean().optional(),
   }).min(1),
 };
 

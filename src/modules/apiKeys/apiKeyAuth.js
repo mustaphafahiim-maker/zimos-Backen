@@ -4,7 +4,7 @@ const asyncHandler = require('express-async-handler');
 const rateLimit = require('express-rate-limit');
 const db = require('../../db/models');
 const env = require('../../config/env');
-const { AuthenticationError, RateLimitError } = require('../../core/errors/AppError');
+const { AuthenticationError, AuthorizationError, RateLimitError } = require('../../core/errors/AppError');
 const { SCOPES, findActiveKey, touchLastUsed } = require('./apiKeyService');
 
 /**
@@ -28,7 +28,8 @@ const INVALID = () => new AuthenticationError('Invalid API key', 'INVALID_API_KE
 function readKey(req) {
   const header = req.headers.authorization;
   if (typeof header === 'string' && header.startsWith('Bearer ')) return header.slice(7).trim();
-  const alt = req.headers['x-api-key'];
+  // "Api-Key" is what integrations written for EasyOrders already send.
+  const alt = req.headers['x-api-key'] || req.headers['api-key'];
   return typeof alt === 'string' ? alt.trim() : null;
 }
 
@@ -84,7 +85,8 @@ function createApiKeyLimiter({ skip = () => env.isTest } = {}) {
     limit: (req) => req.apiKey.rateLimitPerMinute,
     keyGenerator: (req) => `api_key:${req.apiKey.id}`,
     standardHeaders: true,
-    legacyHeaders: false,
+    // X-RateLimit-Limit / -Remaining / -Reset, the names integrations look for.
+    legacyHeaders: true,
     skip,
     handler: (req, res, next) => next(new RateLimitError('Too many requests for this API key')),
   });
@@ -92,4 +94,17 @@ function createApiKeyLimiter({ skip = () => env.isTest } = {}) {
 
 const apiKeyLimiter = createApiKeyLimiter();
 
-module.exports = { authenticateApiKey, apiKeyLimiter, createApiKeyLimiter };
+/**
+ * The key must carry one of these scopes by name. On top of requirePermission:
+ * a role permission (orders.manage) covers creating, updating and cancelling
+ * alike, and only the scope says which of them this key was made for.
+ */
+function requireScope(...scopes) {
+  return (req, res, next) => {
+    const held = (req.apiKey && req.apiKey.scopes) || [];
+    if (scopes.some((scope) => held.includes(scope))) return next();
+    return next(new AuthorizationError(`This API key does not have the "${scopes[0]}" scope`));
+  };
+}
+
+module.exports = { authenticateApiKey, apiKeyLimiter, createApiKeyLimiter, requireScope };

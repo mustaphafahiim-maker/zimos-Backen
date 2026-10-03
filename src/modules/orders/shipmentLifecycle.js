@@ -122,12 +122,11 @@ async function transitionShipment(
   // the status actually changes.
   const trigger = automationTrigger(before.status, updates.status);
   if (trigger) {
-    // Required here, not at the top: the engine loads the WhatsApp module,
-    // which this low-level file has no reason to pull in at startup.
-    const automationEngine = require('../automations/automationEngine');
-    const emit = () => automationEngine.emit(workspaceId, trigger, shipment.orderId);
-    if (transaction) transaction.afterCommit(emit);
-    else emit();
+    await require('../../core/outbox/outbox').record(transaction || null, trigger, {
+      workspaceId,
+      orderId: shipment.orderId,
+      shipmentId: shipment.id,
+    });
   }
 
   await recordAudit({

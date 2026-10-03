@@ -17,11 +17,17 @@ const checkoutSessionController = require('../checkoutSessions/checkoutSessionCo
 const checkoutSessionSchemas = require('../checkoutSessions/checkoutSessionValidation');
 const onlinePaymentController = require('../payments/onlinePaymentController');
 const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
+const botProtection = require('../risk/botProtection');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
+// What the checkout form needs to pass the bot guard (a fresh time token).
+router.get('/checkout/guard', botProtection.guardConfig);
+
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
+router.get('/policies/:key', validate(schemas.getPolicy), controller.getPolicy);
+router.get('/sitemap', validate(schemas.workspaceParam), controller.getSitemap);
 router.get('/products', collectOptionFilters, validate(schemas.listProducts), controller.listProducts);
 // Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
 router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
@@ -47,6 +53,14 @@ router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shipp
 
 // The payment methods the checkout offers (COD only while online payments
 // are off). A valid X-Store-Preview header adds test-mode gateway methods.
+// Whether a cash-on-delivery order by this phone needs a deposit first (payments/manualTransferService.js).
+router.post(
+  '/deposit-quote',
+  validate({ params: onlinePaymentSchemas.storeMethods.params, body: require('joi').object({ phone: require('joi').string().max(32).allow('', null) }) }),
+  require('express-async-handler')(async (req, res) =>
+    res.json({ deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, req.body || {}) })
+  )
+);
 router.get('/payment-methods', validate(onlinePaymentSchemas.storeMethods), onlinePaymentController.storefrontMethods);
 
 // An unpaid online order, for the shopper holding its X-Payment-Token (given
@@ -64,6 +78,8 @@ router.post(
 router.post(
   '/checkout',
   validate(checkoutSchemas.checkout),
+  // Honeypot, time token, optional challenge — modules/risk/botProtection.
+  botProtection.guardCheckout,
   refuseDraftOrders,
   idempotent('storefront.checkout')(checkoutController.checkout)
 );

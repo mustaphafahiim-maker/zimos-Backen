@@ -18,6 +18,38 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Background jobs, domain events and repeatable jobs (src/worker.js).
+  worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: zimos_dev
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      REDIS_URL: redis://redis:6379
+      INTEGRATIONS_ENCRYPTION_KEY: ${INTEGRATIONS_ENCRYPTION_KEY:?set INTEGRATIONS_ENCRYPTION_KEY (openssl rand -hex 32)}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET (openssl rand -hex 32)}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET (openssl rand -hex 32)}
+    command: node src/worker.js
+
   api:
     build: .
     restart: unless-stopped
@@ -32,9 +64,14 @@ services:
       DB_NAME: zimos_dev
       DB_USER: postgres
       DB_PASSWORD: postgres
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change_me_access_secret_min_32_chars}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me_refresh_secret_min_32_chars}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET (openssl rand -hex 32)}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET (openssl rand -hex 32)}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      INTEGRATIONS_ENCRYPTION_KEY: ${INTEGRATIONS_ENCRYPTION_KEY:?set INTEGRATIONS_ENCRYPTION_KEY (openssl rand -hex 32)}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+      REDIS_URL: redis://redis:6379
+      # The worker service above does the background work.
+      WORKER_IN_PROCESS: "false"
     ports:
       - "4000:4000"
     command: sh scripts/start.sh

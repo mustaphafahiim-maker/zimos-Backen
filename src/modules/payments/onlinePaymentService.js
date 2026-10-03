@@ -768,7 +768,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
   const rules = fraudRules.resolveFraudRules(workspace.settings);
   const ruleFlags = Object.values(fraudRules.FLAGS);
   const flagged = (order.riskFlags || []).filter((f) => ruleFlags.includes(f));
-  if (rules.action === 'block' && flagged.length > 0) {
+  if (fraudRules.refusesFlags(rules, flagged)) {
     await recordAudit({
       workspaceId,
       action: 'order.blocked',
