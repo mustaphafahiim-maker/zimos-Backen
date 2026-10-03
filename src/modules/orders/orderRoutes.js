@@ -36,7 +36,29 @@ router.get('/pipeline', validate(schemas.pipeline), requirePermission(PERMISSION
 // '/:orderId' for the same reason as '/pipeline'.
 router.get('/export/columns', validate(exportSchemas.columns), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.columns);
 router.get('/export', validate(exportSchemas.exportCsv), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.exportCsv);
+// Every tag in use, for the tag picker and the list's tag filter.
+router.get('/tags', validate(schemas.listTags), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.listTags);
 router.get('/:orderId', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.get);
+
+// Tags, test, archive (orders.manage). Marking an order seen is something
+// anyone who can open it does, so a body of only { isSeen } needs orders.view.
+router.patch(
+  '/:orderId/meta',
+  validate(schemas.updateMeta),
+  (req, res, next) =>
+    requirePermission(
+      Object.keys(req.body).every((k) => k === 'isSeen') ? PERMISSIONS.ORDERS_VIEW : PERMISSIONS.ORDERS_MANAGE
+    )(req, res, next),
+  controller.updateMeta
+);
+router.get('/:orderId/notes', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.listNotes);
+router.post('/:orderId/notes', validate(schemas.addNote), requirePermission(PERMISSIONS.ORDERS_MANAGE), controller.addNote);
+router.delete(
+  '/:orderId/notes/:noteId',
+  validate(schemas.deleteNote),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.deleteNote
+);
 
 router.post(
   '/:orderId/cancel',
