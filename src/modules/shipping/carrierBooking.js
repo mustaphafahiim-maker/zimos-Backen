@@ -101,7 +101,13 @@ async function tellMerchant(workspaceId, order, courier, reason) {
       title: `لم يُحجز الأوردر ${order.orderNumber} تلقائيًا مع ${adapter ? adapter.name : courier}`,
       body: `${String(reason).slice(0, 300)}\nاحجزه من صفحة الأوردر.`,
       link: `/orders/${order.id}`,
-      data: { integration: courier, orderId: order.id, reason: String(reason).slice(0, 300) },
+      data: {
+        integration: adapter ? adapter.name : courier,
+        carrierCode: courier,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        reason: String(reason).slice(0, 300),
+      },
       dedupeKey: `auto_booking:${order.id}`,
     });
   } catch (err) {

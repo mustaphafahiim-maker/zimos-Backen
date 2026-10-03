@@ -14,6 +14,17 @@ module.exports = {
       handle: (event) => require('./carrierBooking').autoBook(event),
     },
   ],
+  processors: [
+    {
+      // "Ship selected": books a batch's orders one by one (bulkShipping.js).
+      // Each booking is guarded against repeating; a crashed run is resumed
+      // with the order it was booking marked interrupted, never booked again.
+      queue: 'carriers',
+      name: 'shipments.bulk_book',
+      // eslint-disable-next-line global-require
+      handle: (job) => require('./bulkShipping').processBatch(job),
+    },
+  ],
   schedules: [
     {
       // Couriers without a webhook are asked for their shipments' status

@@ -34,6 +34,8 @@ const TYPES = Object.freeze({
   'stock.low': { permission: PERMISSIONS.INVENTORY_VIEW, defaults: { inApp: true, email: false } },
   'integration.failed': { permission: PERMISSIONS.WORKSPACE_MANAGE, defaults: { inApp: true, email: true } },
   'export.ready': { permission: null, defaults: { inApp: true, email: false } },
+  // A "Ship selected" batch finished (shipping/bulkShipping.js); sent to whoever started it.
+  'shipping.batch_done': { permission: PERMISSIONS.ORDERS_MANAGE, defaults: { inApp: true, email: false } },
   announcement: { permission: null, defaults: { inApp: true, email: false } },
   // An automation's "notify the team" step (modules/automations).
   automation: { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },

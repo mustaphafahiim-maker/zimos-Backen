@@ -203,6 +203,7 @@ v1.use('/workspaces/:workspaceId/support', supportRoutes);
 v1.use('/workspaces/:workspaceId/billing', workspaceBillingRoutes);
 v1.use('/workspaces/:workspaceId/checkout-sessions', checkoutSessionRoutes);
 v1.use('/workspaces/:workspaceId/carriers', carrierRoutes);
+v1.use('/workspaces/:workspaceId/shipment-batches', require('./modules/shipping/bulkShipRoutes'));
 v1.use('/workspaces/:workspaceId/payments', onlinePaymentRoutes);
 v1.use('/workspaces/:workspaceId/analytics', analyticsRoutes);
 v1.use('/workspaces/:workspaceId/audit-logs', auditRoutes);

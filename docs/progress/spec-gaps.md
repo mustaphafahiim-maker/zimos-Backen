@@ -19,6 +19,8 @@ the numbers **400–449** (no lane owns them).
 - Places (`geo_regions`, migration 403): two levels, governorate (Egypt's 27 + North Coast, Saudi Arabia's 13 regions) and city (343 in Egypt, 84 in Saudi Arabia). Egyptian governorates keep their existing codes; North Coast is `north-coast`; Saudi regions are `sa-*`; cities are `<parent>.<slug>`. The list changes only by migration. The storefront form still takes the city as free text; the order's text is read back to a place when booking.
 - Courier area map (`carrier_region_map`, migration 404): rows matched by name are shared by every store (`workspace_id` null), because a courier's list is the same for everyone, and are refreshed at most daily when a store opens the Areas screen. A store's own choice is stored per store and wins. A pick made on one order's booking is not remembered as the area's mapping: that order's street may not represent the area. Mappings are set only from the Areas screen.
 - The sandbox courier now has two levels (city > district, Bosta-shaped) built from `geo_regions`, with North Coast towns under Alexandria and Matrouh, so district picking and mapping can be exercised.
+- Bulk shipping with a connected courier (`shipping/bulkShipping.js`, migration 405) is a batch on the carriers queue: preview (ready / missing an area / cannot ship) → batch → one booking at a time, each through `createCarrierShipment` exactly as from the order page, recorded as the person who started it. A booking is never repeated on its own: an item left `booking` by a crashed run becomes booked if its order now has the shipment, else failed "interrupted". Only the merchant sends failed ones again (`/retry`). The old synchronous `POST /orders/bulk` action `ship` stays for manual courier names; the dashboard sends a connected courier through the batch.
+- A missing area is fixed in the dialog on the areas map when the order's city is on the platform's list (every order from there follows), else for that order only (`addresses`).
 
 ## P0 — correctness, compliance, launch gates
 
@@ -49,7 +51,7 @@ the numbers **400–449** (no lane owns them).
   behind `AUTH_REFRESH_COOKIE=true` — an owner setting, because the cookie only
   works once the dashboard and the API share a site (app.x + api.x). Nothing to
   code; turn it on with the deploy.
-- [ ] 10. Shipping data (10a shipment_events, 10b per-account booking settings + automatic booking, 10c geo_regions + carrier_region_map done): `geo_regions` seed (Egypt + North Coast + districts,
+- [x] 10. Shipping data (10a shipment_events, 10b per-account booking settings + automatic booking, 10c geo_regions + carrier_region_map, 10d bulk ship batches): `geo_regions` seed (Egypt + North Coast + districts,
   Saudi regions), `carrier_region_map` (stored, editable), `shipment_events`
   timeline, per-carrier-account `autoCreateShipmentOn` / inspection / courier
   notes; bulk ship shows ready vs missing-mapping and retries failures.
