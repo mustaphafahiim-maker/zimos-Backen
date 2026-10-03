@@ -1,6 +1,7 @@
 'use strict';
 
 const { ValidationError } = require('../../core/errors/AppError');
+const showcase = require('./showcaseElements');
 
 /**
  * Pages are stored as a structured JSON tree, never raw HTML. Shape:
@@ -45,6 +46,8 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'scroll_story',
   'marquee',
   'comparison',
+  // Full-width storefront bands (slider, tiles, product rails…): showcaseElements.js.
+  ...showcase.TYPES,
 ]);
 
 const MAX_NODES = 10000;
@@ -174,6 +177,8 @@ const ELEMENT_PROP_RULES = {
     ),
   },
 };
+
+Object.assign(ELEMENT_PROP_RULES, showcase.propRules(check));
 
 function pushIdCheck(node, field, errors) {
   if (typeof node.id !== 'string' || node.id.trim() === '') {
