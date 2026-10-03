@@ -9,11 +9,11 @@
 - [x] 6. Affiliates (§20.3) — checked on :4108/:5208/:3208: an affiliate at 10%; two orders carrying `ref=hany10` got pending commissions; delivering one approved it, cancelling the other voided it; "Mark as paid" recorded a payout; `/affiliates` in Arabic; the storefront portal signed in with phone + SMS code (read from the local server log) and showed links, orders without customer data, balance and the payout.
 - [x] 7. Dashboard as a PWA (§20.1 first step) — checked on :5208: the manifest and its three icons load, the service worker registers and activates, and the install card shows in the layout when the browser fires `beforeinstallprompt` (dispatched by hand).
 - [x] 8a. Subscriptions and installments on the sandbox gateway (§18.1) — checked against the lane DB (scratch script through the real services) and on :5208/:3208: a card order with a monthly subscription and a 3-payment plan started both with the saved sandbox card; renewals made linked paid orders; the plan completed after its 3rd payment; a card that could not be charged was retried at +1, +3 and +7 days and then cancelled; `/subscriptions` (list, KPIs, product plans) in Arabic; the customer page showed the subscription and cancelled it.
+- [x] 8d. Services marketplace (§20.5) — checked on :4108/:5208/:5308: listings created through `/admin/service-listings` (a listing with no contact is refused; a non-admin gets 403); the dashboard `/services` directory with category filter, price or "on request", and WhatsApp / email buttons in Arabic; the platform-admin "Service listings" page with its editor.
 
 ## Next
 - [ ] 8b. Courses (§18.3): courses → modules → lessons, drip release, free preview, enrollment on purchase, student portal with OTP.
 - [ ] 8c. Shoppable images (§7.9).
-- [ ] 8d. Services marketplace (§20.5): `service_listings` managed from platform-admin, directory for merchants.
 
 ## Decisions
 - 2026-10-03 Contact `type`, `totalSpent`, `lastOrderAt` and the delivery rate are computed from the live orders (one CTE over the derived stage, `contacts/segmentRules.js`), not stored: no hook into the orders module, and nothing to drift. Stored on `customers`: `tags` and `source` only. `segments` (the old unused array) was copied into `tags` and left in place.
@@ -47,14 +47,17 @@
 - 2026-10-03 Subscriptions not built: the free trial (needs a first order that charges nothing) and replacing the card from the portal (needs the gateway's hosted card form — integrations). The portal shows the state and lets a subscription (not an installment plan) be cancelled. Events for automations: `subscription.created|renewed|payment_failed|cancelled`.
 - 2026-10-03 The lane's own `.env` got a random `GATEWAY_CREDENTIALS_KEY` (untracked file) so the sandbox gateway can be connected in the lane DB.
 
+- 2026-10-03 Services marketplace: `service_listings` is platform-wide (no workspace), ten fixed categories from the spec, managed under two new platform permissions (`service_listings.view|manage`). No rating field: nobody rates providers yet, and an admin-typed rating would be a fake review (§21). The price is the provider's own, typed by the admin (nullable = "price on request"); payment stays outside ZIMOS. The mock `SuppliersPage` was left as it is.
+
 ## Blocked
 
 ## Handoff
 - Branch `lane-8` in both worktrees; everything under Done is merged into `origin/zimos-additions`.
-- Migrations used: 310–315. Next free: 316.
+- Migrations used: 310–316. Next free: 317.
 - Setup guide: `payment` is done whenever the storefront offers a method (COD counts); `domain` and `pixel` are optional and outside the percentage. Shortcuts live on `memberships.nav_shortcuts` (max 8 dashboard routes).
 - Lane DB has demo data: 4 customers with COD orders, 3 leads, 2 segments, a published site "Lane 8 site" with `/contact` carrying a form (`form1`), and a second store "Demo Store Copy" made by the duplicate endpoint. The demo user's username is `demo`.
 - Scratch API helper (not in the repo): log in as `demo@zimos.test` against `http://localhost:4108/api/v1`, workspace from `GET /workspaces`; POSTs to `/orders` need an `Idempotency-Key` header.
 - Lane DB also has: digital products `EBOOK-1` / `LICENCE-1` and a paid order `ORD-DIGI-…`; an affiliate "Hany Marketer" (`hany10`, phone 01066600077) with one paid and one void commission. A portal OTP is printed in the backend log (`otp_affiliate_portal`).
 - Lane DB also has: the sandbox gateway connected, products `CLUB-1` (monthly subscription) and `COURSE-3` (3 weekly payments), customer "Subscriber Samy" with one completed plan and one cancelled subscription.
+- In the lane DB the demo user was made a platform `creator` (so `/admin` routes and the admin app on :5308 work with the same login), and two service listings exist.
 - The lane shares a 5-dev-server limit with other chats: stop the dashboard before starting the storefront.
