@@ -42,6 +42,7 @@ the numbers **400–449** (no lane owns them).
 - Digital delivery: the thank-you page asks `GET /store/:ws/downloads/order/:orderId` with the order's payment token (the online checkout's credential) a few times over ~50 s, since the payment is often captured just after the shopper lands; a COD order has no token and shows nothing there (its links come with the tracking page once paid). The message is the ready-made automation `digital_delivery` on the new trigger `order.digital_delivered` (WhatsApp template with the signed order link); the email was already sent by orderEmailService.
 - Shipping groups (migration 410 `shipping_profiles`, `products.shipping_profile_id`): a group's price for a destination is its governorate price, else its flat price, else none. The parcel travels once, so an order pays the dearest price that applies — each group's for its products and the store's own rate for products in no group (rule `profile_rate`). Free shipping, offer overrides and the free threshold still win first; extra-fee products still add their fee. Products are assigned from the group (a product is in one group at most); deleting a group sends its products back to the store's prices.
 - AI funnel: a generated page (feature `page`) applied with `target: funnel` becomes a new draft funnel in one transaction — the page as the sales step (its product-page button links removed so the funnel's edges lead on), a checkout with the COD form and a thank-you page, edges always / completed_checkout, step names in the job's dialect, a link made unique like createFunnel's, counted against the plan. Needs funnels.manage (the AI routes now also accept it). The product form's "Write with AI" fills the description field only (not saved until the product is); creating a whole product stays in the AI Studio.
+- Shipping options (settings.shipping_options): `standard` is always the store's computed price (groups, free shipping and all); up to five more either add an amount to it (express: still charged when shipping is free) or cost exactly an amount (pickup). The quote lists them once a price is known; the checkout sends `shippingOption`, an unknown or switched-off one is refused, and the order keeps the pick in `shipping_snapshot.option` (shown on the order page). No extra option = no choice, exactly as before. Wired into the cart checkout and the product page form; funnel COD forms still charge the standard price.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -103,7 +104,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 20. Digital delivery link on the thank-you page and by message.
 - [x] 21. AI: apply a generated funnel as funnel steps; AI entry points in the
   product form and the funnel wizard.
-- [ ] 22. (22a shipping profiles done) Shipping profiles + products.shippingProfileId; shipping options the
+- [x] 22. Shipping profiles + products.shippingProfileId (22a); shipping options the
   shopper chooses between.
 - [ ] 23. Merchant PWA web push + `device_tokens`.
 

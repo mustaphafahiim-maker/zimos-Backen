@@ -45,6 +45,8 @@ async function quote(workspaceId, { country, region, items }) {
 
   return {
     pricingMode: shipping.pricingMode,
+    // The choices the shopper has (standard first), with their amounts; [] = none (shippingOptions.js).
+    options: await require('./shippingOptions').quoteOptions(workspaceId, shipping),
     amount: Number(shipping.amount),
     currency: lines[0].currency,
     subtotal,

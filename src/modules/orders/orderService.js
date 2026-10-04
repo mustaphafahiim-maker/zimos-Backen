@@ -454,7 +454,9 @@ async function createOrder(
       productLines: pricedLines.map((l) => l.shippingRule),
       transaction,
     });
-    const shippingAmount = shipping.amount;
+    // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
+    const chosenShipping = await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
+    const shippingAmount = chosenShipping ? chosenShipping.amount : shipping.amount;
 
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
@@ -508,7 +510,8 @@ async function createOrder(
         totalWeightGrams: shipping.weightGrams,
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
-        shippingSnapshot: shippingSnapshot(shipping),
+        // With the option the shopper picked, when not the standard one.
+        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}) },
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,

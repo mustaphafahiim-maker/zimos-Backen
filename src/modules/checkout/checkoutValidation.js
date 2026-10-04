@@ -54,6 +54,8 @@ module.exports = {
       // (payments/savedMethods/consentedSave.js). Online card payments only.
       saveCard: Joi.boolean().optional(),
       discountCode: Joi.string().max(100).optional(),
+      // The shipping option the shopper picked (shipping/shippingOptions.js); absent = standard.
+      shippingOption: Joi.string().max(40).optional(),
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
       notes: Joi.string().max(2000).allow('').optional(),
