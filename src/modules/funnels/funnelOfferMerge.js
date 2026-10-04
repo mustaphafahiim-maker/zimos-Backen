@@ -232,6 +232,9 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req, variantI
     transaction,
   });
   if (!offer || (offer.lines || []).length === 0) throw offerUnavailable('Offer');
+  // Its countdown ran out (offers/offerCountdown.js).
+  const countdown = require('../offers/offerCountdown');
+  countdown.assertOpen(offer, session.updatedAt, countdown.funnelOfferExpired);
   // In the variant the shopper chose (offers/offerVariantChoice.js).
   const line = await require('../offers/offerVariantChoice').offerLineFor(offer, variantId, transaction);
 

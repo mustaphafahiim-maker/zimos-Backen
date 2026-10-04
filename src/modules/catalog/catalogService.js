@@ -922,6 +922,7 @@ async function createOffer(workspaceId, productId, data, req) {
         badge: data.badge,
         isDefault: data.isDefault,
         shippingOverride: data.shippingOverride,
+        countdownMinutes: data.countdownMinutes ?? null,
       },
       { transaction: t }
     );

@@ -173,6 +173,8 @@ const offer = {
     badge: Joi.string().max(100).allow(null, '').optional(),
     isDefault: Joi.boolean().default(false),
     shippingOverride: Joi.object().allow(null).optional(),
+    // Minutes a shopper has to take it as a one-click offer (offers/offerCountdown.js); null = none.
+    countdownMinutes: Joi.number().integer().min(1).max(1440).allow(null).optional(),
     lines: Joi.array()
       .items(Joi.object({ variantId: uuid.required(), quantity: Joi.number().integer().min(1).required() }))
       .min(1)
@@ -208,6 +210,8 @@ const offerUpdate = {
     badge: Joi.string().max(100).allow(null, '').optional(),
     isDefault: Joi.boolean().optional(),
     shippingOverride: Joi.object().allow(null).optional(),
+    // Minutes a shopper has to take it as a one-click offer (offers/offerCountdown.js); null = none.
+    countdownMinutes: Joi.number().integer().min(1).max(1440).allow(null).optional(),
     status: Joi.string().valid('active', 'archived').optional(),
     lines: Joi.array()
       .items(Joi.object({ variantId: uuid.required(), quantity: Joi.number().integer().min(1).required() }))

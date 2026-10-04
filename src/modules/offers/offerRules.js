@@ -386,7 +386,12 @@ async function publicUpsell(workspaceId, orderId, orderNumber) {
   if (!(await orderOpenForUpsell(order))) return null;
   if (await db.UpsellAcceptance.count({ where: { orderId: order.id } })) return null;
   const match = await upsellFor(workspaceId, await orderProductIds(order.id));
-  return match ? { ...match.card, ruleId: match.rule.id } : null;
+  if (!match) return null;
+  // The real countdown runs from the order (offers/offerCountdown.js); an ended one is not shown.
+  const offer = await db.Offer.findByPk(match.card.offerId, { attributes: ['id', 'countdownMinutes'] });
+  const expiresAt = require('./offerCountdown').deadline(offer, order.createdAt);
+  if (expiresAt && expiresAt.getTime() <= Date.now()) return null;
+  return { ...match.card, ruleId: match.rule.id, countdownMinutes: (offer && offer.countdownMinutes) || null, expiresAt };
 }
 
 /** POST: adds the upsell's offer to the order, once. */
@@ -404,6 +409,8 @@ async function acceptUpsell(workspaceId, orderId, orderNumber, offerId, variantI
       }
       // In the variant the shopper chose (offers/offerVariantChoice.js).
       const offer = await db.Offer.findOne({ where: { id: offerId, workspaceId }, include: [{ model: db.OfferVariant, as: 'lines' }], transaction });
+      const countdown = require('./offerCountdown');
+      countdown.assertOpen(offer, order.createdAt, countdown.upsellExpired);
       const line = offer ? await require('./offerVariantChoice').offerLineFor(offer, variantId, transaction) : { variantId: match.card.variantId, offerId, quantity: 1 };
       const { item } = await orderService.addLineToOpenOrder(
         workspaceId,

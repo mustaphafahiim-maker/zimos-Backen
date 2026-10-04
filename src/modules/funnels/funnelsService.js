@@ -748,6 +748,9 @@ async function resolveStepPayload(workspaceId, snapshot, stepKey, session = null
         currency: offer.currency,
         badge: offer.badge,
         lines: (offer.lines || []).map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+        // The real countdown (offers/offerCountdown.js): from when the session reached this step.
+        countdownMinutes: offer.countdownMinutes || null,
+        expiresAt: session ? require('../offers/offerCountdown').deadline(offer, session.updatedAt) : null,
       };
     }
   }
@@ -910,6 +913,9 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
     transaction,
   });
   if (!offer || (offer.lines || []).length === 0) throw offerUnavailable('Offer');
+  // Its countdown ran out (the session has stayed on this step since it began).
+  const countdown = require('../offers/offerCountdown');
+  countdown.assertOpen(offer, session.updatedAt, countdown.funnelOfferExpired);
 
   // One click (SPEC §9.5): the order was paid with a card the shopper agreed
   // to save, so the offer is a card order charged to it once this
