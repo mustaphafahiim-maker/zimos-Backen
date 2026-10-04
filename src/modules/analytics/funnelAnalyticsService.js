@@ -249,7 +249,10 @@ async function getFunnelDetail(workspaceId, funnelId, query = {}) {
     }
   }
 
-  const steps = orderSteps(graph.steps, graph.edges, graph.entryKey).map((step) => {
+  // Page performance per step (funnelStepMetrics.js).
+  const ordered = orderSteps(graph.steps, graph.edges, graph.entryKey);
+  const perStep = await require('./funnelStepMetrics').stepMetrics(workspaceId, funnel.id, ordered, sessions, { start, end });
+  const steps = ordered.map((step) => {
     let reached = 0;
     let dropped = 0;
     for (const s of sessions) {
@@ -257,7 +260,7 @@ async function getFunnelDetail(workspaceId, funnelId, query = {}) {
       if (onStep || (s.path || []).includes(step.key)) reached += 1;
       if (onStep && s.status !== 'completed') dropped += 1;
     }
-    return { key: step.key, name: step.name, stepType: step.stepType, reached, dropped, reachRate: rate(reached, totals.sessions) };
+    return { key: step.key, name: step.name, stepType: step.stepType, reached, dropped, reachRate: rate(reached, totals.sessions), ...perStep.get(step.key) };
   });
 
   return {
@@ -265,6 +268,8 @@ async function getFunnelDetail(workspaceId, funnelId, query = {}) {
     currency,
     funnel: { id: funnel.id, name: funnel.name, subdomain: funnel.subdomain, status: funnel.status },
     ...withRate(totals),
+    // Earnings per click: revenue ÷ visitors (sessions), minor units of the base currency.
+    epc: totals.sessions > 0 ? Math.round(totals.revenue / totals.sessions) : null,
     steps,
     sources: Array.from(sources.values()).sort((a, b) => b.sessions - a.sessions || b.revenue - a.revenue).slice(0, 10),
     series: Array.from(series.values()),
