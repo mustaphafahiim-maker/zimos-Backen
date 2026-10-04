@@ -36,18 +36,24 @@ const listPaymentMethods = asyncHandler(async (req, res) => {
   res.json(await paymentMethods.listForWorkspace(req.tenant.workspaceId));
 });
 
-// POST /workspaces/:workspaceId/billing/invoices/open — 201 when a charge was written.
+// POST /workspaces/:workspaceId/billing/invoices/open — the charge to pay
+// now and the ways to pay it; writes nothing, so always 200.
 const openInvoice = asyncHandler(async (req, res) => {
-  const { invoice, created } = await proofs.openInvoice(req.tenant.workspaceId, req);
-  res.status(created ? 201 : 200).json({ invoice, created });
+  res.json(await proofs.openInvoice(req.tenant.workspaceId));
 });
 
-// POST /workspaces/:workspaceId/billing/invoices/:invoiceId/payment-proofs — multipart.
+// POST /workspaces/:workspaceId/billing/invoices/:invoiceId/payment-proofs —
+// multipart; `:invoiceId` may be `next` (the charge is written with the proof).
 const submitInvoiceProof = asyncHandler(async (req, res) => {
   const proof = await proofs.submitForInvoice(
     req.tenant.workspaceId,
     req.params.invoiceId,
-    { methodCode: req.body.methodCode, senderPhone: req.body.senderPhone, file: req.file },
+    {
+      methodCode: req.body.methodCode,
+      senderPhone: req.body.senderPhone,
+      expectedAmount: req.body.expectedAmount,
+      file: req.file,
+    },
     req
   );
   res.status(201).json({ proof });

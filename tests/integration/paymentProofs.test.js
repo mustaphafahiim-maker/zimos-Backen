@@ -4,8 +4,8 @@
 // mobile wallet) and proving it with a screenshot, and a platform admin
 // checking it (billing/paymentProofService):
 //
-//   POST /workspaces/:id/billing/invoices/open
-//   POST /workspaces/:id/billing/invoices/:invoiceId/payment-proofs   multipart
+//   POST /workspaces/:id/billing/invoices/open                         writes nothing
+//   POST /workspaces/:id/billing/invoices/:invoiceId/payment-proofs   multipart; `next` writes the charge
 //   GET  /workspaces/:id/billing/payment-proofs
 //   GET  /admin/payment-proofs, /admin/payment-proofs/:id
 //   POST /admin/payment-proofs/:id/approve | /reject
@@ -15,11 +15,13 @@
 // amount, through settlePaid, once.
 
 const sharp = require('sharp');
-const { app, request, registerAndActivate, makePlatformUser } = require('../helpers/factories');
+const { app, request, registerAndActivate, makePlatformUser, addMemberWithRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const proofsService = require('../../src/modules/billing/paymentProofService');
+const charges = require('../../src/modules/billing/subscriptionChargeService');
 
 const MONTHLY = 29900; // EGP 299
+const PRO = 59900; // EGP 599
 
 beforeEach(async () => {
   await db.Plan.create({ key: 'eg-basic', name: 'Basic', monthlyPriceAmount: MONTHLY, yearlyPriceAmount: MONTHLY * 10, currency: 'EGP' });
@@ -63,26 +65,68 @@ async function sendProof(m, invoiceId, { methodCode = 'instapay', senderPhone = 
   return req;
 }
 
+/**
+ * A store holding a pending charge written before any proof: by the console,
+ * or by the payment window from before it stopped writing one.
+ */
 async function merchantWithOpenInvoice(opts) {
   const m = await newMerchant(opts);
-  const res = await openInvoice(m);
-  if (res.status !== 201) throw new Error(`open: ${res.status} ${JSON.stringify(res.body)}`);
-  return { ...m, invoiceId: res.body.invoice.id };
+  const { invoice } = await charges.createCharge(m.wid);
+  return { ...m, invoiceId: invoice.id };
 }
 
+const approve = (admin, id, receivedAmount) =>
+  request(app).post(`/api/v1/admin/payment-proofs/${id}/approve`).set(admin.H).send({ receivedAmount });
+
 describe('the charge to pay', () => {
-  it('is written on the server, at the plan price, when a way to pay is offered', async () => {
+  it('is priced on the server at the plan price and written nowhere, however often the window opens', async () => {
     const m = await newMerchant();
     const res = await openInvoice(m);
-    expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ created: true, invoice: { status: 'pending', amountDue: MONTHLY, currency: 'EGP' } });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      created: false,
+      written: false,
+      invoice: {
+        id: proofsService.NEXT_CHARGE,
+        status: 'pending',
+        grossAmount: MONTHLY,
+        discountAmount: 0,
+        amountDue: MONTHLY,
+        currency: 'EGP',
+        createdAt: null,
+      },
+      methods: [expect.objectContaining({ code: 'instapay', kind: 'manual', accountNumber: 'zimos@instapay' })],
+    });
+    expect(new Date(res.body.invoice.periodEnd).getTime()).toBeGreaterThan(new Date(res.body.invoice.periodStart).getTime());
 
     const again = await openInvoice(m);
     expect(again.status).toBe(200);
-    expect(again.body).toMatchObject({ created: false, invoice: { id: res.body.invoice.id } });
+    expect(again.body).toMatchObject({ written: false, invoice: { id: proofsService.NEXT_CHARGE, amountDue: MONTHLY } });
+    expect(await db.BillingInvoice.count()).toBe(0);
+    expect(await db.AuditLog.count({ where: { action: 'billing_invoice.create' } })).toBe(0);
   });
 
-  it('is not written when nothing is offered: contact support', async () => {
+  it('is the pending charge, as it stands, when one is already open', async () => {
+    const m = await merchantWithOpenInvoice();
+    const res = await openInvoice(m);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: false, written: true, invoice: { id: m.invoiceId, status: 'pending', amountDue: MONTHLY } });
+    expect(await db.BillingInvoice.count()).toBe(1);
+  });
+
+  it('is nothing on a free plan', async () => {
+    await db.Plan.create({ key: 'eg-free', name: 'Free', monthlyPriceAmount: 0, yearlyPriceAmount: 0, currency: 'EGP' });
+    const m = await newMerchant({ planKey: 'eg-free' });
+    const res = await openInvoice(m);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('PLAN_IS_FREE');
+    const sent = await sendProof(m, proofsService.NEXT_CHARGE);
+    expect(sent.status).toBe(409);
+    expect(sent.body.error.code).toBe('PLAN_IS_FREE');
+    expect(await db.BillingInvoice.count()).toBe(0);
+  });
+
+  it('is not shown when nothing is offered: contact support', async () => {
     await db.PaymentMethod.update({ enabled: false }, { where: {} });
     const m = await newMerchant();
     const res = await openInvoice(m);
@@ -237,6 +281,148 @@ describe('sending a proof', () => {
   });
 });
 
+describe('a proof that writes its charge (`next`)', () => {
+  const NEXT = proofsService.NEXT_CHARGE;
+
+  it('writes the charge with the proof, at the plan price, and the window then shows it', async () => {
+    const m = await newMerchant();
+    const opened = await openInvoice(m);
+    const res = await sendProof(m, opened.body.invoice.id, { fields: { expectedAmount: String(opened.body.invoice.amountDue) } });
+    expect(res.status).toBe(201);
+
+    const invoices = await db.BillingInvoice.findAll();
+    expect(invoices).toHaveLength(1);
+    expect(invoices[0]).toMatchObject({ workspaceId: m.wid, status: 'pending', currency: 'EGP' });
+    expect(Number(invoices[0].amount)).toBe(MONTHLY);
+    expect(res.body.proof).toMatchObject({ invoiceId: invoices[0].id, amount: MONTHLY, currency: 'EGP', status: 'pending' });
+    const audit = await db.AuditLog.findOne({ where: { action: 'billing_invoice.create' } });
+    expect(audit).toMatchObject({ workspaceId: m.wid, entityId: invoices[0].id });
+
+    const reopened = await openInvoice(m);
+    expect(reopened.body).toMatchObject({ written: true, invoice: { id: invoices[0].id, amountDue: MONTHLY } });
+    // A second proof for it waits its turn, and writes nothing more.
+    const again = await sendProof(m, NEXT);
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('PROOF_ALREADY_OPEN');
+    expect(await db.BillingInvoice.count()).toBe(1);
+  });
+
+  it('leaves the plan free to change after the window opened, and charges the new plan', async () => {
+    await db.Plan.update({ isPublic: true }, { where: { key: 'eg-basic' } });
+    const pro = await db.Plan.create({ key: 'eg-pro', name: 'Pro', monthlyPriceAmount: PRO, yearlyPriceAmount: PRO * 10, currency: 'EGP', isPublic: true });
+    const m = await newMerchant();
+    expect((await openInvoice(m)).body.invoice.amountDue).toBe(MONTHLY);
+    expect((await openInvoice(m)).status).toBe(200);
+
+    const changed = await request(app).post(`${base(m)}/plan`).set(m.H).send({ planId: pro.id });
+    expect(changed.status).toBe(200);
+    expect((await db.Subscription.findOne({ where: { workspaceId: m.wid } })).planId).toBe(pro.id);
+
+    const opened = await openInvoice(m);
+    expect(opened.body.invoice.amountDue).toBe(PRO);
+    const sent = await sendProof(m, NEXT, { fields: { expectedAmount: String(PRO) } });
+    expect(sent.status).toBe(201);
+    expect(sent.body.proof.amount).toBe(PRO);
+    const invoice = await db.BillingInvoice.findOne({ where: { workspaceId: m.wid } });
+    expect(Number(invoice.grossAmount)).toBe(PRO);
+    expect(Number(invoice.amount)).toBe(PRO);
+
+    // Once a proof holds the charge, the plan holds too, as before.
+    const basic = await db.Plan.findOne({ where: { key: 'eg-basic' } });
+    const back = await request(app).post(`${base(m)}/plan`).set(m.H).send({ planId: basic.id });
+    expect(back.status).toBe(409);
+    expect(back.body.error.code).toBe('OPEN_CHARGE_EXISTS');
+  });
+
+  it('refuses a proof whose amount changed since the window opened, writing nothing', async () => {
+    const pro = await db.Plan.create({ key: 'eg-pro', name: 'Pro', monthlyPriceAmount: PRO, yearlyPriceAmount: PRO * 10, currency: 'EGP' });
+    const m = await newMerchant();
+    expect((await openInvoice(m)).body.invoice.amountDue).toBe(MONTHLY);
+    await db.Subscription.update({ planId: pro.id }, { where: { workspaceId: m.wid } });
+
+    const res = await sendProof(m, NEXT, { fields: { expectedAmount: String(MONTHLY) } });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('CHARGE_AMOUNT_CHANGED');
+    expect(res.body.error.details).toMatchObject({ amountDue: PRO, currency: 'EGP' });
+    expect(await db.BillingInvoice.count()).toBe(0);
+    expect(await db.PaymentProof.count()).toBe(0);
+  });
+
+  it('two proofs sent at the same moment write one charge and one proof', async () => {
+    const m = await newMerchant();
+    const results = await Promise.all([sendProof(m, NEXT), sendProof(m, NEXT)]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(results.find((r) => r.status === 409).body.error.code).toBe('PROOF_ALREADY_OPEN');
+    expect(await db.BillingInvoice.count()).toBe(1);
+    expect(await db.PaymentProof.count()).toBe(1);
+    expect(await db.AuditLog.count({ where: { action: 'billing_invoice.create' } })).toBe(1);
+  });
+
+  it('leaves no charge behind when the proof is refused', async () => {
+    const m = await newMerchant();
+    expect((await sendProof(m, NEXT, { senderPhone: '0223456789' })).status).toBe(422);
+    expect((await sendProof(m, NEXT, { file: null })).status).toBe(422);
+    expect((await sendProof(m, NEXT, { methodCode: 'wallet' })).status).toBe(422);
+    expect((await sendProof(m, NEXT, { fields: { expectedAmount: 'lots' } })).status).toBe(422);
+    expect((await sendProof(m, 'later')).status).toBe(422);
+    expect(await db.BillingInvoice.count()).toBe(0);
+    expect(await db.PaymentProof.count()).toBe(0);
+  });
+
+  it('refuses a plan priced in another currency, writing nothing', async () => {
+    const m = await newMerchant({ planKey: 'us-basic' });
+    const res = await sendProof(m, NEXT);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('MANUAL_PAYMENT_CURRENCY_UNSUPPORTED');
+    expect(await db.BillingInvoice.count()).toBe(0);
+  });
+
+  it('is settled by the review like any charge', async () => {
+    const m = await newMerchant();
+    const sent = await sendProof(m, NEXT);
+    const admin = await makePlatformUser('admin');
+    const res = await approve(admin, sent.body.proof.id, MONTHLY);
+    expect(res.status).toBe(200);
+    expect((await db.BillingInvoice.findByPk(sent.body.proof.invoiceId)).status).toBe('paid');
+    expect((await db.Subscription.findOne({ where: { workspaceId: m.wid } })).status).toBe('active');
+  });
+
+  it('writes the charge in the sender’s own store only', async () => {
+    const a = await newMerchant();
+    const b = await newMerchant({ name: 'Other Store' });
+    // B under A's store: not a member, so nothing is opened or written there.
+    const bAsA = { wid: a.wid, H: b.H };
+    expect([403, 404]).toContain((await openInvoice(bAsA)).status);
+    expect([403, 404]).toContain((await sendProof(bAsA, NEXT)).status);
+    expect(await db.BillingInvoice.count()).toBe(0);
+
+    expect((await sendProof(b, NEXT)).status).toBe(201);
+    expect(await db.BillingInvoice.count({ where: { workspaceId: b.wid } })).toBe(1);
+    expect(await db.BillingInvoice.count({ where: { workspaceId: a.wid } })).toBe(0);
+
+    // B naming A's pending charge under its own store: no such charge.
+    const { invoice: aCharge } = await charges.createCharge(a.wid);
+    const crossed = await sendProof(b, aCharge.id);
+    expect(crossed.status).toBe(404);
+    expect(await db.PaymentProof.count({ where: { billingInvoiceId: aCharge.id } })).toBe(0);
+  });
+
+  it('is for billing.manage: the accountant can, an order operator can neither open nor send', async () => {
+    const m = await newMerchant();
+    const operator = await addMemberWithRole(m.owner.accessToken, m.wid, 'order_operator', 'Operator');
+    const asOperator = { wid: m.wid, H: { Authorization: `Bearer ${operator.accessToken}` } };
+    expect((await openInvoice(asOperator)).status).toBe(403);
+    expect((await sendProof(asOperator, NEXT)).status).toBe(403);
+    expect(await db.BillingInvoice.count()).toBe(0);
+
+    const accountant = await addMemberWithRole(m.owner.accessToken, m.wid, 'accountant', 'Accountant');
+    const asAccountant = { wid: m.wid, H: { Authorization: `Bearer ${accountant.accessToken}` } };
+    expect((await openInvoice(asAccountant)).status).toBe(200);
+    expect((await sendProof(asAccountant, NEXT)).status).toBe(201);
+    expect(await db.BillingInvoice.count()).toBe(1);
+  });
+});
+
 describe('another store', () => {
   it('cannot send a proof for, or read, a charge or proof that is not its own', async () => {
     const a = await merchantWithOpenInvoice();
@@ -261,8 +447,6 @@ describe('the review', () => {
     const res = await sendProof(m, m.invoiceId);
     return { ...m, proofId: res.body.proof.id };
   }
-  const approve = (admin, id, receivedAmount) =>
-    request(app).post(`/api/v1/admin/payment-proofs/${id}/approve`).set(admin.H).send({ receivedAmount });
   const reject = (admin, id, body) => request(app).post(`/api/v1/admin/payment-proofs/${id}/reject`).set(admin.H).send(body);
 
   it('lists what waits and shows one with its image behind a short signed link', async () => {

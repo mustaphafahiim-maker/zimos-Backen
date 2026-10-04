@@ -27,16 +27,29 @@ Migration 130 seeds `instapay` and `wallet`, both off and without a number.
 
 ## Paying by transfer
 
-1. `POST /billing/invoices/open`: the charge to pay now. It's the open one,
-   or the next period's written by `createCharge`, as the online Pay button
-   does. It is only written while some method is offered.
-2. `POST /billing/invoices/:invoiceId/payment-proofs`, multipart:
+1. `POST /billing/invoices/open`: the charge to pay now and the methods
+   offered (`methods`), **writing nothing**. It's the open charge if there is
+   one (`written: true`), otherwise the next period priced as `createCharge`
+   would write it, with the id `next` and `createdAt: null`. So opening the
+   Pay window never holds the plan. Only while some method is offered
+   (otherwise 409 `NO_PAYMENT_METHOD`). Always 200; `created` is always false.
+2. `POST /billing/invoices/:invoiceId/payment-proofs`, multipart, where
+   `:invoiceId` is an open charge of the store or `next`:
    - `methodCode`: an enabled manual method;
    - `senderPhone`: the Egyptian mobile number it came from, normalised by
      `normalizePhone`;
    - `file`: the screenshot. JPEG, PNG or WebP by its bytes, at most 8 MB,
      re-encoded without metadata and stored privately under
-     `payment-proofs/<workspaceId>/`.
+     `payment-proofs/<workspaceId>/`;
+   - `expectedAmount` (optional): the amount the merchant was shown, in minor
+     units. Only compared: if the charge comes to anything else, 409
+     `CHARGE_AMOUNT_CHANGED` with `details.amountDue`, and nothing is written.
+
+   For `next`, the charge is written (or the open one taken) in the proof's
+   own transaction, by `createCharge`'s rules, with the subscription row
+   locked: a refused proof leaves no charge, and two proofs sent at once
+   write one charge (the second gets `PROOF_ALREADY_OPEN`). From then on the
+   charge is open, so a plan change answers `OPEN_CHARGE_EXISTS` as before.
 
    The rules on a proof:
    - **The amount is the server's:** the charge's amount payable now, frozen

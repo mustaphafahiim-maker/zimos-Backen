@@ -19,15 +19,24 @@ const { signedProofImageUrl } = require('./proofLinks');
  * A merchant's proof of a manual transfer (InstaPay, a mobile wallet) and a
  * platform admin's review of it (payment_proofs, migration 130).
  *
+ *   open     POST /workspaces/:id/billing/invoices/open (billing.manage):
+ *            what paying now comes to, writing nothing — the pending charge
+ *            if one is open, otherwise the next one priced as createCharge
+ *            would write it, under the id NEXT_CHARGE.
  *   send     POST /workspaces/:id/billing/invoices/:invoiceId/payment-proofs
- *            (billing.manage): the method (an enabled manual one), the
+ *            (billing.manage), `:invoiceId` a pending charge of the store or
+ *            NEXT_CHARGE — the charge is then written (or the pending one
+ *            taken) in the proof's own transaction, so only a sent proof
+ *            holds a charge open. The method (an enabled manual one), the
  *            sender's Egyptian mobile number and the screenshot (JPEG, PNG
  *            or WebP by its bytes, at most PROOF_MAX_BYTES, re-encoded
  *            without its metadata and stored privately). The amount is the
  *            server's: the charge's amount payable now, frozen with its
- *            discount and code — the merchant never sends one. One image is
- *            never accepted twice (its SHA-256 is unique), one proof waits
- *            per charge, and at most MAX_OPEN_PER_WORKSPACE per store.
+ *            discount and code — the merchant never sends one; an
+ *            `expectedAmount` (the amount the merchant was shown) is only
+ *            compared with it. One image is never accepted twice (its
+ *            SHA-256 is unique), one proof waits per charge, and at most
+ *            MAX_OPEN_PER_WORKSPACE per store.
  *   top-up   POST /workspaces/:id/billing/wallet/topups (WALLET_ENABLED):
  *            the same checks, for an amount the merchant chooses between
  *            walletService.MIN_TOPUP_AMOUNT and MAX_TOPUP_AMOUNT, at most
@@ -44,6 +53,8 @@ const { signedProofImageUrl } = require('./proofLinks');
 
 const PROOF_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_OPEN_PER_WORKSPACE = 3;
+// The charge a proof writes as it is sent: `/invoices/next/payment-proofs`.
+const NEXT_CHARGE = 'next';
 // An Egyptian mobile number after normalizePhone: 20, then 10, 11, 12 or 15, then 8 digits.
 const EGYPT_MOBILE = /^201[0125]\d{8}$/;
 
@@ -62,6 +73,12 @@ const duplicateImage = () =>
   new ConflictError('This screenshot was already sent. Send the screenshot of this transfer.', 'PROOF_IMAGE_DUPLICATE');
 const alreadyOpen = () =>
   new ConflictError('A proof for this charge is already waiting for review.', 'PROOF_ALREADY_OPEN');
+const notPending = () => new ConflictError('This charge is not waiting for payment.', 'CHARGE_NOT_PENDING');
+const currencyUnsupported = () =>
+  new ConflictError(
+    `A transfer can only pay a charge in ${paymentMethods.MANUAL_CURRENCY}. Contact support to pay this one.`,
+    'MANUAL_PAYMENT_CURRENCY_UNSUPPORTED'
+  );
 
 // ------------------------------------------------------------ serialize
 
@@ -85,24 +102,51 @@ function serializeForMerchant(proof, method = proof.method) {
 // ------------------------------------------------------------- merchant
 
 /**
- * POST /workspaces/:id/billing/invoices/open — the charge to pay now: the
- * one already open, or the next period's, priced and written as the online
- * Pay button does (createCharge). Only while some way to pay it is offered,
- * so a store is never handed a charge it has no way to settle. Its amount is
- * what it comes to if paid now.
+ * POST /workspaces/:id/billing/invoices/open — the charge to pay now, and the
+ * ways to pay it, writing nothing: the one already open (`written`), as it
+ * comes to if paid now, or the next period's priced as createCharge would
+ * write it, with the id NEXT_CHARGE and no `createdAt`. A proof sent for
+ * NEXT_CHARGE writes it; the online Pay button writes its own. Nothing is
+ * held open, so the plan can still change. `created` is always false (kept
+ * for clients from when opening wrote the charge). Only while some way to
+ * pay is offered, so a store is never shown a charge it has no way to settle.
  */
-async function openInvoice(workspaceId, req) {
+async function openInvoice(workspaceId) {
   const subscription = await db.Subscription.findOne({ where: { workspaceId }, include: [{ model: db.Plan, as: 'plan' }] });
   if (!subscription) throw new NotFoundError('Subscription');
   const currency = subscription.plan ? subscription.plan.currency : null;
   if (!(await paymentMethods.anyOffered(currency))) {
     throw new ConflictError('There is no way to pay online or by transfer right now. Contact support.', 'NO_PAYMENT_METHOD');
   }
-  const { invoice, created } = await charges.createCharge(workspaceId, { req, byMerchant: true });
-  const payable = await charges.payableNow(invoice);
+  const { pending, quote } = await charges.quoteCharge(workspaceId);
+  const { methods } = await paymentMethods.listForWorkspace(workspaceId);
+  if (pending) {
+    const payable = await charges.payableNow(pending);
+    return {
+      invoice: { ...serializeInvoice(pending), discountAmount: payable.discountAmount, amountDue: payable.amount },
+      created: false,
+      written: true,
+      methods,
+    };
+  }
   return {
-    invoice: { ...serializeInvoice(invoice), discountAmount: payable.discountAmount, amountDue: payable.amount },
-    created,
+    invoice: {
+      id: NEXT_CHARGE,
+      status: 'pending',
+      periodStart: quote.periodStart,
+      periodEnd: quote.periodEnd,
+      grossAmount: quote.grossAmount,
+      discountAmount: quote.discountAmount,
+      amountDue: quote.amount,
+      amountPaid: null,
+      currency: quote.currency,
+      paidAt: null,
+      paymentSource: null,
+      createdAt: null,
+    },
+    created: false,
+    written: false,
+    methods,
   };
 }
 
@@ -172,30 +216,68 @@ async function createRow(fields, transaction) {
 }
 
 /**
- * POST /workspaces/:id/billing/invoices/:invoiceId/payment-proofs. Another
- * store's charge, or one that doesn't exist, is a 404 alike.
+ * Before the screenshot is stored: what can be refused without a lock. A
+ * charge by its id must be this store's (another store's, or one that
+ * doesn't exist, is a 404 alike) and pending; NEXT_CHARGE must have a charge
+ * to write (409 NO_PLAN / PLAN_IS_FREE). Either way, in MANUAL_CURRENCY.
  */
-async function submitForInvoice(workspaceId, invoiceId, { methodCode, senderPhone, file }, req) {
-  const invoice = await db.BillingInvoice.findOne({ where: { id: invoiceId, workspaceId } });
-  if (!invoice) throw new NotFoundError('Charge');
-  if (invoice.status !== 'pending') throw new ConflictError('This charge is not waiting for payment.', 'CHARGE_NOT_PENDING');
-  if (invoice.currency !== paymentMethods.MANUAL_CURRENCY) {
-    throw new ConflictError(
-      `A transfer can only pay a charge in ${paymentMethods.MANUAL_CURRENCY}. Contact support to pay this one.`,
-      'MANUAL_PAYMENT_CURRENCY_UNSUPPORTED'
-    );
+async function assertTransferCanPay(workspaceId, invoiceId) {
+  let currency;
+  if (invoiceId === NEXT_CHARGE) {
+    const { pending, quote } = await charges.quoteCharge(workspaceId);
+    currency = (pending || quote).currency;
+  } else {
+    const invoice = await db.BillingInvoice.findOne({ where: { id: invoiceId, workspaceId } });
+    if (!invoice) throw new NotFoundError('Charge');
+    if (invoice.status !== 'pending') throw notPending();
+    currency = invoice.currency;
   }
+  if (currency !== paymentMethods.MANUAL_CURRENCY) throw currencyUnsupported();
+}
+
+/**
+ * POST /workspaces/:id/billing/invoices/:invoiceId/payment-proofs, for a
+ * pending charge of the store or for NEXT_CHARGE. With NEXT_CHARGE the
+ * charge is written here, in the proof's transaction (createCharge's rules:
+ * the pending one if there is one, otherwise the next period at the plan's
+ * price now), so a proof refused leaves no charge behind. The subscription
+ * row is locked first, so two proofs sent at once write one charge and the
+ * second finds its proof waiting (409 PROOF_ALREADY_OPEN). With
+ * `expectedAmount`, a charge that comes to anything else is refused (409
+ * CHARGE_AMOUNT_CHANGED) before anything is written.
+ */
+async function submitForInvoice(workspaceId, invoiceId, { methodCode, senderPhone, file, expectedAmount }, req) {
+  await assertTransferCanPay(workspaceId, invoiceId);
   const { method, phone, imageSha256 } = await readSubmission({ methodCode, senderPhone, file });
 
   const proof = await withStoredImage(workspaceId, file, (image) =>
     db.sequelize.transaction(async (transaction) => {
       await assertRoomForAnother(workspaceId, transaction);
-      const locked = await db.BillingInvoice.findByPk(invoice.id, { transaction, lock: transaction.LOCK.UPDATE });
-      if (locked.status !== 'pending') throw new ConflictError('This charge is not waiting for payment.', 'CHARGE_NOT_PENDING');
+      const target =
+        invoiceId === NEXT_CHARGE
+          ? (await charges.createChargeInTransaction(workspaceId, { req, byMerchant: true }, transaction)).invoice.id
+          : invoiceId;
+      const locked = await db.BillingInvoice.findOne({
+        where: { id: target, workspaceId },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!locked) throw new NotFoundError('Charge');
+      if (locked.status !== 'pending') throw notPending();
+      // A charge written just now is priced in the plan's currency as it is now.
+      if (locked.currency !== paymentMethods.MANUAL_CURRENCY) throw currencyUnsupported();
       if (await db.PaymentProof.count({ where: { billingInvoiceId: locked.id, status: 'pending' }, transaction })) throw alreadyOpen();
 
       const payable = await charges.payableNow(locked, transaction);
       if (!(payable.amount > 0)) throw new ConflictError('Nothing is due on this charge.', 'NOTHING_TO_PAY');
+      if (expectedAmount != null && expectedAmount !== payable.amount) {
+        throw new AppError(
+          'CHARGE_AMOUNT_CHANGED',
+          'The amount due has changed since the payment window opened. Check the new amount before sending.',
+          409,
+          { amountDue: payable.amount, currency: locked.currency }
+        );
+      }
       const row = await createRow(
         {
           workspaceId,
@@ -545,6 +627,7 @@ module.exports = {
   PROOF_MAX_BYTES,
   MAX_OPEN_PER_WORKSPACE,
   EGYPT_MOBILE,
+  NEXT_CHARGE,
   openInvoice,
   submitForInvoice,
   submitTopup,

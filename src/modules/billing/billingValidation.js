@@ -21,12 +21,19 @@ module.exports = {
     }),
   },
   // A transfer's proof, multipart: the screenshot is the `file` part. No
-  // amount: the server takes the charge's.
+  // amount: the server takes the charge's. The charge is a pending one by its
+  // id, or `next` (paymentProofService.NEXT_CHARGE): written with the proof.
+  // `expectedAmount` is the amount the merchant was shown, in minor units,
+  // only compared with the server's (409 CHARGE_AMOUNT_CHANGED).
   submitInvoiceProof: {
-    params: Joi.object({ workspaceId: Joi.string().required(), invoiceId: Joi.string().guid().required() }),
+    params: Joi.object({
+      workspaceId: Joi.string().required(),
+      invoiceId: Joi.alternatives(Joi.string().guid(), Joi.string().valid('next')).required(),
+    }),
     body: Joi.object({
       methodCode: Joi.string().pattern(METHOD_CODE).required(),
       senderPhone: Joi.string().trim().min(6).max(32).required(),
+      expectedAmount: Joi.number().integer().min(0).max(1e12).optional(),
     }),
   },
   getOnlinePayment: {
