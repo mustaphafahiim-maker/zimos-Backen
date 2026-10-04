@@ -272,6 +272,7 @@ const ELEMENT_PROP_RULES = {
 
 Object.assign(ELEMENT_PROP_RULES, showcase.propRules(check));
 Object.assign(ELEMENT_PROP_RULES, builderExtras.propRules(check));
+for (const [type, rules] of Object.entries(builderExtras.extraRules(check))) ELEMENT_PROP_RULES[type] = { ...(ELEMENT_PROP_RULES[type] || {}), ...rules };
 // A countdown's fixed end (countdownDeadline.js).
 ELEMENT_PROP_RULES.countdown = { ...(ELEMENT_PROP_RULES.countdown || {}), endsAt: require('./countdownDeadline').endsAtRule };
 

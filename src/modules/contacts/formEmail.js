@@ -18,7 +18,9 @@ async function send(event) {
   const s = await db.FormSubmission.findOne({ where: { id: submissionId, workspaceId: event.workspaceId } });
   if (!s) return null;
 
-  const extra = s.data && typeof s.data === 'object' ? Object.entries(s.data).map(([k, v]) => `${k}: ${v}`) : [];
+  // A photo is only named here: staff open it in Form submissions (formFiles.js).
+  const { data, files } = require('./formFiles').present(s.data && typeof s.data === 'object' ? s.data : {});
+  const extra = [...Object.entries(data).map(([k, v]) => `${k}: ${v}`), ...files.map((f) => `${f.label}: صورة مرفقة`)];
   const lines = [
     s.fullName && `الاسم: ${s.fullName}`,
     s.phone && `الهاتف: ${s.phone}`,

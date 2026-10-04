@@ -16,6 +16,8 @@
  *   popup             a window over the page: opened by any link to
  *                     "#popup-<key>", after a delay, or when the pointer
  *                     leaves the page — shown once a visit for the last two
+ *   masonry_grid      pictures of their own heights in 2–5 columns, each with
+ *                     an optional caption and link (item 93)
  *
  * A "container" is not an element: every column is a flex box, and its
  * layout settings (stacked or side by side, gap, alignment) live on the
@@ -24,7 +26,7 @@
  * Every prop is optional: the builder autosaves half-filled elements.
  */
 
-const TYPES = ['image_gallery', 'variant_selector', 'bundle_selector', 'review_form', 'popup'];
+const TYPES = ['image_gallery', 'variant_selector', 'bundle_selector', 'review_form', 'popup', 'masonry_grid'];
 
 /**
  * @param {object} check pageTree.js's rule builders
@@ -51,7 +53,43 @@ function propRules(check) {
       trigger: check.oneOf('click', 'delay', 'exit'),
       delaySeconds: check.intRange(1, 120),
     },
+    masonry_grid: {
+      title: check.string(300),
+      items: check.listOf(40, check.shape({ image: check.url, caption: check.string(200), href: check.url })),
+      columns: check.intRange(2, 5),
+    },
   };
 }
 
-module.exports = { TYPES, propRules };
+/**
+ * Props item 93 adds to elements that already had rules (or none): merged
+ * into ELEMENT_PROP_RULES after the rest, so each type keeps its own.
+ *
+ *   button  what it does: follow its link (the default), put the product in
+ *           the cart, or put it there and go to the checkout. The product is
+ *           `productId` ("" = the page's product); the variant is the one the
+ *           shopper picked on the page, else `variantId`, else the first in
+ *           stock.
+ *   form    one photo input (`fileLabel`, required with `fileRequired`) and
+ *           one 1–5 stars input (`ratingLabel`); contacts/formFiles.js reads
+ *           them from the published page when the form is sent.
+ *
+ * A column's "sticky" (stays in view while the page scrolls, on a computer)
+ * is a column setting like its layout — read by the storefront, not checked.
+ */
+function extraRules(check) {
+  return {
+    button: {
+      action: check.oneOf('link', 'add_to_cart', 'buy_now'),
+      productId: check.uuid,
+      variantId: check.uuid,
+    },
+    form: {
+      fileLabel: check.string(100),
+      fileRequired: check.bool,
+      ratingLabel: check.string(100),
+    },
+  };
+}
+
+module.exports = { TYPES, propRules, extraRules };

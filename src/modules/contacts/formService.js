@@ -24,6 +24,7 @@ function cleanTags(tags) {
 }
 
 function view(s) {
+  const { data, files } = require('./formFiles').present(s.data);
   return {
     id: s.id,
     customerId: s.customerId,
@@ -33,7 +34,8 @@ function view(s) {
     phone: s.phone,
     email: s.email,
     message: s.message,
-    data: s.data || {},
+    data,
+    files,
     tags: s.tags || [],
     marketingConsent: s.marketingConsent,
     isRead: s.isRead,
@@ -77,7 +79,7 @@ async function publishedForm(workspaceId, pagePath, elementId) {
   if (!node) return null;
   const props = node.props || {};
   const tags = Array.isArray(props.tags) ? props.tags : String(props.tags || '').split(',');
-  return { name: String(props.formName || props.title || '').trim(), tags: cleanTags(tags) };
+  return { name: String(props.formName || props.title || '').trim(), tags: cleanTags(tags), props };
 }
 
 async function funnelFormNode(workspaceId, elementId) {
@@ -130,6 +132,8 @@ async function submit(workspaceId, body, req) {
   const form = await publishedForm(workspaceId, body.pagePath, body.elementId);
   const tags = form ? form.tags : [];
   const consent = Boolean(body.marketingConsent);
+  // The published form's photo and stars inputs (formFiles.js).
+  const prepared = await require('./formFiles').prepare(workspaceId, form && form.props, body);
 
   await db.sequelize.transaction(async (transaction) => {
     let customer = null;
@@ -164,7 +168,7 @@ async function submit(workspaceId, body, req) {
         phone: phoneNormalized,
         email,
         message,
-        data: body.fields || {},
+        data: await require('./formFiles').attach(prepared, transaction),
         tags,
         marketingConsent: consent,
         ipAddress: req.ip || null,
@@ -239,6 +243,7 @@ async function markRead(workspaceId, submissionId, isRead) {
 async function deleteSubmission(workspaceId, submissionId, req) {
   const submission = await scoped(db.FormSubmission, workspaceId, 'FormSubmission').findByPkOrThrow(submissionId);
   await submission.destroy();
+  await require('./formFiles').removeFor(workspaceId, submission.data);
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,

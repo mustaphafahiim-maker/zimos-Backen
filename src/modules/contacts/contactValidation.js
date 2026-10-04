@@ -87,6 +87,8 @@ module.exports = {
       marketingConsent: Joi.boolean().default(false),
       fields: Joi.object().pattern(Joi.string().max(100), Joi.string().max(2000).allow('')).max(30).default({}),
       website: text(200),
+      // Who uploaded the form's photo (X-Visitor-Id of POST /store/:ws/uploads).
+      visitorId: Joi.string().pattern(/^[A-Za-z0-9_-]{8,64}$/).allow('', null),
     }),
   },
 };
