@@ -165,3 +165,5 @@ router.post(
 );
 
 module.exports = router;
+// "Chrome on Windows" for the new sign-in alert (newDeviceSignIn.js).
+module.exports.describeAgent = describeAgent;

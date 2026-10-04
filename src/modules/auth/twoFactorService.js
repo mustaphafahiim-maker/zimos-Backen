@@ -182,13 +182,17 @@ function maskEmail(email) {
  * Called by authService.login once the password is right. Null = sign in as
  * usual; otherwise the answer login must return instead of tokens.
  */
-async function challengeIfNeeded(user, req, { locale = 'ar' } = {}) {
+async function challengeIfNeeded(user, req, { locale = 'ar', newDevice = false } = {}) {
   const row = await db.UserTwoFactor.findByPk(user.id);
-  if (!row || row.mode === 'off') return null;
+  // Without a second step of its own, a browser new to the account is asked
+  // for an email code (newDeviceSignIn.js).
+  const mode = row && row.mode !== 'off' ? row.mode : newDevice ? 'email' : 'off';
+  if (mode === 'off') return null;
   if (await isTrusted(user.id, req)) return null;
+  const flag = mode !== (row && row.mode) ? { newDevice: true } : {};
 
-  const base = { userId: user.id, channel: row.mode, expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? req.ip : null };
-  if (row.mode === 'totp') {
+  const base = { userId: user.id, channel: mode, expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? req.ip : null };
+  if (mode === 'totp') {
     const challenge = await db.LoginChallenge.create(base);
     return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'totp' };
   }
@@ -198,15 +202,15 @@ async function challengeIfNeeded(user, req, { locale = 'ar' } = {}) {
   if (recent >= 5) {
     // No new code for now, but the step still opens: a backup code works in it (twoFactorRecovery.js).
     const challenge = await db.LoginChallenge.create(base);
-    return { twoFactorRequired: true, challengeToken: challenge.id, channel: row.mode, codeNotSent: true };
+    return { twoFactorRequired: true, challengeToken: challenge.id, channel: mode, codeNotSent: true, ...flag };
   }
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   const challenge = await db.LoginChallenge.create({ ...base, codeHash: sha256(`${user.id}:${code}`) });
   const minutes = CODE_TTL_MS / 60000;
-  const phone = row.mode === 'whatsapp' ? await require('./twoFactorWhatsapp').sendCode(user, code, { minutes, locale }) : null;
+  const phone = mode === 'whatsapp' ? await require('./twoFactorWhatsapp').sendCode(user, code, { minutes, locale }) : null;
   if (phone) return { twoFactorRequired: true, challengeToken: challenge.id, ...phone };
   await notify.email({ recipient: user.email, template: 'login_code', data: { code, minutes, locale } });
-  return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'email', sentTo: maskEmail(user.email) };
+  return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'email', sentTo: maskEmail(user.email), ...flag };
 }
 
 const invalid = () => new AuthenticationError('That code is not correct or has expired', 'INVALID_TWO_FACTOR_CODE');

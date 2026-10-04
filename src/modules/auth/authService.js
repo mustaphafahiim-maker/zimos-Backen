@@ -210,7 +210,8 @@ async function login({ email, password, locale }, req) {
   // Two-step sign-in (twoFactorService.js): from a browser that is not
   // remembered the answer is a challenge, and POST /auth/two-factor/verify
   // finishes the sign-in through completeLogin.
-  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req, { locale });
+  const newDevice = require('./newDeviceSignIn').needsCode(user, req);
+  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req, { locale, newDevice });
   if (challenge) return challenge;
 
   return completeLogin(user, req);

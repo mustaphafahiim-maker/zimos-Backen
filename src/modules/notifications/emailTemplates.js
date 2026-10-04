@@ -153,6 +153,12 @@ ${codeHtml}
         ? ['Two-step sign-in was turned off on your Zimos account', 'At your request, the Zimos team turned off two-step sign-in on your account and signed you out everywhere. Sign in and turn it back on from Settings → Security.']
         : ['تم إيقاف التحقق بخطوتين في حسابك على Zimos', 'بناءً على طلبك، فريق Zimos وقّف التحقق بخطوتين في حسابك وسجّل خروجك من كل الأجهزة. سجّل دخول وشغّله تاني من الإعدادات ← الأمان.'],
     };
+    // A sign-in from a browser new to the account (newDeviceSignIn.js).
+    const where = [data.device, data.ip].filter(Boolean).map(String).join(' · ');
+    const when = data.at ? new Date(data.at).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : '';
+    texts.new_sign_in = en
+      ? ['New sign-in to your Zimos account', `Your Zimos account was just signed in to from a new browser: ${where || 'unknown browser'}${when ? `, ${when}` : ''}. If this was you, there is nothing to do. If not, change your password now and end that session from Settings → Security.`]
+      : ['تسجيل دخول جديد لحسابك على Zimos', `حسابك على Zimos اتسجّل دخوله دلوقتي من متصفح جديد: ${where || 'متصفح غير معروف'}${when ? `، ${when}` : ''}. لو ده إنت، مفيش حاجة تعملها. لو مش إنت، غيّر كلمة السر حالًا وأنهِ الجلسة دي من الإعدادات ← الأمان.`];
     const [subject, line] = texts[data.kind] || texts.two_factor_reset;
     const warn = en ? 'If this was not you, change your password now and contact support.' : 'لو مش إنت، غيّر كلمة السر حالًا وكلّم الدعم.';
     return {
