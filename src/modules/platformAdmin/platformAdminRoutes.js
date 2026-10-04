@@ -23,6 +23,8 @@ router.use(require('./supportViewRoutes'));
 router.use(require('./carrierMapRoutes'));
 // The merchants' referral program: its share and the payout requests.
 router.use(require('../referrals/merchantReferrals').admin);
+// The help center, Telegram and tutorial links the dashboard shows (educationLinks.js).
+router.use(require('./educationLinks').admin);
 // The theme catalog (themes/themesCatalog.js).
 router.use(require('../themes/themesCatalog').admin);
 

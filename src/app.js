@@ -155,6 +155,8 @@ const v1 = express.Router();
 v1.use('/me/push', require('./modules/notifications/push/pushService').router);
 // ZIMOS's referral program for merchants: their code, link, earnings and payout requests.
 v1.use('/me/referrals', require('./modules/referrals/merchantReferrals').me);
+// Help center, Telegram and tutorial links for the dashboard (platformAdmin/educationLinks.js).
+v1.use('/me/education', require('./modules/platformAdmin/educationLinks').me);
 // The signed-in person's name and picture (before /auth, which has no such route).
 v1.use('/auth/me/profile', require('./modules/auth/profileRoutes'));
 // Changing the sign-in email, confirmed from the new address (auth/emailChange.js).
