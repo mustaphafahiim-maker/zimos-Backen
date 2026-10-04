@@ -99,6 +99,8 @@ async function upsertConversation(workspaceId, phoneNormalized, { customerName, 
  * as failed and re-thrown so the caller sees the WhatsApp error).
  */
 async function sendMessage(workspaceId, { to, text, template, orderId = null }, req) {
+  // The store took the WhatsApp app off: nothing is sent from its number (logins and codes use the platform's).
+  await require('../apps/appGate').assertEnabled(workspaceId, 'whatsapp');
   const integration = await requireConnected(workspaceId);
   const phoneNormalized = normalizePhone(to);
   if (!phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);

@@ -38,6 +38,8 @@ async function call(fn) {
 }
 
 async function connection(workspaceId, code) {
+  // A supplier listed in the app store works only while its app is installed.
+  if (require('../apps/appCatalogue').BY_KEY.has(`dropship_${code}`)) await require('../apps/appGate').assertEnabled(workspaceId, `dropship_${code}`);
   const row = await db.WorkspaceIntegration.findOne({ where: { workspaceId, provider: integrationKey(code) } });
   if (!row || row.status !== 'connected') throw new AppError('DROPSHIP_NOT_CONNECTED', 'Connect this supplier first', 409);
   return { row, credentials: JSON.parse(secretBox.open(row.secretsSealed)) };

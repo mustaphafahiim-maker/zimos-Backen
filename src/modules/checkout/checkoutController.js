@@ -88,6 +88,10 @@ const checkout = asyncHandler(async (req, res) => {
 
   // The ticked order bump becomes one more line of this order, built by the
   // server from the configured offer (422 when it is not that offer).
+  // With the Offers app off the store shows no add-ons, so a ticked one is stale or forged.
+  if (((orderBump && !orderBody.funnelId) || (orderBumps && orderBumps.length > 0)) && !(await require('../apps/appGate').isEnabled(workspace.id, 'offers'))) {
+    throw new AppError('ORDER_BUMP_INVALID', 'This add-on is no longer offered', 422);
+  }
   if (orderBump) {
     items = [...items, await resolveOrderBumpItem(workspace, { offerId: orderBump.offerId, funnelId: orderBody.funnelId })];
   }

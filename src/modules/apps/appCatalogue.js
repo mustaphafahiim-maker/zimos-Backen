@@ -9,6 +9,8 @@
  *                              work; shown so the merchant knows it is planned
  *   openPath      where "Open" takes the merchant in the dashboard
  *   sandbox       only where test integrations are allowed (not production)
+ *   standard      a feature every store has had: on until the store uninstalls
+ *                 it (appGate.js); any other app is off until installed
  *
  * No prices here: an app costs what its `apps` row says (price_amount), set
  * by the platform admin once pricing is decided. Null = free.
@@ -29,12 +31,12 @@ const app = (key, category, kind, name, description, extra = {}) => ({ key, cate
 const soon = { availability: 'coming_soon' };
 
 const APPS = [
-  app('tracking_pixels', 'tracking', 'feature', { en: 'Tracking tools', ar: 'أدوات التتبع' }, { en: 'Meta, TikTok, Snapchat and Google pixels with server-side events.', ar: 'بيكسلات ميتا وتيك توك وسناب وجوجل مع أحداث من السيرفر.' }, { openPath: '/marketing' }),
-  app('webhooks', 'orders', 'feature', { en: 'Webhooks', ar: 'الـ Webhooks' }, { en: 'Send orders and store events to your own systems as they happen.', ar: 'ابعت الطلبات وأحداث المتجر لأنظمتك أول ما تحصل.' }, { openPath: '/settings' }),
-  app('public_api', 'orders', 'feature', { en: 'Public API', ar: 'الـ API العام' }, { en: 'API keys for your developers and partners.', ar: 'مفاتيح API للمطورين والشركاء.' }, { openPath: '/settings' }),
-  app('whatsapp', 'marketing', 'feature', { en: 'WhatsApp', ar: 'واتساب' }, { en: 'Official WhatsApp: inbox, order messages and automations.', ar: 'واتساب الرسمي: صندوق الرسائل ورسائل الطلبات والأتمتة.' }, { openPath: '/automations' }),
-  app('fraud_protection', 'protection', 'feature', { en: 'Fake-order protection', ar: 'الحماية من الطلبات الوهمية' }, { en: 'Rules, blocklist and risk scoring before an order is accepted.', ar: 'قواعد وقائمة حظر وتقييم مخاطر قبل قبول الطلب.' }, { openPath: '/fraud' }),
-  app('offers', 'sales', 'feature', { en: 'Offers and bundles', ar: 'العروض والباقات' }, { en: 'Quantity offers, order bumps and upsells.', ar: 'عروض الكميات والإضافات والـ upsell.' }, { openPath: '/offers' }),
+  app('tracking_pixels', 'tracking', 'feature', { en: 'Tracking tools', ar: 'أدوات التتبع' }, { en: 'Meta, TikTok, Snapchat and Google pixels with server-side events.', ar: 'بيكسلات ميتا وتيك توك وسناب وجوجل مع أحداث من السيرفر.' }, { openPath: '/marketing', standard: true }),
+  app('webhooks', 'orders', 'feature', { en: 'Webhooks', ar: 'الـ Webhooks' }, { en: 'Send orders and store events to your own systems as they happen.', ar: 'ابعت الطلبات وأحداث المتجر لأنظمتك أول ما تحصل.' }, { openPath: '/settings', standard: true }),
+  app('public_api', 'orders', 'feature', { en: 'Public API', ar: 'الـ API العام' }, { en: 'API keys for your developers and partners.', ar: 'مفاتيح API للمطورين والشركاء.' }, { openPath: '/settings', standard: true }),
+  app('whatsapp', 'marketing', 'feature', { en: 'WhatsApp', ar: 'واتساب' }, { en: 'Official WhatsApp: inbox, order messages and automations.', ar: 'واتساب الرسمي: صندوق الرسائل ورسائل الطلبات والأتمتة.' }, { openPath: '/automations', standard: true }),
+  app('fraud_protection', 'protection', 'feature', { en: 'Fake-order protection', ar: 'الحماية من الطلبات الوهمية' }, { en: 'Rules, blocklist and risk scoring before an order is accepted.', ar: 'قواعد وقائمة حظر وتقييم مخاطر قبل قبول الطلب.' }, { openPath: '/fraud', standard: true }),
+  app('offers', 'sales', 'feature', { en: 'Offers and bundles', ar: 'العروض والباقات' }, { en: 'Quantity offers, order bumps and upsells.', ar: 'عروض الكميات والإضافات والـ upsell.' }, { openPath: '/offers', standard: true }),
   app('dropship_sandbox', 'dropshipping', 'integration', { en: 'Test supplier', ar: 'مورّد تجريبي' }, { en: 'A test dropshipping supplier: import a product, forward an order and sync stock without a real account.', ar: 'مورّد دروبشيبنج تجريبي: استورد منتج وابعت طلب وحدّث المخزون من غير حساب حقيقي.' }, { openPath: '/apps/dropship_sandbox', sandbox: true }),
   app('taager', 'dropshipping', 'integration', { en: 'Taager', ar: 'تاجر' }, { en: 'Import Taager products and forward orders to them.', ar: 'استورد منتجات تاجر وابعت لهم الطلبات.' }, soon),
   app('shopify', 'store', 'integration', { en: 'Shopify', ar: 'شوبيفاي' }, { en: 'Import products and push orders to a Shopify store.', ar: 'استورد المنتجات وابعت الطلبات لمتجر شوبيفاي.' }, soon),

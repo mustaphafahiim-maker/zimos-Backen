@@ -43,6 +43,9 @@ const authenticateApiKey = asyncHandler(async (req, res, next) => {
   // A suspended or closed store's integrations stop with it.
   const workspace = await db.Workspace.findByPk(key.workspaceId, { attributes: ['id', 'status'] });
   if (!workspace || workspace.status !== 'active') throw INVALID();
+  // The store took the Public API app off: only keys an installed outside app holds still work.
+  const appGate = require('../apps/appGate');
+  if (!(await appGate.apiKeyAllowed(key))) throw appGate.notInstalled('public_api');
 
   const user = await db.User.findByPk(key.createdByUserId);
   if (!user || user.status !== 'active') throw INVALID();

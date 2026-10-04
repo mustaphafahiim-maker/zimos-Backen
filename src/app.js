@@ -71,6 +71,7 @@ const settlementRoutes = require('./modules/settlements/settlementRoutes');
 const profitRoutes = require('./modules/profit/profitRoutes');
 const serverPixelsRoutes = require('./modules/marketing/serverPixelsRoutes');
 const apiKeyRoutes = require('./modules/apiKeys/apiKeyRoutes');
+const appGate = require('./modules/apps/appGate');
 const webhookRoutes = require('./modules/webhooks/webhookRoutes');
 const publicApiRoutes = require('./modules/publicApi/publicApiRoutes');
 const merchantNotificationRoutes = require('./modules/notifications/merchantNotificationRoutes');
@@ -187,7 +188,7 @@ v1.use('/workspaces/:workspaceId/confirmation-tasks', confirmationRoutes);
 v1.use('/workspaces/:workspaceId', paymentRoutes);
 v1.use('/workspaces/:workspaceId/discounts', discountRoutes);
 v1.use('/workspaces/:workspaceId/bundles', require('./modules/bundles/bundleRoutes'));
-v1.use('/workspaces/:workspaceId/offers', require('./modules/offers/offersRoutes'));
+v1.use('/workspaces/:workspaceId/offers', appGate.requireAppForChanges('offers'), require('./modules/offers/offersRoutes'));
 // Product feeds for ad channels: /feeds/:workspaceSlug/:channel.xml|csv (public, no auth).
 v1.use('/feeds', require('./modules/offers/productFeed').publicRouter);
 // Before the shipping router: shipping groups (shipping/shippingProfiles.js).
@@ -218,7 +219,7 @@ v1.use('/workspaces/:workspaceId/payments', onlinePaymentRoutes);
 v1.use('/workspaces/:workspaceId/analytics', analyticsRoutes);
 v1.use('/workspaces/:workspaceId/audit-logs', auditRoutes);
 v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
-v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
+v1.use('/workspaces/:workspaceId/whatsapp', appGate.requireAppForChanges('whatsapp'), whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
@@ -226,18 +227,19 @@ v1.use('/workspaces/:workspaceId/manual-transfers', require('./modules/payments/
 v1.use('/workspaces/:workspaceId/payment-rules', require('./modules/payments/paymentRulesRoutes'));
 v1.use('/workspaces/:workspaceId/currencies', require('./modules/currencies/currencyRoutes'));
 v1.use('/workspaces/:workspaceId/saved-payment-methods', require('./modules/payments/savedMethods/savedMethodRoutes'));
-v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
-v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
-v1.use('/workspaces/:workspaceId/webhooks', webhookRoutes);
+v1.use('/workspaces/:workspaceId/server-pixels', appGate.requireAppForChanges('tracking_pixels'), serverPixelsRoutes.staff);
+v1.use('/workspaces/:workspaceId/api-keys', appGate.requireAppForChanges('public_api'), apiKeyRoutes);
+v1.use('/workspaces/:workspaceId/webhooks', appGate.requireAppForChanges('webhooks'), webhookRoutes);
 // Lane 7: the app store, the app install link and dropshipping providers.
+// Features that are apps take changes only while the store has the app (apps/appGate.js).
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
 // Lane 7: the simple invite (sections → permissions) and support access.
 v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
 v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
-v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
-v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
+v1.use('/workspaces/:workspaceId/tracking-pixels', appGate.requireAppForChanges('tracking_pixels'), trackingPixelRoutes);
+v1.use('/workspaces/:workspaceId/inbox', appGate.requireAppForChanges('whatsapp', { except: ['/stream-ticket'] }), inboxRoutes);
 v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
 // The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
 v1.use('/inbox-stream', inboxRoutes.stream);

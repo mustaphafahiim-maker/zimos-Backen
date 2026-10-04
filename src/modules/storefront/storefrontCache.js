@@ -46,6 +46,8 @@ const STORE_ENTITIES = new Set([
   'Domain',
   'Translation',
   'Media',
+  // An app installed or taken off (pixels, offers).
+  'WorkspaceApp',
 ]);
 
 // --- memory backend ----------------------------------------------------------

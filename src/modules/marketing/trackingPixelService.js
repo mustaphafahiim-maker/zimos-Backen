@@ -195,6 +195,8 @@ async function remove(workspaceId, pixelId, req) {
 
 /** What the storefront may know: the public IDs and where each applies. */
 async function publicPixels(workspaceId) {
+  // The store took the Tracking tools app off: no pixel loads in the shop.
+  if (!(await require('../apps/appGate').isEnabled(workspaceId, 'tracking_pixels'))) return [];
   const pixels = await db.TrackingPixel.findAll({
     where: { workspaceId, isActive: true },
     attributes: ['id', 'platform', 'pixelId', 'scopeType', 'scopeIds', 'config'],
@@ -219,6 +221,7 @@ function scopeCovers(pixel, { funnelId = null, productIds = [] }) {
 
 /** The pixels a server-side event for this order goes to, each with its opened token. */
 async function serverPixelsFor(workspaceId, context) {
+  if (!(await require('../apps/appGate').isEnabled(workspaceId, 'tracking_pixels'))) return [];
   const pixels = await db.TrackingPixel.findAll({ where: { workspaceId, isActive: true, capiEnabled: true }, order: [['createdAt', 'ASC']] });
   return pixels
     .filter((p) => p.capiTokenSealed && supportsCapi(p.platform, p.pixelId) && scopeCovers(p, context))

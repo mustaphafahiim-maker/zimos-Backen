@@ -245,7 +245,9 @@ async function createOrder(
     throw new ValidationError([{ field: 'items', message: 'At least one item is required' }]);
   }
 
-  const evaluateFraudRules = !req.user && !skipFraudRules;
+  // The store's own fraud rules run only while it has the protection app (the platform blocklist always runs).
+  const evaluateFraudRules =
+    !req.user && !skipFraudRules && (await require('../apps/appGate').isEnabled(workspaceId, 'fraud_protection', { transaction: outerTransaction }));
   // SPEC §4.2: where the order came from, and whether it is the merchant
   // trying their own store (kept out of sales figures and ad pixels).
   const orderSource = source || orderMeta.sourceFor(req, { funnelId });
