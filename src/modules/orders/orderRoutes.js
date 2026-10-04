@@ -92,6 +92,14 @@ router.post(
 // Every tag in use, for the tag picker and the list's tag filter.
 router.get('/tags', validate(schemas.listTags), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.listTags);
 router.get('/:orderId', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.get);
+// "Confirm via WhatsApp" (whatsappConfirm.js): the confirmation template, or a wa.me link.
+const whatsappConfirm = require('./whatsappConfirm');
+router.post(
+  '/:orderId/whatsapp-confirm',
+  validate(whatsappConfirm.schema),
+  require('../../core/middleware/rbac').requireAnyPermission(PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.ORDERS_CONFIRM),
+  whatsappConfirm.handler
+);
 
 // Tags, test, archive (orders.manage). Marking an order seen is something
 // anyone who can open it does, so a body of only { isSeen } needs orders.view.
