@@ -165,6 +165,24 @@ The four P2 features use the existing AI job pipeline (`ai/featuresP2.js`), and 
 - **Ad creatives.** These are texts plus banner specs (headline, subline, badge, format) laid over the product's own pictures. Any banner on another address is dropped. The dashboard draws previews and offers a PNG download at the platform's size. Producing raster images would need an image provider, which is left to the integrations team.
 - **Store builder.** Apply creates an unpublished page and hidden collections. The suggested theme (free themes only) and the policies are shown for the merchant to switch on or copy. Nothing goes live.
 - **Suggested WhatsApp replies.** These use the bot's own facts (store info, products, the customer's orders) and fill the inbox's message box; a person sends it. The feature is gated on `orders.confirm`, and a user with only inbox access can read only `wa_reply` jobs.
+Storage gains a multipart contract (`media/storage/MULTIPART.md`):
+
+- **R2.** `r2Multipart.js` uses a SigV4 query presigner written in-house (`s3Presign.js`), so no new package is added. Its signatures match `@smithy/signature-v4` exactly on test inputs.
+- **Sandbox.** `localMultipart.js` keeps signed, expiring `/storage-sandbox` routes that write parts and join them on complete. These routes are only mounted with local storage outside production.
+
+`digital/multipartUploads.js` handles the upload itself:
+
+- Files go up to 10 GB, in 64 MB parts.
+- The plan's `storage_bytes` room counts the declared size up front, including uploads still in progress.
+- Completing needs every part exactly once, and the stored size must match the declared one.
+- An upload abandoned for a day is aborted the next time the store starts one.
+- In-progress uploads live in `digital_uploads` (migration 428).
+
+Files above 100 MB download through a 5-minute signed storage link (302) instead of streaming through the API. The download is still counted against the grant first.
+
+The dashboard uploads in parts above the single-upload limit, three parts at a time, retrying each part twice, and shows progress with a Cancel button.
+
+R2 CORS must expose `ETag`; the README documents this. The sandbox also returns the ETag in its JSON body.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -321,7 +339,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
 - [x] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
 - [x] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
-- [ ] 98. Large digital files uploaded straight to storage (presigned multipart) (§18.2).
+- [x] 98. Large digital files uploaded straight to storage (presigned multipart) (§18.2).
 - [ ] 99. Remove the leftover mock upsell page and helpers (§9.8).
 - [ ] 100. Theme gallery: reset the current theme, theme tags (§8.1).
 
