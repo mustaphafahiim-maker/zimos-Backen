@@ -58,6 +58,8 @@ const schemas = {
       shippingAddress: address.optional(),
       paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).optional(),
       notes: Joi.string().max(2000).allow('').optional(),
+      // The shopper's coupon is kept unless this replaces it (null drops it).
+      discountCode: Joi.string().trim().max(100).allow(null).optional(),
       items: Joi.array()
         .items(Joi.object({ variantId: uuid.required(), offerId: uuid.optional(), quantity: Joi.number().integer().min(1).max(100).required() }))
         .min(1)

@@ -316,9 +316,8 @@ async function update(workspaceId, sessionId, { recoveryStatus, reviewStatus }, 
 async function convert(workspaceId, sessionId, body, req) {
   const session = await db.CheckoutSession.findOne({ where: { id: sessionId, workspaceId } });
   if (!session) throw new NotFoundError('CheckoutSession');
-  if (session.status === 'converted') {
-    throw new AppError('CHECKOUT_SESSION_CONVERTED', 'This checkout already became an order', 409);
-  }
+  const converted = () => new AppError('CHECKOUT_SESSION_CONVERTED', 'This checkout already became an order', 409);
+  if (session.status === 'converted') throw converted();
   const payload = session.checkoutPayload || {};
   const stored = session.contactFields || {};
 
@@ -337,25 +336,57 @@ async function convert(workspaceId, sessionId, body, req) {
     (session.items || []).map((line) => ({ variantId: line.variantId, quantity: line.quantity }));
   if (!items || items.length === 0) throw new ValidationError([{ field: 'items', message: 'This checkout has no items' }]);
 
+  // One order per checkout, whatever two clicks or two teammates do: the
+  // session is claimed (status flipped) before the order is created, by a
+  // single conditional update, and given back if the order cannot be made.
+  const previous = session.status;
+  const [claimed] = await db.CheckoutSession.update(
+    { status: 'converted' },
+    { where: { id: sessionId, workspaceId, status: { [db.Sequelize.Op.ne]: 'converted' } } }
+  );
+  if (!claimed) throw converted();
+
   // eslint-disable-next-line global-require
   const orderService = require('../orders/orderService');
-  const { order } = await orderService.createOrder(
-    workspaceId,
-    {
-      items: items.map((i) => ({ variantId: i.variantId, ...(i.offerId ? { offerId: i.offerId } : {}), quantity: i.quantity })),
-      contact: {
-        fullName: contact.fullName,
-        phone: contact.phone,
-        ...(contact.alternatePhone ? { alternatePhone: contact.alternatePhone } : {}),
-        ...(contact.email ? { email: contact.email } : {}),
+  // The coupon the shopper entered (`discountCode: null` in the body drops it), and the funnel it came from.
+  const discountCode = body.discountCode !== undefined ? body.discountCode : payload.discountCode || null;
+  let order;
+  try {
+    ({ order } = await orderService.createOrder(
+      workspaceId,
+      {
+        // The lines keep their custom-field answers when they were not edited here.
+        items: items.map((i) => ({
+          variantId: i.variantId,
+          ...(i.offerId ? { offerId: i.offerId } : {}),
+          quantity: i.quantity,
+          ...(i.customizations ? { customizations: i.customizations } : {}),
+        })),
+        contact: {
+          fullName: contact.fullName,
+          phone: contact.phone,
+          ...(contact.alternatePhone ? { alternatePhone: contact.alternatePhone } : {}),
+          ...(contact.email ? { email: contact.email } : {}),
+        },
+        shippingAddress,
+        paymentMethod: body.paymentMethod || 'cod',
+        ...(body.notes || payload.notes ? { notes: body.notes || payload.notes } : {}),
+        ...(discountCode ? { discountCode } : {}),
+        ...(payload.funnelId ? { funnelId: payload.funnelId } : {}),
       },
-      shippingAddress,
-      paymentMethod: body.paymentMethod || 'cod',
-      ...(body.notes || payload.notes ? { notes: body.notes || payload.notes } : {}),
-    },
-    req,
-    { source: 'manual' }
-  );
+      req,
+      // The shopper's photos belong to their visitor id (customerUploads).
+      { source: 'manual', customFields: { visitorId: session.visitorId || null } }
+    ));
+  } catch (err) {
+    await db.CheckoutSession.update({ status: previous }, { where: { id: sessionId, workspaceId, status: 'converted', convertedOrderId: null } });
+    throw err;
+  }
+  // The checkout form's extra answers, as the checkout saves them.
+  if (payload.formFields) {
+    const workspace = await db.Workspace.findByPk(workspaceId);
+    await require('../checkout/checkoutForm').saveCheckoutAnswers(order, workspace, payload.formFields);
+  }
 
   await db.sequelize.transaction(async (transaction) => {
     await db.CheckoutSession.update(
@@ -509,9 +540,16 @@ async function fileRefusal(req, refusal) {
         where: { workspaceId: workspace.id, guestToken: cartToken, status: 'active' },
         include: [{ model: db.CartItem, as: 'items' }],
       });
-      if (cart && cart.items) items = cart.items.map((i) => ({ variantId: i.variantId, offerId: i.offerId || undefined, quantity: i.quantity }));
+      if (cart && cart.items) {
+        items = cart.items.map((i) => ({ variantId: i.variantId, offerId: i.offerId || undefined, quantity: i.quantity, customizations: i.customizations || undefined }));
+      }
     }
-    if (items.length === 0 && body.item) items = [{ variantId: body.item.variantId, offerId: body.item.offerId, quantity: body.item.quantity || 1 }];
+    // A "Buy now" and the lines added beside it; each keeps the shopper's custom-field answers for "Convert to order".
+    if (items.length === 0 && body.item) {
+      items = [body.item, ...(Array.isArray(body.extraItems) ? body.extraItems : [])]
+        .filter((line) => line && line.variantId)
+        .map((line) => ({ variantId: line.variantId, offerId: line.offerId, quantity: line.quantity || 1, customizations: line.customizations || undefined }));
+    }
 
     // eslint-disable-next-line global-require
     const { priceLine } = require('../orders/orderService');
@@ -553,6 +591,8 @@ async function fileRefusal(req, refusal) {
         notes: body.notes || null,
         discountCode: body.discountCode || null,
         funnelId: body.funnelId || null,
+        // The checkout form's extra answers (checkout/checkoutForm.js), saved on the converted order.
+        formFields: body.formFields || null,
       },
       ipAddress: visitor.ip,
       ipCountry: visitor.ipCountry,
