@@ -79,6 +79,7 @@ the numbers **400–449** (no lane owns them).
 - Funnel analytics: EPC = revenue ÷ sessions (base currency, minor units) beside the other totals; a "Page performance" table (analytics/funnelStepMetrics.js) per step: visits (sessions that reached it), page views (store analytics events, which now carry the step in metadata.stepKey — the funnel runtime puts the step in the tracking context), moved on and CTR = moved on ÷ visits, and CR = what the page is for ÷ visits: an order on a checkout or sales step (sessions that reached it and ordered), an accepted offer on an upsell/downsell (offer acceptances by step), a sign-up on an opt-in step (moving on from it submits the form), which is also its Opt-ins. Other steps show no CR.
 - Product video: the media library accepts MP4 (an ISO ftyp box, QuickTime brands refused) and WebM (EBML) up to 30 MB, told apart by their bytes like images, counted against the plan's storage, and stored as uploaded (no transcoding on the server). A video lives in `product.media` with its video/* type: the pictures section shows and saves pictures only and carries the video back untouched, a "Video" card uploads/removes it (saved at once), and the product page plays it under the gallery (controls, inline, preload metadata, no autoplay). Picture helpers already skip non-image media, so no thumbnail ever points at a video.
 - Theme catalog (migration 417, themes/themesCatalog.js): `themes` describes the themes the storefront draws (names, description, kind, category, tags, preview pictures, order, on/off, optional price set from the console — NULL = free, nothing in code) and `workspace_themes` records the themes a store used or owns (free | purchase). Seeded with the eight code themes, all free, so no store changes. The dashboard gallery reads it (order, names, All/Free/Paid and category filters, price on a paid card) and switches through it; a paid theme the store doesn't own can't be switched on — not by the gallery nor by a themeSettings PATCH (402 THEME_PURCHASE_UNAVAILABLE) — until the wallet exists; a withdrawn theme is 422. The original look stays free and on. (47a)
+- Platform console → Themes (templates.view to see, templates.manage to edit): every catalog row with how many stores use it; edit names, descriptions, category, kind, tags, preview links, order, offered/hidden and price (empty = free). The original look can't be hidden or priced. New theme keys aren't created here — a theme is storefront code, so its row arrives with it (as the seed did). This closes the theme catalog part of item 28 too. (47b)
 
 ## P0 — correctness, compliance, launch gates
 
@@ -179,7 +180,7 @@ the numbers **400–449** (no lane owns them).
   variant_selector, bundle_selector, review_form, checkout elements…).
 - [x] 45. Funnel analytics: EPC, per-page CTR/CR/opt-ins (events carry stepKey).
 - [x] 46. Product video (mp4) upload.
-- [ ] 47. Themes catalog (`themes`, `workspace_themes`) instead of presets. (47a done: tables, store view, gallery.)
+- [x] 47. Themes catalog (`themes`, `workspace_themes`) instead of presets.
 - [ ] 48. Product-page A/B tests (`subjectType=product_page`).
 - [ ] 49. Custom code (§8.4) exercised end to end; head code server-rendered.
 
