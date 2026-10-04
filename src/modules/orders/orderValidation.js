@@ -37,6 +37,12 @@ const search = {
   updatedSince: Joi.date().iso().optional(),
   productId: Joi.string().uuid().optional(),
   riskLevel: Joi.string().valid('low', 'moderate', 'high').optional(),
+  dataQuality: Joi.string().valid('good', 'low').optional(),
+  ipCountry: Joi.string().trim().pattern(/^[A-Za-z]{2}$/).optional(),
+  discountCode: Joi.string().trim().min(1).max(100).optional(),
+  utmSource: Joi.string().trim().min(1).max(100).optional(),
+  utmCampaign: Joi.string().trim().min(1).max(200).optional(),
+  funnelId: Joi.string().uuid().optional(),
 };
 
 const tagList = Joi.array().items(Joi.string().trim().min(1).max(40)).max(20);

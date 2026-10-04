@@ -11,6 +11,7 @@
  */
 function applyOrderFilters(conditions, bind, query = {}) {
   const { archived = 'exclude', tag, source, paymentMethod, governorate, carrier, seen, test, riskLevel, updatedSince, productId } = query;
+  applyMoreFilters(conditions, bind, query);
 
   // Lane 2: the risk level risk/riskService gave the order.
   if (riskLevel) {
@@ -57,6 +58,42 @@ function applyOrderFilters(conditions, bind, query = {}) {
                 WHERE fi.order_id = o.id AND fv.product_id = $filterProductId)`
     );
     bind.filterProductId = productId;
+  }
+}
+
+/**
+ * The rest of SPEC §4.3: data quality and IP country (risk/riskService), a
+ * discount code the order used, the visit's utm_source / utm_campaign (the
+ * last touch, else the first: marketing/orderAttribution.js) and the funnel.
+ */
+function applyMoreFilters(conditions, bind, { dataQuality, ipCountry, discountCode, utmSource, utmCampaign, funnelId }) {
+  if (dataQuality) {
+    conditions.push('o.data_quality = $filterDataQuality');
+    bind.filterDataQuality = dataQuality;
+  }
+  if (ipCountry) {
+    conditions.push('upper(o.ip_country) = upper($filterIpCountry)');
+    bind.filterIpCountry = ipCountry;
+  }
+  if (discountCode) {
+    conditions.push(
+      `EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.discounts_snapshot) = 'array' THEN o.discounts_snapshot ELSE '[]'::jsonb END) fd
+                WHERE lower(fd->>'code') = lower($filterDiscountCode))`
+    );
+    bind.filterDiscountCode = discountCode;
+  }
+  const touch = (key) => `lower(coalesce(nullif(o.attribution->'last'->>'${key}', ''), o.attribution->'first'->>'${key}'))`;
+  if (utmSource) {
+    conditions.push(`${touch('source')} = lower($filterUtmSource)`);
+    bind.filterUtmSource = utmSource;
+  }
+  if (utmCampaign) {
+    conditions.push(`${touch('campaign')} = lower($filterUtmCampaign)`);
+    bind.filterUtmCampaign = utmCampaign;
+  }
+  if (funnelId) {
+    conditions.push('o.funnel_id = $filterFunnelId');
+    bind.filterFunnelId = funnelId;
   }
 }
 

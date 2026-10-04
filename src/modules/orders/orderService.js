@@ -896,6 +896,12 @@ function applySearchAndDates(conditions, bind, { q, from, to }) {
     arms.push("zimos_normalize_search(o.contact_snapshot->>'fullName') LIKE zimos_normalize_search($qText)");
     arms.push("zimos_normalize_search(o.contact_snapshot->>'email') LIKE zimos_normalize_search($qText)");
 
+    // A courier's waybill number, exactly (any case): the store's shipments only.
+    bind.qWaybill = term;
+    arms.push(
+      'o.id IN (SELECT ws.order_id FROM shipments ws WHERE ws.workspace_id = $workspaceId AND lower(ws.waybill_number) = lower($qWaybill))'
+    );
+
     const digits = term.replace(/\D/g, '');
     if (digits.length >= 10) {
       bind.qPhone = normalizePhone(term).slice(-10);
@@ -1088,7 +1094,22 @@ async function orderPipeline(workspaceId, { q, from, to, ...filters } = {}) {
     stages[row.stage] = row.count;
     total += row.count;
   }
-  return { stages, total };
+  return { stages, total, risk: await riskCounts(workspaceId, { q, from, to, ...filters }) };
+}
+
+/** The risk tabs' counts: every other filter applies, the risk tab itself does not. */
+async function riskCounts(workspaceId, { q, from, to, riskLevel, ...filters }) {
+  const conditions = ['o.workspace_id = $workspaceId'];
+  const bind = { workspaceId };
+  applyOrderFilters(conditions, bind, filters);
+  applySearchAndDates(conditions, bind, { q, from, to });
+  const rows = await db.sequelize.query(
+    `SELECT o.risk_level AS level, COUNT(*)::int AS count FROM orders o WHERE ${conditions.join(' AND ')} GROUP BY 1`,
+    { bind, type: QueryTypes.SELECT }
+  );
+  const risk = { high: 0, moderate: 0, low: 0 };
+  for (const row of rows) if (row.level in risk) risk[row.level] = row.count;
+  return risk;
 }
 
 /**
