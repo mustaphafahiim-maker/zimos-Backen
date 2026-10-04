@@ -90,6 +90,7 @@ the numbers **400–449** (no lane owns them).
 - Phone masking reaches the lost-orders list and export and the suspicious-orders list (core/utils/phoneMask.forViewer, as orders and customers). Reaching the shopper stays possible for anyone with orders.view: the row's WhatsApp / Call ask POST checkout-sessions/:id/reveal-phone for the one number, audited as `lost_order.reveal_phone` — the same deal as opening an order page. Converting with the masked number left in the form uses the captured number. The suspicious list's masked number is plain text; the order page has the full one. (53)
 - The payment link in messages (payments/paymentLinkToken.js): `{{payment_link}}` carries a signed token (`pl_` + an HMAC of store and order) that the shopper endpoints accept beside the shopper's own token — minting a fresh random token would break the page the shopper may still have open, and only its hash is kept. It opens /pay with the same actions (status, try again, switch to COD); whether the order can still be paid is the order's own window. The ready-made "payment failed" automation waits 20 minutes, not SPEC's one hour: the default payment window (PAYMENT_ATTEMPT_TTL_MINUTES) is 30, after which the order expires, the run stops, and the lost-order recovery takes over. (54)
 - sitemap.xml leaves out hidden products (the same notHiddenSql the listings and the feed use); their link still opens. (55)
+- Variant pre-selection: the store-wide switch (purchase form, `checkout_settings.auto_select_variant`) and the product's own page setting both have to allow it — either one off and the shopper picks every option first. A product can't switch it back on against the store; the store switch is the merchant's general rule. (56)
 
 ## P0 — correctness, compliance, launch gates
 
@@ -204,7 +205,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 53. Phone masking (§3.4 #8) on the lost-orders list/export and the suspicious-orders list too.
 - [x] 54. `{{payment_link}}` carries the payment token; the payment-failed template waits an hour (§11.4).
 - [x] 55. Hidden products left out of sitemap.xml (§7.3).
-- [ ] 56. The store-wide "pre-select a variant" switch is read by the product page (§7.2, §8.8).
+- [x] 56. The store-wide "pre-select a variant" switch is read by the product page (§7.2, §8.8).
 - [ ] 57. The builder countdown counts to a fixed date, never restarting per visitor (§9.3, §21).
 - [ ] 58. Funnels take every payment method the store offers: the COD form in a funnel, online and transfer payments in the funnel checkout, payment methods per funnel honoured (§9.2, §11.4).
 - [ ] 59. The product-page buy box completes manual transfers and deposits (§11.3).
