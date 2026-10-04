@@ -141,6 +141,15 @@ Frontend only: the backend and storefront already read a step tree's `productId`
 Undo/redo lives in a new per-step hook (`funnels/useStepHistory.ts`). It uses the website editor's limits and the same typing fold, and opening another step starts a fresh history.
 
 The tree itself stays in the funnel draft, so edits are still saved by the funnel's one Save button.
+Frontend only. Duplicating a section or an element copies it with new ids, right after the original. Its look and any saved-section link come along. A copied HTML block shares its code, as decided for item 92.
+
+Double-click editing works on the plain text a renderer shows unchanged: heading and text use `text`, a button uses `label`, a link uses `text`. The editor sends the frame the ids it may edit (`inlineText`), leaving out any text bound to live data.
+
+The frame edits in place with `contenteditable=plaintext-only`. Enter commits a one-line text, Escape restores it, and leaving the element commits. The commit posts `zimos:edit-text`, and the editor turns it into one undoable tree edit.
+
+X-ray is a preview toolbar switch that injects outlines for sections, rows, columns and elements into the frame. The funnel step editor's preview now uses the same canvas, so it gets these tools along with picking, inserting, dragging and resizing.
+
+Scratch env: the dashboard dev server now gets `VITE_STOREFRONT_URL`, so the canvas loads.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -294,7 +303,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 92. A positioned custom HTML block in the builder, stored outside the tree (§8.2, §8.4).
 - [x] 93. Builder elements: masonry grid, sticky container, file and star inputs in forms, add-to-cart / buy-now buttons, a price that follows the picked variant (§9.3).
 - [x] 94. The funnel page editor gets the website editor's tools: undo/redo, layers, page product, named styles, saved sections (§9.3).
-- [ ] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
+- [x] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
 - [ ] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
 - [ ] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
 - [ ] 98. Large digital files uploaded straight to storage (presigned multipart) (§18.2).
