@@ -132,7 +132,10 @@ function orderCheck({ input }) {
   };
 }
 
-const HANDLERS = { product, page, translate, policies, order_check: orderCheck };
+// whatsapp/bot: the customer service bot's reply (sandboxSupport.js).
+const { supportReply } = require('./sandboxSupport');
+
+const HANDLERS = { product, page, translate, policies, order_check: orderCheck, support_reply: supportReply };
 
 module.exports = {
   name: 'sandbox',

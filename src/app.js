@@ -243,6 +243,8 @@ v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
 // The store as an app for shoppers: its home-screen name, icon and colour (website.publish).
 v1.use('/workspaces/:workspaceId/store-app', require('./modules/storefront/storeApp').router);
 v1.use('/workspaces/:workspaceId/tracking-pixels', appGate.requireAppForChanges('tracking_pixels'), trackingPixelRoutes);
+// The customer service bot on WhatsApp: settings, "Try it", take over (whatsapp/bot).
+v1.use('/workspaces/:workspaceId/wa-bot', appGate.requireAppForChanges('whatsapp', { except: ['/preview'] }), require('./modules/whatsapp/bot/botService').router);
 v1.use('/workspaces/:workspaceId/inbox', appGate.requireAppForChanges('whatsapp', { except: ['/stream-ticket'] }), inboxRoutes);
 v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
 // The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.

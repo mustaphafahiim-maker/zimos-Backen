@@ -15,10 +15,11 @@ const { AppError } = require('../../core/errors/AppError');
  * or a plan whose features are the older array form — means **unlimited**,
  * so nothing is restricted until someone decides a number.
  *
- * Keys in use: members, stores, domains, leads, storage_bytes, funnels_per_month.
+ * Keys in use: members, stores, domains, leads, storage_bytes, funnels_per_month,
+ * bot_replies (the WhatsApp bot's replies this month).
  */
 
-const LIMIT_KEYS = ['members', 'stores', 'domains', 'leads', 'storage_bytes', 'funnels_per_month'];
+const LIMIT_KEYS = ['members', 'stores', 'domains', 'leads', 'storage_bytes', 'funnels_per_month', 'bot_replies'];
 
 async function planOf(workspaceId) {
   const subscription = await db.Subscription.findOne({
@@ -51,6 +52,12 @@ const USAGE = {
     const now = new Date();
     const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     return db.Customer.count({ where: { workspaceId, source: ['form', 'newsletter'], createdAt: { [db.Sequelize.Op.gte]: from } } });
+  },
+  // The WhatsApp bot's replies this calendar month (UTC).
+  bot_replies: (workspaceId) => {
+    const now = new Date();
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return db.WhatsappMessage.count({ where: { workspaceId, sentByBot: true, status: { [db.Sequelize.Op.ne]: 'failed' }, createdAt: { [db.Sequelize.Op.gte]: from } } });
   },
   // Files the store keeps: the media library and digital products.
   storage_bytes: async (workspaceId) => {

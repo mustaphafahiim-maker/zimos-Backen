@@ -62,3 +62,17 @@ merchant on the failed job, so it must not contain secrets.
   per hour.
 - **No fake content.** The prompts forbid invented reviews, counters, stock
   and urgency (SPEC §21); a provider must not add them.
+
+## `support_reply` — the WhatsApp customer service bot
+
+Called synchronously by `whatsapp/bot/botBrain.js` for each customer message
+the bot answers (no job row). Unlike the merchant features, the request does
+carry conversation text: the customer's new message (`input.message`), the
+last few messages in `prompt`, and in `context` the store's facts, its active
+products with price and stock, and **this customer's own** latest orders
+(number, status, total — never an address or another customer's data).
+`input.dialect` is the merchant's chosen tone.
+
+Answer `{ action: 'reply' | 'handoff', text }`. `handoff` hands the
+conversation to the team (the bot stays quiet there until someone lets it
+answer again). The sandbox answers with fixed rules (`providers/sandboxSupport.js`).

@@ -131,7 +131,8 @@ async function sendMessage(workspaceId, { to, text, template, orderId = null }, 
       ? await cloud.sendTemplate(phoneNumberId, accessToken, phoneNormalized, template)
       : await cloud.sendText(phoneNumberId, accessToken, phoneNormalized, text);
     const message = await db.WhatsappMessage.create({ ...record, waMessageId: sent.waMessageId, status: 'sent' });
-    await conversation.update({ lastMessageAt: new Date(), lastMessagePreview: (record.body || '').slice(0, 300) });
+    // A teammate typing in the conversation takes it over from the bot.
+    await conversation.update({ lastMessageAt: new Date(), lastMessagePreview: (record.body || '').slice(0, 300), ...(record.sentByUserId && !template ? { botPausedAt: new Date() } : {}) });
     inboxEvents.publish(workspaceId, { conversationId: conversation.id, reason: 'message_out' });
     return message;
   } catch (err) {
@@ -178,7 +179,7 @@ async function listMessages(workspaceId, conversationId, { limit = 100, before }
   const rows = await db.WhatsappMessage.findAll({ where, order: [['createdAt', 'DESC']], limit });
   if (conversation.unreadCount) await conversation.update({ unreadCount: 0 });
   return {
-    messages: rows.reverse().map((m) => ({ id: m.id, direction: m.direction, type: m.type, body: m.body, templateName: m.templateName, status: m.status, error: m.error, createdAt: m.createdAt })),
+    messages: rows.reverse().map((m) => ({ id: m.id, direction: m.direction, type: m.type, body: m.body, templateName: m.templateName, status: m.status, error: m.error, sentByBot: m.sentByBot, createdAt: m.createdAt })),
     nextCursor: rows.length === limit ? rows[0].createdAt.toISOString() : null,
   };
 }
@@ -229,7 +230,7 @@ async function handleWebhook(workspaceId, payload) {
         const conversation = await upsertConversation(workspaceId, phoneNormalized, { customerName: names[msg.from] });
         const body = msg.type === 'text' ? msg.text && msg.text.body : msg.type === 'button' ? msg.button && msg.button.text : msg.type === 'interactive' ? JSON.stringify(msg.interactive) : `[${msg.type}]`;
         const at = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date();
-        await db.WhatsappMessage.create({ workspaceId, conversationId: conversation.id, direction: 'in', waMessageId: msg.id || null, type: ['text', 'button', 'interactive'].includes(msg.type) ? 'text' : msg.type || 'other', body, status: 'received' });
+        const inbound = await db.WhatsappMessage.create({ workspaceId, conversationId: conversation.id, direction: 'in', waMessageId: msg.id || null, type: ['text', 'button', 'interactive'].includes(msg.type) ? 'text' : msg.type || 'other', body, status: 'received' });
         await conversation.update({
           lastMessageAt: at,
           lastInboundAt: at,
@@ -241,6 +242,8 @@ async function handleWebhook(workspaceId, payload) {
         await require('./quickReplyConfirmation').enqueue(workspaceId, msg, phoneNormalized);
         // STOP withdraws marketing consent (optOut.js).
         await require('./optOut').handleInbound(workspaceId, msg, phoneNormalized);
+        // A typed message gets the customer service bot's answer when the store has it on (bot/botService.js).
+        if (msg.type === 'text') await require('./bot/botService').enqueue(workspaceId, conversation.id, inbound.id);
         inboxEvents.publish(workspaceId, { conversationId: conversation.id, reason: 'message_in' });
         result.messages += 1;
       }
