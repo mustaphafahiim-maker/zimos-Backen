@@ -399,6 +399,14 @@ The order tracking page checks the phone the way the store's checkout does, by t
 - elsewhere, a full number of 8–15 digits, with the matching error message
 
 The Egyptian placeholder shows only in Egypt. The number goes to the API as digits only (a "+" used to be refused there), and the server normalizes it as it did at checkout. Applying the store's country on the server is the next item (121).
+The server now reads the store's country (`core/utils/storeCountry.js`): `settings.general.country`, else the region of the store's language, else Egypt.
+
+- **Phone numbers:** a local number ("05…", "01…") is read in the store's country. The storefront's `resolvePublicWorkspace` and the dashboard's `resolveTenant` put the country on the request context, and `normalizePhone` takes its calling code from it, so every caller (checkout, customers, lost orders, tracking, OTP, blocklists) follows without being edited.
+- **Outside a store's request** (queue jobs): numbers are already stored with their country code, and the Egyptian default stays.
+- **Normalizer guard:** an 11-digit number that already starts with a known country code (Kuwait, Qatar, Bahrain, Oman: "965…") is no longer read as a bare Egyptian number.
+- **Risk score, phone rule and allowed countries:** `fraudRules.storeCountry` now reads the same setting. It used the language only, so an Arabic store set to Saudi Arabia was treated as Egyptian. The order's risk score now loads the setting too.
+- The country codes moved from `fraudRules` into the new module.
+- Existing customers in a non-Egyptian store whose local numbers were stored with +20 are not migrated: pre-launch, there are no live stores.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -583,7 +591,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 118. "Convert to order" keeps the coupon, the funnel and the custom answers, and cannot create two orders (§6.3).
 - [x] 119. Recovery automations mark the lost order contacted; the ready-made recovery timing as the spec says (§6.4).
 - [x] 120. The tracking page accepts the store's own country's phones (§14.7).
-- [ ] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
+- [x] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
 - [ ] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
 - [ ] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
 - [ ] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
