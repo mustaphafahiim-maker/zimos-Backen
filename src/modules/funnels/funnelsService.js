@@ -585,6 +585,8 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
         }
       }
     }
+    // Everything it sells is priced in the funnel's currency (funnelCurrency.js).
+    problems.push(...(await require('./funnelCurrency').publishProblems(workspaceId, funnel, steps, t)));
     if (problems.length) {
       throw new ValidationError(problems, 'Funnel cannot be published yet — fix the issues below');
     }

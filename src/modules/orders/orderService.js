@@ -397,6 +397,9 @@ async function createOrder(
       }
     }
 
+    // A funnel with a currency of its own takes orders in it only (funnels/funnelCurrency.js).
+    await require('../funnels/funnelCurrency').assertOrderCurrency(workspaceId, funnelId, pricedLines[0] && pricedLines[0].currency, transaction);
+
     // Quantity bundles (modules/bundles): lowers the totals of the lines they
     // cover, before anything else looks at the subtotal.
     const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
