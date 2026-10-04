@@ -342,6 +342,16 @@ A paid order's subscription and course enrolment now start from the `order.paid`
 - the store and funnel headers, which showed the ZIMOS logo in place of a store logo when the store had none (they show just the store's name)
 
 One helper (`brandingRemoved`) reads the store's `removeBranding`. The store-unavailable page keeps its mark: it gets no plan information, and the store isn't open anyway.
+The storefront no longer makes up promises for a store. "Fast delivery", "Easy returns", "within 2–5 working days", "we'll arrange an exchange" and "we call before we ship" are gone. Every such promise is now the store's own shipping, returns and cash-on-delivery cards (Settings → store info, `lib/storePromises.ts`):
+
+- **Trust strip** (home, cart): the cards; no row when there are none.
+- **Product page:**
+  - The "Shipping & returns" tab shows the shipping and returns cards, and is left out when the store has none.
+  - The FAQ is the product's own questions. Failing those, it is the store-wide questions answered from the cards (how to pay → COD card, when it arrives → shipping card, returns → returns card), and a question with no card is left out.
+  - The aside shows the cards, with no generic row in their place.
+- **Footer help column:** the cards' titles, hidden when there are none.
+
+A card with no title is named by its kind ("Shipping", "Returns", "Cash on delivery").
 
 ## P0 — correctness, compliance, launch gates
 
@@ -519,7 +529,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
 - [x] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
 - [x] 113. "Powered by ZIMOS" honours remove_branding on funnels and the rich footer (§8.11).
-- [ ] 114. No invented shipping, returns or COD promises: the product tab, FAQ fallback, trust strip and footer help read the store's own information (§8.5).
+- [x] 114. No invented shipping, returns or COD promises: the product tab, FAQ fallback, trust strip and footer help read the store's own information (§8.5).
 - [ ] 115. The rich footer shows the policy links, footer pages and social links (§8.3).
 - [ ] 116. Automation conditions work on checkout, lost-order, lead and subscription triggers (§14.2).
 - [ ] 117. Trial subscriptions shown and counted in the subscriptions screen (§18.1).
