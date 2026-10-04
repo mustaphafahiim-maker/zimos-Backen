@@ -44,6 +44,12 @@ function drawInvoice(doc, { order, invoice, workspace }) {
 
   // ---- header
   let y = drawText(doc, (workspace && workspace.name) || 'Store', { x: left, y: 40, width: width / 2, size: 18, bold: true, align: 'left' });
+  // The business on the invoice (account settings: workspaces/accountSettings.js).
+  const legal = workspace ? require('../workspaces/accountSettings').accountOf(workspace).legal : null;
+  if (legal) {
+    const lines = [legal.company || legal.name, legal.address, [legal.phone, legal.country].filter(Boolean).join(' · ')].filter(Boolean);
+    for (const line of lines) y = drawText(doc, line, { x: left, y, width: width / 2, size: 9, align: 'left' });
+  }
   doc.font('Helvetica-Bold').fontSize(20).fillColor('#222').text('INVOICE', left + width / 2, 40, { width: width / 2, align: 'right', lineBreak: false });
   doc.font('Helvetica').fontSize(9).fillColor('#555');
   doc.text(`No. ${invoice.invoiceNumber}`, left + width / 2, 66, { width: width / 2, align: 'right', lineBreak: false });
