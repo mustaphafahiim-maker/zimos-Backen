@@ -562,6 +562,8 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
       const stamped = require('../pages/countdownDeadline').stampCountdowns(row.builderData);
       if (stamped.changed) await row.update({ builderData: stamped.tree }, { transaction: t });
     }
+    // …and on the pages of the split tests running on it (splitTestCountdowns.js).
+    await require('./splitTestCountdowns').stampRunning(workspaceId, funnelId, t);
     const steps = toSnapshotSteps(stepRows);
     const edges = toSnapshotEdges(edgeRows);
 

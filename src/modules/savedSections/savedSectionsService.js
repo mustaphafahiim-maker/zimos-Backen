@@ -127,7 +127,7 @@ async function remove(workspaceId, id, req) {
  * the saved section. A link to a section that was deleted leaves the page's
  * own copy as it is.
  */
-async function resolveLinkedSections(workspaceId, tree, { transaction } = {}) {
+async function resolveLinkedSections(workspaceId, tree, { transaction, stampCountdowns = false } = {}) {
   const sections = tree && Array.isArray(tree.sections) ? tree.sections : null;
   if (!sections) return tree;
   const ids = [
@@ -139,6 +139,14 @@ async function resolveLinkedSections(workspaceId, tree, { transaction } = {}) {
   ];
   if (ids.length === 0) return tree;
   const rows = await db.SavedSection.findAll({ where: { workspaceId, id: ids }, transaction });
+  if (stampCountdowns) {
+    // Going live: a countdown's "N hours" becomes a date in the saved section itself, so
+    // every page linking it, and every later publish, shows the same deadline (pages/countdownDeadline.js).
+    for (const row of rows) {
+      const stamped = require('../pages/countdownDeadline').stampCountdowns({ sections: [row.tree] });
+      if (stamped.changed) await row.update({ tree: stamped.tree.sections[0] }, { transaction });
+    }
+  }
   const saved = new Map(rows.map((r) => [r.id, r.tree]));
   return {
     ...tree,
