@@ -318,6 +318,16 @@ The opt-in step collects the visitor's details before the funnel moves on (`funn
 - The page's own "next" buttons bring the visitor to the form instead of skipping it.
 - The step's Opt-ins count (and its conversion rate) is stored sign-ups, not every move past the step.
 - The ad platforms' Lead fires only after a stored sign-up.
+Linked saved sections now work inside funnels as they do on the website.
+
+**Funnel publish**
+- A funnel publish fills each step's linked sections from the saved section's current content (with countdown dates fixed), so editing a saved section and publishing the funnel updates every linked copy.
+- The pages of running split tests get the same treatment. A variant page is both what the editor holds and what visitors see, and it keeps its links.
+
+**Funnel-only saved sections** (the backend already had `scope: 'funnel'`; nothing used it)
+- The funnel editor's library lists the store's sections plus that funnel's own, marked "This funnel".
+- Saving a section there can be "Only in this funnel".
+- A funnel-only section fills links inside its own funnel only. A website page or another funnel linking it keeps its own copy, and a website publish now resolves global sections only.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -492,7 +502,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
 - [x] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
 - [x] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
-- [ ] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
+- [x] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
 - [ ] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
 - [ ] 113. "Powered by ZIMOS" honours remove_branding on funnels and the rich footer (§8.11).
 - [ ] 114. No invented shipping, returns or COD promises: the product tab, FAQ fallback, trust strip and footer help read the store's own information (§8.5).
