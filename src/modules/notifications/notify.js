@@ -6,6 +6,7 @@ const db = require('../../db/models');
 const emailTemplates = require('./emailTemplates');
 const brevoEmailProvider = require('./brevoEmailProvider');
 const twilioSmsProvider = require('./twilioSmsProvider');
+const platformWhatsapp = require('./platformWhatsapp');
 
 // Minimal SMS bodies. OTP flows pass { code } (and, for the sign-up code,
 // { minutes, locale }); anything else falls back to a terse template-name +
@@ -78,8 +79,14 @@ async function sendChannel(channel, provider, { recipient, template, data, works
   let attempts = 1;
   try {
     if (provider === 'console') {
-      // WhatsApp is logged exactly as before.
-      logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: channel === 'whatsapp' ? data : loggable(data) });
+      // Nothing leaves the server. Fine while developing; in production it is
+      // "not configured", so callers fall back (WhatsApp → SMS → email) instead
+      // of believing a code was delivered.
+      if (env.isProduction) throw new Error(`No ${channel} provider is configured (${channel.toUpperCase()}_PROVIDER=console)`);
+      logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: loggable(data) });
+    } else if (channel === 'whatsapp' && provider === 'cloud') {
+      // ZIMOS's own number (PLATFORM_WHATSAPP.md).
+      await platformWhatsapp.send({ to: recipient, template, data });
     } else if (channel === 'sms' && provider === 'twilio') {
       const sent = await twilioSmsProvider.sendSms({ to: recipient, body: smsBody(template, data) });
       attempts = sent.attempts || attempts;

@@ -52,9 +52,15 @@ async function sendText(phoneNumberId, token, to, text) {
   return { waMessageId: data && data.messages && data.messages[0] ? data.messages[0].id : null };
 }
 
-/** An approved template (required to start a conversation). `params` fill {{1}}, {{2}}… in the body. */
-async function sendTemplate(phoneNumberId, token, to, { name, language, params = [] }) {
+/**
+ * An approved template (required to start a conversation). `params` fill {{1}}, {{2}}… in the body;
+ * `urlButtonParam` fills the first button's URL (an authentication template's copy-code button).
+ */
+async function sendTemplate(phoneNumberId, token, to, { name, language, params = [], urlButtonParam }) {
   const components = params.length ? [{ type: 'body', parameters: params.map((p) => ({ type: 'text', text: String(p) })) }] : [];
+  if (urlButtonParam !== undefined) {
+    components.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: String(urlButtonParam) }] });
+  }
   const data = await call(`/${encodeURIComponent(phoneNumberId)}/messages`, token, {
     method: 'POST',
     body: { messaging_product: 'whatsapp', to, type: 'template', template: { name, language: { code: language }, ...(components.length ? { components } : {}) } },
