@@ -352,6 +352,9 @@ The storefront no longer makes up promises for a store. "Fast delivery", "Easy r
 - **Footer help column:** the cards' titles, hidden when there are none.
 
 A card with no title is named by its kind ("Shipping", "Returns", "Cash on delivery").
+The rich footer now adds the same columns as the plain footer: the pages flagged "show in footer" and the store's written policies. The plain footer's code moved into `lib/footerLinks.ts` and both footers use it, so choosing a footer layout no longer drops a store's policy links (which ad platforms require).
+
+The social accounts already came from the store's Social links (item 101). They now also show in the bottom row when the merchant turns the brand block off, where they used to vanish with it.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -530,7 +533,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
 - [x] 113. "Powered by ZIMOS" honours remove_branding on funnels and the rich footer (§8.11).
 - [x] 114. No invented shipping, returns or COD promises: the product tab, FAQ fallback, trust strip and footer help read the store's own information (§8.5).
-- [ ] 115. The rich footer shows the policy links, footer pages and social links (§8.3).
+- [x] 115. The rich footer shows the policy links, footer pages and social links (§8.3).
 - [ ] 116. Automation conditions work on checkout, lost-order, lead and subscription triggers (§14.2).
 - [ ] 117. Trial subscriptions shown and counted in the subscriptions screen (§18.1).
 - [ ] 118. "Convert to order" keeps the coupon, the funnel and the custom answers, and cannot create two orders (§6.3).
