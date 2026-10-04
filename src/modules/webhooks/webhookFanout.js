@@ -66,7 +66,8 @@ async function build(topic, event) {
       include: [{ model: db.ProductVariant, as: 'variants', required: false }],
       paranoid: false,
     });
-    const data = product ? { product: product.toJSON() } : { product: { id: payload.productId } };
+    const { productId: _p, workspaceId: _w, ...extra } = payload;
+    const data = { product: product ? product.toJSON() : { id: payload.productId }, ...extra };
     return { subject: { productIds: [payload.productId] }, data };
   }
 
@@ -80,6 +81,12 @@ async function build(topic, event) {
     const customer = await db.Customer.findOne({ where: { id: payload.customerId, workspaceId } });
     if (!customer) return null;
     return { subject: {}, data: { customer: customer.toJSON() } };
+  }
+
+  if (aggregate === 'review' && payload.reviewId) {
+    const review = await db.Review.findOne({ where: { id: payload.reviewId, workspaceId } });
+    if (!review) return null;
+    return { subject: { productIds: review.productId ? [review.productId] : [] }, data: { review: review.toJSON() } };
   }
 
   // checkout.*, lead.created, contact_form.submitted: what the event recorded.

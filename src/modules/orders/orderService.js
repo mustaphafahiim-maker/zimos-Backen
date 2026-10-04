@@ -795,6 +795,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   }
 
   order.items = items;
+  // A product joined an order that was already placed (an upsell, a merged offer).
+  await outbox.record(transaction, 'order.item_added', { workspaceId, orderId: order.id, itemId: item.id, isUpsell });
   return { order, item, before };
 }
 

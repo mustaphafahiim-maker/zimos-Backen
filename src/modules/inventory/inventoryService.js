@@ -2,6 +2,8 @@
 
 const db = require('../../db/models');
 const { InsufficientStockError, NotFoundError } = require('../../core/errors/AppError');
+// Records product.low_stock when a change takes a variant to its threshold.
+require('./lowStockEvent');
 
 /**
  * Every stock mutation goes through one of the functions below: open/join a
