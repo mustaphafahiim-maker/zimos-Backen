@@ -108,6 +108,7 @@ the numbers **400–449** (no lane owns them).
 - 71: the primary domain counts only once verified and with its certificate issued (an https link to a domain without one would not open) — domains/primaryHost.js, cached a minute, cleared on domain changes. The redirect is 307, not 301/308: a browser keeps a permanent redirect for good and merchants change or drop domains; the canonical links carry the SEO signal. Skipped for staff previews, /pay and non-GET. resolve-host now also answers platform subdomains (primary host only), which the proxy asks once a minute per host.
 - 72: no backend change — `general.country` already comes with GET /store/:ws. The forms' initial values carry the store country (lib/storeCountry), so every "EG" fallback became a fallback for an unset setting only; a hidden country field now sends the store's country rather than Egypt. Shipping quotes take the form's country (cart and bundle quotes the store's).
 - 73: one image URL per variant (product_variants.image_url, migration 421), not a gallery per variant — the product keeps its gallery and the chosen variant's picture is put first. The product page's gallery and form are separate parts of the page, so the form publishes the chosen variant's picture through a tiny store (lib/variantImage, useSyncExternalStore). Option "image" swatches (§7.2 displayType) are left as they are.
+- 74: three commits. Variant choice: only for a one-line offer (a bundle keeps its lines), any active variant of the offer's product at the offer price; priceLine now consumes the chosen variant's stock for a one-line offer (before, a line in another variant held the offer's variant). Countdown: offers.countdown_minutes (migration 422), from the session reaching the step (its updatedAt, untouched while it sits there) or the order's creation, 30 s grace, enforced by the server. Card orders: the thank-you offer becomes a linked order — one-click on a consented saved card, else COD — like the funnel's after an online payment.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -240,7 +241,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 71. The primary domain is the store's canonical address: canonical, sitemap and feed links, redirect (§8.11).
 - [x] 72. The store country setting drives the order form's country (§8.8).
 - [x] 73. A variant's own image (§7.2).
-- [ ] 74. Upsell/downsell: the shopper picks the variant, the offer's countdown, card orders get the thank-you upsell (§9.5, §10.4).
+- [x] 74. Upsell/downsell: the shopper picks the variant, the offer's countdown, card orders get the thank-you upsell (§9.5, §10.4).
 - [ ] 75. Funnel settings: change the link, funnel-wide scripts, a shipping group per funnel (§9.7).
 - [ ] 76. The funnel issues counter checks untranslated text (§9.2).
 - [ ] 77. Offers hub numbers: impressions, acceptances, added revenue per offer (§10.11).
