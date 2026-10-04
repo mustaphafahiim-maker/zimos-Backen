@@ -210,7 +210,8 @@ async function conditionsFail(conditions, subject) {
   const workspaceId = (subject.workspace && subject.workspace.id) || (subject.order && subject.order.workspaceId);
   const segment = await require('./segmentCondition').segmentFails(c, subject, workspaceId);
   if (segment) return segment;
-  if (subject.kind !== 'order') return null; // the order conditions do not apply to a lost checkout
+  // A checkout, a lead or a subscription answers the same conditions from what it has (subjectConditions.js).
+  if (subject.kind !== 'order') return require('./subjectConditions').fails(c, subject);
   const { order } = subject;
 
   if (c.paymentMethod && order.paymentMethod !== c.paymentMethod) return `payment method is ${order.paymentMethod}`;
