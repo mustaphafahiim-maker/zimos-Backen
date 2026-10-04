@@ -17,6 +17,8 @@ router.use(authenticate);
 
 // Lane 7: queues, app catalogue, suppliers, usage, delivery network, support access.
 router.use(require('./platformExtraRoutes'));
+// Support's view of a store's own data: only while the merchant has let support in.
+router.use(require('./supportViewRoutes'));
 
 // --- Plans ---------------------------------------------------------------
 router.get('/plans', can(P.PLANS_VIEW), controller.listPlans);
