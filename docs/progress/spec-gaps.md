@@ -119,6 +119,7 @@ Saving a card with no payment is an optional gateway contract (`createCardSetup`
 Both are `standard` apps (on until uninstalled), like the other features stores already had, so no store loses its feed or Clarity script. Uninstalling Google Merchant makes only the `google` feed channel answer 404; the Meta, TikTok and Snapchat feeds stay. Uninstalling Clarity removes Clarity pixels from the storefront payload; the other pixels stay under Tracking tools. "Open" goes to /offers/feed and /marketing. No frontend change was needed: the apps page renders from the catalogue.
 The email changes only when the link sent to the new address is opened (24 hours, single use), and that counts as verifying it. The old address is told at the request and at the change. The password is asked for when the account has one; a Google-only account relies on its session. A wrong password answers 400 `INVALID_PASSWORD`, not 401, because the dashboard reads 401 as an expired session. Pending changes are their own table (`email_changes`), not a new `verification_tokens` enum value. Other sessions are not signed out.
 The links are a platform setting (`platform_settings.education_links`), not code, because the URLs are ZIMOS's own and change. The console page uses the announcements permissions. Ten dashboard topics each have one tutorial link, shown under the page title through a `tutorial` prop on PageHeader. The help center, Telegram and support chat are cards at the bottom of the home page. Anything unset is not shown, so nothing appears until the platform team fills it in.
+Templates are synced into `whatsapp_templates` (one row per name + language). This happens on demand, after connecting, and through Meta's status webhook; there is no cron. Syncing a real number needs the WhatsApp Business Account ID; the sandbox number returns a fixed list. Sends are only refused for a template the list knows that is not APPROVED; an unknown name still goes to Meta, since the list may not be synced yet. The pickers sit above the existing name field, which stays for templates not synced. Picking a template sets the language and the number of variables.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -262,7 +263,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 82. App store: Clarity and Google Merchant shown as available (§16.6).
 - [x] 83. Changing the owner's email, verified (§17.3).
 - [x] 84. Education: tutorial links by key settings, help center and Telegram cards on the home page (§15.1, §18.6).
-- [ ] 85. WhatsApp templates synced from Meta with their status, picked in automations and the inbox (§14.1).
+- [x] 85. WhatsApp templates synced from Meta with their status, picked in automations and the inbox (§14.1).
 - [ ] 86. Product and funnel pickers for automation conditions (§14.2).
 - [ ] 87. Order emails: the store's From name and Reply-To (§14.5).
 - [ ] 88. WhatsApp as a merchant notification channel (§14.6).
