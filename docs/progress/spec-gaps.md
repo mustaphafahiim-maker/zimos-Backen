@@ -77,6 +77,7 @@ the numbers **400–449** (no lane owns them).
 - Container and popup: the "container" is not a new element — every column is already a flex box, so it gains layout settings (items stacked or side by side and wrapping, the gap between them, how a side-by-side row lines up); nested element trees would have meant a second editor. `popup` is an element (builderExtras.js): any link or button to "#popup-<name>" opens it (caught before the link navigates), and "after N seconds" / "on leaving the page" open it once a visit; Escape, the × and the backdrop close it; in the editor preview it shows in place as a dashed card. (44b)
 - Checkout elements of §9.3 are not separate blocks: `shipping_address`, `payment_form` and `order_bump` are the parts of `cod_form` (the product page's own buy box: options, the purchase form from Settings → Purchase form, payment methods, the store and product bumps) and, on a funnel checkout step, of the step's checkout form; `checkout_summary` and `order_summary` already exist. Splitting them would let a page hold an address with no form to send it, or a bump with nothing to add it to. `billing_address` has no use with cash on delivery, and `express_checkout` waits for a gateway that offers it (Paymob does not). Item 44 closes with 44a/44b.
 - Funnel analytics: EPC = revenue ÷ sessions (base currency, minor units) beside the other totals; a "Page performance" table (analytics/funnelStepMetrics.js) per step: visits (sessions that reached it), page views (store analytics events, which now carry the step in metadata.stepKey — the funnel runtime puts the step in the tracking context), moved on and CTR = moved on ÷ visits, and CR = what the page is for ÷ visits: an order on a checkout or sales step (sessions that reached it and ordered), an accepted offer on an upsell/downsell (offer acceptances by step), a sign-up on an opt-in step (moving on from it submits the form), which is also its Opt-ins. Other steps show no CR.
+- Product video: the media library accepts MP4 (an ISO ftyp box, QuickTime brands refused) and WebM (EBML) up to 30 MB, told apart by their bytes like images, counted against the plan's storage, and stored as uploaded (no transcoding on the server). A video lives in `product.media` with its video/* type: the pictures section shows and saves pictures only and carries the video back untouched, a "Video" card uploads/removes it (saved at once), and the product page plays it under the gallery (controls, inline, preload metadata, no autoplay). Picture helpers already skip non-image media, so no thumbnail ever points at a video.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -176,7 +177,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 44. Missing builder elements (container, popup, image_gallery,
   variant_selector, bundle_selector, review_form, checkout elements…).
 - [x] 45. Funnel analytics: EPC, per-page CTR/CR/opt-ins (events carry stepKey).
-- [ ] 46. Product video (mp4) upload.
+- [x] 46. Product video (mp4) upload.
 - [ ] 47. Themes catalog (`themes`, `workspace_themes`) instead of presets.
 - [ ] 48. Product-page A/B tests (`subjectType=product_page`).
 - [ ] 49. Custom code (§8.4) exercised end to end; head code server-rendered.
