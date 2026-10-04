@@ -293,6 +293,15 @@ Two-step sign-in recovery (`auth/twoFactorRecovery.js`, migration 432).
 - It only spares the code and the alert. It is not the two-step "remember this device", which skips the second step and is kept server-side.
 
 **Fix along the way:** the platform console's login could not take a code at all (it read `result.user` from a challenge), so a platform user with two-step sign-in could not sign in. The console now has its own code step, with backup codes.
+Two places where a countdown could go live still counting "N hours from now" for each visitor now get a fixed date like every published page (`pages/countdownDeadline.js`).
+
+**Split-test variant pages** (`funnels/splitTestCountdowns.js`)
+- A variant goes live while its test runs on a published funnel, without a publish of its own.
+- Its countdowns get their date when the test is created or changed on a live funnel, and when the funnel is published with the test running or paused.
+- A test on a draft funnel keeps its durations until the funnel goes live.
+
+**Linked saved sections**
+- A website publish freezes linked sections with the saved section's content. That content's countdowns are now dated in the saved section itself, so every page linking it and every later publish show the same deadline.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -465,7 +474,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
 - [x] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
 - [x] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
-- [ ] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
+- [x] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
 - [ ] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
 - [ ] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
 - [ ] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
