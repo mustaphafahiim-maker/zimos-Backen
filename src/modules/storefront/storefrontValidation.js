@@ -78,6 +78,8 @@ module.exports = {
         .min(1)
         .max(50)
         .optional(),
+      // Quoted for a funnel's checkout: the funnel's shipping group applies.
+      funnelId: uuid.optional(),
     }),
   },
   workspaceParam: { params: Joi.object({ workspaceId: workspaceIdParam }) },

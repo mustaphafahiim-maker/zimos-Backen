@@ -62,10 +62,13 @@ async function calculateShippingAmount(
     totalQuantity,
     offerShippingOverride,
     weightLines,
-    productLines,
+    productLines: rawProductLines,
+    // An order in a funnel: the funnel's shipping group prices every line (funnels/funnelShipping.js).
+    funnelId = null,
     transaction,
   }
 ) {
+  const productLines = await require('../funnels/funnelShipping').productLinesFor(workspaceId, funnelId, rawProductLines, transaction);
   const workspace = await db.Workspace.findByPk(workspaceId, { transaction });
   const settings = (workspace && workspace.settings) || {};
   const pricingMode = settings.shipping_pricing_mode === 'weight_tiers' ? 'weight_tiers' : 'rates';

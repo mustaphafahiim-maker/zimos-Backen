@@ -466,6 +466,7 @@ async function createOrder(
       offerShippingOverride,
       weightLines: pricedLines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
       productLines: pricedLines.map((l) => l.shippingRule),
+      funnelId: payload.funnelId || null,
       transaction,
     });
     // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
@@ -730,6 +731,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     offerShippingOverride,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
+    funnelId: order.funnelId || null,
     transaction,
   });
   const { taxAmount } = await calculateTax(workspaceId, {

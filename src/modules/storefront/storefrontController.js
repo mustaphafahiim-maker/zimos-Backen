@@ -80,6 +80,8 @@ const shippingQuote = asyncHandler(async (req, res) => {
     country: req.body.country,
     region: req.body.governorate,
     items: await require('../catalog/productTests').pinPrices(workspaceId, items, testVisitor),
+    // A funnel's checkout: priced with the funnel's shipping group (funnels/funnelShipping.js).
+    funnelId: req.body.funnelId || null,
   });
   res.json({ quote });
 });

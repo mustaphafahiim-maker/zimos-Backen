@@ -175,6 +175,12 @@ async function updateFunnel(workspaceId, funnelId, data, req) {
   const before = funnel.toJSON();
   const patch = {};
   if (data.name !== undefined) patch.name = data.name;
+  // A new link: the old one stops answering (SPEC §9.7). Links are unique across stores.
+  if (data.subdomain !== undefined && data.subdomain !== funnel.subdomain) {
+    const taken = await db.Funnel.findOne({ where: { subdomain: data.subdomain }, attributes: ['id'] });
+    if (taken) throw new AppError('FUNNEL_SUBDOMAIN_TAKEN', 'This link is already used by another funnel', 409, [{ field: 'subdomain', message: 'This link is taken' }]);
+    patch.subdomain = data.subdomain;
+  }
   await funnel.update(patch);
   await recordAudit({
     workspaceId,

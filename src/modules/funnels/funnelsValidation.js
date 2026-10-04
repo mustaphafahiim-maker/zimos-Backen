@@ -65,7 +65,11 @@ const createFunnel = {
 
 const updateFunnel = {
   params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required() }),
-  body: Joi.object({ name: Joi.string().min(1).max(200).optional() }).min(1),
+  body: Joi.object({
+    name: Joi.string().min(1).max(200).optional(),
+    // The funnel's link (/f/<subdomain>); a taken one is refused (409 FUNNEL_SUBDOMAIN_TAKEN).
+    subdomain: Joi.string().lowercase().min(3).max(63).pattern(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/).optional(),
+  }).min(1),
 };
 
 const funnelIdParam = {
