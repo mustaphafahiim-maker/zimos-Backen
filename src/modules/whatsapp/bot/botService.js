@@ -24,6 +24,7 @@ const brain = require('./botBrain');
  *
  * settings.wa_bot: enabled, always_on, from/to ("HH:MM", the store's clock),
  * days (0 = Sunday), dialect, extra_info (what the merchant wants it to know).
+ * It can also take a COD order in the chat, step by step (botOrder.js).
  * It stays quiet in a conversation a teammate took over (bot_paused_at, set
  * when they reply from the inbox or press "Take over") until someone lets it
  * answer again. Replies a month are capped by the plan's `bot_replies`.
@@ -135,7 +136,10 @@ async function process(job) {
   }
 
   const history = (await db.WhatsappMessage.findAll({ where: { conversationId, createdAt: { [Op.lt]: incoming.createdAt } }, order: [['createdAt', 'DESC']], limit: 8 })).reverse();
-  const result = await brain.answer({ workspace, settings, conversation, message: incoming.body || '', history });
+  // Taking an order step by step (botOrder.js) comes first; anything else is a question for the brain.
+  const lang = settings.dialect === 'english' ? 'en' : 'ar';
+  const flow = await require('./botOrder').handle({ workspace, conversation, message: incoming.body || '', lang }); // eslint-disable-line global-require
+  const result = flow ? { action: flow.handoff ? 'handoff' : 'reply', text: flow.text } : await brain.answer({ workspace, settings, conversation, message: incoming.body || '', history });
   const { sendMessage } = require('../whatsappService'); // eslint-disable-line global-require
   const sent = await sendMessage(workspaceId, { to: conversation.phoneNormalized, text: result.text });
   await sent.update({ sentByBot: true });
