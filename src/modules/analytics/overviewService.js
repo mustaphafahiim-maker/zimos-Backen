@@ -91,15 +91,6 @@ async function collectWindow(workspaceId, { start, end, tz, funnelId }) {
       count(*) FILTER (WHERE payment_method = 'cod' AND confirmation_state = 'confirmed') AS confirmed,
       count(*) FILTER (WHERE stage IN ${SHIPPED_STAGES}) AS shipped,
       count(*) FILTER (WHERE stage = 'delivered') AS delivered`;
-  const EVENT_AGG = `
-      count(DISTINCT sid) AS visits,
-      count(*) FILTER (WHERE event_name = 'add_to_cart') AS add_to_cart,
-      count(*) FILTER (WHERE event_name = 'add_to_cart' AND metadata->>'source' = 'cross_sell') AS cross_sell,
-      count(*) FILTER (WHERE event_name = 'begin_checkout') AS checkouts,
-      count(*) FILTER (WHERE event_name = 'lead') AS leads,
-      count(DISTINCT sid) FILTER (WHERE event_name = 'add_to_cart') AS cart_sessions,
-      count(DISTINCT sid) FILTER (WHERE event_name = 'begin_checkout') AS checkout_sessions,
-      count(DISTINCT sid) FILTER (WHERE event_name = 'purchase') AS purchase_sessions`;
   // A funnel checkout stores its funnel in the session's attribution.
   const lostFunnel = funnelId ? "AND c.attribution->>'funnelId' = :funnelId" : '';
   const LOST = `
@@ -108,11 +99,13 @@ async function collectWindow(workspaceId, { start, end, tz, funnelId }) {
      WHERE c.workspace_id = :workspaceId AND c.created_at >= :start AND c.created_at < :end
        AND c.status = 'abandoned' ${lostFunnel}`;
 
+  // Event numbers: whole days from analytics_daily, the edges from raw events (analyticsDaily.js).
+  const events = require('./analyticsDaily').eventNumbers(workspaceId, { start, end, tz, funnelId });
   const [[orderTotals], orderDays, [eventTotals], eventDays, lostDays, [customers], [profit]] = await Promise.all([
     run(`WITH ord AS (${ORDERS}) SELECT ${ORDER_AGG} FROM ord`),
     run(`WITH ord AS (${ORDERS}) SELECT day, ${ORDER_AGG} FROM ord GROUP BY day`),
-    run(`WITH ev AS (${EVENTS}) SELECT ${EVENT_AGG} FROM ev`),
-    run(`WITH ev AS (${EVENTS}) SELECT day, ${EVENT_AGG} FROM ev GROUP BY day`),
+    events.then((e) => [e.total]),
+    events.then((e) => e.days),
     run(`WITH lost AS (${LOST}) SELECT day, count(*) AS lost FROM lost GROUP BY day`),
     // New = the customer's first ever order falls inside the window.
     run(`

@@ -34,6 +34,7 @@ the numbers **400–449** (no lane owns them).
 - Exporting the orders list (the Export button) is built in the `io` queue (`POST /exports/orders`, migration 407 `export_files`); the file goes to private storage and an `export.ready` notification (bell and email, now on by default) links to `/exports/:id`, where the teammate who asked downloads it with their session. Only that teammate sees it; it is kept 7 days, then the sweep removes it (410 after). Exporting ticked orders (at most 100) still downloads at once.
 - `integration.failed` (notifications/integrationAlerts.js) is sent for the connection itself only: a gateway that refuses the keys or does not answer (starting a payment, refunds, status checks, saved-card charges), a payment webhook whose signature does not match the stored secret, a courier refusing the stored key or a permission (every call through `withAuthHandling`), WhatsApp refusing the token or not answering. A declined card, an address or an undeliverable number are not. Once a day per integration and reason; it never waits on or fails the call. WhatsApp webhooks with a bad signature send nothing: the URL carries only the public store id, so anyone could trigger it. Still open: a subscription renewal whose gateway refuses the keys is counted against the shopper (subscriptions/subscriptionService failRenewal) — the merchant is now told, but the renewal still fails.
 - Orders are attributed by their own touch (analytics/orderTouch.js): the last unless the merchant picks first, the other one when that is missing, the whole touch at once; an order from before touches were kept uses its purchase event. Attribution, the campaigns screen and P&L by campaign all read it, so a campaign has the same orders everywhere. Visitors stay per visit (events): a visitor has no order to carry a touch.
+- `analytics_daily` (migration 408) holds the overview's event counts per store day, for the store and per funnel. The overview reads whole days from it and counts the partial days at the window's edges (always today) from raw events, so it stays exact; a row counted before its day ended (+10 min) is recounted on the spot, which also fills old ranges once. `analytics.rollup_days` (every 30 min) counts finished days after each store's midnight. Total visits are now the sum of daily visits (a session past midnight counts on both days). Orders, lost checkouts and the breakdowns (sources, devices…) still query their tables.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -87,8 +88,8 @@ the numbers **400–449** (no lane owns them).
 - [x] 16. Lead pixel event from the newsletter form.
 - [x] 17. Notifications: integration-failed for gateway / carrier / WhatsApp (17a);
   export ready (17b).
-- [ ] 18. Analytics (18b first/last touch done): `analytics_daily` rollup filled by the worker; attribution
-  from `orders.attribution` with first/last touch.
+- [x] 18. Analytics: `analytics_daily` rollup filled by the worker (18a); attribution
+  from `orders.attribution` with first/last touch (18b).
 - [ ] 19. Team screen admins/members + seat counter; phone verification screen;
   2FA code over WhatsApp; account settings (timezone, contact-form email,
   legal company/country, owner picture); plan limits on leads and storage.
