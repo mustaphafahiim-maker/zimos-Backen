@@ -345,7 +345,8 @@ async function list(workspaceId, { status, kind, limit = 100 } = {}) {
 
 async function overview(workspaceId) {
   const [counts] = await db.sequelize.query(
-    `SELECT (COUNT(*) FILTER (WHERE status = 'active'))::int AS active,
+    `SELECT (COUNT(*) FILTER (WHERE status = 'trialing'))::int AS trialing,
+            (COUNT(*) FILTER (WHERE status = 'active'))::int AS active,
             (COUNT(*) FILTER (WHERE status = 'past_due'))::int AS past_due,
             (COUNT(*) FILTER (WHERE status = 'paused'))::int AS paused,
             (COUNT(*) FILTER (WHERE status = 'cancelled'))::int AS cancelled,
@@ -367,7 +368,7 @@ async function overview(workspaceId) {
   const top = await db.sequelize.query(
     `SELECT product_name AS "productName", COUNT(*)::int AS subscriptions
        FROM customer_subscriptions
-      WHERE workspace_id = :workspaceId AND status IN ('active', 'past_due')
+      WHERE workspace_id = :workspaceId AND status IN ('trialing', 'active', 'past_due')
       GROUP BY product_name ORDER BY subscriptions DESC LIMIT 5`,
     { replacements: { workspaceId }, type: QueryTypes.SELECT }
   );
@@ -375,6 +376,8 @@ async function overview(workspaceId) {
   return {
     currency: workspace.defaultCurrency,
     total: counts.total,
+    // On a free trial: not charged yet, so not in activeAmount (trialCheckout.js).
+    trialing: counts.trialing,
     active: counts.active,
     pastDue: counts.past_due,
     paused: counts.paused,

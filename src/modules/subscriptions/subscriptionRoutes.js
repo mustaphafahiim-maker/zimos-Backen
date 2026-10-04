@@ -25,7 +25,7 @@ staff.use(authenticate, resolveTenant);
 staff.get('/', validate({
   params: Joi.object(ws),
   query: Joi.object({
-    status: Joi.string().valid('active', 'past_due', 'paused', 'cancelled', 'completed'),
+    status: Joi.string().valid('trialing', 'active', 'past_due', 'paused', 'cancelled', 'completed'),
     kind: Joi.string().valid('subscription', 'installments'),
     limit: Joi.number().integer().min(1).max(500).default(100),
   }),
