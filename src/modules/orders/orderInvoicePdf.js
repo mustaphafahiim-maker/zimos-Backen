@@ -30,7 +30,13 @@ async function invoicePdf(workspaceId, orderId) {
   const chunks = [];
   doc.on('data', (c) => chunks.push(c));
   const done = new Promise((resolve) => doc.on('end', () => resolve({ pdf: Buffer.concat(chunks), invoiceNumber: invoice.invoiceNumber })));
+  drawInvoice(doc, { order, invoice, workspace });
+  doc.end();
+  return done;
+}
 
+/** One invoice, from the top of the current page (several share a document: orderInvoicesPdf.js). */
+function drawInvoice(doc, { order, invoice, workspace }) {
   const left = doc.page.margins.left;
   const width = doc.page.width - left * 2;
   const right = left + width;
@@ -133,9 +139,7 @@ async function invoicePdf(workspaceId, orderId) {
   doc.font('Helvetica').fontSize(9).fillColor('#555');
   const method = { cod: 'Cash on delivery', card: 'Card', wallet: 'Wallet', bank_transfer: 'Bank transfer' }[order.paymentMethod] || order.paymentMethod;
   doc.text(`Payment method: ${method}`, left, y, { lineBreak: false });
-
-  doc.end();
-  return done;
+  doc.fillColor('#000');
 }
 
-module.exports = { invoicePdf };
+module.exports = { invoicePdf, drawInvoice };

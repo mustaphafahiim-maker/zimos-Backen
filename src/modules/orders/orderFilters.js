@@ -66,7 +66,12 @@ function applyOrderFilters(conditions, bind, query = {}) {
  * discount code the order used, the visit's utm_source / utm_campaign (the
  * last touch, else the first: marketing/orderAttribution.js) and the funnel.
  */
-function applyMoreFilters(conditions, bind, { dataQuality, ipCountry, discountCode, utmSource, utmCampaign, funnelId }) {
+function applyMoreFilters(conditions, bind, { dataQuality, ipCountry, discountCode, utmSource, utmCampaign, funnelId, ids }) {
+  // Named orders ("export selected"): a comma-separated list of ids.
+  if (ids) {
+    conditions.push('o.id = ANY($filterIds::uuid[])');
+    bind.filterIds = String(ids).split(',');
+  }
   if (dataQuality) {
     conditions.push('o.data_quality = $filterDataQuality');
     bind.filterDataQuality = dataQuality;

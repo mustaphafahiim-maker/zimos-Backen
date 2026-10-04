@@ -21,6 +21,7 @@ the numbers **400–449** (no lane owns them).
 - The sandbox courier now has two levels (city > district, Bosta-shaped) built from `geo_regions`, with North Coast towns under Alexandria and Matrouh, so district picking and mapping can be exercised.
 - Bulk shipping with a connected courier (`shipping/bulkShipping.js`, migration 405) is a batch on the carriers queue: preview (ready / missing an area / cannot ship) → batch → one booking at a time, each through `createCarrierShipment` exactly as from the order page, recorded as the person who started it. A booking is never repeated on its own: an item left `booking` by a crashed run becomes booked if its order now has the shipment, else failed "interrupted". Only the merchant sends failed ones again (`/retry`). The old synchronous `POST /orders/bulk` action `ship` stays for manual courier names; the dashboard sends a connected courier through the batch.
 - A missing area is fixed in the dialog on the areas map when the order's city is on the platform's list (every order from there follows), else for that order only (`addresses`).
+- Orders list columns and saved views stay per device (localStorage), as they were: SPEC says "saved per user"; moving them to the server is a separate change, not needed for any flow. Export selected goes through the export's `ids` filter (≤ 100 ids, a GET URL); resend to webhook uses the existing `POST /webhooks/resend-orders` (≤ 100, webhooks.manage).
 
 ## P0 — correctness, compliance, launch gates
 
@@ -58,7 +59,7 @@ the numbers **400–449** (no lane owns them).
 
 ## P1 — Phase 1/2 features still missing
 
-- [ ] 11. Orders list (11a search by waybill, the filters below, date shortcuts and risk tab counts; 11b columns IP country / data quality / shipping / address, reorderable done): search by waybill; filters dataQuality, ipCountry,
+- [x] 11. Orders list (11a search by waybill, the filters below, date shortcuts and risk tab counts; 11b columns IP country / data quality / shipping / address, reorderable; 11c bulk invoices, webhook resend, export selected): search by waybill; filters dataQuality, ipCountry,
   discount code, utm source/campaign, funnel, product control, date shortcuts;
   columns IP country / data quality / shipping / address, reorderable; risk tab
   counts; bulk print invoices, resend webhook, export selected.

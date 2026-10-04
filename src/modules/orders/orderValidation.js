@@ -43,6 +43,10 @@ const search = {
   utmSource: Joi.string().trim().min(1).max(100).optional(),
   utmCampaign: Joi.string().trim().min(1).max(200).optional(),
   funnelId: Joi.string().uuid().optional(),
+  // Up to 100 order ids, comma-separated ("export selected").
+  ids: Joi.string()
+    .pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(,[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}){0,99}$/i)
+    .optional(),
 };
 
 const tagList = Joi.array().items(Joi.string().trim().min(1).max(40)).max(20);

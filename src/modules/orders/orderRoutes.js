@@ -44,6 +44,9 @@ router.post(
   requirePermission(PERMISSIONS.ORDERS_VIEW),
   controller.waybillsPdf
 );
+// Many invoices in one PDF (orderInvoicesPdf.js).
+const invoices = require('./orderInvoicesPdf');
+router.post('/documents/invoices', validate(invoices.schema), requirePermission(PERMISSIONS.ORDERS_VIEW), invoices.handler);
 router.post(
   '/documents/manifest',
   validate(schemas.manifestPdf),
