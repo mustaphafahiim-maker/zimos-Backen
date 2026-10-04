@@ -116,8 +116,9 @@ async function buildItems(workspace) {
         title: [product.name, ...options].join(' - ').slice(0, 150),
         description,
         link: `${base}/products/${product.slug}`,
-        image_link: images[0],
-        additional_image_link: images.slice(1, 11),
+        // A variant's own picture leads (SPEC §7.2); the product's follow.
+        image_link: variant.imageUrl || images[0],
+        additional_image_link: (variant.imageUrl ? images : images.slice(1)).slice(0, 10),
         price: price(regular, variant.currency),
         sale_price: regular > current ? price(current, variant.currency) : '',
         availability: inStock ? 'in stock' : 'out of stock',

@@ -153,7 +153,7 @@ async function bulkEditProducts(workspaceId, { productIds, changes }, req) {
   });
 }
 
-const VARIANT_FIELDS = ['sku', 'barcode', 'priceAmount', 'compareAtAmount', 'costAmount', 'allowOverselling', 'status'];
+const VARIANT_FIELDS = ['sku', 'barcode', 'priceAmount', 'compareAtAmount', 'costAmount', 'allowOverselling', 'status', 'imageUrl'];
 
 /**
  * Saves the variant table of one product. Each row names a variant of this

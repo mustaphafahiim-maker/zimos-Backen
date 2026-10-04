@@ -30,6 +30,8 @@ module.exports = (sequelize, DataTypes) => {
       allowOverselling: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'allow_overselling' },
       lowStockThreshold: { type: DataTypes.INTEGER, allowNull: true, field: 'low_stock_threshold' },
       weightGrams: { type: DataTypes.INTEGER, allowNull: true, field: 'weight_grams' },
+      // The variant's own picture (migration 421); null = the product's.
+      imageUrl: { type: DataTypes.STRING(1000), allowNull: true, field: 'image_url' },
       dimensions: { type: DataTypes.JSONB, allowNull: true },
       status: {
         type: DataTypes.ENUM('active', 'archived'),

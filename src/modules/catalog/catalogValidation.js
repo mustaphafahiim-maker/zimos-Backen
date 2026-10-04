@@ -77,6 +77,8 @@ const product = {
   }),
 };
 
+const variantImage = Joi.string().trim().uri({ scheme: ['http', 'https'] }).max(1000).allow('', null);
+
 // No `variant` here: variants are edited through their own endpoints.
 const productUpdate = {
   params: Joi.object({ workspaceId: uuid.required(), productId: uuid.required() }),
@@ -130,6 +132,8 @@ const variant = {
     allowOverselling: Joi.boolean().default(false),
     weightGrams: weightGrams.optional(),
     dimensions: dimensions.optional(),
+    // The variant's own picture (http/https), shown when it is chosen.
+    imageUrl: variantImage.optional(),
     // Initial stock is set here at creation only; all later mutations go through /inventory endpoints.
     stockOnHand: Joi.number().integer().min(0).default(0),
   }),
@@ -151,6 +155,7 @@ const variantUpdate = {
     allowOverselling: Joi.boolean().optional(),
     weightGrams: weightGrams.optional(),
     dimensions: dimensions.optional(),
+    imageUrl: variantImage.optional(),
     status: Joi.string().valid('active', 'archived').optional(),
   }),
 };

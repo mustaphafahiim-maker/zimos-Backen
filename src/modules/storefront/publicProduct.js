@@ -20,6 +20,8 @@ function toPublicVariant(variant, product) {
     compareAtAmount: price.compareAtAmount,
     currency: variant.currency,
     weightGrams: variant.weightGrams,
+    // Its own picture, when the merchant gave it one (SPEC §7.2).
+    imageUrl: variant.imageUrl || null,
     // Availability is exposed as a boolean, not exact counts, so shoppers
     // (and competitors) never see precise stock levels via the public API.
     inStock: variant.allowOverselling || variant.stockOnHand - variant.reservedStock > 0,
