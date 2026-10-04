@@ -122,6 +122,7 @@ The links are a platform setting (`platform_settings.education_links`), not code
 Templates are synced into `whatsapp_templates` (one row per name + language). This happens on demand, after connecting, and through Meta's status webhook; there is no cron. Syncing a real number needs the WhatsApp Business Account ID; the sandbox number returns a fixed list. Sends are only refused for a template the list knows that is not APPROVED; an unknown name still goes to Meta, since the list may not be synced yet. The pickers sit above the existing name field, which stays for templates not synced. Picking a template sets the language and the number of variables.
 Frontend only: the backend already applied `productIds` and `funnelIds`. The pickers are searchable checkbox lists. Products are loaded up to 300 (three pages, active and draft); the product list API has no name search, so the search filters on the client. Ids of deleted products or funnels stay on the rule until cleared, and the editor shows how many there are.
 The sender name defaults to the store's name; the merchant may set another (no quotes or angle brackets, at most 70 characters). The Reply-To is empty unless set, because the owner's own email is not handed to customers by default. The sending address stays the platform's; verifying a merchant domain (SPF/DKIM) is still out of scope. Both values go into the email's data, so the console provider logs them and Brevo gets `replyTo`.
+The teammate's WhatsApp goes out from the platform's own number, not the store's: a store may have no WhatsApp at all, and the store's number talks to customers. It is sent only to a verified phone, as an approved utility template (`WHATSAPP_ALERT_TEMPLATE`, default `zimos_alert`, three parameters: title, text, dashboard link), because Meta does not deliver free text outside a 24-hour window. It is off by default for every type. It has no SMS fallback, because the notification is also in the bell.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -268,7 +269,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 85. WhatsApp templates synced from Meta with their status, picked in automations and the inbox (§14.1).
 - [x] 86. Product and funnel pickers for automation conditions (§14.2).
 - [x] 87. Order emails: the store's From name and Reply-To (§14.5).
-- [ ] 88. WhatsApp as a merchant notification channel (§14.6).
+- [x] 88. WhatsApp as a merchant notification channel (§14.6).
 - [ ] 89. Paymob valU and Kiosk (§11.2).
 - [ ] 90. Lost orders: the WhatsApp row action sends the recovery template through the connected number (§6.3).
 - [ ] 91. French in the storefront interface (§8.10).
