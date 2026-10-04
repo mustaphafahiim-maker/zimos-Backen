@@ -44,6 +44,7 @@ the numbers **400–449** (no lane owns them).
 - AI funnel: a generated page (feature `page`) applied with `target: funnel` becomes a new draft funnel in one transaction — the page as the sales step (its product-page button links removed so the funnel's edges lead on), a checkout with the COD form and a thank-you page, edges always / completed_checkout, step names in the job's dialect, a link made unique like createFunnel's, counted against the plan. Needs funnels.manage (the AI routes now also accept it). The product form's "Write with AI" fills the description field only (not saved until the product is); creating a whole product stays in the AI Studio.
 - Shipping options (settings.shipping_options): `standard` is always the store's computed price (groups, free shipping and all); up to five more either add an amount to it (express: still charged when shipping is free) or cost exactly an amount (pickup). The quote lists them once a price is known; the checkout sends `shippingOption`, an unknown or switched-off one is refused, and the order keeps the pick in `shipping_snapshot.option` (shown on the order page). No extra option = no choice, exactly as before. Wired into the cart checkout and the product page form; funnel COD forms still charge the standard price.
 - Push: `device_tokens` (migration 411) per person, registered from the dashboard (`/me/push/devices`); `push` is a third merchant-notification channel, on by default for new/suspicious orders, integration failures, exports, bulk shipping, automations and plan limits. Providers follow notifications/push/README.md; only `sandbox` exists (records each push in notification_logs, channel `push`, added to its enum); the real `webpush` adapter needs VAPID keys and the `web-push` package (not installed). The dashboard service worker already shows `{title, body, link}` and opens the link on tap.
+- Orders board (`/orders/board`): one column per working stage (cancelled and awaiting-payment orders stay in the list); each pages its own `GET /orders?stage=`; moves go through `PATCH /orders/:id/status`, so the server decides what is allowed and refuses the rest with its own message. Saved views live per teammate in `saved_views` (migration 412, scopes orders/lost_orders/customers/products); views a browser kept in localStorage are copied up once on first load.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -111,7 +112,7 @@ the numbers **400–449** (no lane owns them).
 
 ## P2
 
-- [ ] 24. Orders pipeline (kanban) page; refresh button; saved views per user.
+- [x] 24. Orders pipeline (kanban) page; refresh button (24a); saved views per user (24b).
 - [ ] 25. Lost orders product filter and bulk delete.
 - [ ] 26. Carriers screen tabs, search, country filter; manifest.
 - [ ] 27. Installed apps gate their features; support access enforced for admins.

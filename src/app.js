@@ -181,6 +181,7 @@ v1.use('/workspaces/:workspaceId', dashboardRoutes);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/exports', require('./modules/orders/exportFileRoutes'));
 v1.use('/workspaces/:workspaceId/account-settings', require('./modules/workspaces/accountSettings').router);
+v1.use('/workspaces/:workspaceId/saved-views', require('./modules/workspaces/savedViews').router);
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
 v1.use('/workspaces/:workspaceId/confirmation-tasks', confirmationRoutes);
 v1.use('/workspaces/:workspaceId', paymentRoutes);
