@@ -75,6 +75,7 @@ the numbers **400–449** (no lane owns them).
 - Funnel wizard (FunnelTemplateGallery.tsx): the starter templates can be filtered by kind (cash on delivery, with an upsell, leads, advertorial), switched between their Arabic and English versions and previewed page by page; "Your funnels" lists the store's own funnels (newest first) to start from a copy (POST /funnels/:id/duplicate, which now takes the chosen link). No "bought" tab, prices or usage counts: there is no template marketplace. Step 3 is "Name, link and currency": a currency other than the store's is saved as the funnel's own (settings.currency) for every way of creating it. (43c)
 - Builder elements, first batch (pages/builderExtras.js, page-renderer/builderExtras.tsx, editor builderExtraBlocks.ts — registered like the showcase ones, PAGE_ELEMENT_TYPES untouched): `image_gallery` (own pictures, else the product's; thumbnails below or beside), `variant_selector` (option chips with stock and price), `bundle_selector` (the product's quantity offers), `review_form` (the shopper review form alone). An empty productId means the page's product. A pick on the variant or bundle picker is kept for the visit (sessionStorage) and announced on the page: the order form beside it follows it at once and the funnel checkout starts from the picked variant. Each draws nothing when there is nothing to show (no pictures, no options, fewer than two offers). (44a)
 - Container and popup: the "container" is not a new element — every column is already a flex box, so it gains layout settings (items stacked or side by side and wrapping, the gap between them, how a side-by-side row lines up); nested element trees would have meant a second editor. `popup` is an element (builderExtras.js): any link or button to "#popup-<name>" opens it (caught before the link navigates), and "after N seconds" / "on leaving the page" open it once a visit; Escape, the × and the backdrop close it; in the editor preview it shows in place as a dashed card. (44b)
+- Checkout elements of §9.3 are not separate blocks: `shipping_address`, `payment_form` and `order_bump` are the parts of `cod_form` (the product page's own buy box: options, the purchase form from Settings → Purchase form, payment methods, the store and product bumps) and, on a funnel checkout step, of the step's checkout form; `checkout_summary` and `order_summary` already exist. Splitting them would let a page hold an address with no form to send it, or a bump with nothing to add it to. `billing_address` has no use with cash on delivery, and `express_checkout` waits for a gateway that offers it (Paymob does not). Item 44 closes with 44a/44b.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -171,8 +172,8 @@ the numbers **400–449** (no lane owns them).
 - [x] 42. Page settings in the builder: SEO and Scripts tabs.
 - [x] 43. Funnel map editor (pan/zoom, link points per button, thumbnails,
   stats); wizard with currency step and template gallery.
-- [ ] 44. Missing builder elements (container, popup, image_gallery,
-  variant_selector, bundle_selector, review_form, checkout elements…). (44a done: image_gallery, variant_selector, bundle_selector, review_form; 44b: container settings, popup.)
+- [x] 44. Missing builder elements (container, popup, image_gallery,
+  variant_selector, bundle_selector, review_form, checkout elements…).
 - [ ] 45. Funnel analytics: EPC, per-page CTR/CR/opt-ins (events carry stepKey).
 - [ ] 46. Product video (mp4) upload.
 - [ ] 47. Themes catalog (`themes`, `workspace_themes`) instead of presets.
