@@ -174,7 +174,8 @@ async function sendTest(workspaceId, key, { to, subject, body } = {}, req) {
     workspaceId,
     data: {
       ...composeData({ subject: subject || current.subject, body: body || current.body }, { ...SAMPLE_VARS, store_name: brand.storeName }, brand),
-      fromName: brand.storeName,
+      // The store's sender name and Reply-To (orderEmailSender.js).
+      ...(await require('./orderEmailSender').senderFor(workspaceId)),
     },
   });
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'order_email.test', entityType: 'OrderEmailTemplate', entityId: row ? row.id : null, req, after: { key, ok: result.status === 'sent' } });
@@ -215,7 +216,7 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
         recipient: subject.email,
         template: 'order_email',
         workspaceId,
-        data: { ...composeData(current, subject.vars, brand), fromName: brand.storeName },
+        data: { ...composeData(current, subject.vars, brand), ...(await require('./orderEmailSender').senderFor(workspaceId)) },
       });
       results.push({ key: row.key, status: sent.status });
     }

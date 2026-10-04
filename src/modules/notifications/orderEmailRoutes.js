@@ -22,6 +22,8 @@ const wid = (req) => req.tenant.workspaceId;
 // customers are emailed is a store setting: workspace.manage.
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.WORKSPACE_MANAGE));
+// The sender name and Reply-To (orderEmailSender.js), ahead of the /:key routes.
+router.use(require('./orderEmailSender').router);
 
 router.get('/', validate({ params: Joi.object(ws) }), asyncHandler(async (req, res) => res.json(await service.list(wid(req)))));
 

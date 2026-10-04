@@ -13,9 +13,11 @@ const RETRY_DELAYS = env.isTest ? [0, 0, 0] : [0, 1000, 3000];
 // Per attempt. Without it a hung Brevo connection hangs the send indefinitely.
 const SEND_TIMEOUT_MS = 10_000;
 
-function buildPayload({ to, subject, html, text, fromAddress, fromName }) {
+function buildPayload({ to, subject, html, text, fromAddress, fromName, replyTo }) {
   return {
     sender: { email: fromAddress, name: fromName },
+    // A store's order emails: the customer's reply goes to the store (notifications/orderEmailSender.js).
+    ...(replyTo ? { replyTo: { email: replyTo } } : {}),
     to: [{ email: to }],
     subject,
     htmlContent: html,
@@ -53,14 +55,14 @@ async function sendOnce(payload, apiKey) {
   return res.json().catch(() => ({}));
 }
 
-async function sendEmail({ to, subject, html, text, fromName: senderName }) {
+async function sendEmail({ to, subject, html, text, fromName: senderName, replyTo }) {
   const { apiKey, fromAddress, fromName } = env.notifications.brevo;
   if (!apiKey || !fromAddress) {
     throw new Error('Brevo email provider is not configured (BREVO_API_KEY / EMAIL_FROM_ADDRESS)');
   }
 
   // A store's email to its own customer goes out under the store's name (same sending address).
-  const payload = buildPayload({ to, subject, html, text, fromAddress, fromName: senderName || fromName });
+  const payload = buildPayload({ to, subject, html, text, fromAddress, fromName: senderName || fromName, replyTo });
   const { value, attempts } = await withRetry(() => sendOnce(payload, apiKey), { delays: RETRY_DELAYS });
 
   return { messageId: value.messageId || null, attempts };
