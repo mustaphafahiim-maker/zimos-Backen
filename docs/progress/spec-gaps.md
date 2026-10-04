@@ -183,6 +183,14 @@ Files above 100 MB download through a 5-minute signed storage link (302) instead
 The dashboard uploads in parts above the single-upload limit, three parts at a time, retrying each part twice, and shows progress with a Cancel button.
 
 R2 CORS must expose `ETag`; the README documents this. The sandbox also returns the ETag in its JSON body.
+Removed from the storefront:
+
+- the parked `UpsellOfferView`, which invented a 25%-off offer on the device and recorded acceptance only in `localStorage`;
+- its `lib/commerce.ts` helpers (`getUpsellOffer`, `acceptUpsell`, `getAcceptedUpsell`);
+- the thank-you page banner and footnote that read that local acceptance;
+- the strings no longer used, in English, Arabic and French. `upsell.save` stays because funnel offers use it.
+
+`/offer/<order>` stays as a redirect to the thank-you page so old links keep working. The real post-purchase offers are `ThankYouUpsell` (Offers → post-purchase upsell) and the funnels' upsell/downsell steps. The backend had nothing to remove.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -340,7 +348,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
 - [x] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
 - [x] 98. Large digital files uploaded straight to storage (presigned multipart) (§18.2).
-- [ ] 99. Remove the leftover mock upsell page and helpers (§9.8).
+- [x] 99. Remove the leftover mock upsell page and helpers (§9.8).
 - [ ] 100. Theme gallery: reset the current theme, theme tags (§8.1).
 
 Not queued (decided already or waiting on the owner): cross-sell discounts and "once per customer" by phone/email (lane 3), the full style/layout tab list (lane 5), city/district shipping prices (decision 19 keeps the city as free text), service ratings (lane 8: no fake ratings), a niche-template wizard card (decision 75).
