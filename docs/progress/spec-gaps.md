@@ -261,6 +261,20 @@ How the check works:
 - The answer is 401 `SESSION_ENDED`. The dashboard's refresh then fails and it goes to the login page, with no frontend change.
 
 The inbox and live-analytics streams: their tickets carry the session. An ended session can't open a stream, and an open stream is closed within 15 s.
+Two-step sign-in recovery (`auth/twoFactorRecovery.js`, migration 432).
+
+**Backup codes**
+- Ten one-time codes, made from Settings → Security after the password and shown once. Only hashes are kept, and making new codes voids the old ones.
+- A code works in the sign-in step in place of any channel's code. Using one emails the person: a new `security_notice` email that says how many codes are left.
+- The sign-in step starts in backup-code mode when no code could be sent. That happens after five codes in ten minutes: login used to refuse with TOO_MANY_CODES, so a person locked out of the phone or mailbox could never reach a step to type a backup code. Now login opens the step without a new code (`codeNotSent`).
+
+**Platform reset**
+- In the console, a platform user with `support.manage` turns the second step off from the user page. It is meant for someone who lost every way through, after support checks who they are.
+- The reset ends every session, forgets remembered browsers, records `admin.user_two_factor_reset`, and emails the person.
+
+**Password reset**
+- A password reset (link or SMS) keeps two-step sign-in on. Otherwise a mailbox that can reset the password would also get past an authenticator.
+- It now forgets remembered browsers, so every device asks for the second step again.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -431,7 +445,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
 - [x] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
 - [x] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
-- [ ] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
+- [x] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
 - [ ] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
 - [ ] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
 - [ ] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
