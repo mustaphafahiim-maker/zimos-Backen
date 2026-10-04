@@ -19,7 +19,9 @@ const PHONE_MATCH_DAYS = 7;
 
 /**
  * The storefront autosave: one open session per (workspace, visitor), created
- * on the first save and overwritten by every later one.
+ * on the first save and overwritten by every later one. The first save may
+ * carry only a name (phone_normalized null until a number is typed); a
+ * number, when sent, must be one.
  *
  * Every line is priced here from the catalogue with the order path's own
  * priceLine, so the merchant sees what the order would have cost, not what the
@@ -36,8 +38,11 @@ const PHONE_MATCH_DAYS = 7;
  * racing a conversion re-checks after the conversion commits and inserts too.
  */
 async function capture(workspaceId, { contact, items, source = 'store', visitorId }) {
-  const phoneNormalized = normalizePhone(contact.phone);
-  if (!phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
+  const phoneNormalized = contact.phone ? normalizePhone(contact.phone) : null;
+  if (contact.phone && !phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
+  if (!phoneNormalized && !(contact.fullName && String(contact.fullName).trim())) {
+    throw new AppError('CONTACT_REQUIRED', 'A name or a phone number is required', 422);
+  }
 
   const priced = [];
   for (const item of items) priced.push(await priceLine(workspaceId, item));
@@ -54,7 +59,7 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
 
   const contactFields = {
     fullName: contact.fullName || null,
-    phone: contact.phone,
+    phone: contact.phone || null,
     email: contact.email || null,
   };
 
@@ -67,8 +72,12 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
         $source, now(), now(), now())
      ON CONFLICT (workspace_id, visitor_id) WHERE status = 'in_progress' AND visitor_id IS NOT NULL
      DO UPDATE SET
-       contact_fields = EXCLUDED.contact_fields,
-       phone_normalized = EXCLUDED.phone_normalized,
+       -- A save without a number (a name typed while the number is being edited)
+       -- keeps the number the session already has.
+       contact_fields = CASE WHEN EXCLUDED.phone_normalized IS NULL
+                             THEN EXCLUDED.contact_fields || jsonb_build_object('phone', checkout_sessions.contact_fields->'phone')
+                             ELSE EXCLUDED.contact_fields END,
+       phone_normalized = COALESCE(EXCLUDED.phone_normalized, checkout_sessions.phone_normalized),
        items = EXCLUDED.items,
        subtotal_amount = EXCLUDED.subtotal_amount,
        currency = EXCLUDED.currency,

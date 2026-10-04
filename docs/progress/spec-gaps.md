@@ -24,6 +24,7 @@ the numbers **400–449** (no lane owns them).
 - Orders list columns and saved views stay per device (localStorage), as they were: SPEC says "saved per user"; moving them to the server is a separate change, not needed for any flow. Export selected goes through the export's `ids` filter (≤ 100 ids, a GET URL); resend to webhook uses the existing `POST /webhooks/resend-orders` (≤ 100, webhooks.manage).
 - "Notify the customer" on a cancellation or refund is `notifyCustomer` on the event payload: false sends no order email and skips the store's automations for that event (webhooks and everything else still run); true sends the order email even while that template is switched off; unset follows the settings. A gateway refund settled later by webhook follows the settings. A cancellation with `refundAmount` stands when the refund fails (`refundError`).
 - "Confirm via WhatsApp" sends the ready-made automation's `order_confirmation` template (it must be approved on Meta under that name); without WhatsApp it is a wa.me link from the merchant's own phone. Editing the customer on an order changes the order's snapshot only, not the customer profile.
+- A checkout is captured from a name alone (phone_normalized null, migration 406) or from a valid number for the form's country (an Egyptian mobile on an Egyptian form, 8–15 digits otherwise), 800 ms after typing stops. A save without a number keeps the number the session already has. The server still normalises a non-Egyptian local number with the Egyptian default, as orders do; a store country setting would fix both.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -68,7 +69,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 12. Order page (12a whatsapp-confirm, 12b customer card copy/link/block/edit + map link, 12c coupon + bundle card, 12d cancel with refund + notify, refund notify): `POST /orders/:id/whatsapp-confirm` (template with buttons
   when WhatsApp is connected); customer card copy/link/block/edit; map link;
   coupon + bundle discount card; cancel with refund + notify; refund notify.
-- [ ] 13. Lost orders capture on a name or any valid phone for the store's
+- [x] 13. Lost orders capture on a name or any valid phone for the store's
   country, 800 ms debounce.
 - [ ] 14. Webhook topics `checkout.created` / `checkout.updated` (`lead.created` is recorded since item 3).
 - [ ] 15. Payments: funnel currency applied to orders, storefront display
