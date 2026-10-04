@@ -713,6 +713,8 @@ async function retry(workspaceId, orderId, token, body, req) {
   if (method.id === methodsService.COD) {
     throw new AppError('PAYMENT_METHOD_UNAVAILABLE', 'Use switch-to-cod for cash on delivery', 422);
   }
+  // A subscription or installment product stays on a card that can be saved (subscriptions/planCheckout).
+  await require('../subscriptions/planCheckout').assertOrderPayable(order, method);
 
   const lastAttempt = await db.Payment.findOne({ where: { orderId: order.id }, order: [['createdAt', 'DESC']] });
   const returnUrl = await assertReturnUrl(workspaceId, body.returnUrl || (lastAttempt && lastAttempt.returnUrl));
@@ -768,6 +770,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
   if (!(await methodsService.codOffered(workspace, { preview }))) {
     throw new AppError('PAYMENT_METHOD_UNAVAILABLE', 'This store does not take cash on delivery', 422);
   }
+  await require('../subscriptions/planCheckout').assertOrderPayable(order, { method: 'cod' });
 
   await inquireOpenAttempts(order.id);
   order = await db.Order.findByPk(order.id);

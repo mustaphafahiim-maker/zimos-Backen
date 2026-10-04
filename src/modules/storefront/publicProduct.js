@@ -62,6 +62,8 @@ function toPublicProduct(product) {
     offers: (product.offers || []).map(toPublicOffer),
     // The fields the shopper fills in when ordering; [] for most products.
     customFields: Array.isArray(product.customFields) ? product.customFields : [],
+    // Paid every period or in installments (SPEC §18.1); null when sold once.
+    billingPlan: require('../subscriptions/planCheckout').publicPlan(product.billingPlan),
   };
 }
 

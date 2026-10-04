@@ -122,7 +122,10 @@ const checkout = asyncHandler(async (req, res) => {
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
 
-  const context = { cartId: cart ? cart.id : null, checkoutSessionId: checkoutSessionId || null, ...(saveCard === true ? { saveCard: true } : {}) };
+  // A subscription or installment product needs a card that can be saved (SPEC §18.1). Its card
+  // is saved by subscriptionService.startForOrder once paid, so the shopper's own tick is not used twice.
+  const planned = await require('../subscriptions/planCheckout').assertPayable(workspaceId, items, isOnline ? prepared.method : { method: orderBody.paymentMethod });
+  const context = { cartId: cart ? cart.id : null, checkoutSessionId: checkoutSessionId || null, ...(saveCard === true && !planned ? { saveCard: true } : {}) };
   // The shopper's answers to custom fields are checked again here, required
   // ones enforced; photos must be this visitor's or in this cart.
   const customFields = {
