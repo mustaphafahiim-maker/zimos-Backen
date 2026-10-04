@@ -207,7 +207,7 @@ async function duplicateFunnel(workspaceId, funnelId, data, req) {
   const name = data.name || `${source.name.slice(0, 200 - COPY_SUFFIX.length)}${COPY_SUFFIX}`;
   // Resolved before the transaction opens, exactly as createFunnel does — the
   // subdomain is globally unique, so it can't be checked workspace-scoped.
-  const subdomain = await ensureUniqueSubdomain(name);
+  const subdomain = await ensureUniqueSubdomain(data.subdomain || name);
 
   return db.sequelize.transaction(async (t) => {
     const stepRows = await db.FunnelStep.findAll({

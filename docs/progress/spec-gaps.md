@@ -72,6 +72,7 @@ the numbers **400–449** (no lane owns them).
 - Page settings in the builder (website editor toolbar and the funnel step page view): an SEO tab (title, description, sharing image; "hide from search engines" for website pages → robots noindex) saved as the page's `seo` (live with the next publish) or the step's `seo` in the funnel draft; and a Scripts tab (code in <head> and before </body>). Page scripts follow the custom-code rules (§8.4): kept outside the tree in workspace_custom_code (`ph:`/`pb:` + page id, `sh:`/`sb:` + funnel step id; published funnel snapshots now carry each step's id), website.publish to read or write, audited, live at once rather than with a publish, sent with the live page or step but never to a staff preview, and run by the storefront only on the store's own host and never on payment pages. A split-test variant has no page settings of its own.
 - Funnel map (FlowMapTools.tsx): the wheel zooms around the pointer (40–160%, plus −/+/fit buttons) and dragging the empty map pans it; each card shows a schematic thumbnail of its page (a row per section, a block per element, the first four sections) and its numbers for 7/30/90 days from the funnel analytics: visits (sessions that reached it), moved on (reached − stopped there) and CTR = moved on ÷ visits. Cards are taller (172px) to hold them. (43a)
 - Funnel map link points (FlowLinkPoints.tsx): each card shows its ways out as dots on its end edge — the order form / checkout (completed_checkout), an offer's Yes / No, and every button with no link of its own (clicked_through + its element id, which the runtime already routes per button), or Continue when the page has none; at most five. Dragging a dot onto a card draws that path (replacing the dot's previous one), dropping it on the empty map or picking "A new step…" adds a step there; pressing a dot (Enter/Space) lists the steps instead of dragging. A button's path has priority 2 so it beats the step's general "always" path; connectors leave from their dot and are labelled with the button text. (43b)
+- Funnel wizard (FunnelTemplateGallery.tsx): the starter templates can be filtered by kind (cash on delivery, with an upsell, leads, advertorial), switched between their Arabic and English versions and previewed page by page; "Your funnels" lists the store's own funnels (newest first) to start from a copy (POST /funnels/:id/duplicate, which now takes the chosen link). No "bought" tab, prices or usage counts: there is no template marketplace. Step 3 is "Name, link and currency": a currency other than the store's is saved as the funnel's own (settings.currency) for every way of creating it. (43c)
 
 ## P0 — correctness, compliance, launch gates
 
@@ -166,8 +167,8 @@ the numbers **400–449** (no lane owns them).
 - [x] 41. Translations of pages and funnels; "Translate with AI"; server-side
   `<html lang dir>` for the store (SEO).
 - [x] 42. Page settings in the builder: SEO and Scripts tabs.
-- [ ] 43. Funnel map editor (pan/zoom, link points per button, thumbnails,
-  stats); wizard with currency step and template gallery. (43a done: pan/zoom, thumbnails, stats; 43b: link points.)
+- [x] 43. Funnel map editor (pan/zoom, link points per button, thumbnails,
+  stats); wizard with currency step and template gallery.
 - [ ] 44. Missing builder elements (container, popup, image_gallery,
   variant_selector, bundle_selector, review_form, checkout elements…).
 - [ ] 45. Funnel analytics: EPC, per-page CTR/CR/opt-ins (events carry stepKey).

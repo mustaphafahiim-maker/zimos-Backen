@@ -73,9 +73,13 @@ const funnelIdParam = {
 };
 
 // `name` is optional — the service falls back to "<source name> (copy)".
+// `subdomain`: the copy's link, as on create (the funnel wizard's "Your funnels").
 const duplicateFunnel = {
   params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required() }),
-  body: Joi.object({ name: Joi.string().min(1).max(200).optional() }).default({}),
+  body: Joi.object({
+    name: Joi.string().min(1).max(200).optional(),
+    subdomain: Joi.string().lowercase().min(3).max(63).pattern(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/).optional(),
+  }).default({}),
 };
 
 const createStep = {
