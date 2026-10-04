@@ -28,6 +28,7 @@ the numbers **400–449** (no lane owns them).
 - `checkout.created` is the first autosave of a session; `checkout.updated` follows a new number or other lines at once, and a name/email edit at most once a minute per session (autosaves fire at every pause in typing). The payload carries the contact, the lines, the total and the product ids (for endpoint filters).
 - "Save my card" is the shopper's tick at checkout (`saveCard`, kept in the order's completion context); the card is saved after the payment is captured, with the gateway's token only. A funnel offer accepted after an order paid with a card saved that way is a card order charged to it at once (outside the session transaction); declined, it stays unpaid and expires, and the first order is untouched. Without a consented card the offer is cash on delivery, as before.
 - A funnel's currency is applied without converting prices: the funnel publishes only when its offers, order bump and page product are priced in its currency, and an order placed on it in another currency is refused (FUNNEL_CURRENCY_MISMATCH). What a shopper is charged is the price the merchant set; FX conversion of charges waits on the rate provider, an open decision (SPEC §11.5).
+- The storefront display currency is display only: the header switcher (and the builder `currency_converter` element, which shares the choice) adds an "≈" amount under the price in the chosen currency from the store rates; the cart, checkout and charge stay in the price currency. The choice is remembered per store in the browser; "convert automatically" picks the visitor currency from the browser language region on a first visit when the store lists it.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -75,7 +76,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 13. Lost orders capture on a name or any valid phone for the store's
   country, 800 ms debounce.
 - [x] 14. Webhook topics `checkout.created` / `checkout.updated` (`lead.created` is recorded since item 3).
-- [ ] 15. Payments (15a shopper consent to save a card + one-click upsell charge; 15b funnel currency applied done): funnel currency applied to orders, storefront display
+- [ ] 15. Payments (15a shopper consent to save a card + one-click upsell charge; 15b funnel currency applied; 15c display currency switcher + `currency_converter` element done): funnel currency applied to orders, storefront display
   currency switcher, `currency_converter` element, base amounts in
   attribution/P&L; shopper consent to save a card and one-click upsell charge.
 - [ ] 16. Lead pixel event from the newsletter form.

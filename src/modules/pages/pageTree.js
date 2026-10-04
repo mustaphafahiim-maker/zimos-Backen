@@ -56,6 +56,7 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'toggle',
   'carousel',
   'stars_display',
+  'currency_converter',
   'price',
   'reviews_list',
   'cod_form',
