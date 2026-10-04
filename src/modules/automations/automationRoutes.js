@@ -57,6 +57,9 @@ const ruleBody = {
     riskLevel: Joi.array().items(Joi.string().valid('low', 'medium', 'high')).max(3),
     isFirstOrder: Joi.boolean().allow(null),
     tags: Joi.array().items(Joi.string().trim().max(40)).max(20),
+    // Only contacts in this segment / never contacts in that one (segmentCondition.js).
+    segmentId: uuid.allow(null),
+    excludeSegmentId: uuid.allow(null),
     // Stop a waiting sequence when the order's status changed meanwhile (default true).
     stopOnStatusChange: Joi.boolean(),
     // review.request: days after delivery (default 3).

@@ -398,6 +398,7 @@ async function resolveSegment(workspaceId, segmentId, { consentingOnly = true, l
 }
 
 module.exports = {
+  buildFilter,
   cleanTags,
   listContacts,
   countContacts,

@@ -204,6 +204,10 @@ const asList = (value) => (Array.isArray(value) ? value : value === undefined ||
 /** Null when the rule applies; otherwise the reason it was skipped. */
 async function conditionsFail(conditions, subject) {
   const c = conditions && !Array.isArray(conditions) ? conditions : {};
+  // In / not in a segment: for any subject that names a contact (segmentCondition.js).
+  const workspaceId = (subject.workspace && subject.workspace.id) || (subject.order && subject.order.workspaceId);
+  const segment = await require('./segmentCondition').segmentFails(c, subject, workspaceId);
+  if (segment) return segment;
   if (subject.kind !== 'order') return null; // the order conditions do not apply to a lost checkout
   const { order } = subject;
 
