@@ -42,9 +42,12 @@ function generateTrackingCode() {
 async function insertShipment(values, transaction) {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      return await db.sequelize.transaction({ transaction }, (sp) =>
+      const shipment = await db.sequelize.transaction({ transaction }, (sp) =>
         db.Shipment.create({ ...values, trackingCode: generateTrackingCode() }, { transaction: sp })
       );
+      // The order's saved shipment draft (shipmentDraft.js) has served its purpose.
+      await db.Order.update({ shipmentDraft: null }, { where: { id: shipment.orderId }, transaction, silent: true });
+      return shipment;
     } catch (err) {
       if (err.name === 'SequelizeUniqueConstraintError' && attempt < 5) continue;
       throw err;

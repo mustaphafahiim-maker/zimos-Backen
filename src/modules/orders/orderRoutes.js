@@ -248,5 +248,7 @@ router.get(
 
 // The order page's session details, customer history and last action (orderSessionDetails.js).
 router.use(require('./orderSessionDetails').router);
+// The shipping card's "Save as draft" (shipmentDraft.js).
+router.use(require('./shipmentDraft').router);
 
 module.exports = router;
