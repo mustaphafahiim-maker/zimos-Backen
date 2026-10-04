@@ -37,7 +37,7 @@ async function recordAudit({
   );
   // Some audited changes are also domain events (product.updated, order.paid…):
   // core/outbox/auditEventBridge.js records them in the same transaction.
-  await require('../../core/outbox/auditEventBridge').onAudit({ workspaceId, action, entityType, entityId, before, after, transaction });
+  await require('../../core/outbox/auditEventBridge').onAudit({ workspaceId, action, entityType, entityId, before, after, metadata, transaction });
   // A change the storefront shows drops the store's 60-second cache once it commits.
   require('../storefront/storefrontCache').onAudit({ workspaceId, entityType, transaction });
   return row;

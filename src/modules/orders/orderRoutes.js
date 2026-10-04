@@ -154,11 +154,12 @@ router.delete(
   controller.deleteNote
 );
 
+// With the refund and "notify the customer" options (orderCancelRefund.js).
 router.post(
   '/:orderId/cancel',
   validate(schemas.cancel),
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
-  controller.cancel
+  require('./orderCancelRefund').handler
 );
 // A COD order confirmed from the order page — same rules and bookkeeping as
 // a queue call (modules/cod/confirmationService.js#confirmFromOrder).

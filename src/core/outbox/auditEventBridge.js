@@ -55,6 +55,7 @@ async function onAudit(entry) {
     payload.newStatus = entry.after ? entry.after.status : null;
   }
   if (type === 'order.refunded' || type === 'order.paid') payload.financialState = entry.after.financialState;
+  if (entry.metadata && typeof entry.metadata.notifyCustomer === 'boolean') payload.notifyCustomer = entry.metadata.notifyCustomer;
 
   // Required here: outbox → queue → registry would otherwise load every
   // module's jobs.js while the audit module itself is still loading.

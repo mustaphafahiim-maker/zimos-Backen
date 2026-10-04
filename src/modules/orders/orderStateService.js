@@ -146,6 +146,8 @@ async function setFinancialState(workspaceId, orderId, state, req, transaction) 
     entityId: order.id,
     before: { financialState: before },
     after: { financialState: state },
+    // A refund's "notify the customer" choice rides to the order.refunded event (auditEventBridge).
+    metadata: req && req.notifyCustomer !== undefined ? { notifyCustomer: req.notifyCustomer } : null,
     req,
     transaction,
   });

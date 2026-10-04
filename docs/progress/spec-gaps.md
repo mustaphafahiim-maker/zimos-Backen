@@ -22,6 +22,8 @@ the numbers **400–449** (no lane owns them).
 - Bulk shipping with a connected courier (`shipping/bulkShipping.js`, migration 405) is a batch on the carriers queue: preview (ready / missing an area / cannot ship) → batch → one booking at a time, each through `createCarrierShipment` exactly as from the order page, recorded as the person who started it. A booking is never repeated on its own: an item left `booking` by a crashed run becomes booked if its order now has the shipment, else failed "interrupted". Only the merchant sends failed ones again (`/retry`). The old synchronous `POST /orders/bulk` action `ship` stays for manual courier names; the dashboard sends a connected courier through the batch.
 - A missing area is fixed in the dialog on the areas map when the order's city is on the platform's list (every order from there follows), else for that order only (`addresses`).
 - Orders list columns and saved views stay per device (localStorage), as they were: SPEC says "saved per user"; moving them to the server is a separate change, not needed for any flow. Export selected goes through the export's `ids` filter (≤ 100 ids, a GET URL); resend to webhook uses the existing `POST /webhooks/resend-orders` (≤ 100, webhooks.manage).
+- "Notify the customer" on a cancellation or refund is `notifyCustomer` on the event payload: false sends no order email and skips the store's automations for that event (webhooks and everything else still run); true sends the order email even while that template is switched off; unset follows the settings. A gateway refund settled later by webhook follows the settings. A cancellation with `refundAmount` stands when the refund fails (`refundError`).
+- "Confirm via WhatsApp" sends the ready-made automation's `order_confirmation` template (it must be approved on Meta under that name); without WhatsApp it is a wa.me link from the merchant's own phone. Editing the customer on an order changes the order's snapshot only, not the customer profile.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -63,7 +65,7 @@ the numbers **400–449** (no lane owns them).
   discount code, utm source/campaign, funnel, product control, date shortcuts;
   columns IP country / data quality / shipping / address, reorderable; risk tab
   counts; bulk print invoices, resend webhook, export selected.
-- [ ] 12. Order page (12a whatsapp-confirm, 12b customer card copy/link/block/edit + map link done): `POST /orders/:id/whatsapp-confirm` (template with buttons
+- [x] 12. Order page (12a whatsapp-confirm, 12b customer card copy/link/block/edit + map link, 12c coupon + bundle card, 12d cancel with refund + notify, refund notify): `POST /orders/:id/whatsapp-confirm` (template with buttons
   when WhatsApp is connected); customer card copy/link/block/edit; map link;
   coupon + bundle discount card; cancel with refund + notify; refund notify.
 - [ ] 13. Lost orders capture on a name or any valid phone for the store's

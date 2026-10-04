@@ -11,6 +11,8 @@ const capture = asyncHandler(async (req, res) => {
   res.json({ payment });
 });
 const refund = asyncHandler(async (req, res) => {
+  // Read by orderStateService.setFinancialState for the order.refunded event.
+  if (req.body.notifyCustomer !== undefined) req.notifyCustomer = req.body.notifyCustomer;
   const result = await service.processRefund(req.tenant.workspaceId, req.params.orderId, req.body, req);
   res.status(201).json({ refund: result });
 });

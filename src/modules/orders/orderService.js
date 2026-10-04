@@ -1134,7 +1134,7 @@ async function riskCounts(workspaceId, { q, from, to, riskLevel, ...filters }) {
  * uncollected shipment, closes open confirmation tasks and records the
  * reason. Refused once a parcel has shipped — use a return after that.
  */
-async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false }, req) {
+async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false, notifyCustomer }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({
       where: { id: orderId, workspaceId },
@@ -1146,7 +1146,11 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       throw new AppError('ORDER_ALREADY_CANCELLED', 'This order is already cancelled', 409);
     }
     await assertNotShipped(order, transaction);
-    await outbox.record(transaction, 'order.cancelled', { workspaceId, orderId: order.id });
+    await outbox.record(transaction, 'order.cancelled', {
+      workspaceId,
+      orderId: order.id,
+      ...(notifyCustomer !== undefined ? { notifyCustomer } : {}),
+    });
 
     // Whatever the order still holds: nothing more if a rejection already gave it back.
     await orderStock.releaseOrderStock(

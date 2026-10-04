@@ -189,12 +189,17 @@ function composeData({ subject, body }, vars, brand) {
 /**
  * An outbox event happened: send the store's email for it, if that template
  * is switched on and the customer left an email address. Never throws.
+ * The merchant's choice on a cancellation or refund wins over the switch:
+ * `payload.notifyCustomer` false sends nothing, true sends the template
+ * (its built-in text when never customised) even while it is off.
  */
 async function handleEvent(workspaceId, eventType, payload = {}) {
   try {
     const keys = KEYS.filter((k) => TEMPLATES[k].event === eventType);
-    if (keys.length === 0) return [];
-    const rows = await db.OrderEmailTemplate.findAll({ where: { workspaceId, key: keys, isEnabled: true } });
+    if (keys.length === 0 || payload.notifyCustomer === false) return [];
+    const forced = payload.notifyCustomer === true;
+    const stored = await db.OrderEmailTemplate.findAll({ where: { workspaceId, key: keys, ...(forced ? {} : { isEnabled: true }) } });
+    const rows = forced ? keys.map((key) => stored.find((r) => r.key === key) || { key }) : stored;
     if (rows.length === 0) return [];
     const subject = payload.orderId
       ? await context().loadOrderSubject(workspaceId, payload.orderId)

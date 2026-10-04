@@ -135,6 +135,10 @@ module.exports = {
       // The merchant cancelled the order's courier booking in the courier's
       // own dashboard (couriers without a cancel API only).
       acknowledgeManualCancel: Joi.boolean().optional(),
+      // Tell the customer (their email, the store's automations); unset: as the store's settings say.
+      notifyCustomer: Joi.boolean().optional(),
+      // Give this much back once cancelled (refunds.manage; orderCancelRefund.js).
+      refundAmount: Joi.number().integer().min(1).optional(),
     }),
   },
   // PATCH /:orderId/status — see orderStageChange.js for what each move does.
