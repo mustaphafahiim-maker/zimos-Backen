@@ -93,6 +93,7 @@ the numbers **400–449** (no lane owns them).
 - Variant pre-selection: the store-wide switch (purchase form, `checkout_settings.auto_select_variant`) and the product's own page setting both have to allow it — either one off and the shopper picks every option first. A product can't switch it back on against the store; the store switch is the merchant's general rule. (56)
 - The countdown element counts to a fixed date (pages/countdownDeadline.js): `endsAt` set in the editor (a date-and-time field), or `endsInHours` turned into a date the first time the page/funnel is published and written back into the draft, so republishing keeps it and every visitor sees the same deadline. Templates keep durations (stamped when a page made from one goes live). Only an unpublished draft's preview counts hours from now; pages published before this change get their date at their next publish (pre-launch, no live stores to migrate). (57)
 - Funnels take the store's payment methods (§9.2, §11.4): the funnel checkout lists the funnel's own list (`payment-methods?funnelId=`, payment rules → methods per funnel) — COD, cards and wallets through the gateway, manual transfers and COD deposits with the receipt. A card/wallet order goes to the gateway; the payment page, once paid, offers "Continue" back to the funnel session (lib/payments savePaymentReturn), where the step moves on (the server already only advances paid online orders). A manual-transfer order advances like COD (the merchant checks the receipt later). A `cod_form` element on a funnel page draws the funnel's own form (lib/funnelSessionContext) and follows the step's "order" link; on a checkout step it draws nothing (the step has its form). The payment page now also recognizes the sandbox gateway's return fields. (58)
+- The product page's own order form completes manual transfers and COD deposits like /checkout: the transfer details and receipt upload (components/checkout/TransferDetails), for the whole order (`bank_transfer`) or the deposit a COD order needs, refused client-side without the receipt and sent with the order. (59)
 
 ## P0 — correctness, compliance, launch gates
 
@@ -210,7 +211,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 56. The store-wide "pre-select a variant" switch is read by the product page (§7.2, §8.8).
 - [x] 57. The builder countdown counts to a fixed date, never restarting per visitor (§9.3, §21).
 - [x] 58. Funnels take every payment method the store offers: the COD form in a funnel, online and transfer payments in the funnel checkout, payment methods per funnel honoured (§9.2, §11.4).
-- [ ] 59. The product-page buy box completes manual transfers and deposits (§11.3).
+- [x] 59. The product-page buy box completes manual transfers and deposits (§11.3).
 - [ ] 60. Coupons in the funnel checkout: the code field, `?coupon=`, funnel-limited coupons (§9.3, §10.5).
 - [ ] 61. The store's currency (set until the first order) and its format settings used by the storefront (§8.8, §11.5).
 - [ ] 62. Store product pages send ViewContent / InitiateCheckout / bundle AddToCart; one content id everywhere (§13.2).
