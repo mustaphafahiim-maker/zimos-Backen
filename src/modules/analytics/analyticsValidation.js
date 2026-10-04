@@ -48,6 +48,8 @@ module.exports = {
     params: wsParams,
     query: rangeQuery.keys({
       groupBy: Joi.string().valid('source', 'medium', 'campaign', 'content').optional(),
+      // Which of the order's touches gets the sale (analytics/orderTouch.js).
+      touch: Joi.string().valid('first', 'last').optional(),
       funnelId: Joi.string().uuid().optional(),
       utm_source: Joi.string().max(100).optional(),
       utm_medium: Joi.string().max(100).optional(),

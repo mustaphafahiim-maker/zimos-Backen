@@ -5,15 +5,17 @@ const { STAGE_SQL, LATEST_SHIPMENT_JOIN, countsAsSaleSql } = require('../orders/
 const { dayKey, rate, toNumber, DAY_MS } = require('./analyticsService');
 const { resolveWindow } = require('./overviewService');
 const base = require('../currencies/baseAmounts');
+const { touchSql } = require('./orderTouch');
 
 /**
  * Sales attribution (SPEC §15.3): visitors, orders and sales per UTM value,
  * with what was actually delivered — the number a COD merchant is paid on —
  * and, when ad spend is recorded (ad_spend_daily), spend and real ROAS.
  *
- * An order is attributed to the UTM values on its own `purchase` event (the
- * storefront stamps every event with the visit's UTM parameters). Orders with
- * no tracked purchase — taken by phone, entered by hand — are grouped under
+ * An order is attributed to its own last touch (or first, `touch=first`):
+ * the UTM values the storefront kept for it at checkout (orders.attribution).
+ * Older orders without touches use their `purchase` event's values. Orders
+ * with neither — taken by phone, entered by hand — are grouped under
  * the empty key, so the table always adds up to the store's real sales.
  */
 
@@ -24,6 +26,8 @@ const DIMENSIONS = {
   content: 'utm_content',
 };
 const FILTERS = { utm_source: 'source', utm_medium: 'medium', utm_campaign: 'campaign', utm_content: 'utm_content' };
+// The same filters on an order's touch (the k_* columns of ORDERS below).
+const ORDER_FILTERS = { utm_source: 'k_source', utm_medium: 'k_medium', utm_campaign: 'k_campaign', utm_content: 'k_content' };
 
 function validTimeZone(tz) {
   try {
@@ -59,6 +63,8 @@ async function getAttribution(workspaceId, query = {}) {
   const groupBy = DIMENSIONS[query.groupBy] ? query.groupBy : 'source';
   const dim = DIMENSIONS[groupBy];
   const funnelId = query.funnelId || null;
+  // Which of the order's touches gets the sale (SPEC §13.4): the last one unless asked.
+  const touch = query.touch === 'first' ? 'first' : 'last';
 
   const replacements = { workspaceId, start, end, tz, funnelId };
   const eventFilters = [];
@@ -69,7 +75,6 @@ async function getAttribution(workspaceId, query = {}) {
     }
   }
   const eventWhere = `${funnelId ? 'AND e.funnel_id = :funnelId' : ''} ${eventFilters.join(' ')}`;
-  const filtered = eventFilters.length > 0;
   const run = (sql) => db.sequelize.query(sql, { replacements, type: db.Sequelize.QueryTypes.SELECT });
   const notTest = db.Order.rawAttributes.isTest ? `AND o.${db.Order.rawAttributes.isTest.field || 'is_test'} = false` : '';
 
@@ -78,38 +83,53 @@ async function getAttribution(workspaceId, query = {}) {
            to_char(e.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day
       FROM analytics_events e
      WHERE e.workspace_id = :workspaceId AND e.created_at >= :start AND e.created_at < :end ${eventWhere}`;
-  // One row per order, with the UTM values of its purchase event (if any).
+  // One row per order, keyed by its own first or last touch (orders.attribution,
+  // SPEC §13.4) — the whole touch, never one touch's source with another's
+  // campaign. An order from before touches were kept falls back to the UTM
+  // values on its purchase event.
+  const keyOf = (touchKey, eventColumn) =>
+    `CASE WHEN tc.touch IS NOT NULL THEN coalesce(lower(nullif(tc.touch->>'${touchKey}', '')), '')
+          ELSE coalesce(lower(nullif(p.${eventColumn}, '')), '') END`;
+  const orderFilters = Object.entries(ORDER_FILTERS)
+    .filter(([param]) => replacements[param])
+    .map(([param, column]) => `AND ${column} = :${param}`)
+    .join(' ');
   const ORDERS = `
-    SELECT o.id, ${base.totalSql('o')} AS total_amount, ${STAGE_SQL} AS stage,
-           (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live,
-           (o.payment_method = 'cod' AND o.confirmation_state = 'confirmed') AS confirmed,
-           to_char(o.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day,
-           coalesce(lower(nullif(p.${dim}, '')), '') AS key, p.id AS event_id
-      FROM orders o${LATEST_SHIPMENT_JOIN}
-      LEFT JOIN LATERAL (
-        SELECT e.id, e.source, e.medium, e.campaign, e.utm_content
-          FROM analytics_events e
-         WHERE e.workspace_id = o.workspace_id AND e.order_id = o.id AND e.event_name = 'purchase'
-         ORDER BY e.created_at LIMIT 1
-      ) p ON TRUE
-     WHERE o.workspace_id = :workspaceId AND o.created_at >= :start AND o.created_at < :end
-       AND ${countsAsSaleSql('o')} ${notTest} ${funnelId ? 'AND o.funnel_id = :funnelId' : ''}
-       ${filtered
-    ? `AND EXISTS (SELECT 1 FROM analytics_events e WHERE e.workspace_id = o.workspace_id AND e.order_id = o.id
-                        AND e.event_name = 'purchase' ${eventFilters.join(' ')})`
-    : ''}`;
+    SELECT * FROM (
+      SELECT o.id, ${base.totalSql('o')} AS total_amount, ${STAGE_SQL} AS stage,
+             (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live,
+             (o.payment_method = 'cod' AND o.confirmation_state = 'confirmed') AS confirmed,
+             to_char(o.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day,
+             ${keyOf('source', 'source')} AS k_source,
+             ${keyOf('medium', 'medium')} AS k_medium,
+             ${keyOf('campaign', 'campaign')} AS k_campaign,
+             ${keyOf('content', 'utm_content')} AS k_content
+        FROM orders o${LATEST_SHIPMENT_JOIN}
+        CROSS JOIN LATERAL (SELECT ${touchSql(touch)} AS touch) tc
+        LEFT JOIN LATERAL (
+          SELECT e.source, e.medium, e.campaign, e.utm_content
+            FROM analytics_events e
+           WHERE tc.touch IS NULL AND e.workspace_id = o.workspace_id AND e.order_id = o.id AND e.event_name = 'purchase'
+           ORDER BY e.created_at LIMIT 1
+        ) p ON TRUE
+       WHERE o.workspace_id = :workspaceId AND o.created_at >= :start AND o.created_at < :end
+         AND ${countsAsSaleSql('o')} ${notTest} ${funnelId ? 'AND o.funnel_id = :funnelId' : ''}
+    ) x
+    WHERE TRUE ${orderFilters}`;
+  // The key the table groups by.
+  const keyColumn = `k_${groupBy}`;
 
   const [visitRows, visitDays, orderRows, orderDays, spend] = await Promise.all([
     run(`WITH v AS (${VISITS}) SELECT key, count(DISTINCT visitor_id) AS visitors FROM v GROUP BY key`),
     run(`WITH v AS (${VISITS}) SELECT day, count(DISTINCT visitor_id) AS visitors FROM v GROUP BY day`),
     run(`WITH ord AS (${ORDERS})
-         SELECT key, count(*) AS orders,
+         SELECT ${keyColumn} AS key, count(*) AS orders,
                 coalesce(sum(total_amount) FILTER (WHERE live), 0) AS sales,
                 count(*) FILTER (WHERE live) AS live_orders,
                 count(*) FILTER (WHERE confirmed) AS confirmed,
                 count(*) FILTER (WHERE stage = 'delivered') AS delivered,
                 coalesce(sum(total_amount) FILTER (WHERE stage = 'delivered'), 0) AS delivered_sales
-           FROM ord GROUP BY key`),
+           FROM ord GROUP BY 1`),
     run(`WITH ord AS (${ORDERS})
          SELECT day, count(*) AS orders, coalesce(sum(total_amount) FILTER (WHERE live), 0) AS sales FROM ord GROUP BY day`),
     spendByKey(workspaceId, { start, end, tz, groupBy }),
@@ -185,6 +205,7 @@ async function getAttribution(workspaceId, query = {}) {
     range: { from: start.toISOString(), to: end.toISOString(), timeZone: tz },
     currency: (workspace && workspace.defaultCurrency) || 'EGP',
     groupBy,
+    touch,
     funnelId,
     totals: {
       visitors: toNumber(visitorTotal.visitors),

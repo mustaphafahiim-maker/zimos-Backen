@@ -5,6 +5,7 @@ const { STAGE_SQL, LATEST_SHIPMENT_JOIN, countsAsSaleSql } = require('../orders/
 const { resolveWindow } = require('../analytics/overviewService');
 const { dayKey, rate, DAY_MS } = require('../analytics/analyticsService');
 const base = require('../currencies/baseAmounts');
+const { campaignSql } = require('../analytics/orderTouch');
 
 /**
  * Real profit (SPEC §15.4).
@@ -74,7 +75,7 @@ async function historicalDeliveryRate(workspaceId, until) {
 function linesSql({ notTest, zimos }) {
   return `
     WITH ord AS (
-      SELECT o.id, ${base.totalSql('o')} AS total_amount, ${base.amountSql('amount_refunded')} AS amount_refunded, o.payment_method,
+      SELECT o.id, o.attribution, ${base.totalSql('o')} AS total_amount, ${base.amountSql('amount_refunded')} AS amount_refunded, o.payment_method,
              to_char(o.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day,
              ${STAGE_SQL} AS stage
         FROM orders o${LATEST_SHIPMENT_JOIN}
@@ -97,16 +98,11 @@ function linesSql({ notTest, zimos }) {
              CASE WHEN sum(i.line_total_amount) OVER w > 0
                   THEN i.line_total_amount::numeric / sum(i.line_total_amount) OVER w
                   ELSE 1.0 / count(*) OVER w END AS share,
-             coalesce(lower(nullif(p.campaign, '')), '') AS campaign
+             ${campaignSql('last', { attribution: 'ord.attribution', orderId: 'ord.id', workspaceId: ':workspaceId' })} AS campaign
         FROM ord
         JOIN order_items i ON i.order_id = ord.id
         LEFT JOIN product_economics pe ON pe.workspace_id = :workspaceId AND pe.product_id = i.product_id
         LEFT JOIN product_economics d ON d.workspace_id = :workspaceId AND d.product_id IS NULL
-        LEFT JOIN LATERAL (
-          SELECT e.campaign FROM analytics_events e
-           WHERE e.workspace_id = :workspaceId AND e.order_id = ord.id AND e.event_name = 'purchase'
-           ORDER BY e.created_at LIMIT 1
-        ) p ON TRUE
        WHERE ord.stage <> 'cancelled'
       WINDOW w AS (PARTITION BY ord.id)
     ),

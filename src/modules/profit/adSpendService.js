@@ -8,6 +8,7 @@ const { STAGE_SQL, LATEST_SHIPMENT_JOIN, countsAsSaleSql } = require('../orders/
 const { resolveWindow } = require('../analytics/overviewService');
 const { PLATFORM_OF_SOURCE } = require('../analytics/attributionService');
 const base = require('../currencies/baseAmounts');
+const { campaignSql } = require('../analytics/orderTouch');
 
 /**
  * Ad spend per day (SPEC §15.4): manual entry, CSV import and the campaigns
@@ -293,21 +294,16 @@ async function campaigns(workspaceId, query = {}) {
            SELECT ${base.totalSql('o')} AS total_amount, ${STAGE_SQL} AS stage,
                   (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live,
                   (o.confirmation_state = 'confirmed') AS confirmed,
-                  lower(p.campaign) AS campaign
+                  -- The order's last touch (analytics/orderTouch.js), as attribution has it.
+                  ${campaignSql()} AS campaign
              FROM orders o${LATEST_SHIPMENT_JOIN}
-             JOIN LATERAL (
-               SELECT e.campaign FROM analytics_events e
-                WHERE e.workspace_id = o.workspace_id AND e.order_id = o.id AND e.event_name = 'purchase'
-                  AND coalesce(e.campaign, '') <> ''
-                ORDER BY e.created_at LIMIT 1
-             ) p ON TRUE
             WHERE o.workspace_id = :workspaceId AND o.created_at >= :start AND o.created_at < :end AND ${countsAsSaleSql('o')})
          SELECT campaign, count(*) AS orders, count(*) FILTER (WHERE confirmed) AS confirmed,
                 count(*) FILTER (WHERE stage = 'delivered') AS delivered,
                 count(*) FILTER (WHERE stage = 'returned') AS returned,
                 coalesce(sum(total_amount) FILTER (WHERE live), 0) AS sales,
                 coalesce(sum(total_amount) FILTER (WHERE stage = 'delivered'), 0) AS delivered_sales
-           FROM ord GROUP BY campaign`),
+           FROM ord WHERE campaign <> '' GROUP BY campaign`),
   ]);
   const byCampaign = new Map(orders.map((r) => [r.campaign, r]));
   const matched = new Set();
