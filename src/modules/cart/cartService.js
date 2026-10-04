@@ -7,6 +7,7 @@ const db = require('../../db/models');
 const { NotFoundError, AppError } = require('../../core/errors/AppError');
 const { toPublicVariant } = require('../storefront/storefrontService');
 const { resolveCustomizations, sameCustomizations, snapshotToInput, bindUploadsToCart } = require('../catalog/customFields');
+const { customFieldsDelta } = require('../catalog/customFieldPricing');
 
 function generateGuestToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -36,7 +37,7 @@ async function getCart(workspaceId, cartId) {
         as: 'items',
         include: [
           // The product rides along for its countdown offer (catalog/productPage.js).
-          { model: db.ProductVariant, as: 'variant', include: [{ model: db.Product, as: 'product', attributes: ['id', 'pageSettings'] }] },
+          { model: db.ProductVariant, as: 'variant', include: [{ model: db.Product, as: 'product', attributes: ['id', 'pageSettings', 'customFields'] }] },
           { model: db.Offer, as: 'offer' },
         ],
       },
@@ -56,9 +57,12 @@ async function getCart(workspaceId, cartId) {
  */
 function withComputedTotals(cart) {
   const items = (cart.items || []).map((item) => {
-    const currentUnitPrice = item.offer
+    const listUnit = item.offer
       ? item.offer.priceAmount
       : effectiveVariantPrice(item.variant, item.variant.product).priceAmount;
+    // Priced custom fields (catalog/customFieldPricing.js), as the order will charge them.
+    const fieldsDelta = customFieldsDelta(item.variant && item.variant.product && item.variant.product.customFields, item.customizations);
+    const currentUnitPrice = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
     return {
       id: item.id,
       variantId: item.variantId,
@@ -108,6 +112,8 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
     if (!offer) throw new NotFoundError('Offer');
     unitPrice = offer.priceAmount;
   }
+  const fieldsDelta = customFieldsDelta(variant.product.customFields, snapshot);
+  if (fieldsDelta) unitPrice = Number(unitPrice) + fieldsDelta;
 
   // The same product with different answers ("Ahmed" / "Sara" engraved) is a
   // line of its own; only identical ones add up.

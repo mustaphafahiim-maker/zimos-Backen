@@ -71,6 +71,8 @@ module.exports = {
             variantId: uuid.required(),
             offerId: uuid.optional(),
             quantity: Joi.number().integer().min(1).max(1000).default(1),
+            // The product form's custom-field answers: a priced field changes the subtotal.
+            customizations: require('../catalog/customFields').customizationsInputSchema.optional(),
           })
         )
         .min(1)

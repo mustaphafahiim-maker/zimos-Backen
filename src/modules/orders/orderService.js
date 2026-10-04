@@ -52,7 +52,7 @@ function generateOrderNumber() {
 // `forSale: false` reads a line an order already holds — its variant, product
 // or offer may have been archived since — for what it weighs and how it ships
 // (recalculateOrder); the caller keeps the prices the order recorded.
-async function priceLine(workspaceId, { variantId, offerId, quantity }, transaction, { forSale = true } = {}) {
+async function priceLine(workspaceId, { variantId, offerId, quantity, customizations }, transaction, { forSale = true } = {}) {
   const active = forSale ? { status: 'active' } : {};
   const variant = await db.ProductVariant.findOne({
     where: { id: variantId, workspaceId, ...active },
@@ -61,6 +61,8 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     transaction,
   });
   if (!variant) throw new NotFoundError('ProductVariant');
+  // Priced custom fields the shopper filled in add to the unit price (catalog/customFieldPricing.js).
+  const fieldsDelta = require('../catalog/customFieldPricing').customFieldsDelta(variant.product.customFields, customizations);
 
   if (offerId) {
     const offer = await db.Offer.findOne({
@@ -84,7 +86,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     if (!offer) throw new NotFoundError('Offer');
 
     const consumedLines = offer.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity * quantity }));
-    const unitPrice = offer.priceAmount;
+    const unitPrice = fieldsDelta ? Number(offer.priceAmount) + fieldsDelta : offer.priceAmount;
     const lineTotal = unitPrice * quantity;
 
     return {
@@ -112,7 +114,8 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
   }
 
   // A countdown offer that has ended sells at the full price (catalog/productPage.js).
-  const unitPriceAmount = effectiveVariantPrice(variant, variant.product).priceAmount;
+  const listUnit = effectiveVariantPrice(variant, variant.product).priceAmount;
+  const unitPriceAmount = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
   const lineTotal = unitPriceAmount * quantity;
   return {
     productId: variant.productId,
