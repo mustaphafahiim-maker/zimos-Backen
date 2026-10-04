@@ -16,13 +16,14 @@ const notify = require('./notify');
  * orders is not told about them — and (b) has not switched that type off.
  * Each teammate gets their own row, so "read" is theirs alone.
  *
- * Channels: `inApp` (the bell) and `email` (the existing email provider).
- * Web push, the mobile app and WhatsApp-to-the-merchant from the spec need
- * providers that are out of scope (§14 scope boundary); a new channel is one
- * more key in CHANNELS and one more branch in deliver().
+ * Channels: `inApp` (the bell), `email` (the existing email provider),
+ * `push` (notifications/push) and `whatsapp` — from the platform's own
+ * number to the teammate's verified phone (platformWhatsapp.js, its alert
+ * template). WhatsApp is off for every type until the teammate turns it on.
+ * A new channel is one more key in CHANNELS and one more branch in create().
  */
 
-const CHANNELS = ['inApp', 'email', 'push'];
+const CHANNELS = ['inApp', 'email', 'push', 'whatsapp'];
 // Push (notifications/push) is on by default for what needs a quick look; off for the rest.
 const PUSH_ON = new Set(['order.new', 'order.suspicious', 'integration.failed', 'export.ready', 'shipping.batch_done', 'automation', 'plan.limit_reached']);
 
@@ -103,7 +104,7 @@ async function create(workspaceId, { type, title, body = null, link = null, data
       where,
       include: [
         { model: db.Role, as: 'role' },
-        { model: db.User, as: 'user', attributes: ['id', 'email'] },
+        { model: db.User, as: 'user', attributes: ['id', 'email', 'phone', 'phoneVerifiedAt'] },
       ],
     });
     const members = memberships.filter((m) => m.user && roleAllows(m.role, spec.permission));
@@ -149,6 +150,12 @@ async function create(workspaceId, { type, title, body = null, link = null, data
       if (!channelsFor(m.userId).push) continue;
       if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
       await require('./push/pushService').sendToUser(m.userId, { title, body, link, type, workspaceId });
+    }
+    // WhatsApp from the platform's number to a verified phone (platformWhatsapp.js), same once-only rule.
+    for (const m of members) {
+      if (!channelsFor(m.userId).whatsapp || !m.user.phone || !m.user.phoneVerifiedAt) continue;
+      if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
+      await notify.whatsapp({ recipient: m.user.phone, template: 'merchant_notification', data: { title, body, link }, workspaceId });
     }
     return { created: deliveredTo.size, emailed };
   } catch (err) {

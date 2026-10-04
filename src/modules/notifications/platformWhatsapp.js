@@ -1,5 +1,6 @@
 'use strict';
 
+const env = require('../../config/env');
 const cloud = require('../whatsapp/whatsappCloud');
 
 /**
@@ -11,8 +12,11 @@ const cloud = require('../whatsapp/whatsappCloud');
  *
  * A code goes out as the approved authentication template (body {{1}} = the
  * code, plus the copy-code button Meta requires); a ready text (`data.body`)
- * as plain text, which Meta only delivers inside a 24-hour window. Anything
- * else is refused, so the caller falls back to SMS. The phone number id
+ * as plain text, which Meta only delivers inside a 24-hour window. A
+ * teammate's notification (merchantNotificationService, the `whatsapp`
+ * channel) goes out as the approved alert template: {{1}} title, {{2}} text,
+ * {{3}} the dashboard link. Anything else is refused, so the caller falls
+ * back to SMS. The phone number id
  * `sandbox` answers locally (refused in production), like a store's.
  */
 
@@ -25,11 +29,16 @@ function config() {
       ar: (process.env.WHATSAPP_CODE_LANG_AR || 'ar').trim(),
       en: (process.env.WHATSAPP_CODE_LANG_EN || 'en_US').trim(),
     },
+    alertTemplate: (process.env.WHATSAPP_ALERT_TEMPLATE || 'zimos_alert').trim(),
+    alertLanguage: (process.env.WHATSAPP_ALERT_LANG || 'ar').trim(),
   };
 }
 
+// A template parameter may not hold new lines, tabs or long runs of spaces (Meta refuses it).
+const param = (value, max) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max) || '—';
+
 async function send({ to, template, data = {} }) {
-  const { phoneNumberId, token, codeTemplate, languages } = config();
+  const { phoneNumberId, token, codeTemplate, languages, alertTemplate, alertLanguage } = config();
   if (!phoneNumberId || !token) {
     throw new Error('The platform WhatsApp number is not configured (WHATSAPP_PLATFORM_PHONE_NUMBER_ID / WHATSAPP_PLATFORM_TOKEN)');
   }
@@ -41,6 +50,14 @@ async function send({ to, template, data = {} }) {
       language: data.locale === 'en' ? languages.en : languages.ar,
       params: [code],
       urlButtonParam: code,
+    });
+  }
+  if (template === 'merchant_notification') {
+    const link = `${env.frontendUrl.replace(/\/$/, '')}${data.link || ''}`;
+    return cloud.sendTemplate(phoneNumberId, token, recipient, {
+      name: alertTemplate,
+      language: alertLanguage,
+      params: [param(data.title, 120), param(data.body, 600), link],
     });
   }
   if (typeof data.body === 'string' && data.body.trim()) return cloud.sendText(phoneNumberId, token, recipient, data.body);
