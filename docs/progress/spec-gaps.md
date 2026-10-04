@@ -375,6 +375,15 @@ Subscriptions on a free trial (`trialing`, from trialCheckout.js) now show on th
 - included in the top products
 
 They are not in the "per period" amount: nothing has been charged for them yet.
+"Convert to order" on a lost order:
+
+- **Can't create two orders.** The session is claimed by one conditional update (status → converted) before the order is created. A second click, or a second teammate, gets 409 `CHECKOUT_SESSION_CONVERTED`. If the order can't be made, the claim is released and the lost order is left as it was.
+- **Keeps the coupon.** The shopper's code is used, and the body's `discountCode` may replace it or drop it (null). An invalid code fails the conversion with the discount error rather than converting silently without it.
+- **Keeps the funnel.** The order carries `funnelId`. Its source stays `manual`.
+- **Keeps the custom answers.**
+  - A refused checkout now stores each line's custom-field answers, including lines added beside a "Buy now", which were dropped before.
+  - It also stores the checkout form's extra answers. Both go onto the converted order (the shopper's photos are checked against their visitor id).
+  - Lines the merchant edited in the convert dialog use what the dialog sends.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -556,7 +565,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 115. The rich footer shows the policy links, footer pages and social links (§8.3).
 - [x] 116. Automation conditions work on checkout, lost-order, lead and subscription triggers (§14.2).
 - [x] 117. Trial subscriptions shown and counted in the subscriptions screen (§18.1).
-- [ ] 118. "Convert to order" keeps the coupon, the funnel and the custom answers, and cannot create two orders (§6.3).
+- [x] 118. "Convert to order" keeps the coupon, the funnel and the custom answers, and cannot create two orders (§6.3).
 - [ ] 119. Recovery automations mark the lost order contacted; the ready-made recovery timing as the spec says (§6.4).
 - [ ] 120. The tracking page accepts the store's own country's phones (§14.7).
 - [ ] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
