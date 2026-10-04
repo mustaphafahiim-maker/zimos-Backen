@@ -184,6 +184,8 @@ module.exports = {
   refund,
   parseWebhook,
   parseRedirect,
+  // Saving a card with no payment, and its page (./sandboxCardSetup.js).
+  ...require('./sandboxCardSetup'),
   // For the hosted page.
   signPage,
   buildResult,

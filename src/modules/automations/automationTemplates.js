@@ -119,6 +119,25 @@ const TEMPLATES = [
     steps: [{ type: 'whatsapp_template', template: 'tried_to_reach', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{store_name}}'] }],
     whatsapp: { name: 'tried_to_reach', body: 'مرحبًا {{1}}، حاولنا التواصل معك لتأكيد طلبك رقم {{2}} من {{3}} ولم نتمكن. من فضلك رد على هذه الرسالة لتأكيد الطلب.' },
   },
+  {
+    key: 'subscription_renewal_failed',
+    trigger: 'subscription.renewal_failed',
+    name: { ar: 'فشل تجديد الاشتراك + تحديث البطاقة', en: 'Renewal failed + update the card' },
+    description: {
+      ar: 'عند تعذّر سحب تجديد اشتراك أو قسط: رسالة واتساب وبريد برابط صفحة الاشتراك، حيث يغيّر العميل بطاقته فيُسحب التجديد فورًا. يُعاد السحب تلقائيًا بعد ١ ثم ٣ ثم ٧ أيام قبل الإلغاء.',
+      en: 'When a subscription or installment renewal cannot be charged: a WhatsApp message and an email with the subscription page, where the customer changes their card and the renewal is charged at once. The charge is retried after 1, 3 and 7 days before it is cancelled.',
+    },
+    conditions: {},
+    steps: [
+      { type: 'whatsapp_template', template: 'subscription_renewal_failed', language: 'ar', params: ['{{customer_name}}', '{{product_name}}', '{{payment_link}}'] },
+      {
+        type: 'email',
+        subject: 'تعذّر تجديد اشتراكك في {{product_name}}',
+        body: 'مرحبًا {{customer_name}}،\n\nلم نتمكن من سحب قيمة تجديد اشتراكك في {{product_name}} ({{order_total}}). حدّث بطاقتك من هنا ليستمر اشتراكك:\n{{payment_link}}\n\n{{store_name}}',
+      },
+    ],
+    whatsapp: { name: 'subscription_renewal_failed', body: 'مرحبًا {{1}}، تعذّر سحب قيمة تجديد اشتراكك في {{2}}. حدّث بطاقتك من هنا ليستمر الاشتراك: {{3}}' },
+  },
 ];
 
 const byKey = (key) => TEMPLATES.find((t) => t.key === key) || null;

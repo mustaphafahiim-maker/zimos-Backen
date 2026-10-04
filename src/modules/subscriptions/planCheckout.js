@@ -23,6 +23,7 @@ function publicPlan(plan) {
     interval: plan.interval,
     intervalCount: plan.intervalCount || 1,
     ...(plan.mode === 'installments' ? { payments: plan.payments } : {}),
+    ...(plan.mode === 'subscription' && plan.trialDays ? { trialDays: plan.trialDays } : {}),
   };
 }
 

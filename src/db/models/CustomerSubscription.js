@@ -35,6 +35,8 @@ module.exports = (sequelize, DataTypes) => {
       failedAttempts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'failed_attempts' },
       lastFailureReason: { type: DataTypes.STRING(300), allowNull: true, field: 'last_failure_reason' },
       portalToken: { type: DataTypes.STRING(64), allowNull: false, field: 'portal_token' },
+      // A card update started from the portal (subscriptions/subscriptionCard.js).
+      cardSetup: { type: DataTypes.JSONB, allowNull: true, field: 'card_setup' },
       cancelledAt: { type: DataTypes.DATE, allowNull: true, field: 'cancelled_at' },
       cancelReason: { type: DataTypes.STRING(300), allowNull: true, field: 'cancel_reason' },
     },

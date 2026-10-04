@@ -177,6 +177,9 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
   // {orderId} placeholder (URL-encoded once it went through new URL()).
   const returnUrl = String(template).replace(/\{orderId\}|%7BorderId%7D/gi, order.id);
   const expiresAt = order.paymentExpiresAt;
+  // A free trial with nothing to pay saves the card instead (subscriptions/trialCheckout.js).
+  const cardOnly = await require('../subscriptions/trialCheckout').startInsteadOfPayment(order, { provider, method, returnUrl });
+  if (cardOnly) return cardOnly;
 
   const attempt = await db.Payment.create({
     workspaceId: order.workspaceId,
@@ -590,7 +593,8 @@ function shopperStatusOf(order) {
   // Paid, but not going ahead: the shopper sees a cancelled order, not a
   // confirmation, and is told nothing about why.
   if (order.cancelledAt && order.cancellationReason === BLOCKED_REASON) return 'cancelled';
-  if (isPaid(order) && Number(order.amountPaid) > 0) return 'paid';
+  // A free trial with nothing to pay is paid at 0 once its card is saved (subscriptions/trialCheckout.js).
+  if (isPaid(order) && (Number(order.amountPaid) > 0 || (Number(order.totalAmount) === 0 && order.completedAt))) return 'paid';
   if (order.cancelledAt) return order.cancellationReason === EXPIRED_REASON ? 'expired' : 'cancelled';
   if (order.paymentMethod === 'cod') return 'cod';
   return 'awaiting_payment';
@@ -668,6 +672,8 @@ async function getShopperStatus(workspaceId, orderId, token, { refresh = false, 
 async function handleReturn(workspaceId, orderId, token, query, req) {
   const order = await loadOrderForShopper(workspaceId, orderId, token);
   const attempts = await db.Payment.findAll({ where: { orderId: order.id }, order: [['createdAt', 'DESC']] });
+  // Back from a free trial's card page (subscriptions/trialCheckout.js).
+  if (await require('../subscriptions/trialCheckout').finishOnReturn(order, attempts, query)) return getShopperStatus(workspaceId, orderId, token, { req });
   const providers = [...new Set(attempts.map((a) => a.providerCode).filter((c) => gateways.isGateway(c)))];
 
   let recorded = false;

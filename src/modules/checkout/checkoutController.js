@@ -118,6 +118,8 @@ const checkout = asyncHandler(async (req, res) => {
   // cart's (whoever filled it) or this visitor's for a Buy Now. Funnels price their own way.
   const testVisitor = orderBody.funnelId ? null : (cart && cart.visitorId) || productTests.visitorOf(req);
   items = await productTests.pinPrices(workspaceId, items, testVisitor);
+  // A free trial prices its product at nothing on the first order (subscriptions/trialCheckout.js).
+  items = await require('../subscriptions/trialCheckout').pinTrialLines(workspaceId, items, orderBody.contact);
 
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);

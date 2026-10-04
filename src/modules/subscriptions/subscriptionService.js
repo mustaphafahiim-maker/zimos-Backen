@@ -25,15 +25,16 @@ const { recordAudit } = require('../audit/auditService');
  * and 7 days; then the subscription is cancelled. A COD order never starts
  * one.
  *
- * Not built: a free trial period (it needs a first order that charges
- * nothing) and replacing the card from the portal (it needs the gateway's
- * hosted card form). The portal shows the state and cancels.
+ * A free trial (trialDays on a subscription plan, trialCheckout.js): the first
+ * order charges nothing for the product, and the subscription is 'trialing'
+ * until its first renewal. The portal shows the state, cancels, and replaces
+ * the card (subscriptionCard.js).
  */
 
 const { Op } = db.Sequelize;
 const INTERVALS = ['week', 'month', 'year'];
 const RETRY_DAYS = [1, 3, 7];
-const LIVE = ['active', 'past_due'];
+const LIVE = ['trialing', 'active', 'past_due'];
 // What a background renewal acts as: no person, so audits carry no actor.
 const SYSTEM_REQ = Object.freeze({ user: { id: null }, ip: null, headers: {}, get: () => undefined });
 
@@ -42,6 +43,8 @@ const planSchema = Joi.alternatives().try(
     mode: Joi.string().valid('subscription').required(),
     interval: Joi.string().valid(...INTERVALS).required(),
     intervalCount: Joi.number().integer().min(1).max(12).default(1),
+    // Days free before the first charge (trialCheckout.js).
+    trialDays: Joi.number().integer().min(1).max(90),
   }),
   Joi.object({
     mode: Joi.string().valid('installments').required(),
@@ -172,7 +175,9 @@ async function startForOrder(workspaceId, orderId) {
     for (const item of lines) {
       const plan = planOf.get(item.productId);
       const count = plan.intervalCount || 1;
-      const periodEnd = addInterval(now, plan.interval, count);
+      // A free trial: the checkout priced this line at nothing (trialCheckout.js).
+      const trialDays = require('./trialCheckout').trialDaysOf(plan, item);
+      const periodEnd = trialDays ? new Date(now.getTime() + trialDays * 24 * 3600 * 1000) : addInterval(now, plan.interval, count);
       const installments = plan.mode === 'installments' ? plan.payments : null;
       try {
         const row = await db.CustomerSubscription.create({
@@ -187,16 +192,17 @@ async function startForOrder(workspaceId, orderId) {
           lastOrderId: order.id,
           kind: plan.mode,
           // No saved card: it cannot renew on its own, so it waits for the merchant.
-          status: cardId ? 'active' : 'past_due',
+          // A trial without one still ends on time: its first charge fails and the customer is asked for a card.
+          status: trialDays ? 'trialing' : cardId ? 'active' : 'past_due',
           interval: plan.interval,
           intervalCount: count,
-          amount: Number(item.lineTotalAmount),
+          amount: trialDays ? await require('./trialCheckout').periodAmount(item) : Number(item.lineTotalAmount),
           currency: order.currency,
           savedPaymentMethodId: cardId,
           currentPeriodStart: now,
           currentPeriodEnd: periodEnd,
-          nextRenewalAt: cardId ? periodEnd : null,
-          paymentsMade: 1,
+          nextRenewalAt: cardId || trialDays ? periodEnd : null,
+          paymentsMade: trialDays ? 0 : 1,
           installmentsTotal: installments,
           installmentsRemaining: installments ? installments - 1 : null,
           lastFailureReason: cardId ? null : 'No saved card: the gateway did not return one',
@@ -427,7 +433,7 @@ function portalView(s) {
     installmentsTotal: s.installmentsTotal,
     installmentsRemaining: s.installmentsRemaining,
     // Installments are a price already agreed: they are not cancelled from here.
-    canCancel: s.kind === 'subscription' && ['active', 'past_due', 'paused'].includes(s.status),
+    canCancel: s.kind === 'subscription' && ['trialing', 'active', 'past_due', 'paused'].includes(s.status),
   };
 }
 
@@ -460,4 +466,6 @@ module.exports = {
   portalGet,
   portalCancel,
   view,
+  byToken,
+  portalView,
 };
