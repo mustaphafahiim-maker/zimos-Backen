@@ -48,9 +48,10 @@ const pixelMatching = require('./pixelMatching');
 // is enough to debug a merchant's "my TikTok didn't get the conversion"
 // report without inventing a new audit table for four log lines a day.
 
-function eventSourceUrlFor(workspace, orderId) {
+async function eventSourceUrlFor(workspace, orderId) {
   if (!workspace || !workspace.slug) return null;
-  return `https://${workspace.slug}.${env.platformRootDomain}/thank-you?order=${orderId}`;
+  // The store's canonical address: the domain its ads point to (domains/primaryHost.js).
+  return `${await require('../domains/primaryHost').storeOriginOf(workspace)}/thank-you?order=${orderId}`;
 }
 
 /** Google Ads ("AW-"/"GT-") ids are a different product (OAuth-based
@@ -88,7 +89,7 @@ async function run(workspaceId, trigger, orderId) {
   // matching browser-side eventID (see apps/storefront/src/lib/track.ts) and
   // this server-side event dedup into one conversion instead of two.
   const eventId = order.id;
-  const eventSourceUrl = eventSourceUrlFor(workspace, order.id);
+  const eventSourceUrl = await eventSourceUrlFor(workspace, order.id);
 
   // Who bought and what, for the platform to match the order to the ad
   // click (pixelMatching.js): the IP and browser kept at checkout, the

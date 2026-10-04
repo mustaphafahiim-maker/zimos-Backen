@@ -4,7 +4,6 @@ const { Router } = require('express');
 const Joi = require('joi');
 const asyncHandler = require('express-async-handler');
 const db = require('../../db/models');
-const env = require('../../config/env');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { effectiveVariantPrice } = require('../catalog/productPage');
@@ -56,7 +55,8 @@ function readFeedSettings(settings) {
   };
 }
 
-const storeBase = (workspace) => `https://${workspace.slug}.${env.platformRootDomain}`;
+// The store's canonical address: its primary domain when it has one (domains/primaryHost.js).
+const storeBase = (workspace) => require('../domains/primaryHost').storeOriginOf(workspace);
 
 /** "250.00 EGP" — the feed's price format. */
 const price = (minor, currency) => `${(Number(minor) / 100).toFixed(2)} ${currency}`;
@@ -94,7 +94,7 @@ async function buildItems(workspace) {
     ],
   });
 
-  const base = storeBase(workspace);
+  const base = await storeBase(workspace);
   const brand = config.brand || workspace.name;
   const items = [];
   for (const product of products) {
@@ -139,7 +139,7 @@ const xmlEscape = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 
-function toXml(workspace, items) {
+function toXml(workspace, items, base) {
   const tag = (name, value) => (value === '' || value === null || value === undefined ? '' : `      <g:${name}>${xmlEscape(value)}</g:${name}>\n`);
   const body = items
     .map(
@@ -149,7 +149,7 @@ function toXml(workspace, items) {
           .join('')}${tag('price', item.price)}${tag('sale_price', item.sale_price)}${tag('availability', item.availability)}${tag('brand', item.brand)}${tag('condition', item.condition)}${tag('google_product_category', item.google_product_category)}    </item>\n`
     )
     .join('');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">\n  <channel>\n    <title>${xmlEscape(workspace.name)}</title>\n    <link>${xmlEscape(storeBase(workspace))}</link>\n    <description>${xmlEscape(workspace.name)}</description>\n${body}  </channel>\n</rss>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">\n  <channel>\n    <title>${xmlEscape(workspace.name)}</title>\n    <link>${xmlEscape(base)}</link>\n    <description>${xmlEscape(workspace.name)}</description>\n${body}  </channel>\n</rss>\n`;
 }
 
 const CSV_COLUMNS = ['id', 'item_group_id', 'title', 'description', 'link', 'image_link', 'additional_image_link', 'price', 'sale_price', 'availability', 'brand', 'condition', 'google_product_category'];
@@ -169,7 +169,7 @@ async function renderFeed(workspace, format) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit;
   const items = await buildItems(workspace);
-  const entry = { at: Date.now(), count: items.length, body: format === 'csv' ? toCsv(items) : toXml(workspace, items) };
+  const entry = { at: Date.now(), count: items.length, body: format === 'csv' ? toCsv(items) : toXml(workspace, items, await storeBase(workspace)) };
   cache.set(key, entry);
   return entry;
 }

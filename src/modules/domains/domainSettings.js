@@ -10,6 +10,7 @@ const validate = require('../../core/middleware/validate');
 const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { getCertificateProvider, CertificateProviderError } = require('./certificates');
+const primaryHost = require('./primaryHost');
 
 /**
  * What the domains screen needs beyond add / verify / delete (domainsService):
@@ -92,6 +93,12 @@ function providerFailure(err) {
  * Asks the provider for a certificate (first time) or where the request
  * stands. A domain that is not verified yet has nothing to certify.
  */
+/** The store's canonical host may have changed: forget the remembered one and the store's cached info. */
+function canonicalChanged(workspaceId) {
+  primaryHost.forget(workspaceId);
+  require('../storefront/storefrontCache').invalidate(workspaceId);
+}
+
 async function syncCertificate(workspaceId, domainId, req) {
   const domain = await loadDomain(workspaceId, domainId);
   if (!USABLE.includes(domain.status)) {
@@ -128,6 +135,7 @@ async function syncCertificate(workspaceId, domainId, req) {
     after: { sslStatus: domain.sslStatus, status: domain.status },
     req,
   });
+  canonicalChanged(workspaceId);
   return { domain: await presentOne(workspaceId, domain), detail: result.detail || null };
 }
 
@@ -178,7 +186,10 @@ async function updateDomain(workspaceId, domainId, patch, req) {
       transaction,
     });
     return domain;
-  }).then((domain) => presentOne(workspaceId, domain));
+  }).then((domain) => {
+    canonicalChanged(workspaceId);
+    return presentOne(workspaceId, domain);
+  });
 }
 
 const flatten = (records) => (records || []).map((chunks) => (Array.isArray(chunks) ? chunks.join('') : String(chunks)));
@@ -224,7 +235,16 @@ async function resolveHost(rawHost) {
   const host = bare(String(rawHost || '').split(':')[0]);
   if (!host) throw new NotFoundError('Host');
   const domain = await db.Domain.findOne({ where: { hostname: host, status: USABLE } });
-  if (!domain) throw new NotFoundError('Host');
+  if (!domain) {
+    // A store's platform subdomain: only its primary domain is asked for, so the
+    // storefront's proxy can send the shopper on to it.
+    const platformSlug = primaryHost.platformSlugOf(host);
+    const store = platformSlug
+      ? await db.Workspace.findOne({ where: { slug: platformSlug, status: ['active', 'suspended'] }, attributes: ['id', 'slug'] })
+      : null;
+    if (!store) throw new NotFoundError('Host');
+    return { host, workspaceId: store.id, slug: store.slug, homeFunnel: null, primaryHost: await primaryHost.primaryHostOf(store.id), sslStatus: null };
+  }
   const workspace = await db.Workspace.findOne({
     where: { id: domain.workspaceId, status: ['active', 'suspended'] },
     attributes: ['id', 'slug'],
@@ -239,16 +259,14 @@ async function resolveHost(rawHost) {
     });
     if (funnel) homeFunnel = { id: funnel.id, ref: funnel.subdomain || funnel.id };
   }
-  const primary = domain.isPrimary
-    ? domain
-    : await db.Domain.findOne({ where: { workspaceId: workspace.id, isPrimary: true, status: USABLE }, attributes: ['hostname'] });
 
   return {
     host,
     workspaceId: workspace.id,
     slug: workspace.slug,
     homeFunnel,
-    primaryHost: primary ? primary.hostname : null,
+    // The store's canonical host (primaryHost.js): only a primary domain with a certificate.
+    primaryHost: await primaryHost.primaryHostOf(workspace.id),
     sslStatus: domain.sslStatus,
   };
 }

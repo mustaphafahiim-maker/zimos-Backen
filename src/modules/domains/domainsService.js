@@ -132,6 +132,9 @@ async function deleteDomain(workspaceId, domainId, req) {
   const before = domain.toJSON();
   await require('./domainSettings').revokeCertificate(domain);
   await domain.destroy();
+  // It may have been the store's canonical address (primaryHost.js).
+  require('./primaryHost').forget(workspaceId);
+  require('../storefront/storefrontCache').invalidate(workspaceId);
 
   await recordAudit({
     workspaceId,

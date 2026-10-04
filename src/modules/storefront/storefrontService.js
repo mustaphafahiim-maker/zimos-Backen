@@ -98,6 +98,8 @@ async function getStorefront(workspaceId) {
     id: w.id,
     name: w.name,
     slug: w.slug,
+    // The store's canonical host when it has a primary domain that can be served (domains/primaryHost.js).
+    primaryHost: await require('../domains/primaryHost').primaryHostOf(w.id),
     logoUrl: w.logoUrl,
     tagline: w.tagline,
     themeSettings: w.themeSettings || {},

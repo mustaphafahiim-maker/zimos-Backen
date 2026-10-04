@@ -5,7 +5,6 @@ const { Router } = require('express');
 const Joi = require('joi');
 const asyncHandler = require('express-async-handler');
 const db = require('../../../db/models');
-const env = require('../../../config/env');
 const logger = require('../../../core/utils/logger');
 const validate = require('../../../core/middleware/validate');
 const { workspaceRef } = require('../../../core/utils/workspaceSlug');
@@ -64,7 +63,8 @@ async function sendForEvent(event) {
     type: `shopper.${event.type}`,
     title,
     body: body.replace('{n}', order.orderNumber),
-    link: `https://${workspace.slug}.${env.platformRootDomain}/track?t=${tracking}`,
+    // The store's canonical address (its primary domain when it has one).
+    link: `${await require('../../domains/primaryHost').storeOriginOf(workspace)}/track?t=${tracking}`,
   };
   let sent = 0;
   for (const subscription of subscriptions) {

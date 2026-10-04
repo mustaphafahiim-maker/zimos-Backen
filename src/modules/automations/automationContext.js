@@ -2,7 +2,6 @@
 
 const { Op } = require('sequelize');
 const db = require('../../db/models');
-const env = require('../../config/env');
 
 /**
  * What an automation knows about its subject: the order (or lost checkout),
@@ -40,7 +39,8 @@ function render(value, ctx) {
   return String(value).replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (_, token) => (ctx[token] !== undefined && ctx[token] !== null ? String(ctx[token]) : ''));
 }
 
-const storeBase = (workspace) => (workspace && workspace.slug ? `https://${workspace.slug}.${env.platformRootDomain}` : '');
+// The store's canonical address: its primary domain when it has one (domains/primaryHost.js).
+const storeBase = (workspace) => require('../domains/primaryHost').storeOriginOf(workspace && workspace.slug ? workspace : null);
 
 /** Everything a step needs about an order. Null when the order is gone. */
 async function loadOrderSubject(workspaceId, orderId) {
@@ -58,7 +58,7 @@ async function loadOrderSubject(workspaceId, orderId) {
   const shipments = (order.shipments || []).slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const shipment = shipments[0] || null;
   const items = order.items || [];
-  const base = storeBase(workspace);
+  const base = await storeBase(workspace);
 
   let reviewLink = '';
   const productId = items.map((i) => i.productId).find(Boolean);
@@ -106,7 +106,7 @@ async function loadCheckoutSubject(workspaceId, checkoutSessionId) {
   if (!session) return null;
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name', 'slug'] });
   const contact = session.contactFields || {};
-  const base = storeBase(workspace);
+  const base = await storeBase(workspace);
   // Lane 2 adds the recovery token; until then the link is the store's checkout.
   const token = session.recoveryToken || null;
   const sessionItems = Array.isArray(session.items) ? session.items : [];
@@ -184,7 +184,7 @@ async function loadSubscriptionSubject(workspaceId, subscriptionId) {
   if (!sub) return null;
   const subject = await loadCustomerSubject(workspaceId, sub.customerId);
   if (!subject) return null;
-  const base = storeBase(subject.workspace);
+  const base = await storeBase(subject.workspace);
   return {
     ...subject,
     kind: 'subscription',
