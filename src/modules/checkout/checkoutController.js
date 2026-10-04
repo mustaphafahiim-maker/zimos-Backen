@@ -14,6 +14,18 @@ const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
 const { resolveOrderBumpItem } = require('./orderBump');
 const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
+const productTests = require('../catalog/productTests');
+const logger = require('../../core/utils/logger');
+
+/** Credits the order to the shopper's variant in its products' A/B tests; never fails the checkout. */
+async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
+  if (!visitorId) return;
+  try {
+    await productTests.recordOrder(workspaceId, (orderItems || []).map((i) => i.productId).filter(Boolean), visitorId, orderId);
+  } catch (err) {
+    logger.warn('Product test order could not be recorded', { error: err.message });
+  }
+}
 
 /**
  * Guest checkout (no login). Runs the same orderService.createOrder as the
@@ -102,6 +114,11 @@ const checkout = asyncHandler(async (req, res) => {
     items = [...items, ...bumpItems.filter((b) => !items.some((i) => i.offerId === b.offerId))];
   }
 
+  // A product A/B test: plain lines at the price their shopper was shown — the
+  // cart's (whoever filled it) or this visitor's for a Buy Now. Funnels price their own way.
+  const testVisitor = orderBody.funnelId ? null : (cart && cart.visitorId) || productTests.visitorOf(req);
+  items = await productTests.pinPrices(workspaceId, items, testVisitor);
+
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
 
@@ -126,6 +143,7 @@ const checkout = asyncHandler(async (req, res) => {
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
+    await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     await afterOrderCompleted(workspaceId, order, context);
     const transferPayment = await manualCheckout.record(order, manualTransfer);
     return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}) });
@@ -146,6 +164,7 @@ const checkout = asyncHandler(async (req, res) => {
   );
 
   await saveCheckoutAnswers(order, workspace, formFields);
+  await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
 
   const attempt = await online.startAttempt(order, {
     provider: prepared.method.provider,

@@ -52,7 +52,8 @@ function generateOrderNumber() {
 // `forSale: false` reads a line an order already holds — its variant, product
 // or offer may have been archived since — for what it weighs and how it ships
 // (recalculateOrder); the caller keeps the prices the order recorded.
-async function priceLine(workspaceId, { variantId, offerId, quantity, customizations }, transaction, { forSale = true } = {}) {
+async function priceLine(workspaceId, line, transaction, { forSale = true } = {}) {
+  const { variantId, offerId, quantity, customizations } = line;
   const active = forSale ? { status: 'active' } : {};
   const variant = await db.ProductVariant.findOne({
     where: { id: variantId, workspaceId, ...active },
@@ -114,7 +115,9 @@ async function priceLine(workspaceId, { variantId, offerId, quantity, customizat
   }
 
   // A countdown offer that has ended sells at the full price (catalog/productPage.js).
-  const listUnit = effectiveVariantPrice(variant, variant.product).priceAmount;
+  // A product A/B test's price for this shopper, pinned by the server (catalog/productTests.js).
+  const testPrice = require('../catalog/productTests').testPriceOf(line);
+  const listUnit = testPrice !== undefined ? testPrice : effectiveVariantPrice(variant, variant.product).priceAmount;
   const unitPriceAmount = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
   const lineTotal = unitPriceAmount * quantity;
   return {

@@ -204,11 +204,12 @@ async function saveOrderRules(workspaceId, data, req) {
  * throws for a bad code: `valid: false` with the reason's code, so the page
  * can say why in the shopper's language.
  */
-async function previewCode(workspaceId, code, items) {
+async function previewCode(workspaceId, code, items, visitorId = null) {
   const { priceLine } = require('../orders/orderService');
   const { applyBundleTiers } = require('../bundles/bundlePricing');
   const lines = [];
-  for (const item of items) lines.push(await priceLine(workspaceId, item));
+  // A product A/B test's price for this visitor (catalog/productTests.js).
+  for (const item of await require('../catalog/productTests').pinPrices(workspaceId, items, visitorId)) lines.push(await priceLine(workspaceId, item));
   await applyBundleTiers(workspaceId, lines);
   const subtotal = lines.reduce((sum, line) => sum + Number(line.lineTotalAmount), 0);
   try {

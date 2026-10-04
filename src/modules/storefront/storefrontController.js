@@ -64,6 +64,8 @@ const trackOrder = asyncHandler(async (req, res) => res.json({ result: await ser
 const shippingQuote = asyncHandler(async (req, res) => {
   const workspaceId = req.tenant.workspaceId;
   let items = req.body.items;
+  // A product A/B test: priced for this visitor, or for whoever filled the cart (catalog/productTests.js).
+  let testVisitor = require('../catalog/productTests').visitorOf(req);
   if (!items) {
     const cartToken = req.headers['x-cart-token'];
     if (!cartToken) {
@@ -72,11 +74,12 @@ const shippingQuote = asyncHandler(async (req, res) => {
     const cart = await db.Cart.findOne({ where: { workspaceId, guestToken: cartToken, status: 'active' } });
     if (!cart) throw new AppError('CART_NOT_FOUND', 'No active cart found for this token', 404);
     ({ items } = await cartService.toOrderItems(workspaceId, cart.id));
+    testVisitor = cart.visitorId || testVisitor;
   }
   const quote = await shippingQuoteService.quote(workspaceId, {
     country: req.body.country,
     region: req.body.governorate,
-    items,
+    items: await require('../catalog/productTests').pinPrices(workspaceId, items, testVisitor),
   });
   res.json({ quote });
 });

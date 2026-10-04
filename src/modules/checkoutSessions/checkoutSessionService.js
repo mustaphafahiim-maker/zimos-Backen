@@ -45,7 +45,9 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
   }
 
   const priced = [];
-  for (const item of items) priced.push(await priceLine(workspaceId, item));
+  // A product A/B test's price for this visitor (catalog/productTests.js), as the order will charge it.
+  const pinned = await require('../catalog/productTests').pinPrices(workspaceId, items, visitorId);
+  for (const item of pinned) priced.push(await priceLine(workspaceId, item));
 
   const snapshot = priced.map((line) => ({
     productId: line.productId,

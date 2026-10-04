@@ -45,6 +45,8 @@ router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), contr
 router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getProduct);
 // The review form: order number + phone prove the purchase (reviews/shopperReviews.js).
 router.use(require('../reviews/shopperReviews').router);
+// A product page's A/B test: which variant this visitor sees (catalog/productTests.js).
+router.use(require('../catalog/productTests').publicRouter);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 // A shopper's photo for a product's image field (customerUploads). Limited
 // before multer reads a byte; multer refuses anything over 15 MB mid-stream.

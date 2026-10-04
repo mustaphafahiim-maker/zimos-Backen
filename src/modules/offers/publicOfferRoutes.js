@@ -125,7 +125,7 @@ router.post(
     }),
   }),
   asyncHandler(async (req, res) =>
-    res.json({ coupon: await require('../discounts/couponExtras').previewCode(ws(req), req.body.code, req.body.items) })
+    res.json({ coupon: await require('../discounts/couponExtras').previewCode(ws(req), req.body.code, req.body.items, require('../catalog/productTests').visitorOf(req)) })
   )
 );
 

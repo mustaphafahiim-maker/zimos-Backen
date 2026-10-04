@@ -8,6 +8,7 @@ const { NotFoundError, AppError } = require('../../core/errors/AppError');
 const { toPublicVariant } = require('../storefront/storefrontService');
 const { resolveCustomizations, sameCustomizations, snapshotToInput, bindUploadsToCart } = require('../catalog/customFields');
 const { customFieldsDelta } = require('../catalog/customFieldPricing');
+const productTests = require('../catalog/productTests');
 
 function generateGuestToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -44,8 +45,10 @@ async function getCart(workspaceId, cartId) {
     ],
   });
   if (!cart) throw new NotFoundError('Cart');
+  // A product A/B test prices plain lines for whoever filled the cart (catalog/productTests.js).
+  const testPrices = await productTests.visitorPrices(workspaceId, (cart.items || []).filter((i) => !i.offerId).map((i) => i.variantId), cart.visitorId);
   // Quantity bundles lower the lines they cover, as they will on the order.
-  return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart));
+  return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart, testPrices));
 }
 
 /**
@@ -55,11 +58,13 @@ async function getCart(workspaceId, cartId) {
  * The authoritative price is always resolved again at checkout time inside
  * orderService, exactly like every other entry point into order creation.
  */
-function withComputedTotals(cart) {
+function withComputedTotals(cart, testPrices = new Map()) {
   const items = (cart.items || []).map((item) => {
     const listUnit = item.offer
       ? item.offer.priceAmount
-      : effectiveVariantPrice(item.variant, item.variant.product).priceAmount;
+      : testPrices.has(item.variantId)
+        ? testPrices.get(item.variantId)
+        : effectiveVariantPrice(item.variant, item.variant.product).priceAmount;
     // Priced custom fields (catalog/customFieldPricing.js), as the order will charge them.
     const fieldsDelta = customFieldsDelta(item.variant && item.variant.product && item.variant.product.customFields, item.customizations);
     const currentUnitPrice = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
@@ -106,7 +111,10 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
     enforceRequired: true,
   });
 
-  let unitPrice = variant.priceAmount;
+  // The cart is priced for whoever last added to it (catalog/productTests.js).
+  if (visitorId) await db.Cart.update({ visitorId }, { where: { id: cartId, workspaceId } });
+  const testPrice = offerId ? undefined : (await productTests.visitorPrices(workspaceId, [variantId], visitorId)).get(variantId);
+  let unitPrice = testPrice !== undefined ? testPrice : variant.priceAmount;
   if (offerId) {
     const offer = await db.Offer.findOne({ where: { id: offerId, workspaceId, productId: variant.productId, status: 'active' } });
     if (!offer) throw new NotFoundError('Offer');
