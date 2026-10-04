@@ -113,7 +113,7 @@ the numbers **400–449** (no lane owns them).
 ## P2
 
 - [x] 24. Orders pipeline (kanban) page; refresh button (24a); saved views per user (24b).
-- [ ] 25. Lost orders product filter and bulk delete.
+- [x] 25. Lost orders product filter and bulk delete.
 - [ ] 26. Carriers screen tabs, search, country filter; manifest.
 - [ ] 27. Installed apps gate their features; support access enforced for admins.
 - [ ] 28. Platform admin: carrier city mapping, theme catalog.
