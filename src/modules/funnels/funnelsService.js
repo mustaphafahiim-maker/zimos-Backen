@@ -895,7 +895,7 @@ async function getSessionStep(workspaceId, funnelId, sessionId) {
  * after the order was created must never leave a charged visitor on a session
  * that never advanced. The caller links it via `linked_from_order_id`.
  */
-async function createFollowOnOrder(workspaceId, funnelId, step, session, req, transaction) {
+async function createFollowOnOrder(workspaceId, funnelId, step, session, req, transaction, variantId = null) {
   if (!session.orderId) {
     throw new AppError('FUNNEL_OFFER_NEEDS_ORDER', 'Cannot accept this offer', 422, [
       { field: 'session', message: 'This upsell has no prior order to attach to — the visitor must complete checkout first' },
@@ -918,7 +918,8 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
   const { order } = await orderService.createOrder(
     workspaceId,
     {
-      items: [{ variantId: offer.lines[0].variantId, offerId: offer.id, quantity: 1 }],
+      // In the variant the shopper chose (offers/offerVariantChoice.js).
+      items: [await require('../offers/offerVariantChoice').offerLineFor(offer, variantId, transaction)],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
       paymentMethod: card ? 'card' : 'cod',
@@ -1023,8 +1024,8 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
     let followOn = null;
     let accepted = null;
     if (outcome.type === 'accepted_offer' && OFFER_STEP_TYPES.has(currentStep.stepType)) {
-      accepted = await funnelOfferMerge.acceptOffer({ workspaceId, funnelId, step: currentStep, session, req }, t);
-      if (!accepted) followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t);
+      accepted = await funnelOfferMerge.acceptOffer({ workspaceId, funnelId, step: currentStep, session, req, variantId: outcome.variantId }, t);
+      if (!accepted) followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t, outcome.variantId);
     }
 
     // completed_checkout carries the order just placed on this step. An order

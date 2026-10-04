@@ -87,7 +87,12 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
     });
     if (!offer) throw new NotFoundError('Offer');
 
-    const consumedLines = offer.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity * quantity }));
+    // A one-line offer taken in another variant of its product (the shopper's choice,
+    // offers/offerVariantChoice.js) holds that variant's stock; a bundle keeps its own lines.
+    const consumedLines =
+      offer.lines.length === 1 && offer.lines[0].variantId !== variant.id
+        ? [{ variantId: variant.id, quantity: offer.lines[0].quantity * quantity }]
+        : offer.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity * quantity }));
     const unitPrice = fieldsDelta ? Number(offer.priceAmount) + fieldsDelta : offer.priceAmount;
     const lineTotal = unitPrice * quantity;
 

@@ -390,7 +390,7 @@ async function publicUpsell(workspaceId, orderId, orderNumber) {
 }
 
 /** POST: adds the upsell's offer to the order, once. */
-async function acceptUpsell(workspaceId, orderId, orderNumber, offerId) {
+async function acceptUpsell(workspaceId, orderId, orderNumber, offerId, variantId = null) {
   const orderService = require('../orders/orderService');
   try {
     return await db.sequelize.transaction(async (transaction) => {
@@ -402,10 +402,13 @@ async function acceptUpsell(workspaceId, orderId, orderNumber, offerId) {
       if (!match || match.card.offerId !== offerId) {
         throw new AppError('UPSELL_INVALID', 'This offer is not available for this order', 422);
       }
+      // In the variant the shopper chose (offers/offerVariantChoice.js).
+      const offer = await db.Offer.findOne({ where: { id: offerId, workspaceId }, include: [{ model: db.OfferVariant, as: 'lines' }], transaction });
+      const line = offer ? await require('./offerVariantChoice').offerLineFor(offer, variantId, transaction) : { variantId: match.card.variantId, offerId, quantity: 1 };
       const { item } = await orderService.addLineToOpenOrder(
         workspaceId,
         order,
-        { variantId: match.card.variantId, offerId, quantity: 1 },
+        line,
         { isUpsell: true },
         transaction
       );

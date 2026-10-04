@@ -202,7 +202,7 @@ function publicOrder(order, items) {
  *   order) otherwise. A repeat of an accepted (order, step) returns what the
  *   first one did and adds nothing.
  */
-async function acceptOffer({ workspaceId, funnelId, step, session, req }, transaction) {
+async function acceptOffer({ workspaceId, funnelId, step, session, req, variantId = null }, transaction) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'], transaction });
   if (!mergeSettings(workspace && workspace.settings).enabled) return null;
 
@@ -232,7 +232,8 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req }, transa
     transaction,
   });
   if (!offer || (offer.lines || []).length === 0) throw offerUnavailable('Offer');
-  const line = { variantId: offer.lines[0].variantId, offerId: offer.id, quantity: 1 };
+  // In the variant the shopper chose (offers/offerVariantChoice.js).
+  const line = await require('../offers/offerVariantChoice').offerLineFor(offer, variantId, transaction);
 
   const now = new Date();
   const task = await mergeableTask(workspaceId, order, now, transaction);

@@ -76,10 +76,14 @@ router.get(
 
 router.post(
   '/orders/:orderId/upsell',
-  validate({ params: orderParams, body: Joi.object({ number: Joi.string().trim().max(40).required(), offerId: uuid.required() }) }),
+  validate({
+    params: orderParams,
+    // variantId: the option the shopper chose for the offer (offers/offerVariantChoice.js).
+    body: Joi.object({ number: Joi.string().trim().max(40).required(), offerId: uuid.required(), variantId: uuid.optional() }),
+  }),
   // No Idempotency-Key needed: one acceptance per order is enforced by a unique index.
   asyncHandler(async (req, res) =>
-    res.status(201).json({ order: await rules.acceptUpsell(ws(req), req.params.orderId, req.body.number, req.body.offerId) })
+    res.status(201).json({ order: await rules.acceptUpsell(ws(req), req.params.orderId, req.body.number, req.body.offerId, req.body.variantId) })
   )
 );
 

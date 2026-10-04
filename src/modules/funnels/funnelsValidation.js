@@ -190,6 +190,8 @@ const advance = {
       orderId: uuid.optional(),
       // Which button was pressed, for edges drawn from a page element.
       sourceElementId: Joi.string().max(120).optional(),
+      // The variant the shopper chose for the offer (accepted_offer; offers/offerVariantChoice.js).
+      variantId: uuid.optional(),
     }).required(),
   }),
 };
