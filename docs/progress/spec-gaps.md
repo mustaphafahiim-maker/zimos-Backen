@@ -96,6 +96,7 @@ the numbers **400–449** (no lane owns them).
 - The product page's own order form completes manual transfers and COD deposits like /checkout: the transfer details and receipt upload (components/checkout/TransferDetails), for the whole order (`bank_transfer`) or the deposit a COD order needs, refused client-side without the receipt and sent with the order. (59)
 - Coupons in funnels (§9.3, §10.5): the funnel checkout has the code field (when the store allows codes) and picks up a `?coupon=` link (CouponFromLink now runs on funnel pages too); the code is previewed with the funnel (`coupon-preview` takes `funnelId`, so funnel-limited codes apply there and not in the store) and sent with the order only when it applies, as on the product page. (60)
 - The store's currency (currencies/baseCurrency.js, §8.8/§11.5): set from Payments → Currencies until the first order (409 BASE_CURRENCY_LOCKED after); every variant and offer moves to it with the same amounts (a new store is still being set up — the merchant checks prices), it leaves the display list, audited. Prices created without a currency take the store's, not EGP. The currency format (symbol before/after, decimals) is applied by the storefront everywhere (lib/moneyFormat): client components get it from the store context, the page renderer's server elements from a per-request slot (React cache) the renderer fills — so server HTML and hydration agree. The new Saudi riyal sign (Unicode 17, U+20C1) is not used: common fonts don't draw it yet. (61)
+- Pixel events (§13.2): the store product page sends ViewContent (once per view) and InitiateCheckout (the first time the shopper touches the order form); bundle adds were already AddToCart through the cart. Every event — in the store and funnels, browser side — names products by the product feed's item id (variant SKU, else variant id; lib/contentId) so catalogs match; Purchase reads it from the order lines' SKU snapshot. Events sent before the store's analytics context exists wait for it (up to 10) instead of being dropped. (62)
 
 ## P0 — correctness, compliance, launch gates
 
@@ -216,7 +217,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 59. The product-page buy box completes manual transfers and deposits (§11.3).
 - [x] 60. Coupons in the funnel checkout: the code field, `?coupon=`, funnel-limited coupons (§9.3, §10.5).
 - [x] 61. The store's currency (set until the first order) and its format settings used by the storefront (§8.8, §11.5).
-- [ ] 62. Store product pages send ViewContent / InitiateCheckout / bundle AddToCart; one content id everywhere (§13.2).
+- [x] 62. Store product pages send ViewContent / InitiateCheckout / bundle AddToCart; one content id everywhere (§13.2).
 - [ ] 63. Server-side Purchase carries matching data (IP, user agent, fbp/fbc, ttclid, name, city, country) and contents (§13.2).
 - [ ] 64. The recovery link applies the automation's coupon (§6.4).
 - [ ] 65. Bulk actions on "all filter results" in the orders list (§4.3).
