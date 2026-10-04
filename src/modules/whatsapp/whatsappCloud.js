@@ -68,6 +68,19 @@ async function sendTemplate(phoneNumberId, token, to, { name, language, params =
   return { waMessageId: data && data.messages && data.messages[0] ? data.messages[0].id : null };
 }
 
+/** The WhatsApp Business account's message templates, every page (whatsappTemplates.js). */
+async function listTemplates(businessAccountId, token) {
+  const out = [];
+  let path = `/${encodeURIComponent(businessAccountId)}/message_templates?fields=id,name,language,status,category,components,rejected_reason&limit=100`;
+  for (let page = 0; page < 20 && path; page += 1) {
+    const data = await call(path, token);
+    out.push(...((data && data.data) || []));
+    const next = data && data.paging && data.paging.next;
+    path = next && next.startsWith(base()) ? next.slice(base().length) : null;
+  }
+  return out;
+}
+
 // A store connected with the phone number id `sandbox` talks to whatsappSandbox.js
 // (no network, refused in production) instead of Meta — same three calls.
 const sandbox = require('./whatsappSandbox');
@@ -77,4 +90,6 @@ module.exports = {
   verifyPhoneNumber: orSandbox(verifyPhoneNumber, sandbox.verifyPhoneNumber),
   sendText: orSandbox(sendText, sandbox.sendText),
   sendTemplate: orSandbox(sendTemplate, sandbox.sendTemplate),
+  // By business account, not phone number: whatsappTemplates.js picks the sandbox itself.
+  listTemplates,
 };

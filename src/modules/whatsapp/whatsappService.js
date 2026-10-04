@@ -59,6 +59,8 @@ async function connect(workspaceId, { phoneNumberId, accessToken, businessAccoun
   const fields = { workspaceId, provider: PROVIDER, status: 'connected', config, secretsSealed, lastVerifiedAt: new Date(), lastError: null };
   const integration = existing ? await existing.update(fields) : await db.WorkspaceIntegration.create(fields);
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'integration.whatsapp.connect', entityType: 'WorkspaceIntegration', entityId: integration.id, after: { phoneNumberId, displayPhoneNumber: details.displayPhoneNumber }, req });
+  // The account's templates and their status, for the pickers (whatsappTemplates.js).
+  void require('./whatsappTemplates').syncQuietly(workspaceId);
   return integration;
 }
 
@@ -112,6 +114,9 @@ async function sendMessage(workspaceId, { to, text, template, orderId = null }, 
       throw new AppError('WHATSAPP_WINDOW_CLOSED', 'The customer has not messaged in the last 24 hours — send an approved template instead', 422);
     }
   }
+
+  // A template Meta has not approved is refused here, with its status (whatsappTemplates.js).
+  if (template) await require('./whatsappTemplates').assertSendable(workspaceId, template);
 
   const { accessToken } = secretsOf(integration);
   const { phoneNumberId } = integration.config;
@@ -221,6 +226,11 @@ async function handleWebhook(workspaceId, payload) {
   for (const entry of (payload && payload.entry) || []) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
+      // A template approved, rejected or paused in Meta (whatsappTemplates.js).
+      if (change.field === 'message_template_status_update') {
+        await require('./whatsappTemplates').onStatusUpdate(workspaceId, value);
+        continue;
+      }
       const names = Object.fromEntries((value.contacts || []).map((c) => [c.wa_id, c.profile && c.profile.name]));
 
       for (const msg of value.messages || []) {

@@ -26,6 +26,8 @@ function apiBase(req) {
 // ---------------------------------------------------------------------------
 const staff = Router({ mergeParams: true });
 staff.use(authenticate, resolveTenant);
+// The account's message templates, synced from Meta (whatsappTemplates.js).
+staff.use(require('./whatsappTemplates').router);
 
 staff.get(
   '/integration',
