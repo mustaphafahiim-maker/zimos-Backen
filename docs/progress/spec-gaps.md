@@ -112,6 +112,7 @@ the numbers **400–449** (no lane owns them).
 - 75: the link change takes effect at once and the old /f/<old> stops answering (the funnel id link always works); no redirect history kept — the hint tells the merchant to update their ads. Funnel code follows the store's custom-code rule (own host only, never /pay or preview) and stays in place across steps (deferred removal, so a remount does not rerun scripts). The funnel's shipping group replaces every line's own group for orders and quotes in the funnel (calculateShippingAmount gets funnelId); the funnel checkout shows no quote, so the price shows on the order.
 - 76: counted on the draft steps (what the merchant is editing), against the funnel's translations keyed by sentence hash — so an edited sentence counts as untranslated again, as on the Languages screen. One warning per step and language; nothing when the store has a single language.
 - 77: impressions are a custom storefront event (`offer_view`, metadata { kind, id }, once per offer per page) — no new table. Acceptances/revenue come from what is already stored: bump lines by the rule's offer, upsell_acceptances by rule, orders whose discounts_snapshot carries the bundle, exit-code redemptions. Cross-sell has no revenue figure: an item added from the strip is not marked on the order, so only adds to cart from the rule's strip are counted.
+The photos are uploaded through the media library and only their URLs are sent (max 6). The provider gets them as `images` with prompt `product_content.v2`, which states the photo count and says to describe only what they show. The sandbox provider ignores them. Existing v1 jobs keep their prompt version.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -248,7 +249,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 75. Funnel settings: change the link, funnel-wide scripts, a shipping group per funnel (§9.7).
 - [x] 76. The funnel issues counter checks untranslated text (§9.2).
 - [x] 77. Offers hub numbers: impressions, acceptances, added revenue per offer (§10.11).
-- [ ] 78. "Create product with AI" takes product photos (§19.2).
+- [x] 78. "Create product with AI" takes product photos (§19.2).
 - [ ] 79. Subscription / instalment products in the store: the plan shown, COD refused, the card saved (§18.1).
 - [ ] 80. Subscriptions: free trial, card update in the portal, a ready "renewal failed" message (§18.1).
 - [ ] 81. `ad_id` from ad links recorded and matched to spend (§15.4).
