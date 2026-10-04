@@ -162,7 +162,7 @@ async function prepareOnlineCheckout(workspace, body, req) {
   const method = await methodsService.resolveStorefrontMethod(workspace, body, { preview });
   const returnUrl = await assertReturnUrl(workspace.id, body.returnUrl);
   const { token, hash } = newPaymentToken();
-  const expiresAt = new Date(Date.now() + env.payments.attemptTtlMinutes * 60 * 1000);
+  const expiresAt = new Date(Date.now() + ttlMinutesFor(method.method) * 60 * 1000);
   return { method, returnUrl, token, tokenHash: hash, expiresAt };
 }
 
@@ -171,6 +171,11 @@ async function prepareOnlineCheckout(workspace, body, req) {
  * then the gateway. A gateway that refuses or does not answer leaves the
  * attempt 'failed' — the shopper can retry or switch to cash on delivery.
  */
+/** How long an unpaid online order waits: a kiosk reference is paid in cash later, so it waits longer. */
+function ttlMinutesFor(method) {
+  return method === 'kiosk' ? env.payments.kioskTtlMinutes : env.payments.attemptTtlMinutes;
+}
+
 async function startAttempt(order, { provider, method, returnUrl: template }) {
   const ctx = await gatewayRuntime.contextFor(order.workspaceId, provider);
   // The storefront builds its return URL before the order exists, with an
@@ -735,7 +740,7 @@ async function retry(workspaceId, orderId, token, body, req) {
     await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
     // The retry gets a full window of its own; the attempt cap bounds how long
     // one order can hold its stock this way.
-    const expiresAt = new Date(Date.now() + env.payments.attemptTtlMinutes * 60 * 1000);
+    const expiresAt = new Date(Date.now() + ttlMinutesFor(method.method) * 60 * 1000);
     await locked.update({ paymentMethod: method.method, paymentExpiresAt: expiresAt }, { transaction });
     return locked;
   });

@@ -1019,7 +1019,7 @@ async function latestShipments(orderIds) {
  * to COD) has none. One query for the page.
  */
 async function paymentProviders(orders) {
-  const online = orders.filter((o) => o.paymentMethod === 'card' || o.paymentMethod === 'wallet').map((o) => o.id);
+  const online = orders.filter((o) => require('../payments/methodNames').isOnline(o.paymentMethod)).map((o) => o.id);
   if (online.length === 0) return new Map();
   const rows = await db.sequelize.query(
     `SELECT DISTINCT ON (order_id) order_id, provider_code

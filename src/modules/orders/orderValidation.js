@@ -28,7 +28,7 @@ const search = {
   archived: Joi.string().valid('exclude', 'only', 'include').optional(),
   tag: Joi.string().trim().min(1).max(40).optional(),
   source: Joi.string().valid('store', 'funnel', 'manual', 'api', 'import', 'upsell').optional(),
-  paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').optional(),
+  paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).optional(),
   governorate: Joi.string().trim().min(1).max(100).optional(),
   carrier: Joi.string().trim().min(1).max(100).optional(),
   seen: Joi.boolean().optional(),
@@ -83,7 +83,7 @@ module.exports = {
         .required(),
       contact: contact.required(),
       shippingAddress: address.optional(),
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').required(),
+      paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).required(),
       discountCode: Joi.string().max(100).optional(),
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
@@ -117,7 +117,7 @@ module.exports = {
       })
         .unknown(true)
         .optional(),
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').default('cod'),
+      paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).default('cod'),
       discountCode: Joi.string().max(100).optional(),
       shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
     }),

@@ -39,7 +39,7 @@ module.exports = {
       // method — a merchant recording a bank transfer they received is real.
       // 'bank_transfer' is a manual transfer with a receipt (payments/
       // manualTransferService.js); it does not depend on the gateway flag.
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').required(),
+      paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).required(),
       // The shopper's transfer: for 'bank_transfer', or the deposit a COD order needs.
       transfer: Joi.object({
         methodId: Joi.string().max(80).required(),

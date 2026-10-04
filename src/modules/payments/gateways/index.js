@@ -18,7 +18,7 @@ const kashier = require('./kashier');
  * Adapter interface
  * ---------------------------------------------------------------------------
  * Descriptive fields (the dashboard's connect form is built from these)
- *   code, name, methods (['card', 'wallet']), currencies
+ *   code, name, methods (of payments/methodNames.js ONLINE_METHODS: card, wallet, valu, kiosk), currencies
  *   credentialFields   [{ key, secret, label: { en, ar }, placeholder? }]
  *   settingFields      [{ key, method?, type, label: { en, ar } }]
  *   setupSteps         { en: [...], ar: [...] }

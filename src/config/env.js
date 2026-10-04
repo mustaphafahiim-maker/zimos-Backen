@@ -266,6 +266,8 @@ const env = {
     credentialsKey: (process.env.GATEWAY_CREDENTIALS_KEY || '').trim(),
     // How long an unpaid online order holds its stock before it expires.
     attemptTtlMinutes: Math.max(5, parseInt(process.env.PAYMENT_ATTEMPT_TTL_MINUTES || '30', 10) || 30),
+    // A kiosk payment is a reference the shopper pays in cash later: the order waits longer (48 hours).
+    kioskTtlMinutes: Math.max(30, parseInt(process.env.PAYMENT_KIOSK_TTL_MINUTES || '2880', 10) || 2880),
     // How many payment attempts one order may start (first try + retries).
     maxAttemptsPerOrder: Math.max(1, parseInt(process.env.PAYMENT_MAX_ATTEMPTS_PER_ORDER || '5', 10) || 5),
     // POST /webhooks/payments/:code/:token, per token per window.

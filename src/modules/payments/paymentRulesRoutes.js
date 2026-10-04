@@ -75,8 +75,8 @@ router.post(
     const order = await db.Order.findOne({ where: { id: req.params.orderId, workspaceId } });
     if (!order) throw new NotFoundError('Order');
     if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'A cancelled order cannot be paid', 409);
-    if (!['card', 'wallet'].includes(order.paymentMethod)) {
-      throw new AppError('NOT_AN_ONLINE_ORDER', 'Only an order paid by card or wallet has a payment link', 422);
+    if (!require('./methodNames').isOnline(order.paymentMethod)) {
+      throw new AppError('NOT_AN_ONLINE_ORDER', 'Only an order paid online has a payment link', 422);
     }
     if (online.PAID_STATES.includes(order.financialState)) throw new AppError('ORDER_ALREADY_PAID', 'This order is already paid', 409);
     const token = crypto.randomBytes(32).toString('base64url');

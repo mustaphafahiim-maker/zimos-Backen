@@ -48,7 +48,7 @@ const ruleBody = {
   trigger: Joi.string().valid(...TRIGGERS),
   isActive: Joi.boolean(),
   conditions: Joi.object({
-    paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').allow(null),
+    paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).allow(null),
     minTotalAmount: Joi.number().integer().min(0).allow(null),
     productIds: Joi.array().items(uuid).max(50),
     governorates: Joi.array().items(Joi.string().trim().max(100)).max(40),

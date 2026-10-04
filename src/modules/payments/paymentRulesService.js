@@ -21,7 +21,7 @@ const { recordAudit } = require('../audit/auditService');
  *    checkout offers. A funnel with no entry offers everything the store does.
  */
 
-const METHODS = ['cod', 'card', 'wallet', 'bank_transfer'];
+const METHODS = [...require('./methodNames').ORDER_METHODS];
 const MAX_FUNNEL_RULES = 200;
 
 function adjustments(settings) {

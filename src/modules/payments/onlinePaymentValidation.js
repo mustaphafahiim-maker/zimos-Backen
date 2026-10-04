@@ -50,7 +50,7 @@ module.exports = {
   shopperRetry: {
     params: storeOrderParam,
     body: Joi.object({
-      paymentMethod: Joi.string().valid('card', 'wallet').optional(),
+      paymentMethod: Joi.string().valid(...require('./methodNames').ONLINE_METHODS).optional(),
       paymentProvider: Joi.string().max(50).optional(),
       returnUrl: Joi.string().max(2000).optional(),
     }),

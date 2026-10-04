@@ -82,7 +82,10 @@ const REDIRECT_ALIASES = {
   'source_data.type': ['source_data.type', 'type'],
 };
 
-const METHODS = ['card', 'wallet'];
+// valu: valU installments; kiosk: a reference paid in cash at Aman / Masary (payments/methodNames.js).
+const METHODS = ['card', 'wallet', 'valu', 'kiosk'];
+// The setting that holds each method's Paymob integration id.
+const INTEGRATION_SETTING = { card: 'cardIntegrationId', wallet: 'walletIntegrationId', valu: 'valuIntegrationId', kiosk: 'kioskIntegrationId' };
 const CURRENCIES = ['EGP'];
 
 const integrationId = Joi.alternatives()
@@ -99,6 +102,8 @@ const credentialsSchema = Joi.object({
 const settingsSchema = Joi.object({
   cardIntegrationId: integrationId.allow(null).optional(),
   walletIntegrationId: integrationId.allow(null).optional(),
+  valuIntegrationId: integrationId.allow(null).optional(),
+  kioskIntegrationId: integrationId.allow(null).optional(),
 });
 
 const bi = (en, ar) => ({ en, ar });
@@ -123,20 +128,32 @@ const settingFields = [
     type: 'integer',
     label: bi('Mobile wallet integration ID', 'رقم تكامل المحافظ الإلكترونية (Integration ID)'),
   },
+  {
+    key: 'valuIntegrationId',
+    method: 'valu',
+    type: 'integer',
+    label: bi('valU integration ID', 'رقم تكامل valU ‏(Integration ID)'),
+  },
+  {
+    key: 'kioskIntegrationId',
+    method: 'kiosk',
+    type: 'integer',
+    label: bi('Kiosk (Aman / Masary) integration ID', 'رقم تكامل الدفع في الكشك — أمان / مصاري (Integration ID)'),
+  },
 ];
 
 const setupSteps = {
   en: [
     'Log in to your Paymob dashboard (accept.paymob.com).',
     'Open Settings → Account info and copy the Secret key, Public key, API key and HMAC secret. Test keys contain "_test_", live keys "_live_" — use the same mode for both keys.',
-    'Open Developers → Payment integrations and copy the Integration ID of your card integration and, if you accept mobile wallets, of your wallet integration.',
+    'Open Developers → Payment integrations and copy the Integration ID of your card integration and, for each other way you accept (mobile wallets, valU, Kiosk), of its integration.',
     'For EACH of those integrations, click Edit and paste the webhook URL shown below into "Transaction processed callback". Leave "Transaction response callback" as it is — we send the shopper back ourselves.',
     'Paste everything here and connect. Start in test mode, place a test order from the store preview, then switch to live keys.',
   ],
   ar: [
     'ادخل على لوحة تحكم Paymob ‏(accept.paymob.com).',
     'من Settings ← Account info انسخ الـ Secret key والـ Public key والـ API key والـ HMAC secret. مفاتيح التجربة فيها "_test_" ومفاتيح التشغيل فيها "_live_" — لازم المفتاحين يكونوا من نفس النوع.',
-    'من Developers ← Payment integrations انسخ رقم الـ Integration ID الخاص بالكروت، ولو هتقبل محافظ إلكترونية انسخ رقم تكامل المحافظ كمان.',
+    'من Developers ← Payment integrations انسخ رقم الـ Integration ID الخاص بالكروت، ولكل طريقة تانية بتقبلها (المحافظ الإلكترونية، valU، الكشك) انسخ رقم تكاملها.',
     'لكل تكامل منهم اضغط Edit والصق رابط الـ webhook اللي تحت في خانة "Transaction processed callback". سيب "Transaction response callback" زي ما هي — إحنا بنرجّع العميل للمتجر بنفسنا.',
     'الصق كل البيانات هنا واضغط ربط. ابدأ بمفاتيح التجربة، اعمل طلب تجريبي من معاينة المتجر، وبعدها بدّل لمفاتيح التشغيل.',
   ],
@@ -353,7 +370,7 @@ async function verifyCredentials(creds) {
 
 /** Which of our methods this account's settings can take. */
 function availableMethods(settings = {}) {
-  return METHODS.filter((m) => (m === 'card' ? settings.cardIntegrationId : settings.walletIntegrationId));
+  return METHODS.filter((m) => settings[INTEGRATION_SETTING[m]]);
 }
 
 function splitName(fullName) {
@@ -369,7 +386,7 @@ function splitName(fullName) {
  * @returns {{ providerOrderId: string, providerReference: string, redirectUrl: string }}
  */
 async function createPayment(creds, { attempt, order, method, settings, returnUrl, webhookUrl, expiresInSeconds, storeName }) {
-  const integration = method === 'card' ? settings.cardIntegrationId : settings.walletIntegrationId;
+  const integration = INTEGRATION_SETTING[method] ? settings[INTEGRATION_SETTING[method]] : null;
   if (!integration) {
     throw new AppError('PAYMENT_METHOD_UNAVAILABLE', `This store cannot take ${method} payments right now`, 422);
   }

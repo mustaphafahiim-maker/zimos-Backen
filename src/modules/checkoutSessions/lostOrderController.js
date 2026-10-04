@@ -56,7 +56,7 @@ const schemas = {
         email: joiEmail().allow(null, '').optional(),
       }).optional(),
       shippingAddress: address.optional(),
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').optional(),
+      paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).optional(),
       notes: Joi.string().max(2000).allow('').optional(),
       items: Joi.array()
         .items(Joi.object({ variantId: uuid.required(), offerId: uuid.optional(), quantity: Joi.number().integer().min(1).max(100).required() }))

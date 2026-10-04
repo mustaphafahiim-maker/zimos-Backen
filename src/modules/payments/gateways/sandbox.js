@@ -17,7 +17,8 @@ const Joi = require('joi');
 
 const code = 'sandbox';
 const name = 'Sandbox';
-const METHODS = ['card', 'wallet'];
+// Every method a real gateway may offer, so each can be tried from the store preview.
+const METHODS = ['card', 'wallet', 'valu', 'kiosk'];
 const CURRENCIES = ['EGP', 'USD', 'SAR', 'AED', 'MAD', 'EUR'];
 const SIGNED_FIELDS = ['sbx_order', 'sbx_txn', 'sbx_status', 'sbx_amount', 'sbx_currency'];
 
