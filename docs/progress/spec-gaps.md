@@ -246,6 +246,21 @@ The email ends with an unsubscribe link, which is the email form of STOP (`notif
 Migration 431 lets `marketing_opt_outs` hold an email, with or without a phone.
 
 Automation email steps on marketing triggers now pass the subject's email to the guard as well. No List-Unsubscribe header: the email provider wrapper takes no custom headers.
+Ending a session now cuts its access token at once, not when the token runs out (up to 15 minutes later). The access token carries its session (`sid`), and every authenticated request checks it with `core/security/sessionGate.js`. This covers:
+
+- ending one device
+- ending all devices
+- a password reset (link or SMS)
+- a replayed refresh token
+
+How the check works:
+
+- A refreshed session is followed along its `rotated_to_session_id` chain in one recursive query, so a request in flight during a refresh is not thrown out.
+- Answers are cached for 10 s. Any change to a session row empties this server's cache, so the cut is immediate here and within 10 s on other servers.
+- Tokens issued before this change (no `sid`) still work until they expire.
+- The answer is 401 `SESSION_ENDED`. The dashboard's refresh then fails and it goes to the login page, with no frontend change.
+
+The inbox and live-analytics streams: their tickets carry the session. An ended session can't open a stream, and an open stream is closed within 15 s.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -415,7 +430,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 103. The checkout autosave goes through the bot guard and keeps the shopper's IP and country (§5.1, §6.1).
 - [x] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
 - [x] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
-- [ ] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
+- [x] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
 - [ ] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
 - [ ] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
 - [ ] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
