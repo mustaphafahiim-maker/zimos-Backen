@@ -284,6 +284,8 @@ module.exports = {
     body: Joi.object({
       shippingAddress: address.optional(),
       notes: Joi.string().max(2000).allow('', null).optional(),
+      // The customer's details as written on the order (a typo in the name or number).
+      contact: contact.optional(),
     }).min(1),
   },
   listShipments: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }) },

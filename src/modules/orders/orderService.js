@@ -1200,7 +1200,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
 
 /**
  * The only fields a merchant may edit on an existing order: the shipping
- * address snapshot and the internal notes. Totals, line items and pricing are
+ * address snapshot, the customer's contact details and the internal notes. Totals, line items and pricing are
  * never touched here. Refused once the order has shipped.
  */
 async function updateOrderLimited(workspaceId, orderId, data, req) {
@@ -1210,9 +1210,10 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
     if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
     await assertNotShipped(order, transaction);
 
-    const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, notes: order.notes };
+    const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes };
     const updates = {};
     if (data.shippingAddress !== undefined) updates.shippingAddressSnapshot = data.shippingAddress;
+    if (data.contact !== undefined) updates.contactSnapshot = { ...(order.contactSnapshot || {}), ...data.contact };
     if (data.notes !== undefined) updates.notes = data.notes;
     await order.update(updates, { transaction });
 
@@ -1223,7 +1224,7 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
       entityType: 'Order',
       entityId: order.id,
       before,
-      after: { shippingAddressSnapshot: order.shippingAddressSnapshot, notes: order.notes },
+      after: { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes },
       req,
       transaction,
     });

@@ -63,7 +63,7 @@ the numbers **400–449** (no lane owns them).
   discount code, utm source/campaign, funnel, product control, date shortcuts;
   columns IP country / data quality / shipping / address, reorderable; risk tab
   counts; bulk print invoices, resend webhook, export selected.
-- [ ] 12. Order page (12a whatsapp-confirm done): `POST /orders/:id/whatsapp-confirm` (template with buttons
+- [ ] 12. Order page (12a whatsapp-confirm, 12b customer card copy/link/block/edit + map link done): `POST /orders/:id/whatsapp-confirm` (template with buttons
   when WhatsApp is connected); customer card copy/link/block/edit; map link;
   coupon + bundle discount card; cancel with refund + notify; refund notify.
 - [ ] 13. Lost orders capture on a name or any valid phone for the store's
