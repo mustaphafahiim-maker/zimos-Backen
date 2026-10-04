@@ -104,6 +104,7 @@ the numbers **400–449** (no lane owns them).
 - 67: the draft is a JSONB on the order (orders.shipment_draft, migration 420), not a Shipment row with a 'draft' status — a shipment row drives the order's stage, counts and courier sync. Saving is allowed before the order can be booked (that is the point of preparing it); nothing is checked against the courier until booking. insertShipment clears it, so any shipment (form, bulk, auto-booking) ends the draft.
 - 68: customer.updated / review.created / staff-edit order.item_added ride on the audit bridge (the audit rows already exist); a line appended to a placed order records order.item_added in addLineToOpenOrder. product.low_stock is a ProductVariant afterUpdate hook (registered by inventoryService) firing once per downward crossing of low_stock_threshold on available = on hand − reserved — every stock path uses instance updates. All four are webhook topics.
 - 69: funnels hide the store footer, so the funnel layout's own footer gets the policy links (FunnelPolicies, new tab so the path stays put), and FunnelCheckout — which the COD form element reuses — shows PolicyLinks above its button like the store checkout. No backend change: `legal` already comes with GET /store/:ws.
+- 70: category SEO uses the product's keys (title, description, imageUrl, noindex — validated with the same schema); the store's category address stays /products?collection=<slug> (its canonical), so that is what the sitemap lists, minus hidden and noindex categories. "Export" is one CSV of all categories from the page (per-row export of a single category made little sense); preview opens the category listing on the store's subdomain.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -232,7 +233,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 67. "Save as draft" on the order's shipping card (§4.4).
 - [x] 68. The missing outbox events: order.item_added, customer.updated, product.low_stock, review.created (§3.2).
 - [x] 69. Policies shown in funnels (§8.3).
-- [ ] 70. Category SEO (title, description, OG image, noindex) used by the store; the categories list's preview / in-header / export (§7.6, §8.9).
+- [x] 70. Category SEO (title, description, OG image, noindex) used by the store; the categories list's preview / in-header / export (§7.6, §8.9).
 - [ ] 71. The primary domain is the store's canonical address: canonical, sitemap and feed links, redirect (§8.11).
 - [ ] 72. The store country setting drives the order form's country (§8.8).
 - [ ] 73. A variant's own image (§7.2).
