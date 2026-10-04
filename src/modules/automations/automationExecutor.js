@@ -5,6 +5,7 @@ const queue = require('../../core/queue');
 const logger = require('../../core/utils/logger');
 const context = require('./automationContext');
 const steps = require('./automationSteps');
+const recoveryCoupon = require('./recoveryCoupon');
 const marketingGuard = require('./marketingGuard');
 
 /**
@@ -95,7 +96,7 @@ async function advance(execution, { resumed = false } = {}) {
       }
     }
     try {
-      const detail = await steps.runStep(step, subject, { workspaceId: execution.workspaceId, trigger: execution.trigger, rule });
+      const detail = await steps.runStep(step, recoveryCoupon.forStep(subject, step, ctx.couponCode, list), { workspaceId: execution.workspaceId, trigger: execution.trigger, rule });
       await logRun(execution, { status: 'sent', stepIndex: i, stepType: step.type, detail });
     } catch (err) {
       await logRun(execution, { status: 'failed', stepIndex: i, stepType: step.type, detail: err.message });
