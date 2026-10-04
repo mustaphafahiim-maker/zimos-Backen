@@ -834,30 +834,34 @@ async function startSession(workspaceId, funnelRef, body) {
 
   const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
   return {
-    funnel: {
-      id: funnel.id,
-      name: funnel.name,
-      subdomain: funnel.subdomain,
-      // Its own icon, title and currency label (funnels/geoRedirects.js).
-      settings: require('./geoRedirects').resolveSettings(funnel),
-    },
+    funnel: publicFunnel(funnel),
     session: publicSession(session),
     ...payload,
+  };
+}
+
+/** What a step page shows of the funnel: its own icon, title and currency (funnels/geoRedirects.js). */
+function publicFunnel(funnel) {
+  return {
+    id: funnel.id,
+    name: funnel.name,
+    subdomain: funnel.subdomain,
+    settings: require('./geoRedirects').resolveSettings(funnel),
   };
 }
 
 async function getSessionStep(workspaceId, funnelId, sessionId) {
   const session = await db.FunnelSession.findOne({ where: { id: sessionId, funnelId, workspaceId } });
   if (!session) throw sessionNotFound();
-  const { snapshot } = await loadPublishedSnapshot(workspaceId, funnelId);
+  const { funnel, snapshot } = await loadPublishedSnapshot(workspaceId, funnelId);
 
   if (session.status === 'completed') {
     // Still serve the step it finished on — that page is the thank-you the
     // visitor is looking at, and refreshing it must not blank it. Nothing to
     // render (or to resume) if a republish removed that step.
-    if (!stepExists(snapshot, session.currentStepKey)) return { done: true, session: publicSession(session) };
+    if (!stepExists(snapshot, session.currentStepKey)) return { done: true, funnel: publicFunnel(funnel), session: publicSession(session) };
     const finishedPayload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
-    return { done: true, session: publicSession(session), ...finishedPayload };
+    return { done: true, funnel: publicFunnel(funnel), session: publicSession(session), ...finishedPayload };
   }
 
   if (!stepExists(snapshot, session.currentStepKey)) {
@@ -866,7 +870,7 @@ async function getSessionStep(workspaceId, funnelId, sessionId) {
   const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
   // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
   if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session);
-  return { session: publicSession(session), ...payload };
+  return { funnel: publicFunnel(funnel), session: publicSession(session), ...payload };
 }
 
 /**

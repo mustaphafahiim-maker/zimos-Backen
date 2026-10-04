@@ -62,6 +62,7 @@ the numbers **400–449** (no lane owns them).
 - Product list: search (name), SKU, collection, type and stock filters now go to the server (GET /catalog/products q/sku/collectionId/productType/stock, typing debounced), so they cover the whole catalog, not the loaded page; a Created column; digital products and services show "Not tracked" for stock; "Preview" opens the product in the store (archived ones have none). Frontend only — the backend filters already existed.
 - Product SEO: `product.seo` {title, description, imageUrl, noindex} is now validated (lengths, http(s) image; other keys kept) and edited in the product form's "Search engines and sharing" card with a Google preview. The storefront's product metadata uses the title, description and sharing image and sends `noindex, follow` when hidden; the sitemap leaves hidden products out.
 - Product page settings on the store: `auto_select_variant` (default on) off leaves every option unchosen and the buy box says "Choose options" until the shopper picks; `landing_page_id` renders that published website page at the product URL with the product as the page's product (an inactive or missing page falls back to the standard page; picked in the product form from the store's website pages); "Similar products" (4, the first collection, else the newest) sits under the reviews and `hide_related_products` hides it.
+- Funnel runtime: the step endpoint now returns the funnel and its own settings (as the start already did). A step page shows prices in the funnel's currency (falling back to the store's) — the page's elements, the checkout line, the orders summary and the pixel `ViewContent` — and its tab title, description and icon are the step's own SEO first, then the funnel's title/description/favicon, then the step name and the store's icon. The entry page `/f/<ref>` keeps its generic title (it only starts the session and moves on).
 
 ## P0 — correctness, compliance, launch gates
 
@@ -149,7 +150,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 36. Product SEO fields in the product form (backend and store read them).
 - [x] 37. Storefront honours `auto_select_variant`, `landing_page_id`; a
   related-products section that `hide_related_products` can hide.
-- [ ] 38. Funnel runtime uses the funnel's currency, favicon and title (ties to 15).
+- [x] 38. Funnel runtime uses the funnel's currency, favicon and title (ties to 15).
 - [ ] 39. Custom-field answers on the waybill; `priceDeltaAmount`.
 - [ ] 40. Shopper review form with a photo; reviews import (Shopify) on the
   sandbox; public review endpoint must not reveal purchases by phone.
