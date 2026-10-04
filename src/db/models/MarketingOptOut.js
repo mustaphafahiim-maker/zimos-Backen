@@ -1,13 +1,15 @@
 'use strict';
 
 module.exports = (sequelize, DataTypes) => {
-  // A phone that asked the store to stop marketing messages (migration 400, whatsapp/optOut.js).
+  // A phone or an email address that asked the store to stop marketing messages
+  // (migrations 400 and 431, whatsapp/optOut.js, notifications/marketingUnsubscribe.js).
   const MarketingOptOut = sequelize.define(
     'MarketingOptOut',
     {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       workspaceId: { type: DataTypes.UUID, allowNull: false, field: 'workspace_id' },
-      phoneNormalized: { type: DataTypes.STRING(32), allowNull: false, field: 'phone_normalized' },
+      phoneNormalized: { type: DataTypes.STRING(32), allowNull: true, field: 'phone_normalized' },
+      email: { type: DataTypes.STRING(255), allowNull: true },
       source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'whatsapp' },
       word: { type: DataTypes.STRING(40), allowNull: true },
     },

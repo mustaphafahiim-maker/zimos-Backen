@@ -153,13 +153,18 @@ ${codeHtml}
       .map((p) => `<p style="margin:0 0 14px">${linkify(escapeHtml(p)).replace(/\n/g, '<br />')}</p>`)
       .join('\n');
     const logo = data.logoUrl && /^https?:\/\//.test(data.logoUrl) ? `<img src="${escapeHtml(data.logoUrl)}" alt="${store}" style="max-height:48px;max-width:180px" />` : `<strong style="font-size:18px">${store}</strong>`;
+    // A marketing email (the abandoned cart) ends with its unsubscribe link (marketingUnsubscribe.js).
+    const unsubscribe = data.unsubscribeUrl && /^https?:\/\//.test(data.unsubscribeUrl) ? String(data.unsubscribeUrl) : null;
+    const unsubscribeHtml = unsubscribe
+      ? `\n<p style="font-size:13px;color:#6b7280;margin:14px 0 0">لا تريد رسائل تسويقية من ${store}؟ <a href="${escapeHtml(unsubscribe)}" style="color:#6b7280">إلغاء الاشتراك</a></p>`
+      : '';
     return {
       subject,
       ...wrap(
         `<div style="border-top:4px solid ${color};padding-top:18px;margin-bottom:18px">${logo}</div>
 ${paragraphs}
-<p style="color:#6b7280;margin:18px 0 0">${store}</p>`,
-        [data.body, data.storeName].filter(Boolean).join('\n\n'),
+<p style="color:#6b7280;margin:18px 0 0">${store}</p>${unsubscribeHtml}`,
+        [data.body, data.storeName, unsubscribe && `إلغاء الاشتراك من الرسائل التسويقية: ${unsubscribe}`].filter(Boolean).join('\n\n'),
         { dir: 'rtl', arabicFooter: true }
       ),
     };

@@ -251,6 +251,8 @@ async function subscribe(workspace, body) {
   }
   // Signing up again is opting back in to marketing after an earlier STOP (whatsapp/optOut.js).
   await db.MarketingOptOut.destroy({ where: { workspaceId: workspace.id, phoneNormalized } });
+  // …and after an unsubscribe from a marketing email (notifications/marketingUnsubscribe.js).
+  if (email) await db.MarketingOptOut.destroy({ where: { workspaceId: workspace.id, email: String(email).trim().toLowerCase() } });
   await recordAudit({
     workspaceId: workspace.id,
     actorUserId: null,

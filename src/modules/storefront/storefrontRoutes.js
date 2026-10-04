@@ -30,6 +30,8 @@ router.use(require('../notifications/push/orderPush').router);
 
 // What the checkout form needs to pass the bot guard (a fresh time token).
 router.get('/checkout/guard', botProtection.guardConfig);
+// The unsubscribe link in a marketing email (notifications/marketingUnsubscribe.js).
+router.use(require('../notifications/marketingUnsubscribe').router);
 // The code-entry step of a checkout that answered 428 OTP_REQUIRED.
 router.post('/checkout/otp/verify', checkoutOtp.verify);
 router.post('/checkout/otp/resend', checkoutOtp.resend);

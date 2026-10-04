@@ -208,6 +208,18 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
         ? await context().loadCheckoutSubject(workspaceId, payload.checkoutSessionId)
         : null;
     if (!subject || !subject.email) return [];
+    // The abandoned-cart email is marketing: never to a STOP, an unsubscribe or a blocked phone or address,
+    // and it ends with an unsubscribe link (marketingUnsubscribe.js).
+    let unsubscribeUrl = null;
+    if (subject.kind === 'checkout') {
+      const refused = await require('../automations/marketingGuard').refusal(workspaceId, subject.phone, subject.email);
+      if (refused) {
+        logger.info(`[orderEmails] ${eventType} for ${workspaceId} not sent: ${refused}`);
+        return [];
+      }
+      const base = await require('../domains/primaryHost').storeOriginOf(subject.workspace && subject.workspace.slug ? subject.workspace : null);
+      unsubscribeUrl = require('./marketingUnsubscribe').linkFor(base, workspaceId, subject.session.id);
+    }
     const brand = await brandOf(workspaceId);
     const results = [];
     for (const row of rows) {
@@ -216,7 +228,7 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
         recipient: subject.email,
         template: 'order_email',
         workspaceId,
-        data: { ...composeData(current, subject.vars, brand), ...(await require('./orderEmailSender').senderFor(workspaceId)) },
+        data: { ...composeData(current, subject.vars, brand), ...(await require('./orderEmailSender').senderFor(workspaceId)), unsubscribeUrl },
       });
       results.push({ key: row.key, status: sent.status });
     }

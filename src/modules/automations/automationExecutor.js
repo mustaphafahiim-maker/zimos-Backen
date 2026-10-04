@@ -89,7 +89,7 @@ async function advance(execution, { resumed = false } = {}) {
     }
     // Checked before every message, not only at the start: a STOP during a wait counts.
     if (MESSAGE_STEPS.has(step.type) && marketingGuard.isMarketing(execution.trigger)) {
-      const refused = await marketingGuard.refusal(execution.workspaceId, subject.phone);
+      const refused = await marketingGuard.refusal(execution.workspaceId, subject.phone, subject.email);
       if (refused) {
         await logRun(execution, { status: 'skipped', stepIndex: i, stepType: step.type, detail: `stopped: ${refused}` });
         return finish(execution, 'stopped');
