@@ -228,6 +228,24 @@ The checkout autosave (`POST /store/:ws/checkout-sessions`) passes the order's b
   - The code is sent with the switch (`otpCode`); the same call without it sends another code.
   - The code is checked last, so a deposit error does not spend it.
 - **Deposit:** the shopper's payment status names the deposit up front (`codDeposit`). The pay page shows the transfer form once the shopper picks cash on delivery. The transfer is recorded as a `deposit` payment in the switch's transaction, on the order's COD price.
+The abandoned-cart email is marketing, so `automations/marketingGuard.js` checks it like the WhatsApp recovery message. It is not sent to:
+
+- a phone that replied STOP
+- a blocked phone
+- a blacklisted customer
+- an unsubscribed email
+- a blocked email
+
+The email ends with an unsubscribe link, which is the email form of STOP (`notifications/marketingUnsubscribe.js`, storefront `/unsubscribe`):
+
+- The link is signed and names the checkout it was sent for, so it can't be forged for someone else.
+- The page asks for one click instead of acting on open, because mail scanners open links too.
+- One unsubscribe covers both channels: it records the checkout's email and its phone (when it had one), exactly as a WhatsApp STOP stops all marketing.
+- A newsletter sign-up opts the person back in, by phone and by email.
+
+Migration 431 lets `marketing_opt_outs` hold an email, with or without a phone.
+
+Automation email steps on marketing triggers now pass the subject's email to the guard as well. No List-Unsubscribe header: the email provider wrapper takes no custom headers.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -396,7 +414,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 102. The orders export masks phones unless the teammate may reveal them (§3.4 #8).
 - [x] 103. The checkout autosave goes through the bot guard and keeps the shopper's IP and country (§5.1, §6.1).
 - [x] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
-- [ ] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
+- [x] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
 - [ ] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
 - [ ] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
 - [ ] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
