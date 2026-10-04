@@ -4,6 +4,7 @@ const db = require('../../db/models');
 const { ValidationError } = require('../../core/errors/AppError');
 const { STAGE_SQL, LATEST_SHIPMENT_JOIN, countsAsSaleSql } = require('../orders/orderStage');
 const { dayKey, rate, toNumber, DAY_MS } = require('./analyticsService');
+const base = require('../currencies/baseAmounts');
 
 /**
  * The dashboard home in one request (SPEC §15.1): every KPI for a range and
@@ -66,7 +67,7 @@ async function collectWindow(workspaceId, { start, end, tz, funnelId }) {
   const live = "(o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected')";
 
   const ORDERS = `
-    SELECT o.id, o.customer_id, o.created_at, coalesce(o.total_amount_base, o.total_amount) AS total_amount, o.discount_amount, o.amount_refunded,
+    SELECT o.id, o.customer_id, o.created_at, ${base.totalSql('o')} AS total_amount, ${base.amountSql('discount_amount')} AS discount_amount, ${base.amountSql('amount_refunded')} AS amount_refunded,
            o.payment_method, o.confirmation_state, o.funnel_id, o.shipping_address_snapshot,
            ${live} AS live, ${STAGE_SQL} AS stage,
            ${cols.unseen || "(o.confirmation_state = 'pending' AND o.cancelled_at IS NULL)"} AS is_new,

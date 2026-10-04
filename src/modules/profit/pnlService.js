@@ -4,6 +4,7 @@ const db = require('../../db/models');
 const { STAGE_SQL, LATEST_SHIPMENT_JOIN, countsAsSaleSql } = require('../orders/orderStage');
 const { resolveWindow } = require('../analytics/overviewService');
 const { dayKey, rate, DAY_MS } = require('../analytics/analyticsService');
+const base = require('../currencies/baseAmounts');
 
 /**
  * Real profit (SPEC §15.4).
@@ -73,7 +74,7 @@ async function historicalDeliveryRate(workspaceId, until) {
 function linesSql({ notTest, zimos }) {
   return `
     WITH ord AS (
-      SELECT o.id, o.total_amount, o.amount_refunded, o.payment_method,
+      SELECT o.id, ${base.totalSql('o')} AS total_amount, ${base.amountSql('amount_refunded')} AS amount_refunded, o.payment_method,
              to_char(o.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day,
              ${STAGE_SQL} AS stage
         FROM orders o${LATEST_SHIPMENT_JOIN}

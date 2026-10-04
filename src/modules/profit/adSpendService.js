@@ -7,6 +7,7 @@ const { recordAudit } = require('../audit/auditService');
 const { STAGE_SQL, LATEST_SHIPMENT_JOIN, countsAsSaleSql } = require('../orders/orderStage');
 const { resolveWindow } = require('../analytics/overviewService');
 const { PLATFORM_OF_SOURCE } = require('../analytics/attributionService');
+const base = require('../currencies/baseAmounts');
 
 /**
  * Ad spend per day (SPEC §15.4): manual entry, CSV import and the campaigns
@@ -289,7 +290,7 @@ async function campaigns(workspaceId, query = {}) {
             AND day >= (:start AT TIME ZONE :tz)::date AND day <= ((:end::timestamptz - interval '1 second') AT TIME ZONE :tz)::date
           GROUP BY platform, campaign_key`),
     run(`WITH ord AS (
-           SELECT o.total_amount, ${STAGE_SQL} AS stage,
+           SELECT ${base.totalSql('o')} AS total_amount, ${STAGE_SQL} AS stage,
                   (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live,
                   (o.confirmation_state = 'confirmed') AS confirmed,
                   lower(p.campaign) AS campaign

@@ -4,6 +4,7 @@ const db = require('../../db/models');
 const { STAGE_SQL, LATEST_SHIPMENT_JOIN, countsAsSaleSql } = require('../orders/orderStage');
 const { dayKey, rate, toNumber, DAY_MS } = require('./analyticsService');
 const { resolveWindow } = require('./overviewService');
+const base = require('../currencies/baseAmounts');
 
 /**
  * Sales attribution (SPEC §15.3): visitors, orders and sales per UTM value,
@@ -79,7 +80,7 @@ async function getAttribution(workspaceId, query = {}) {
      WHERE e.workspace_id = :workspaceId AND e.created_at >= :start AND e.created_at < :end ${eventWhere}`;
   // One row per order, with the UTM values of its purchase event (if any).
   const ORDERS = `
-    SELECT o.id, o.total_amount, ${STAGE_SQL} AS stage,
+    SELECT o.id, ${base.totalSql('o')} AS total_amount, ${STAGE_SQL} AS stage,
            (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live,
            (o.payment_method = 'cod' AND o.confirmation_state = 'confirmed') AS confirmed,
            to_char(o.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day,
