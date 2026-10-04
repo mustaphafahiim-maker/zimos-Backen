@@ -136,6 +136,11 @@ The price element follows the variant picked on the page (`lib/pagePicks`); ever
 Forms get one stars input (`ratingLabel`, 1–5, checked on the server) and one photo input (`fileLabel`, `fileRequired`). The photo uses the existing customer upload path, which takes JPEG, PNG or WebP only and re-encodes them. Other file types are not taken because they have no safe re-encoding step.
 
 The upload must belong to the same visitor (`visitorId` in the body). Submitting attaches it, so it stops expiring, and stores it as `data._files`. Staff see it through a signed link, and deleting the submission deletes the photo. Which inputs a form has is always read from the published page.
+Frontend only: the backend and storefront already read a step tree's `productId` and `globalStyles`. The funnel step page editor reuses the website editor's components unchanged: `LayerList` (with "add here" slots), `ResizableSplit`, `PageProductField`, `SavedSectionsLibrary` and `SectionInspector` with named styles.
+
+Undo/redo lives in a new per-step hook (`funnels/useStepHistory.ts`). It uses the website editor's limits and the same typing fold, and opening another step starts a fresh history.
+
+The tree itself stays in the funnel draft, so edits are still saved by the funnel's one Save button.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -288,7 +293,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 91. French in the storefront interface (§8.10).
 - [x] 92. A positioned custom HTML block in the builder, stored outside the tree (§8.2, §8.4).
 - [x] 93. Builder elements: masonry grid, sticky container, file and star inputs in forms, add-to-cart / buy-now buttons, a price that follows the picked variant (§9.3).
-- [ ] 94. The funnel page editor gets the website editor's tools: undo/redo, layers, page product, named styles, saved sections (§9.3).
+- [x] 94. The funnel page editor gets the website editor's tools: undo/redo, layers, page product, named styles, saved sections (§9.3).
 - [ ] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
 - [ ] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
 - [ ] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
