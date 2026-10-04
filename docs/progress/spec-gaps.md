@@ -35,6 +35,7 @@ the numbers **400–449** (no lane owns them).
 - `integration.failed` (notifications/integrationAlerts.js) is sent for the connection itself only: a gateway that refuses the keys or does not answer (starting a payment, refunds, status checks, saved-card charges), a payment webhook whose signature does not match the stored secret, a courier refusing the stored key or a permission (every call through `withAuthHandling`), WhatsApp refusing the token or not answering. A declined card, an address or an undeliverable number are not. Once a day per integration and reason; it never waits on or fails the call. WhatsApp webhooks with a bad signature send nothing: the URL carries only the public store id, so anyone could trigger it. Still open: a subscription renewal whose gateway refuses the keys is counted against the shopper (subscriptions/subscriptionService failRenewal) — the merchant is now told, but the renewal still fails.
 - Orders are attributed by their own touch (analytics/orderTouch.js): the last unless the merchant picks first, the other one when that is missing, the whole touch at once; an order from before touches were kept uses its purchase event. Attribution, the campaigns screen and P&L by campaign all read it, so a campaign has the same orders everywhere. Visitors stay per visit (events): a visitor has no order to carry a touch.
 - `analytics_daily` (migration 408) holds the overview's event counts per store day, for the store and per funnel. The overview reads whole days from it and counts the partial days at the window's edges (always today) from raw events, so it stays exact; a row counted before its day ended (+10 min) is recounted on the spot, which also fills old ranges once. `analytics.rollup_days` (every 30 min) counts finished days after each store's midnight. Total visits are now the sum of daily visits (a session past midnight counts on both days). Orders, lost checkouts and the breakdowns (sources, devices…) still query their tables.
+- The team screen groups people who joined into Admins (owner and the Admin invite, `workspace_manager`) and Members (every other role); pending invites stay in their own table. The seat counter is the API's (`/team/access-options`: members and pending invites); the old `POST /workspaces/:id/members` invite now has the same seat limit as `/team/invite`.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -90,7 +91,7 @@ the numbers **400–449** (no lane owns them).
   export ready (17b).
 - [x] 18. Analytics: `analytics_daily` rollup filled by the worker (18a); attribution
   from `orders.attribution` with first/last touch (18b).
-- [ ] 19. Team screen admins/members + seat counter; phone verification screen;
+- [ ] 19. (19a team screen done) Team screen admins/members + seat counter; phone verification screen;
   2FA code over WhatsApp; account settings (timezone, contact-form email,
   legal company/country, owner picture); plan limits on leads and storage.
 - [ ] 20. Digital delivery link on the thank-you page and by message.
