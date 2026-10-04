@@ -155,14 +155,10 @@ async function setFinancialState(workspaceId, orderId, state, req, transaction) 
   // Digital lines are delivered the moment the order is paid (modules/digital).
   if (state === 'paid' && before !== 'paid') {
     await require('../digital/digitalService').onOrderPaid(workspaceId, order.id, transaction);
-    // A product on a billing plan starts its subscription once the payment is committed (modules/subscriptions).
-    // …and the buyer is enrolled in a course sold through a product on the order (modules/courses).
-    const startPlans = () => {
-      void require('../subscriptions/subscriptionService').startForOrder(workspaceId, order.id);
-      void require('../courses/courseService').enrollForOrder(workspaceId, order.id);
-    };
-    if (transaction) transaction.afterCommit(startPlans);
-    else startPlans();
+    // A product on a billing plan starts its subscription, and the buyer is
+    // enrolled in a course sold through the order, from the order.paid event
+    // the audit row above records in this transaction (subscriptions/jobs.js,
+    // courses/jobs.js): retried until done, never lost to a crash after the commit.
   }
   return order;
 }

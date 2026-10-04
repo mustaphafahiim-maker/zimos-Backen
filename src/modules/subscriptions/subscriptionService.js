@@ -156,9 +156,12 @@ async function savedCardFor(workspaceId, order) {
 /**
  * After an order is paid: starts a subscription for each line whose product
  * is on a plan. Runs after the payment's own transaction — saving the card
- * asks the gateway, which must not hold that transaction open. Never throws.
+ * asks the gateway, which must not hold that transaction open. Started by the
+ * order.paid event (jobs.js), so a crash or a failed attempt is retried, never
+ * lost; a line that already has its subscription is skipped (unique per
+ * order line). Never throws unless `rethrow` (the event consumer) asks to.
  */
-async function startForOrder(workspaceId, orderId) {
+async function startForOrder(workspaceId, orderId, { rethrow = false } = {}) {
   try {
     const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, include: [{ model: db.OrderItem, as: 'items' }] });
     if (!order || order.paymentMethod === 'cod' || order.linkedFromOrderId) return [];
@@ -217,6 +220,7 @@ async function startForOrder(workspaceId, orderId) {
     return started;
   } catch (err) {
     logger.error(`[subscriptions] starting for order ${orderId} failed: ${err.message}`);
+    if (rethrow) throw err;
     return [];
   }
 }
