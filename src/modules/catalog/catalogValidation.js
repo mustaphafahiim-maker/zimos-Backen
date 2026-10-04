@@ -31,7 +31,14 @@ const productFields = {
   options: Joi.array().items(optionSchema),
   media: Joi.array().items(Joi.object()),
   tags: Joi.array().items(Joi.string()),
-  seo: Joi.object(),
+  // The product page's search and sharing details (the storefront's metadata and sitemap read them).
+  // Other keys are kept as they were sent, as before.
+  seo: Joi.object({
+    title: Joi.string().trim().max(120).allow('', null),
+    description: Joi.string().trim().max(320).allow('', null),
+    imageUrl: Joi.string().trim().max(1000).uri({ scheme: ['http', 'https'] }).allow('', null),
+    noindex: Joi.boolean(),
+  }).unknown(true),
   websiteId: uuid,
   // How the product ships (shipping/shippingRules.js). The extra fee is per
   // unit, minor units, and goes with shippingMode 'extra_fee' only — the

@@ -60,6 +60,7 @@ the numbers **400–449** (no lane owns them).
 - Cross-sell at checkout and on the thank-you page: the same strip as the cart, asking `/cross-sell` with placement `checkout` / `thank_you` for the products in the cart / the order just placed. A product opened from the strip carries `?from=cross_sell`, and a click inside the strip (quick add) marks the next add, so `add_to_cart` is sent with `source: cross_sell` in its metadata. Storefront only.
 - Product order bumps on `/checkout`: the add-ons of every product in the cart (one card per offer, none for a product already in the cart, the store-wide bump left to its own card), ticked-by-default rules start ticked; ticked ones go into the totals and the shipping quote and are sent as `orderBumps`, which the server checks against the cart (a refusal unticks them and reloads). Storefront only.
 - Product list: search (name), SKU, collection, type and stock filters now go to the server (GET /catalog/products q/sku/collectionId/productType/stock, typing debounced), so they cover the whole catalog, not the loaded page; a Created column; digital products and services show "Not tracked" for stock; "Preview" opens the product in the store (archived ones have none). Frontend only — the backend filters already existed.
+- Product SEO: `product.seo` {title, description, imageUrl, noindex} is now validated (lengths, http(s) image; other keys kept) and edited in the product form's "Search engines and sharing" card with a Google preview. The storefront's product metadata uses the title, description and sharing image and sends `noindex, follow` when hidden; the sitemap leaves hidden products out.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -144,7 +145,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 34. Product order bumps on `/checkout` (only the store-wide bump shows).
 - [x] 35. Product list uses the backend filters (collection, sku, type, stock)
   and server search; created date, "Not tracked", preview in store.
-- [ ] 36. Product SEO fields in the product form (backend and store read them).
+- [x] 36. Product SEO fields in the product form (backend and store read them).
 - [ ] 37. Storefront honours `auto_select_variant`, `landing_page_id`; a
   related-products section that `hide_related_products` can hide.
 - [ ] 38. Funnel runtime uses the funnel's currency, favicon and title (ties to 15).

@@ -104,11 +104,12 @@ async function storeSitemap(workspace) {
 
   const products = await db.Product.findAll({
     where: { workspaceId, status: 'active' },
-    attributes: ['id', 'slug', 'updatedAt'],
+    attributes: ['id', 'slug', 'updatedAt', 'seo'],
     order: [['updatedAt', 'DESC']],
     limit: SITEMAP_PRODUCT_LIMIT,
   });
-  for (const p of products) entries.push({ path: `/products/${p.slug || p.id}`, updatedAt: p.updatedAt });
+  // A product the merchant hid from search engines (seo.noindex) is left out.
+  for (const p of products.filter((x) => !(x.seo && x.seo.noindex === true))) entries.push({ path: `/products/${p.slug || p.id}`, updatedAt: p.updatedAt });
 
   const website = await db.Website.findOne({
     where: { workspaceId, status: 'published', publishedRevisionId: { [Op.ne]: null } },
