@@ -207,12 +207,15 @@ async function runJob(jobId, { lastAttempt = true } = {}) {
   try {
     const provider = getProvider();
     const context = await buildContext(job);
-    const prompt = renderPrompt(job.promptVersion, { ...job.input, ...context });
+    // Product photos (SPEC §19.2 "Images + name"): counted in the prompt, sent to the model as images.
+    const images = Array.isArray(job.input && job.input.imageUrls) ? job.input.imageUrls : [];
+    const prompt = renderPrompt(job.promptVersion, { ...job.input, photoCount: images.length, ...context });
     const answer = await provider.generate({
       feature: job.feature,
       prompt,
       promptVersion: job.promptVersion,
       input: job.input,
+      images,
       context,
       workspaceId: job.workspaceId,
       jobId: job.id,

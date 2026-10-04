@@ -15,7 +15,8 @@ const text = (max) => Joi.string().trim().max(max);
 
 const FEATURES = {
   product: {
-    prompt: 'product_content.v1',
+    // v2: tells the model about the attached photos (aiService passes them as `images`).
+    prompt: 'product_content.v2',
     input: Joi.object({
       name: text(200).min(2).required(),
       price: text(40).allow('', null),

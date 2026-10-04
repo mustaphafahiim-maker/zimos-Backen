@@ -31,6 +31,7 @@ module.exports = {
 | `prompt` | string | The rendered prompt from `prompts/<file>.vN.md`, placeholders filled. Send this to the model. |
 | `promptVersion` | string | e.g. `product_content.v1`. |
 | `input` | object | The merchant's validated input (`features.js` → `input`). |
+| `images` | string[] | Public http(s) URLs of the product photos the merchant attached (`product` only, at most 6; `[]` otherwise). Send them to a vision-capable model with the prompt; the prompt says how many there are. |
 | `context` | object | Server-side facts the prompt was built from. `page`: `{ product: { id, name, slug, description, imageUrl, features[], faqs[] }, allowedElements[] }`. Others: `{}`. |
 | `workspaceId`, `jobId` | uuid | For the provider's own logging. No customer data is ever in a request. |
 
