@@ -264,7 +264,7 @@ async function listJobs(workspaceId, { feature, limit = 20 } = {}) {
  * unpublished page on the store's website. Translation and policies have
  * nothing to create: the merchant copies the text where it belongs.
  */
-async function applyJob(workspaceId, jobId, { overrides, path: pagePath } = {}, req) {
+async function applyJob(workspaceId, jobId, { overrides, path: pagePath, target, name, subdomain } = {}, req) {
   const job = await scoped(db.AiJob, workspaceId, 'AI job').findByPkOrThrow(jobId);
   if (job.status !== 'succeeded') throw new AppError('AI_JOB_NOT_READY', 'This generation has no result to apply', 409);
   if (job.applied) throw new AppError('AI_JOB_ALREADY_APPLIED', 'This result was already turned into a draft', 409, job.applied);
@@ -288,6 +288,9 @@ async function applyJob(workspaceId, jobId, { overrides, path: pagePath } = {}, 
       req
     );
     applied = { type: 'product', id: product.id };
+  } else if (job.feature === 'page' && target === 'funnel') {
+    // The page as the sales step of a new draft funnel (applyFunnel.js).
+    applied = await require('./applyFunnel').applyAsFunnel(workspaceId, job, { name, subdomain }, req);
   } else if (job.feature === 'page') {
     const website = await db.Website.findOne({ where: { workspaceId }, order: [['updatedAt', 'DESC']] });
     if (!website) throw new AppError('WEBSITE_REQUIRED', 'Create your store website first, then add the page to it', 409);

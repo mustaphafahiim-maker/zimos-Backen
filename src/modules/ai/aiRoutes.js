@@ -6,6 +6,7 @@ const validate = require('../../core/middleware/validate');
 const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requireAnyPermission } = require('../../core/middleware/rbac');
+const { requireCreationAllowed } = require('../../core/middleware/subscriptionGuard');
 const { PERMISSIONS: P } = require('../../core/security/permissions');
 const { FEATURE_KEYS } = require('./features');
 const service = require('./aiService');
@@ -17,7 +18,8 @@ const wsId = (req) => req.tenant.workspaceId;
 // AI module (SPEC §19). Mounted at /api/v1/workspaces/:workspaceId/ai
 // Whoever may edit products or the website may generate drafts for them.
 const router = Router({ mergeParams: true });
-router.use(authenticate, resolveTenant, requireAnyPermission(P.PRODUCTS_MANAGE, P.WEBSITE_EDIT));
+// The funnel wizard's "AI template" generates too (applyFunnel.js).
+router.use(authenticate, resolveTenant, requireAnyPermission(P.PRODUCTS_MANAGE, P.WEBSITE_EDIT, P.FUNNELS_MANAGE));
 
 router.get('/usage', validate({ params: Joi.object(ws) }), asyncHandler(async (req, res) => res.json(await service.usage(wsId(req)))));
 
@@ -52,8 +54,15 @@ router.post(
       overrides: Joi.object().unknown(true),
       // page: where the draft page goes, e.g. "offer".
       path: Joi.string().max(300),
+      // page: a website page (default) or the sales step of a new draft funnel.
+      target: Joi.string().valid('website', 'funnel'),
+      name: Joi.string().trim().max(200),
+      // funnel: its link (made unique like any new funnel's; from the name when absent).
+      subdomain: Joi.string().lowercase().min(3).max(63).pattern(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/),
     }).default({}),
   }),
+  // A new funnel counts against the plan like any other (funnelsRoutes).
+  (req, res, next) => (req.body.target === 'funnel' ? requireCreationAllowed(req, res, next) : next()),
   asyncHandler(async (req, res) => res.json({ job: await service.applyJob(wsId(req), req.params.jobId, req.body, req) }))
 );
 

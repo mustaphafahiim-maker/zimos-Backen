@@ -41,6 +41,7 @@ the numbers **400–449** (no lane owns them).
 - Plan limits on leads and storage (billing/limitGuards.js): `leads` = contacts created this calendar month (UTC, as usage_counters) by forms and the newsletter; past it a NEW lead is refused with 402 at the form/newsletter (someone the store knows is never refused) and the merchant gets `plan.limit_reached` once a month. Manual contacts by staff are not limited. `storage_bytes` = media library + digital product files (shoppers' photos are not counted); an upload that would pass it is refused. The usage block shows new leads this month.
 - Digital delivery: the thank-you page asks `GET /store/:ws/downloads/order/:orderId` with the order's payment token (the online checkout's credential) a few times over ~50 s, since the payment is often captured just after the shopper lands; a COD order has no token and shows nothing there (its links come with the tracking page once paid). The message is the ready-made automation `digital_delivery` on the new trigger `order.digital_delivered` (WhatsApp template with the signed order link); the email was already sent by orderEmailService.
 - Shipping groups (migration 410 `shipping_profiles`, `products.shipping_profile_id`): a group's price for a destination is its governorate price, else its flat price, else none. The parcel travels once, so an order pays the dearest price that applies — each group's for its products and the store's own rate for products in no group (rule `profile_rate`). Free shipping, offer overrides and the free threshold still win first; extra-fee products still add their fee. Products are assigned from the group (a product is in one group at most); deleting a group sends its products back to the store's prices.
+- AI funnel: a generated page (feature `page`) applied with `target: funnel` becomes a new draft funnel in one transaction — the page as the sales step (its product-page button links removed so the funnel's edges lead on), a checkout with the COD form and a thank-you page, edges always / completed_checkout, step names in the job's dialect, a link made unique like createFunnel's, counted against the plan. Needs funnels.manage (the AI routes now also accept it). The product form's "Write with AI" fills the description field only (not saved until the product is); creating a whole product stays in the AI Studio.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -100,7 +101,7 @@ the numbers **400–449** (no lane owns them).
   2FA code over WhatsApp (19c); account settings (timezone, contact-form email,
   legal company/country (19d1), owner picture (19d2)); plan limits on leads and storage (19e).
 - [x] 20. Digital delivery link on the thank-you page and by message.
-- [ ] 21. AI: apply a generated funnel as funnel steps; AI entry points in the
+- [x] 21. AI: apply a generated funnel as funnel steps; AI entry points in the
   product form and the funnel wizard.
 - [ ] 22. (22a shipping profiles done) Shipping profiles + products.shippingProfileId; shipping options the
   shopper chooses between.

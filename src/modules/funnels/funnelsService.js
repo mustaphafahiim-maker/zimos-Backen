@@ -1096,6 +1096,7 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
 }
 
 module.exports = {
+  ensureUniqueSubdomain,
   createFunnel,
   listFunnels,
   getFunnel,
