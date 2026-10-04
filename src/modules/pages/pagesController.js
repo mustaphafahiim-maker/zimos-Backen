@@ -108,6 +108,8 @@ const publicGetPage = asyncHandler(async (req, res) => {
   const data = await require('../translations/contentTranslations').localizePage(req, result.data);
   // The page's own scripts (customCode/pageScripts.js), for the live store only.
   if (data.page) data.page.scripts = await require('../customCode/pageScripts').publicScripts(req, 'page', data.page.id);
+  // The custom HTML blocks the page places (customCode/htmlBlocks.js), for the live store only.
+  if (data.page) data.page.htmlBlocks = await require('../customCode/htmlBlocks').publicBlocks(req, data.page.tree);
   return res.json(data);
 });
 

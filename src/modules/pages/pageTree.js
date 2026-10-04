@@ -67,6 +67,10 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'upsell_decline_link',
   // SPEC §9.4: one block per item of a product's list (features, FAQs, …).
   'repeater',
+  // SPEC §8.2 "HTML code" / §8.4: a placeholder that only names its block. The
+  // merchant's HTML is kept OUTSIDE the tree (customCode/htmlBlocks.js) and
+  // served to the live store's own host only — the tree itself never holds markup.
+  'html_block',
   // Full-width storefront bands (slider, tiles, product rails…): showcaseElements.js.
   ...showcase.TYPES,
   // Gallery with thumbnails, variant and bundle pickers, review form: builderExtras.js.
@@ -189,6 +193,7 @@ function validateProps(props, rules, field, errors) {
 
 const ELEMENT_PROP_RULES = {
   shoppable_image: { imageId: check.uuid, title: check.string(300) },
+  html_block: { blockId: (v) => (typeof v === 'string' && /^[a-z0-9]{8,24}$/.test(v) ? null : 'must be 8–24 lowercase letters or digits') },
   repeater: {
     title: check.string(300),
     source: check.oneOf(...REPEATER_SOURCES),

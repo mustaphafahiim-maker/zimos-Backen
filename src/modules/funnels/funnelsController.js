@@ -137,6 +137,8 @@ const resume = asyncHandler(async (req, res) => {
 const localizeStep = async (req, funnelId, payload) => {
   await require('../translations/contentTranslations').localizeFunnelStep(req, funnelId, payload);
   if (payload && payload.step) payload.step.scripts = await require('../customCode/pageScripts').publicScripts(req, 'step', payload.step.id);
+  // …and the custom HTML blocks it places (customCode/htmlBlocks.js).
+  if (payload && payload.step) payload.step.htmlBlocks = await require('../customCode/htmlBlocks').publicBlocks(req, payload.step.tree);
   return payload;
 };
 
