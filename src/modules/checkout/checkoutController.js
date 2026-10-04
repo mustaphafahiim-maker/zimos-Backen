@@ -33,7 +33,7 @@ const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -101,7 +101,7 @@ const checkout = asyncHandler(async (req, res) => {
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
 
-  const context = { cartId: cart ? cart.id : null, checkoutSessionId: checkoutSessionId || null };
+  const context = { cartId: cart ? cart.id : null, checkoutSessionId: checkoutSessionId || null, ...(saveCard === true ? { saveCard: true } : {}) };
   // The shopper's answers to custom fields are checked again here, required
   // ones enforced; photos must be this visitor's or in this cart.
   const customFields = {

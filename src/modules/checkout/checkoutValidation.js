@@ -50,6 +50,9 @@ module.exports = {
       paymentProvider: Joi.string().max(50).optional(),
       // Where the gateway sends the shopper back to (online methods only).
       returnUrl: Joi.string().max(2000).optional(),
+      // The shopper agreed to keep the card for next time and one-click offers
+      // (payments/savedMethods/consentedSave.js). Online card payments only.
+      saveCard: Joi.boolean().optional(),
       discountCode: Joi.string().max(100).optional(),
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),

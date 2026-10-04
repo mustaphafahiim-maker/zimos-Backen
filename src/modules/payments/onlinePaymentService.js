@@ -428,6 +428,8 @@ async function recordPaymentTransaction(account, tx) {
       cartId: context.cartId || null,
       checkoutSessionId: context.checkoutSessionId || null,
     });
+    // The shopper ticked "save my card" at checkout.
+    await require('./savedMethods/consentedSave').afterPaid(order, context);
   }
   return { outcome, ...ids };
 }

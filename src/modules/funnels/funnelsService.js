@@ -898,13 +898,17 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
   });
   if (!offer || (offer.lines || []).length === 0) throw offerUnavailable('Offer');
 
+  // One click (SPEC §9.5): the order was paid with a card the shopper agreed
+  // to save, so the offer is a card order charged to it once this
+  // transaction commits (chargeOneClick below). Otherwise cash on delivery.
+  const card = await require('../payments/savedMethods/consentedSave').oneClickCardFor(original, transaction);
   const { order } = await orderService.createOrder(
     workspaceId,
     {
       items: [{ variantId: offer.lines[0].variantId, offerId: offer.id, quantity: 1 }],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
-      paymentMethod: 'cod',
+      paymentMethod: card ? 'card' : 'cod',
       funnelId,
     },
     { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
@@ -912,15 +916,49 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
     // shares that order's customer and often its variant, so duplicate_order
     // would flag (or refuse) every upsell. The original order already went
     // through the storefront rules.
-    { transaction, skipFraudRules: true, source: 'upsell' }
+    {
+      transaction,
+      skipFraudRules: true,
+      source: 'upsell',
+      // Not a sale until the card is charged; left unpaid it expires like any online order.
+      ...(card ? { awaitingPayment: oneClickHold() } : {}),
+    }
   );
-  return { order, originalId: original.id };
+  return { order, originalId: original.id, chargeWith: card ? card.id : null };
+}
+
+/** An online order's hold for a one-click charge: the usual payment window and token. */
+function oneClickHold() {
+  const online = require('../payments/onlinePaymentService');
+  const crypto = require('crypto');
+  const token = crypto.randomBytes(32).toString('base64url');
+  const minutes = require('../../config/env').payments.attemptTtlMinutes;
+  return { expiresAt: new Date(Date.now() + minutes * 60 * 1000), tokenHash: online.hashToken(token), completionContext: {} };
+}
+
+/**
+ * After the session move commits: charges a one-click follow-on order to the
+ * saved card (outside the transaction, never holding a lock over the
+ * gateway call). Declined: the offer stays unpaid and expires; the shopper is
+ * told, and their first order is untouched.
+ */
+async function chargeOneClick(workspaceId, result) {
+  const charge = result && result.followOnOrder && result.followOnOrder.chargeWith;
+  if (!charge) return result;
+  delete result.followOnOrder.chargeWith;
+  try {
+    const paid = await require('../payments/savedMethods/savedMethodService').chargeOrder(workspaceId, charge, result.followOnOrder.id, null);
+    result.followOnOrder.payment = { status: 'paid', amount: paid.amount, currency: paid.currency };
+  } catch (err) {
+    result.followOnOrder.payment = { status: 'declined', code: err.code || 'SAVED_METHOD_DECLINED' };
+  }
+  return result;
 }
 
 async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
   const { outcome, fromStepKey } = body;
 
-  return db.sequelize.transaction(async (t) => {
+  const advanced = await db.sequelize.transaction(async (t) => {
     const session = await db.FunnelSession.findOne({
       where: { id: sessionId, funnelId, workspaceId },
       lock: t.LOCK.UPDATE,
@@ -1046,11 +1084,13 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
         orderNumber: followOn.order.orderNumber,
         totalAmount: followOn.order.totalAmount,
         linkedFromOrderId: followOn.originalId,
+        ...(followOn.chargeWith ? { chargeWith: followOn.chargeWith } : {}),
       };
     }
 
     return result;
   });
+  return chargeOneClick(workspaceId, advanced);
 }
 
 module.exports = {

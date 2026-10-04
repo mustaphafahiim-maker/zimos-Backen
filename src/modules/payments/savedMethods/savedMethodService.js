@@ -100,7 +100,7 @@ async function saveFromPayment(workspaceId, paymentId, req) {
     sourcePaymentId: payment.id,
   });
   await recordAudit({
-    workspaceId, actorUserId: req.user.id, action: 'saved_payment_method.create', entityType: 'PaymentMethodSaved', entityId: row.id,
+    workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'saved_payment_method.create', entityType: 'PaymentMethodSaved', entityId: row.id,
     after: { customerId: row.customerId, provider: row.providerCode, last4: row.last4 }, req,
   });
   return present(row);
@@ -112,7 +112,7 @@ async function remove(workspaceId, savedId, req) {
   const before = present(row);
   await row.destroy();
   await recordAudit({
-    workspaceId, actorUserId: req.user.id, action: 'saved_payment_method.delete', entityType: 'PaymentMethodSaved', entityId: savedId, before, req,
+    workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'saved_payment_method.delete', entityType: 'PaymentMethodSaved', entityId: savedId, before, req,
   });
   return { deleted: true };
 }
@@ -178,7 +178,7 @@ async function chargeOrder(workspaceId, savedId, orderId, req) {
     }
     await saved.update({ lastUsedAt: now }, { transaction });
     await recordAudit({
-      workspaceId, actorUserId: req.user.id, action: 'saved_payment_method.charge', entityType: 'Payment', entityId: payment.id,
+      workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'saved_payment_method.charge', entityType: 'Payment', entityId: payment.id,
       after: { orderId, amount, savedMethodId: saved.id }, req, transaction,
     });
     return { paymentId: payment.id, amount, currency: order.currency, status: 'captured' };
