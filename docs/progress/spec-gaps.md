@@ -59,6 +59,7 @@ the numbers **400–449** (no lane owns them).
 - Inbox "Create order" opens `/orders/new?phone=&name=` from the conversation: the number is looked up at once, and a known customer's saved name and last address fill the form (their saved name wins over the WhatsApp profile name). Frontend only.
 - Cross-sell at checkout and on the thank-you page: the same strip as the cart, asking `/cross-sell` with placement `checkout` / `thank_you` for the products in the cart / the order just placed. A product opened from the strip carries `?from=cross_sell`, and a click inside the strip (quick add) marks the next add, so `add_to_cart` is sent with `source: cross_sell` in its metadata. Storefront only.
 - Product order bumps on `/checkout`: the add-ons of every product in the cart (one card per offer, none for a product already in the cart, the store-wide bump left to its own card), ticked-by-default rules start ticked; ticked ones go into the totals and the shipping quote and are sent as `orderBumps`, which the server checks against the cart (a refusal unticks them and reloads). Storefront only.
+- Product list: search (name), SKU, collection, type and stock filters now go to the server (GET /catalog/products q/sku/collectionId/productType/stock, typing debounced), so they cover the whole catalog, not the loaded page; a Created column; digital products and services show "Not tracked" for stock; "Preview" opens the product in the store (archived ones have none). Frontend only — the backend filters already existed.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -141,7 +142,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 33. Cross-sell at checkout and on the thank-you page (the dashboard offers
   both, the store shows only the cart); `add_to_cart` with `source=cross_sell`.
 - [x] 34. Product order bumps on `/checkout` (only the store-wide bump shows).
-- [ ] 35. Product list uses the backend filters (collection, sku, type, stock)
+- [x] 35. Product list uses the backend filters (collection, sku, type, stock)
   and server search; created date, "Not tracked", preview in store.
 - [ ] 36. Product SEO fields in the product form (backend and store read them).
 - [ ] 37. Storefront honours `auto_select_variant`, `landing_page_id`; a
