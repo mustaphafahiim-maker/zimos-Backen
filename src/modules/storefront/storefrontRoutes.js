@@ -9,8 +9,6 @@ const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
 const cartController = require('../cart/cartController');
 const checkoutController = require('../checkout/checkoutController');
-const reviewController = require('../reviews/reviewController');
-const reviewSchemas = require('../reviews/reviewValidation');
 const schemas = require('./storefrontValidation');
 const checkoutSchemas = require('../checkout/checkoutValidation');
 const checkoutSessionController = require('../checkoutSessions/checkoutSessionController');
@@ -45,7 +43,8 @@ router.get('/products', collectOptionFilters, validate(schemas.listProducts), co
 // Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
 router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
 router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getProduct);
-router.post('/products/:productId/reviews', validate(reviewSchemas.submit), reviewController.submit);
+// The review form: order number + phone prove the purchase (reviews/shopperReviews.js).
+router.use(require('../reviews/shopperReviews').router);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 // A shopper's photo for a product's image field (customerUploads). Limited
 // before multer reads a byte; multer refuses anything over 15 MB mid-stream.
