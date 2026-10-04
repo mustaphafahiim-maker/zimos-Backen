@@ -13,10 +13,12 @@ const { validatePageTree } = require('../pages/pageTree');
  * Two ways to use one:
  *   - insert a copy: the page gets the section's nodes and no link back;
  *   - insert it linked: the page's section carries
- *     `settings.savedSectionId`, and when the website is published its rows
- *     and look are taken from the saved section — so editing the saved
- *     section and publishing changes every linked copy. "Detach" in the
- *     editor simply removes that setting.
+ *     `settings.savedSectionId`, and when the website or the funnel is
+ *     published its rows and look are taken from the saved section — so
+ *     editing the saved section and publishing changes every linked copy.
+ *     "Detach" in the editor simply removes that setting. A funnel-only
+ *     section fills links inside its own funnel; anywhere else the page
+ *     keeps its own copy.
  *
  * A saved section's `tree` is one ordinary section node and goes through the
  * same validator as a page, so nothing can be saved here that a page would
@@ -127,7 +129,7 @@ async function remove(workspaceId, id, req) {
  * the saved section. A link to a section that was deleted leaves the page's
  * own copy as it is.
  */
-async function resolveLinkedSections(workspaceId, tree, { transaction, stampCountdowns = false } = {}) {
+async function resolveLinkedSections(workspaceId, tree, { transaction, stampCountdowns = false, funnelId = null } = {}) {
   const sections = tree && Array.isArray(tree.sections) ? tree.sections : null;
   if (!sections) return tree;
   const ids = [
@@ -138,7 +140,10 @@ async function resolveLinkedSections(workspaceId, tree, { transaction, stampCoun
     ),
   ];
   if (ids.length === 0) return tree;
-  const rows = await db.SavedSection.findAll({ where: { workspaceId, id: ids }, transaction });
+  // Global sections everywhere; a funnel-only one inside its own funnel.
+  const rows = (await db.SavedSection.findAll({ where: { workspaceId, id: ids }, transaction })).filter(
+    (r) => r.scope === 'global' || (funnelId && r.funnelId === funnelId)
+  );
   if (stampCountdowns) {
     // Going live: a countdown's "N hours" becomes a date in the saved section itself, so
     // every page linking it, and every later publish, shows the same deadline (pages/countdownDeadline.js).

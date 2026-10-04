@@ -32,15 +32,25 @@ async function forSave(workspaceId, funnelId, variants, transaction) {
   return funnel && funnel.status === 'published' ? stampVariants(variants).variants : variants;
 }
 
-/** At the funnel's publish: the running and paused tests on it. */
+/**
+ * At the funnel's publish: the running and paused tests on it. Their pages'
+ * linked saved sections are filled in too, as the steps' are: a variant page
+ * is both what the editor holds and what visitors see, and keeps its links.
+ */
 async function stampRunning(workspaceId, funnelId, transaction) {
+  const { resolveLinkedSections } = require('../savedSections/savedSectionsService');
   const tests = await db.Experiment.findAll({
     where: { workspaceId, funnelId, subjectType: 'funnel_step', status: ['running', 'paused'] },
     transaction,
   });
   for (const test of tests) {
-    const { variants, changed } = stampVariants(test.variants);
-    if (changed) await test.update({ variants }, { transaction });
+    const linked = [];
+    for (const variant of test.variants || []) {
+      const tree = variant && variant.data && variant.data.builderData;
+      linked.push(tree ? { ...variant, data: { ...variant.data, builderData: await resolveLinkedSections(workspaceId, tree, { transaction, stampCountdowns: true, funnelId }) } } : variant);
+    }
+    const { variants } = stampVariants(linked);
+    if (JSON.stringify(variants) !== JSON.stringify(test.variants)) await test.update({ variants }, { transaction });
   }
 }
 

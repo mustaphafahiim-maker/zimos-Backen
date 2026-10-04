@@ -565,6 +565,14 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
     // …and on the pages of the split tests running on it (splitTestCountdowns.js).
     await require('./splitTestCountdowns').stampRunning(workspaceId, funnelId, t);
     const steps = toSnapshotSteps(stepRows);
+    // Linked saved sections are frozen with the saved section's current content, as a website publish does.
+    for (const step of steps) {
+      step.builderData = await require('../savedSections/savedSectionsService').resolveLinkedSections(workspaceId, step.builderData, {
+        transaction: t,
+        stampCountdowns: true,
+        funnelId,
+      });
+    }
     const edges = toSnapshotEdges(edgeRows);
 
     const problems = validateGraph(steps, edges, { requireContent: true });
