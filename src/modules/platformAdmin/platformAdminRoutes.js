@@ -19,6 +19,8 @@ router.use(authenticate);
 router.use(require('./platformExtraRoutes'));
 // Support's view of a store's own data: only while the merchant has let support in.
 router.use(require('./supportViewRoutes'));
+// The couriers' areas map for every store.
+router.use(require('./carrierMapRoutes'));
 
 // --- Plans ---------------------------------------------------------------
 router.get('/plans', can(P.PLANS_VIEW), controller.listPlans);

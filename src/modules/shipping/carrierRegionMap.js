@@ -18,7 +18,10 @@ const { matchAddress } = require('./carrierAddressMatching');
  *           shared by every store (a courier's list is the same for all);
  *           refreshed when a store opens the courier's Areas screen and the
  *           last match is over a day old, or on demand
- *   manual  the store's own choice from that screen; wins over auto
+ *   manual  the store's own choice from that screen; wins over auto. A
+ *           shared manual row (workspace_id null) is the platform's choice
+ *           for every store (platform console, carrierMapRoutes.js): name
+ *           matching never replaces it, a store's own choice still wins
  *
  * Booking (carrierShipmentService) resolves the drop-off in this order:
  * the ids the merchant sent → the order's place on this map → name matching
@@ -155,10 +158,17 @@ async function autoMatch(connection, country = 'EG') {
     }
     const codes = regions.map((r) => r.code);
     await db.sequelize.transaction(async (transaction) => {
-      await db.CarrierRegionMap.destroy({ where: { carrierCode: adapter.code, workspaceId: null, geoRegionCode: codes }, transaction });
+      // The platform's own choices stay; only what name matching found is replaced.
+      const chosen = await db.CarrierRegionMap.findAll({
+        where: { carrierCode: adapter.code, workspaceId: null, source: 'manual', geoRegionCode: codes },
+        attributes: ['geoRegionCode'],
+        transaction,
+      });
+      const keep = new Set(chosen.map((row) => row.geoRegionCode));
+      await db.CarrierRegionMap.destroy({ where: { carrierCode: adapter.code, workspaceId: null, source: 'auto', geoRegionCode: codes }, transaction });
       if (found.length > 0) {
         await db.CarrierRegionMap.bulkCreate(
-          found.map((f) => ({ ...f, carrierCode: adapter.code, workspaceId: null, source: 'auto' })),
+          found.filter((f) => !keep.has(f.geoRegionCode)).map((f) => ({ ...f, carrierCode: adapter.code, workspaceId: null, source: 'auto' })),
           { transaction }
         );
       }
@@ -178,7 +188,7 @@ async function autoMatch(connection, country = 'EG') {
 async function ensureAutoMatched(connection, country) {
   const codes = (await geo.list({ country })).map((r) => r.code);
   const latest = await db.CarrierRegionMap.max('updatedAt', {
-    where: { carrierCode: connection.adapter.code, workspaceId: null, geoRegionCode: codes },
+    where: { carrierCode: connection.adapter.code, workspaceId: null, source: 'auto', geoRegionCode: codes },
   });
   if (latest && Date.now() - new Date(latest).getTime() < AUTO_TTL_MS) return;
   const key = `${connection.adapter.code}:${country}`;
@@ -291,6 +301,7 @@ async function clearMapping(workspaceId, code, regionCode, req) {
 
 module.exports = {
   schemas,
+  mappingView,
   resolveDropOff,
   autoMatch,
   listRegions,
