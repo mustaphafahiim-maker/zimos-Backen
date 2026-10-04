@@ -335,6 +335,13 @@ A paid order's subscription and course enrolment now start from the `order.paid`
 - Both are safe to repeat: a line's subscription is unique per order line, and an existing enrolment is not made twice.
 - `startForOrder` and `enrollForOrder` still never throw for other callers. The consumers ask them to re-throw so the queue sees the failure.
 - Verified by killing the server right after a payment: the subscription and enrolment were made after restart.
+`remove_branding` (from the plan or an override) now takes ZIMOS off every surface of the store, not only the classic footer:
+
+- the rich footer
+- the funnel pages' footer
+- the store and funnel headers, which showed the ZIMOS logo in place of a store logo when the store had none (they show just the store's name)
+
+One helper (`brandingRemoved`) reads the store's `removeBranding`. The store-unavailable page keeps its mark: it gets no plan information, and the store isn't open anyway.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -511,7 +518,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
 - [x] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
 - [x] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
-- [ ] 113. "Powered by ZIMOS" honours remove_branding on funnels and the rich footer (§8.11).
+- [x] 113. "Powered by ZIMOS" honours remove_branding on funnels and the rich footer (§8.11).
 - [ ] 114. No invented shipping, returns or COD promises: the product tab, FAQ fallback, trust strip and footer help read the store's own information (§8.5).
 - [ ] 115. The rich footer shows the policy links, footer pages and social links (§8.3).
 - [ ] 116. Automation conditions work on checkout, lost-order, lead and subscription triggers (§14.2).
