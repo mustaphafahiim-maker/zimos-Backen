@@ -1029,14 +1029,15 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
 
     // completed_checkout carries the order just placed on this step. An order
     // paid online only counts once it is paid: the shopper is sent on through
-    // the funnel after the payment page, not before.
+    // the funnel after the payment page, not before. A manual transfer goes on
+    // like cash on delivery: the merchant checks the receipt afterwards.
     if (outcome.type === 'completed_checkout' && outcome.orderId) {
       const placed = await db.Order.findOne({
         where: { id: outcome.orderId, workspaceId },
         attributes: ['id', 'paymentMethod', 'financialState', 'cancelledAt'],
         transaction: t,
       });
-      if (placed && placed.paymentMethod !== 'cod' && !['paid', 'partially_paid'].includes(placed.financialState)) {
+      if (placed && !['cod', 'bank_transfer'].includes(placed.paymentMethod) && !['paid', 'partially_paid'].includes(placed.financialState)) {
         throw new AppError('FUNNEL_ORDER_NOT_PAID', 'This order has not been paid yet', 409);
       }
     }
