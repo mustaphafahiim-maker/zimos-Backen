@@ -93,6 +93,8 @@ function newPaymentToken() {
 }
 
 function tokenMatches(order, token) {
+  // A message's payment link (paymentLinkToken.js) opens the same page.
+  if (require('./paymentLinkToken').linkTokenMatches(order, token)) return true;
   if (!order.paymentTokenHash || typeof token !== 'string' || !token) return false;
   const a = Buffer.from(hashToken(token));
   const b = Buffer.from(order.paymentTokenHash);

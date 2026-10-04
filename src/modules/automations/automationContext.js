@@ -91,7 +91,9 @@ async function loadOrderSubject(workspaceId, orderId) {
       order_link: base ? `${base}/track?t=${require('../storefront/orderTrackingExtras').tokenFor(order)}` : '',
       recovery_link: '',
       review_link: reviewLink,
-      payment_link: base && order.paymentMethod !== 'cod' ? `${base}/pay/${order.id}` : '',
+      // Signed, so it opens the payment page from a message (payments/paymentLinkToken.js).
+      payment_link:
+        base && order.paymentMethod !== 'cod' ? `${base}/pay/${order.id}?t=${require('../payments/paymentLinkToken').linkTokenFor(order)}` : '',
     },
     // What "the order moved on" is measured against.
     signature: [order.confirmationState, order.fulfillmentState, order.financialState, order.cancelledAt ? 'cancelled' : 'open'].join('|'),

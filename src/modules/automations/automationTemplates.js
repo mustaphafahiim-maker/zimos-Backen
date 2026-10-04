@@ -89,7 +89,13 @@ const TEMPLATES = [
     name: { ar: 'فشل الدفع + رابط الدفع', en: 'Payment failed + payment link' },
     description: { ar: 'رسالة برابط الدفع عند فشل عملية الدفع الإلكتروني.', en: 'A message with the payment link when an online payment fails.' },
     conditions: {},
-    steps: [{ type: 'whatsapp_template', template: 'payment_failed', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{payment_link}}'] }],
+    // A short wait, inside the order's payment window (PAYMENT_ATTEMPT_TTL_MINUTES, 30 by default):
+    // the shopper may simply try again first, and an order that expires meanwhile stops the run and
+    // becomes a lost order with its own recovery.
+    steps: [
+      { type: 'wait', amount: 20, unit: 'minutes' },
+      { type: 'whatsapp_template', template: 'payment_failed', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{payment_link}}'] },
+    ],
     whatsapp: { name: 'payment_failed', body: 'مرحبًا {{1}}، لم تكتمل عملية الدفع لطلبك رقم {{2}}. أعد المحاولة من هنا: {{3}}' },
   },
   {
