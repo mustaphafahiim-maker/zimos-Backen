@@ -28,6 +28,7 @@ typed the waybill of. Any `carrierCode` without an adapter behaves the same.
 | `settingFields` | `[{ key, label, options? }]` |
 | `credentialsSchema`, `settingsSchema` | Joi schemas for what the form sends |
 | `pollIntervalMinutes` | default 60 |
+| `countries` | ISO codes it delivers to, default `['EG']`; the carriers screen filters by it |
 
 ## Capabilities (all optional)
 

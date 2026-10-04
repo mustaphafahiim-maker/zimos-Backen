@@ -190,6 +190,8 @@ function describeAdapter(adapter) {
     name: adapter.name,
     webhookSetup: adapter.webhookSetup,
     supportsLabel: Boolean(adapter.supportsLabel),
+    // Where it delivers (ISO codes); the couriers so far are Egyptian.
+    countries: adapter.countries || ['EG'],
     credentialFields: adapter.credentialFields,
     settingFields: adapter.settingFields,
     capabilities: {
