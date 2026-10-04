@@ -36,6 +36,7 @@ the numbers **400–449** (no lane owns them).
 - Orders are attributed by their own touch (analytics/orderTouch.js): the last unless the merchant picks first, the other one when that is missing, the whole touch at once; an order from before touches were kept uses its purchase event. Attribution, the campaigns screen and P&L by campaign all read it, so a campaign has the same orders everywhere. Visitors stay per visit (events): a visitor has no order to carry a touch.
 - `analytics_daily` (migration 408) holds the overview's event counts per store day, for the store and per funnel. The overview reads whole days from it and counts the partial days at the window's edges (always today) from raw events, so it stays exact; a row counted before its day ended (+10 min) is recounted on the spot, which also fills old ranges once. `analytics.rollup_days` (every 30 min) counts finished days after each store's midnight. Total visits are now the sum of daily visits (a session past midnight counts on both days). Orders, lost checkouts and the breakdowns (sources, devices…) still query their tables.
 - The team screen groups people who joined into Admins (owner and the Admin invite, `workspace_manager`) and Members (every other role); pending invites stay in their own table. The seat counter is the API's (`/team/access-options`: members and pending invites); the old `POST /workspaces/:id/members` invite now has the same seat limit as `/team/invite`.
+- The phone verification code and the WhatsApp sign-in code go through the platform's WhatsApp provider (authentication template), SMS when WhatsApp cannot deliver, and — for sign-in — email when there is no verified phone any more, so nobody is locked out. WhatsApp two-step sign-in can only be turned on with a verified phone.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -91,7 +92,7 @@ the numbers **400–449** (no lane owns them).
   export ready (17b).
 - [x] 18. Analytics: `analytics_daily` rollup filled by the worker (18a); attribution
   from `orders.attribution` with first/last touch (18b).
-- [ ] 19. (19a team screen, 19b phone verification done) Team screen admins/members + seat counter; phone verification screen;
+- [ ] 19. (19a team screen, 19b phone verification, 19c WhatsApp sign-in code done) Team screen admins/members + seat counter; phone verification screen;
   2FA code over WhatsApp; account settings (timezone, contact-form email,
   legal company/country, owner picture); plan limits on leads and storage.
 - [ ] 20. Digital delivery link on the thank-you page and by message.

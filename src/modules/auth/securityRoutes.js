@@ -108,6 +108,15 @@ router.post(
   asyncHandler(async (req, res) => res.json(await twoFactor.enableEmail(req.user, req.body, req)))
 );
 
+// The code on WhatsApp to the verified phone (twoFactorWhatsapp.js).
+router.post(
+  '/two-factor/whatsapp/enable',
+  authLimiter,
+  authenticate,
+  validate({ body: Joi.object({ password }) }),
+  asyncHandler(async (req, res) => res.json(await twoFactor.enableWhatsapp(req.user, req.body, req)))
+);
+
 router.post(
   '/two-factor/totp/setup',
   authLimiter,

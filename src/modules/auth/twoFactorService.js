@@ -15,6 +15,8 @@ const notify = require('../notifications/notify');
  *   email  a 6-digit code by email when signing in from a browser that is
  *          not remembered
  *   totp   a code from an authenticator app (RFC 6238: SHA-1, 30 s, 6 digits)
+ *   whatsapp  a 6-digit code to the verified phone on WhatsApp (SMS, then
+ *          email, when it cannot be delivered: twoFactorWhatsapp.js)
  *
  * The password check stays where it is (authService.login). When the person
  * has a second step and the browser is not remembered, login answers
@@ -107,6 +109,12 @@ async function enableEmail(user, { password }, req) {
   return status(user);
 }
 
+async function enableWhatsapp(user, { password }, req) {
+  await assertPassword(user, password);
+  await require('./twoFactorWhatsapp').enable(user, await settingsRow(user.id), req);
+  return status(user);
+}
+
 /** Step 1 of the authenticator setup: a new secret, shown as a QR code. Nothing changes until it is confirmed. */
 async function setupTotp(user, { password }) {
   await assertPassword(user, password);
@@ -183,7 +191,10 @@ async function challengeIfNeeded(user, req, { locale = 'ar' } = {}) {
   if (recent >= 5) throw new AppError('TOO_MANY_CODES', 'Too many codes were sent. Try again in a few minutes.', 429);
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   const challenge = await db.LoginChallenge.create({ ...base, codeHash: sha256(`${user.id}:${code}`) });
-  await notify.email({ recipient: user.email, template: 'login_code', data: { code, minutes: CODE_TTL_MS / 60000, locale } });
+  const minutes = CODE_TTL_MS / 60000;
+  const phone = row.mode === 'whatsapp' ? await require('./twoFactorWhatsapp').sendCode(user, code, { minutes, locale }) : null;
+  if (phone) return { twoFactorRequired: true, challengeToken: challenge.id, ...phone };
+  await notify.email({ recipient: user.email, template: 'login_code', data: { code, minutes, locale } });
   return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'email', sentTo: maskEmail(user.email) };
 }
 
@@ -231,4 +242,4 @@ async function forgetDevices(user, req) {
   return status(user);
 }
 
-module.exports = { status, enableEmail, setupTotp, confirmTotp, disable, challengeIfNeeded, verifyChallenge, forgetDevices, totpAt, totpMatches, base32Encode };
+module.exports = { status, enableEmail, enableWhatsapp, setupTotp, confirmTotp, disable, challengeIfNeeded, verifyChallenge, forgetDevices, totpAt, totpMatches, base32Encode };
