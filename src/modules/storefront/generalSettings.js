@@ -103,7 +103,8 @@ async function storeSitemap(workspace) {
   const entries = [{ path: '/', updatedAt: workspace.updatedAt }, { path: '/products', updatedAt: workspace.updatedAt }];
 
   const products = await db.Product.findAll({
-    where: { workspaceId, status: 'active' },
+    // A hidden product (page_settings.hidden) opens by its link only — never in a listing, this one included.
+    where: { workspaceId, status: 'active', [Op.and]: [db.sequelize.literal(require('../catalog/productPage').notHiddenSql('"Product"'))] },
     attributes: ['id', 'slug', 'updatedAt', 'seo'],
     order: [['updatedAt', 'DESC']],
     limit: SITEMAP_PRODUCT_LIMIT,
