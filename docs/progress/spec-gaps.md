@@ -30,6 +30,7 @@ the numbers **400–449** (no lane owns them).
 - A funnel's currency is applied without converting prices: the funnel publishes only when its offers, order bump and page product are priced in its currency, and an order placed on it in another currency is refused (FUNNEL_CURRENCY_MISMATCH). What a shopper is charged is the price the merchant set; FX conversion of charges waits on the rate provider, an open decision (SPEC §11.5).
 - The storefront display currency is display only: the header switcher (and the builder `currency_converter` element, which shares the choice) adds an "≈" amount under the price in the chosen currency from the store rates; the cart, checkout and charge stay in the price currency. The choice is remembered per store in the browser; "convert automatically" picks the visitor currency from the browser language region on a first visit when the store lists it.
 - Reports add orders up in the store base currency (currencies/baseAmounts.js): the order total is its recorded `total_amount_base`, and its other amounts (refunds, discounts, shipping, lines) are converted by that order own base/total ratio, so the rate is the one of the day it was placed. Applies to attribution, ad campaigns, P&L, the overview, the analytics summary and funnel analytics. Product costs and product economics are entered in the store currency and are not converted. An order placed when no rate was known counts at its own amounts, as before.
+- `Lead` fires from the browser on a newsletter sign-up (footer band and popup) and on a funnel opt-in step, with a browser event id the server relay reuses. The builder `form` element is a contact form (`contact_form.submitted`) and sends no Lead. Headless browsers are dropped as bots by the events endpoint, so a browser check needs a desktop user agent.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -80,7 +81,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 15. Payments (15a shopper consent to save a card + one-click upsell charge; 15b funnel currency applied; 15c display currency switcher + `currency_converter` element; 15d base amounts in attribution/P&L): funnel currency applied to orders, storefront display
   currency switcher, `currency_converter` element, base amounts in
   attribution/P&L; shopper consent to save a card and one-click upsell charge.
-- [ ] 16. Lead pixel event from the newsletter form.
+- [x] 16. Lead pixel event from the newsletter form.
 - [ ] 17. Notifications: integration-failed for gateway / carrier / WhatsApp;
   export ready.
 - [ ] 18. Analytics: `analytics_daily` rollup filled by the worker; attribution
