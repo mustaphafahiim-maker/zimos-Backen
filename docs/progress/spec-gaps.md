@@ -115,6 +115,7 @@ the numbers **400–449** (no lane owns them).
 The photos are uploaded through the media library and only their URLs are sent (max 6). The provider gets them as `images` with prompt `product_content.v2`, which states the photo count and says to describe only what they show. The sandbox provider ignores them. Existing v1 jobs keep their prompt version.
 A product on a plan is sold only for a card on a gateway with `supportsTokenization`. The checkout, a payment retry and a switch to cash on delivery answer 422 `PLAN_NEEDS_SAVED_CARD` otherwise. The card is saved without a separate tick, because the storefront says so beside the methods; `startForOrder` saves it, so the shopper's own `saveCard` is ignored for such an order and the card is not saved twice. The storefront filters to card methods. With none, it leaves the list and says the product can't be ordered. The installments note shows each payment (the variant price) and the total (price × payments).
 Saving a card with no payment is an optional gateway contract (`createCardSetup`/`completeCardSetup`); the sandbox implements it, and real gateways add it later. The portal uses the gateway of the card on file, else the one the first order was paid with, else the first live one. A test gateway is never picked for a live shopper. A card update on a past-due subscription charges the renewal at once and resets the retry count. A trial prices the product line at 0 on the first order through the server-pinned price `priceLine` already honours (`Symbol.for('zimos.productTestPrice')`), once per phone and product. With nothing else to pay, the payment becomes a 0 "payment" whose redirect is the card page; on return the order is paid at 0 and completed. The order summaries still show the regular price, and the payment note says the trial takes it off. "Renewal failed" is a ready automation template (WhatsApp + email with `{{payment_link}}`, the portal).
+`ad_id` from the landing URL is kept in the order's touch (`adId`). Spend is still kept per campaign per day; an ad-level CSV (with an "Ad ID" column) is added up into those rows and keeps the ads' ids. An order is counted under a campaign by its `utm_campaign` (name or id) first, then by the campaign its ad belongs to. That rescues renamed campaigns and unfilled `{{campaign.name}}` templates. Ad ids are matched whatever the day they were imported on. Manual spend entry has no ad ids. The P&L by campaign still groups by `utm_campaign` only.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -254,7 +255,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 78. "Create product with AI" takes product photos (§19.2).
 - [x] 79. Subscription / instalment products in the store: the plan shown, COD refused, the card saved (§18.1).
 - [x] 80. Subscriptions: free trial, card update in the portal, a ready "renewal failed" message (§18.1).
-- [ ] 81. `ad_id` from ad links recorded and matched to spend (§15.4).
+- [x] 81. `ad_id` from ad links recorded and matched to spend (§15.4).
 - [ ] 82. App store: Clarity and Google Merchant shown as available (§16.6).
 - [ ] 83. Changing the owner's email, verified (§17.3).
 - [ ] 84. Education: tutorial links by key settings, help center and Telegram cards on the home page (§15.1, §18.6).
