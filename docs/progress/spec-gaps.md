@@ -191,6 +191,13 @@ Removed from the storefront:
 - the strings no longer used, in English, Arabic and French. `upsell.save` stays because funnel offers use it.
 
 `/offer/<order>` stays as a redirect to the thank-you page so old links keep working. The real post-purchase offers are `ThankYouUpsell` (Offers → post-purchase upsell) and the funnels' upsell/downsell steps. The backend had nothing to remove.
+**Reset.** `POST /themes/current/reset` (`themes/themeReset.js`, permission website.edit) removes only the look keys the merchant tuned on top of the theme: `primaryColor`, `primaryColorSource`, `primaryColorDark`, `secondaryColor`, `fontFamily` and `cornerRadius`.
+
+- It keeps the theme itself, the logo, and the content of the header, footer and announcement bar.
+- It takes effect live at once, like switching a theme, and is audited with the before-state.
+- The gallery shows Reset only on the current theme's card, behind a confirmation.
+
+**Tags.** Migration 429 seeds tags for the seeded themes from a small shared vocabulary that the dashboard translates. Only empty tag lists are filled, so console edits are never overwritten; the console already edits tags. Each card shows its tags, and a Style filter lists every tag in use.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -349,7 +356,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
 - [x] 98. Large digital files uploaded straight to storage (presigned multipart) (§18.2).
 - [x] 99. Remove the leftover mock upsell page and helpers (§9.8).
-- [ ] 100. Theme gallery: reset the current theme, theme tags (§8.1).
+- [x] 100. Theme gallery: reset the current theme, theme tags (§8.1).
 
 Not queued (decided already or waiting on the owner): cross-sell discounts and "once per customer" by phone/email (lane 3), the full style/layout tab list (lane 5), city/district shipping prices (decision 19 keeps the city as free text), service ratings (lane 8: no fake ratings), a niche-template wizard card (decision 75).
 
