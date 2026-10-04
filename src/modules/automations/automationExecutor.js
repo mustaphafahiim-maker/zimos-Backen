@@ -98,6 +98,7 @@ async function advance(execution, { resumed = false } = {}) {
     try {
       const detail = await steps.runStep(step, recoveryCoupon.forStep(subject, step, ctx.couponCode, list), { workspaceId: execution.workspaceId, trigger: execution.trigger, rule });
       await logRun(execution, { status: 'sent', stepIndex: i, stepType: step.type, detail });
+      if (MESSAGE_STEPS.has(step.type)) await require('./recoveryContacted').mark(subject);
     } catch (err) {
       await logRun(execution, { status: 'failed', stepIndex: i, stepType: step.type, detail: err.message });
     }

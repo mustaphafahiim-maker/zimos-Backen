@@ -165,12 +165,13 @@ const enableTemplate = asyncHandler(async (req, res) => {
   if (!template) throw new NotFoundError('AutomationTemplate');
   const existing = await db.AutomationRule.findOne({ where: { workspaceId, templateKey: template.key } });
   if (existing) return res.json({ rule: view(existing), created: false });
+  const made = templates.ruleFrom(template, req.body.couponCode);
   const rule = await db.AutomationRule.create({
     workspaceId,
     name: template.name[req.body.locale === 'en' ? 'en' : 'ar'],
     trigger: template.trigger,
-    conditions: template.conditions,
-    actions: template.steps,
+    conditions: made.conditions,
+    actions: made.steps,
     isActive: true,
     templateKey: template.key,
   });
@@ -185,7 +186,11 @@ router.get('/', validate({ params: Joi.object(ws) }), list);
 router.get('/templates', validate({ params: Joi.object(ws) }), listTemplates);
 router.post(
   '/templates/:key/enable',
-  validate({ params: Joi.object({ ...ws, key: Joi.string().max(60).required() }), body: Joi.object({ locale: Joi.string().valid('ar', 'en').default('ar') }).default({}) }),
+  validate({ params: Joi.object({ ...ws, key: Joi.string().max(60).required() }), body: Joi.object({
+      locale: Joi.string().valid('ar', 'en').default('ar'),
+      // A template that offers a coupon (acceptsCoupon): the code its last message gives.
+      couponCode: Joi.string().trim().max(100).allow(null, '').optional(),
+    }).default({}) }),
   enableTemplate
 );
 router.get(

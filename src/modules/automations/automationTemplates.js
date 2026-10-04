@@ -69,19 +69,30 @@ const TEMPLATES = [
     key: 'abandoned_cart',
     trigger: 'checkout.abandoned',
     name: { ar: 'استرجاع السلة المتروكة', en: 'Abandoned cart recovery' },
+    // SPEC §6.4: WhatsApp after 30 minutes, then after 24 hours with a coupon. A checkout counts as
+    // abandoned after 15 minutes by default (abandoned_after_minutes), so the first reminder waits 15 more.
     description: {
-      ar: 'تذكير بعد ساعة من ترك الطلب، ثم تذكير ثانٍ بعد يوم. يتوقف تلقائيًا إذا أكمل العميل الشراء.',
-      en: 'A reminder an hour after the order was left, then a second one a day later. Stops by itself once the customer buys.',
+      ar: 'تذكير بعد حوالي نص ساعة من ترك الطلب، ثم تذكير أخير بعد يوم — بكود خصم لو حددته. يتوقف تلقائيًا إذا أكمل العميل الشراء.',
+      en: 'A reminder about half an hour after the order was left, then a last one a day later — with a coupon when you give one. Stops by itself once the customer buys.',
     },
     conditions: {},
     steps: [
-      { type: 'wait', amount: 1, unit: 'hours' },
+      { type: 'wait', amount: 15, unit: 'minutes' },
       { type: 'whatsapp_template', template: 'cart_reminder', language: 'ar', params: ['{{customer_name}}', '{{store_name}}', '{{recovery_link}}'] },
       { type: 'wait', amount: 1, unit: 'days' },
       { type: 'whatsapp_template', template: 'cart_reminder_last', language: 'ar', params: ['{{customer_name}}', '{{recovery_link}}'] },
     ],
+    // Switched on with a coupon (POST …/templates/abandoned_cart/enable { couponCode }): the last reminder offers it,
+    // and only its link applies it (recoveryCoupon.js).
+    couponStep: {
+      index: 3,
+      step: { type: 'whatsapp_template', template: 'cart_reminder_coupon', language: 'ar', params: ['{{customer_name}}', '{{coupon_code}}', '{{recovery_link}}'] },
+    },
     whatsapp: { name: 'cart_reminder', body: 'مرحبًا {{1}}، طلبك من {{2}} في انتظارك. أكمله من هنا: {{3}}\nللإيقاف أرسل: إيقاف' },
-    whatsappExtra: [{ name: 'cart_reminder_last', body: 'مرحبًا {{1}}، ما زال طلبك محفوظًا. أكمله الآن: {{2}}\nللإيقاف أرسل: إيقاف' }],
+    whatsappExtra: [
+      { name: 'cart_reminder_last', body: 'مرحبًا {{1}}، ما زال طلبك محفوظًا. أكمله الآن: {{2}}\nللإيقاف أرسل: إيقاف' },
+      { name: 'cart_reminder_coupon', body: 'مرحبًا {{1}}، ما زال طلبك محفوظًا — استخدم الكود {{2}} واحصل على خصم. أكمله الآن: {{3}}\nللإيقاف أرسل: إيقاف' },
+    ],
   },
   {
     key: 'payment_failed',
@@ -150,7 +161,16 @@ const publicView = (t) => ({
   description: t.description,
   conditions: t.conditions,
   steps: t.steps,
+  // Takes a coupon when switched on (its last message then offers it).
+  acceptsCoupon: Boolean(t.couponStep),
   whatsappTemplates: [t.whatsapp, ...(t.whatsappExtra || [])].filter(Boolean),
 });
 
-module.exports = { TEMPLATES, byKey, publicView };
+/** The rule a template becomes: with `couponCode`, a template that offers one uses its coupon step. */
+function ruleFrom(t, couponCode) {
+  if (!couponCode || !t.couponStep) return { conditions: t.conditions, steps: t.steps };
+  const steps = t.steps.map((s, i) => (i === t.couponStep.index ? t.couponStep.step : s));
+  return { conditions: { ...t.conditions, couponCode }, steps };
+}
+
+module.exports = { TEMPLATES, byKey, publicView, ruleFrom };

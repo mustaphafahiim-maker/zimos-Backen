@@ -135,7 +135,8 @@ async function loadCheckoutSubject(workspaceId, checkoutSessionId) {
       review_link: '',
       payment_link: '',
     },
-    signature: [session.status, session.recoveryStatus, session.convertedOrderId ? 'converted' : 'open'].join('|'),
+    // "Contacted" (the sequence's own first message, recoveryContacted.js) is still open; a merchant's recovered/lost is not.
+    signature: [session.status, session.recoveryStatus === 'contacted' ? 'not_contacted' : session.recoveryStatus, session.convertedOrderId ? 'converted' : 'open'].join('|'),
   };
 }
 
