@@ -99,6 +99,7 @@ the numbers **400–449** (no lane owns them).
 - Pixel events (§13.2): the store product page sends ViewContent (once per view) and InitiateCheckout (the first time the shopper touches the order form); bundle adds were already AddToCart through the cart. Every event — in the store and funnels, browser side — names products by the product feed's item id (variant SKU, else variant id; lib/contentId) so catalogs match; Purchase reads it from the order lines' SKU snapshot. Events sent before the store's analytics context exists wait for it (up to 10) instead of being dropped. (62)
 - 63: the checkout sends `adIds` (lib/adMatch.ts: _fbp/_fbc, _ttp, _scid, the _ga client id, click ids from the touch cookie, the visitor id), kept in orders.ad_match (migration 419) — the Purchase may go out days later (on_confirmed/on_delivered), so the ids are stored, not read at send time. marketing/pixelMatching.js builds the matching set: IP/UA from the order, fbc falls back to the attribution's fbclid, hashed fn/ln (first and last word of the name), ct, zp, country, external_id = hashed visitor id (same as the other server events) + customer id; contents use the feed's content id (SKU, else variant). TikTok gets ttp/ttclid/external_id/contents only — its name/address hashing rules could not be confirmed. GA4 uses the real _ga client id when present. Staff orders keep no ad ids.
 - 64: automations/recoveryCoupon.js — the rule's couponCode rides on {{recovery_link}} as `?coupon=` only in messages that name {{coupon_code}} (so a first reminder does not give away the later message's discount); when no message names it, every link carries it. The /r/:token page prefers the link's coupon over the session's typed code; the checkout applies it through the existing coupon-from-link path.
+- 65: "all filter results" ticks the ids (dashboard SelectAllMatching pages through GET /orders with the list's own query, up to 500) instead of sending `filter` to POST /orders/bulk, so printing, the extras and bulk shipping — which take ids — work on it too. Offered once the whole page is ticked and the list has more; the bar says when the 500 cap cut the list.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -222,7 +223,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 62. Store product pages send ViewContent / InitiateCheckout / bundle AddToCart; one content id everywhere (§13.2).
 - [x] 63. Server-side Purchase carries matching data (IP, user agent, fbp/fbc, ttclid, name, city, country) and contents (§13.2).
 - [x] 64. The recovery link applies the automation's coupon (§6.4).
-- [ ] 65. Bulk actions on "all filter results" in the orders list (§4.3).
+- [x] 65. Bulk actions on "all filter results" in the orders list (§4.3).
 - [ ] 66. Order page: pages visited, time to purchase, the customer's order count and "New customer", last action in the header (§4.2–§4.4).
 - [ ] 67. "Save as draft" on the order's shipping card (§4.4).
 - [ ] 68. The missing outbox events: order.item_added, customer.updated, product.low_stock, review.created (§3.2).
