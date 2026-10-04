@@ -153,6 +153,8 @@ app.use(hostResolver);
 const v1 = express.Router();
 // The signed-in person's devices for push notifications (notifications/push).
 v1.use('/me/push', require('./modules/notifications/push/pushService').router);
+// ZIMOS's referral program for merchants: their code, link, earnings and payout requests.
+v1.use('/me/referrals', require('./modules/referrals/merchantReferrals').me);
 // The signed-in person's name and picture (before /auth, which has no such route).
 v1.use('/auth/me/profile', require('./modules/auth/profileRoutes'));
 v1.use('/auth', authRoutes);

@@ -21,6 +21,8 @@ router.use(require('./platformExtraRoutes'));
 router.use(require('./supportViewRoutes'));
 // The couriers' areas map for every store.
 router.use(require('./carrierMapRoutes'));
+// The merchants' referral program: its share and the payout requests.
+router.use(require('../referrals/merchantReferrals').admin);
 
 // --- Plans ---------------------------------------------------------------
 router.get('/plans', can(P.PLANS_VIEW), controller.listPlans);
