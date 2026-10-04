@@ -1,4 +1,5 @@
 'use strict';
+const { forViewer } = require('../../core/utils/phoneMask');
 const asyncHandler = require('express-async-handler');
 const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
@@ -67,7 +68,8 @@ const schemas = {
   exportCsv: { params: Joi.object({ workspaceId: uuid.required() }), body: Joi.object(filters).default({}) },
 };
 
-const list = asyncHandler(async (req, res) => res.json(await service.list(req.tenant.workspaceId, req.query)));
+// Phones are masked for roles without customers.reveal_sensitive (lostOrderPhones.js).
+const list = asyncHandler(async (req, res) => res.json(forViewer(req, await service.list(req.tenant.workspaceId, req.query))));
 const stats = asyncHandler(async (req, res) => res.json(await service.stats(req.tenant.workspaceId, req.query)));
 const update = asyncHandler(async (req, res) =>
   res.json({ session: await service.update(req.tenant.workspaceId, req.params.sessionId, req.body, req) })
@@ -78,7 +80,8 @@ const convert = asyncHandler(async (req, res) =>
 const remove = asyncHandler(async (req, res) => res.json(await service.remove(req.tenant.workspaceId, req.params.sessionId, req)));
 const exportCsv = asyncHandler(async (req, res) => {
   // JSON rather than a file download: the dashboard builds the file from `csv`.
-  const { csv, count } = await service.exportCsv(req.tenant.workspaceId, req.body || {});
+  const maskPhones = !req.tenant.hasPermission('customers.reveal_sensitive');
+  const { csv, count } = await service.exportCsv(req.tenant.workspaceId, req.body || {}, { maskPhones });
   res.json({ csv, count, filename: `lost-orders-${new Date().toISOString().slice(0, 10)}.csv` });
 });
 // Public: GET /store/:workspaceId/recover/:token

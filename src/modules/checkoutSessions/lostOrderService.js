@@ -323,6 +323,8 @@ async function convert(workspaceId, sessionId, body, req) {
   const stored = session.contactFields || {};
 
   const contact = { ...(payload.contact || {}), ...stored, ...(body.contact || {}) };
+  // The list showed a masked number (lostOrderPhones.js): sent back unchanged, it means the captured one.
+  if (require('./lostOrderPhones').isMasked(contact.phone)) contact.phone = require('./lostOrderPhones').phoneOf(session);
   if (!contact.fullName) throw new ValidationError([{ field: 'contact.fullName', message: 'The customer name is required' }]);
   if (!contact.phone) throw new ValidationError([{ field: 'contact.phone', message: 'The phone number is required' }]);
   const shippingAddress = body.shippingAddress || payload.shippingAddress || null;
@@ -412,7 +414,7 @@ function csvCell(value) {
 }
 
 /** POST /checkout-sessions/export — the filtered list as CSV (UTF-8 with BOM, opens in Excel). */
-async function exportCsv(workspaceId, filters = {}) {
+async function exportCsv(workspaceId, filters = {}, opts = {}) {
   const minutes = await abandonMinutes(workspaceId);
   const { conditions, bind } = buildFilters(workspaceId, minutes, filters);
   bind.limit = EXPORT_MAX_ROWS;
@@ -434,7 +436,7 @@ async function exportCsv(workspaceId, filters = {}) {
         s.status,
         s.lostReason || '',
         s.customerName,
-        s.phone,
+        opts.maskPhones ? require('../../core/utils/phoneMask').maskPhone(s.phone) : s.phone,
         s.email,
         address.city,
         address.addressLine,
