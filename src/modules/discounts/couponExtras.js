@@ -204,7 +204,7 @@ async function saveOrderRules(workspaceId, data, req) {
  * throws for a bad code: `valid: false` with the reason's code, so the page
  * can say why in the shopper's language.
  */
-async function previewCode(workspaceId, code, items, visitorId = null) {
+async function previewCode(workspaceId, code, items, visitorId = null, funnelId = null) {
   const { priceLine } = require('../orders/orderService');
   const { applyBundleTiers } = require('../bundles/bundlePricing');
   const lines = [];
@@ -217,7 +217,8 @@ async function previewCode(workspaceId, code, items, visitorId = null) {
       subtotal,
       productIds: lines.map((line) => line.productId),
       customerId: null,
-      funnelId: null,
+      // A code limited to some funnels applies in those funnels' checkouts only.
+      funnelId,
     });
     return { valid: true, code: discount.code, type: discount.type, amount, subtotal, reason: null };
   } catch (err) {

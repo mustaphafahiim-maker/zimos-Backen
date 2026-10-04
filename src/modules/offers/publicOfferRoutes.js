@@ -122,10 +122,20 @@ router.post(
         .min(1)
         .max(50)
         .required(),
+      // Previewed in a funnel's checkout: a funnel-limited code applies there.
+      funnelId: uuid.optional(),
     }),
   }),
   asyncHandler(async (req, res) =>
-    res.json({ coupon: await require('../discounts/couponExtras').previewCode(ws(req), req.body.code, req.body.items, require('../catalog/productTests').visitorOf(req)) })
+    res.json({
+      coupon: await require('../discounts/couponExtras').previewCode(
+        ws(req),
+        req.body.code,
+        req.body.items,
+        require('../catalog/productTests').visitorOf(req),
+        req.body.funnelId || null
+      ),
+    })
   )
 );
 
