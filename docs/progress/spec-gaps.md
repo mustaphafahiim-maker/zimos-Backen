@@ -368,6 +368,13 @@ Each condition reads what the subject has:
 - **All of them:** tags and "first order" are read from the contact. A checkout counts as risk "low", since it isn't scored.
 
 A condition the subject can't answer (a lead has no products; a checkout autosaved before a payment method was picked) skips the rule with that reason, rather than sending something the merchant limited to something else.
+Subscriptions on a free trial (`trialing`, from trialCheckout.js) now show on the subscriptions screen:
+
+- an "On a free trial" count beside the others
+- a "Trial" option in the status filter (the API refused `status=trialing` before)
+- included in the top products
+
+They are not in the "per period" amount: nothing has been charged for them yet.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -548,7 +555,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 114. No invented shipping, returns or COD promises: the product tab, FAQ fallback, trust strip and footer help read the store's own information (§8.5).
 - [x] 115. The rich footer shows the policy links, footer pages and social links (§8.3).
 - [x] 116. Automation conditions work on checkout, lost-order, lead and subscription triggers (§14.2).
-- [ ] 117. Trial subscriptions shown and counted in the subscriptions screen (§18.1).
+- [x] 117. Trial subscriptions shown and counted in the subscriptions screen (§18.1).
 - [ ] 118. "Convert to order" keeps the coupon, the funnel and the custom answers, and cannot create two orders (§6.3).
 - [ ] 119. Recovery automations mark the lost order contacted; the ready-made recovery timing as the spec says (§6.4).
 - [ ] 120. The tracking page accepts the store's own country's phones (§14.7).
