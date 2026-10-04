@@ -18,17 +18,19 @@ const exportCsv = asyncHandler(async (req, res) => {
   // Dates are written on the store's own clock, not the server's.
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['timezone'] });
   const timezone = (workspace && workspace.timezone) || 'UTC';
+  // Phones partly hidden, as in the orders list, without customers.reveal_sensitive (SPEC §3.4 #8).
+  const maskPhones = !req.tenant.hasPermission('customers.reveal_sensitive');
 
   // Excel: the same table as one .xlsx document (right-to-left for Arabic).
   if (format === 'xlsx') {
-    const rows = await exportService.tableRows(workspaceId, filters, { columns: requested, rowPer, lang, timezone });
+    const rows = await exportService.tableRows(workspaceId, filters, { columns: requested, rowPer, lang, timezone, maskPhones });
     const file = buildXlsx(rows, { sheetName: lang === 'ar' ? 'الأوردرات' : 'Orders', rtl: lang === 'ar' });
     await recordAudit({
       workspaceId,
       actorUserId: req.user.id,
       action: 'order.export',
       entityType: 'Order',
-      metadata: { filters, rowPer, format, columns: requested || 'default' },
+      metadata: { filters, rowPer, format, columns: requested || 'default', maskedPhones: maskPhones },
       req,
     });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -40,7 +42,7 @@ const exportCsv = asyncHandler(async (req, res) => {
 
   // The first chunk is produced before any header is sent, so a database
   // error still answers as a normal JSON error.
-  const chunks = exportService.csvChunks(workspaceId, filters, { columns: requested, rowPer, lang, timezone });
+  const chunks = exportService.csvChunks(workspaceId, filters, { columns: requested, rowPer, lang, timezone, maskPhones });
   const first = await chunks.next();
 
   await recordAudit({
@@ -48,7 +50,7 @@ const exportCsv = asyncHandler(async (req, res) => {
     actorUserId: req.user.id,
     action: 'order.export',
     entityType: 'Order',
-    metadata: { filters, rowPer, columns: requested || 'default' },
+    metadata: { filters, rowPer, columns: requested || 'default', maskedPhones: maskPhones },
     req,
   });
 

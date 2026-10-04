@@ -282,10 +282,19 @@ function resolveColumns(requested, rowPer) {
  *
  * @param {string} workspaceId
  * @param {object} filters   the orders list query: q, from, to, stage, sort, the three states
- * @param {object} options   { columns: string[], rowPer: 'order' | 'item', lang: 'en' | 'ar', timezone }
+ * @param {object} options   { columns: string[], rowPer: 'order' | 'item', lang: 'en' | 'ar', timezone, maskPhones }
+ *
+ * `maskPhones`: every phone written partly hidden (010****665), as the orders
+ * list shows them to a teammate without customers.reveal_sensitive (SPEC §3.4 #8).
  */
-async function* csvChunks(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone } = {}) {
+/** The order as written to the file: phones masked when the teammate may not see them. */
+function phoneShape(maskPhones) {
+  return maskPhones ? require('../../core/utils/phoneMask').maskPhonesDeep : (row) => row;
+}
+
+async function* csvChunks(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone, maskPhones = false } = {}) {
   const columns = resolveColumns(requested, rowPer);
+  const shape = phoneShape(maskPhones);
   const x = exportContext({ lang, timezone });
   yield `﻿${line(columns.map((c) => (lang === 'ar' ? c.ar : c.en)))}`;
 
@@ -301,7 +310,7 @@ async function* csvChunks(workspaceId, filters, { columns: requested, rowPer = '
     );
     let chunk = '';
     for (const order of page.orders) {
-      const row = { ...order, shipment: shipments.get(order.id) || null };
+      const row = shape({ ...order, shipment: shipments.get(order.id) || null });
       const items = rowPer === 'item' && row.items && row.items.length > 0 ? row.items : [null];
       for (const item of items) chunk += line(columns.map((c) => c.value(row, item, x)));
     }
@@ -334,8 +343,9 @@ const NUMERIC_COLUMNS = new Set([
  * format. Built in memory: the spreadsheet is one zipped document, so there
  * is nothing to stream; MAX_ORDERS bounds it as it bounds the CSV.
  */
-async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone } = {}) {
+async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone, maskPhones = false } = {}) {
   const columns = resolveColumns(requested, rowPer);
+  const shape = phoneShape(maskPhones);
   const x = exportContext({ lang, timezone });
   const rows = [columns.map((c) => (lang === 'ar' ? c.ar : c.en))];
   const asCell = (column, value) => {
@@ -355,7 +365,7 @@ async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'o
       page.orders.map((o) => o.id)
     );
     for (const order of page.orders) {
-      const row = { ...order, shipment: shipments.get(order.id) || null };
+      const row = shape({ ...order, shipment: shipments.get(order.id) || null });
       const items = rowPer === 'item' && row.items && row.items.length > 0 ? row.items : [null];
       for (const item of items) rows.push(columns.map((c) => asCell(c, c.value(row, item, x))));
     }

@@ -55,7 +55,8 @@ async function startOrdersExport(workspaceId, userId, body, req) {
         userId,
         kind: 'orders',
         format,
-        params: { filters, columns: columns || null, rowPer, lang },
+        // Decided by who asks: the file is built later, without their session (SPEC §3.4 #8).
+        params: { filters, columns: columns || null, rowPer, lang, maskPhones: !(req && req.tenant && req.tenant.hasPermission('customers.reveal_sensitive')) },
         fileName: `orders-${stamp}.${format}`,
       },
       { transaction }
@@ -75,9 +76,10 @@ async function startOrdersExport(workspaceId, userId, body, req) {
 }
 
 async function build(row) {
-  const { filters, columns, rowPer, lang } = row.params || {};
+  const { filters, columns, rowPer, lang, maskPhones } = row.params || {};
   const workspace = await db.Workspace.findByPk(row.workspaceId, { attributes: ['timezone'] });
-  const options = { columns: columns || undefined, rowPer, lang, timezone: (workspace && workspace.timezone) || 'UTC' };
+  // An export started before phones were masked has no flag: it is masked too.
+  const options = { columns: columns || undefined, rowPer, lang, timezone: (workspace && workspace.timezone) || 'UTC', maskPhones: maskPhones !== false };
   if (row.format === 'xlsx') {
     const rows = await exportService.tableRows(row.workspaceId, filters || {}, options);
     return buildXlsx(rows, { sheetName: lang === 'ar' ? 'الأوردرات' : 'Orders', rtl: lang === 'ar' });
