@@ -275,6 +275,24 @@ Two-step sign-in recovery (`auth/twoFactorRecovery.js`, migration 432).
 **Password reset**
 - A password reset (link or SMS) keeps two-step sign-in on. Otherwise a mailbox that can reset the password would also get past an authenticator.
 - It now forgets remembered browsers, so every device asks for the second step again.
+**Sign-in from a new device** (`auth/newDeviceSignIn.js`)
+
+- A password sign-in from a browser that has never signed in to the account is asked for an email code. It goes through the two-step challenge (`challengeIfNeeded` with `newDevice`), and the answer carries `newDevice: true`.
+- An account with two-step sign-in on gets its own second step instead.
+- On in production. Elsewhere `NEW_DEVICE_CODE=on` turns it on, so local scripts that sign in with curl keep working.
+- Google sign-in skips the code, as it skips two-step: Google ran its own check.
+
+**New sign-in alert**
+
+- Whenever a sign-in finishes on a browser new to the account, the person gets an email naming the browser, the IP and the time, and what to do if it wasn't them (`security_notice` / `new_sign_in`).
+- Sign-up and its confirmation remember the browser without an alert.
+
+**Remembering a browser**
+
+- A "known" browser is a signed, httpOnly cookie listing up to five accounts that finished a sign-in there.
+- It only spares the code and the alert. It is not the two-step "remember this device", which skips the second step and is kept server-side.
+
+**Fix along the way:** the platform console's login could not take a code at all (it read `result.user` from a challenge), so a platform user with two-step sign-in could not sign in. The console now has its own code step, with backup codes.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -446,7 +464,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
 - [x] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
 - [x] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
-- [ ] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
+- [x] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
 - [ ] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
 - [ ] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
 - [ ] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
