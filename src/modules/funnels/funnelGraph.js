@@ -50,7 +50,8 @@ function validateStepData(data, opts = {}) {
  */
 function resolveEntry(steps, edges) {
   const problems = [];
-  const stepKeys = steps.map((s) => s.key);
+  // Generic pages (genericPages.js) are off the path: never the entry.
+  const stepKeys = require('./genericPages').flowSteps(steps, edges).map((s) => s.key);
   const targeted = new Set(edges.map((e) => e.toStepKey));
   const entries = stepKeys.filter((k) => !targeted.has(k));
 
@@ -133,7 +134,7 @@ function validateGraph(steps, edges, { requireContent = false } = {}) {
       }
     }
     for (const s of steps) {
-      if (!seen.has(s.key)) {
+      if (!seen.has(s.key) && !require('./genericPages').isGeneric(s, edges)) {
         problems.push({
           field: `steps.${s.key}`,
           message: `Step "${s.key}" is unreachable from the entry step`,

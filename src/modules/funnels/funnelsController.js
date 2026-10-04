@@ -188,5 +188,6 @@ module.exports = {
   resume,
   startSession,
   getSessionStep,
+  localizeStep,
   advance,
 };
