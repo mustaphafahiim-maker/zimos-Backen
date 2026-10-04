@@ -245,4 +245,8 @@ router.get(
   waybillController.waybill
 );
 
+
+// The order page's session details, customer history and last action (orderSessionDetails.js).
+router.use(require('./orderSessionDetails').router);
+
 module.exports = router;
