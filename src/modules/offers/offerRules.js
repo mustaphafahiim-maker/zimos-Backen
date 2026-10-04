@@ -383,7 +383,9 @@ async function orderProductIds(orderId, transaction) {
 /** GET: the upsell to show on this order's thank-you page, or null. */
 async function publicUpsell(workspaceId, orderId, orderNumber) {
   const order = await findShopperOrder(workspaceId, orderId, orderNumber);
-  if (!(await orderOpenForUpsell(order))) return null;
+  // Cash on delivery: one more line on the order. Paid online: a linked order (upsellFollowOn.js).
+  const followOn = require('./upsellFollowOn').paidOnlineOpen(order, UPSELL_WINDOW_MINUTES);
+  if (!followOn && !(await orderOpenForUpsell(order))) return null;
   if (await db.UpsellAcceptance.count({ where: { orderId: order.id } })) return null;
   const match = await upsellFor(workspaceId, await orderProductIds(order.id));
   if (!match) return null;
@@ -391,17 +393,24 @@ async function publicUpsell(workspaceId, orderId, orderNumber) {
   const offer = await db.Offer.findByPk(match.card.offerId, { attributes: ['id', 'countdownMinutes'] });
   const expiresAt = require('./offerCountdown').deadline(offer, order.createdAt);
   if (expiresAt && expiresAt.getTime() <= Date.now()) return null;
-  return { ...match.card, ruleId: match.rule.id, countdownMinutes: (offer && offer.countdownMinutes) || null, expiresAt };
+  return { ...match.card, ruleId: match.rule.id, countdownMinutes: (offer && offer.countdownMinutes) || null, expiresAt, followOn };
 }
 
-/** POST: adds the upsell's offer to the order, once. */
+/**
+ * POST: takes the upsell's offer, once — added to a cash-on-delivery order, or
+ * as a linked order after one paid online (upsellFollowOn.js), charged in one
+ * click to a card the shopper saved.
+ */
 async function acceptUpsell(workspaceId, orderId, orderNumber, offerId, variantId = null) {
   const orderService = require('../orders/orderService');
+  const followOns = require('./upsellFollowOn');
+  let charge = null;
   try {
-    return await db.sequelize.transaction(async (transaction) => {
+    const result = await db.sequelize.transaction(async (transaction) => {
       const order = await findShopperOrder(workspaceId, orderId, orderNumber, { transaction, lock: transaction.LOCK.UPDATE });
       const closed = () => new AppError('UPSELL_CLOSED', 'This order can no longer be added to', 409);
-      if (!(await orderOpenForUpsell(order, transaction))) throw closed();
+      const asFollowOn = followOns.paidOnlineOpen(order, UPSELL_WINDOW_MINUTES);
+      if (!asFollowOn && !(await orderOpenForUpsell(order, transaction))) throw closed();
       if (await db.UpsellAcceptance.count({ where: { orderId: order.id }, transaction })) throw closed();
       const match = await upsellFor(workspaceId, await orderProductIds(order.id, transaction));
       if (!match || match.card.offerId !== offerId) {
@@ -412,6 +421,36 @@ async function acceptUpsell(workspaceId, orderId, orderNumber, offerId, variantI
       const countdown = require('./offerCountdown');
       countdown.assertOpen(offer, order.createdAt, countdown.upsellExpired);
       const line = offer ? await require('./offerVariantChoice').offerLineFor(offer, variantId, transaction) : { variantId: match.card.variantId, offerId, quantity: 1 };
+
+      if (asFollowOn) {
+        const made = await followOns.createFollowOn(workspaceId, order, line, transaction);
+        await db.UpsellAcceptance.create(
+          { workspaceId, orderId: order.id, upsellRuleId: match.rule.id, offerId, orderItemId: made.item ? made.item.id : null, amount: made.order.totalAmount },
+          { transaction }
+        );
+        await recordAudit({
+          workspaceId,
+          actorUserId: null,
+          action: 'order.upsell_accepted',
+          entityType: 'Order',
+          entityId: order.id,
+          after: { offerId, upsellRuleId: match.rule.id, followOnOrderId: made.order.id },
+          transaction,
+        });
+        charge = made.chargeWith ? { orderId: made.order.id, savedMethodId: made.chargeWith } : null;
+        return {
+          id: made.order.id,
+          orderNumber: made.order.orderNumber,
+          subtotalAmount: Number(made.order.subtotalAmount),
+          shippingAmount: Number(made.order.shippingAmount),
+          totalAmount: Number(made.order.totalAmount),
+          currency: made.order.currency,
+          followOn: true,
+          paymentMethod: made.order.paymentMethod,
+          added: { name: match.card.name, productName: match.card.productName, amount: Number(made.item ? made.item.lineTotalAmount : made.order.totalAmount) },
+        };
+      }
+
       const { item } = await orderService.addLineToOpenOrder(
         workspaceId,
         order,
@@ -442,6 +481,10 @@ async function acceptUpsell(workspaceId, orderId, orderNumber, offerId, variantI
         added: { name: match.card.name, productName: match.card.productName, amount: Number(item.lineTotalAmount) },
       };
     });
+    // A linked order to a saved card: charged now, outside the transaction.
+    if (charge) result.payment = await followOns.chargeFollowOn(workspaceId, charge.orderId, charge.savedMethodId);
+    else if (result.followOn) result.payment = { status: 'cod' };
+    return result;
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') throw new AppError('UPSELL_CLOSED', 'This order can no longer be added to', 409);
     if (err && err.code === 'INSUFFICIENT_STOCK') throw new AppError('UPSELL_CLOSED', 'This offer just sold out', 409);
