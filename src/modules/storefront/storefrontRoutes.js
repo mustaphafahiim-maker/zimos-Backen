@@ -94,7 +94,7 @@ router.post('/orders/:orderId/payment/return', validate(onlinePaymentSchemas.sho
 router.post('/orders/:orderId/payment/retry', validate(onlinePaymentSchemas.shopperRetry), onlinePaymentController.shopperRetry);
 router.post(
   '/orders/:orderId/payment/switch-to-cod',
-  validate(onlinePaymentSchemas.shopperAction),
+  validate(onlinePaymentSchemas.shopperSwitchToCod),
   onlinePaymentController.shopperSwitchToCod
 );
 

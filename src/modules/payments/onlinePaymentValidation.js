@@ -56,6 +56,18 @@ module.exports = {
     }),
   },
   shopperAction: { params: storeOrderParam },
+  // The COD checks the switch may ask for (payments/codSwitchChecks.js): a code by phone, a deposit by transfer.
+  shopperSwitchToCod: {
+    params: storeOrderParam,
+    body: Joi.object({
+      otpCode: Joi.string().trim().pattern(/^\d{4,6}$/).optional(),
+      transfer: Joi.object({
+        methodId: Joi.string().max(80).required(),
+        receiptUploadId: Joi.string().uuid().allow(null).optional(),
+        senderReference: Joi.string().max(100).allow('', null).optional(),
+      }).optional(),
+    }),
+  },
   webhook: {
     params: Joi.object({ code: Joi.string().max(50).required(), token: Joi.string().max(100).required() }),
   },

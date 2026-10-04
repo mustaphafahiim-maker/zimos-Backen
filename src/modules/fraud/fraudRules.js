@@ -434,6 +434,8 @@ module.exports = {
   OrderRejectedError,
   resolveFraudRules,
   refusesFlags,
+  ruleOfFlag,
+  hasRecentCodOrderFromIp,
   storeCountry,
   isValidMobile,
   evaluateStorefrontOrder,

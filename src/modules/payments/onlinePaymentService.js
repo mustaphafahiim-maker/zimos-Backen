@@ -613,6 +613,7 @@ async function describeForShopper(order, workspace, preview) {
   const online = offered.filter((m) => m.id !== methodsService.COD);
   const awaiting = status === 'awaiting_payment';
   const retriesLeft = Math.max(0, env.payments.maxAttemptsPerOrder - attempts.length);
+  const canSwitchToCod = awaiting && offered.some((m) => m.id === methodsService.COD) && require('./codSwitchChecks').funnelAllowsCod(workspace, order);
 
   return {
     orderId: order.id,
@@ -640,7 +641,9 @@ async function describeForShopper(order, workspace, preview) {
       : null,
     canRetry: awaiting && retriesLeft > 0 && online.length > 0,
     retriesLeft,
-    canSwitchToCod: awaiting && offered.some((m) => m.id === methodsService.COD),
+    canSwitchToCod,
+    // The deposit by transfer the switch needs (payments/codSwitchChecks.js), for the pay page to ask first.
+    codDeposit: canSwitchToCod ? ((await require('./codSwitchChecks').depositFor(workspace, order)) || {}).view || null : null,
     methods: awaiting ? online : [],
   };
 }
@@ -807,6 +810,8 @@ async function switchToCod(workspaceId, orderId, token, req) {
     });
     throw new fraudRules.OrderRejectedError({ customerId: order.customerId, flags: flagged });
   }
+  // What a COD checkout would have asked: the funnel's methods, the per-IP rule, a code, a deposit.
+  const codChecks = await require('./codSwitchChecks').check(workspace, order, (req && req.body) || {}, req);
 
   const completed = await db.sequelize.transaction(async (transaction) => {
     const locked = await db.Order.findOne({ where: { id: order.id }, transaction, lock: transaction.LOCK.UPDATE });
@@ -816,7 +821,9 @@ async function switchToCod(workspaceId, orderId, token, req) {
     await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
     // The online method's fee or discount comes off; cash on delivery's goes on.
     const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
-    await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced }, { transaction });
+    const riskFlags = [...new Set([...(locked.riskFlags || []), ...codChecks.flags])];
+    await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced, riskFlags }, { transaction });
+    await require('./codSwitchChecks').recordDeposit(locked, codChecks.deposit, transaction);
     await db.ConfirmationTask.create({ workspaceId, orderId: locked.id, status: 'queued' }, { transaction });
     await trackStage(workspaceId, locked.id, { transaction, actorType: 'customer', reason: 'switched_to_cod' });
 
