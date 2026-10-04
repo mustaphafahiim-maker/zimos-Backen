@@ -23,6 +23,8 @@ router.use(require('./supportViewRoutes'));
 router.use(require('./carrierMapRoutes'));
 // The merchants' referral program: its share and the payout requests.
 router.use(require('../referrals/merchantReferrals').admin);
+// The theme catalog (themes/themesCatalog.js).
+router.use(require('../themes/themesCatalog').admin);
 
 // --- Plans ---------------------------------------------------------------
 router.get('/plans', can(P.PLANS_VIEW), controller.listPlans);

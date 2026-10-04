@@ -203,6 +203,8 @@ v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 // Code customizations: the merchant's own HTML/CSS/JS slots (website.publish).
 v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').router);
+// The theme catalog for this store (themes/themesCatalog.js).
+v1.use('/workspaces/:workspaceId/themes', require('./modules/themes/themesCatalog').router);
 // Page sections saved for reuse across pages and funnels (website.edit).
 v1.use('/workspaces/:workspaceId/saved-sections', require('./modules/savedSections/savedSectionsRoutes'));
 // Split tests on funnel steps (funnels.manage).

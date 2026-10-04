@@ -310,6 +310,12 @@ async function updateWorkspace({ workspaceId, patch }, req) {
         'themeSettings is too large'
       );
     }
+    // A paid or withdrawn theme can't be switched on this way either (themes/themesCatalog.js).
+    await require('../themes/themesCatalog').assertThemeAllowed(
+      workspaceId,
+      blob.storeTheme,
+      (workspace.themeSettings && workspace.themeSettings.storeTheme) || 'original'
+    );
     next.themeSettings = blob;
   }
   if (patch.settings !== undefined) {
