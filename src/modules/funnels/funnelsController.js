@@ -133,7 +133,12 @@ const resume = asyncHandler(async (req, res) => {
 });
 
 // --- public runtime ---
-const localizeStep = (req, funnelId, payload) => require('../translations/contentTranslations').localizeFunnelStep(req, funnelId, payload);
+// In the shopper's language, with the step's own scripts for the live store (customCode/pageScripts.js).
+const localizeStep = async (req, funnelId, payload) => {
+  await require('../translations/contentTranslations').localizeFunnelStep(req, funnelId, payload);
+  if (payload && payload.step) payload.step.scripts = await require('../customCode/pageScripts').publicScripts(req, 'step', payload.step.id);
+  return payload;
+};
 
 const startSession = asyncHandler(async (req, res) => {
   // The visitor's country, for geo redirects (funnels/geoRedirects.js); null when unknown.

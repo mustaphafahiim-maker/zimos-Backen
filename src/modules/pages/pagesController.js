@@ -105,7 +105,10 @@ const publicGetPage = asyncHandler(async (req, res) => {
     return res.render('store-home', await quickstartService.storeHomeLocals(req.tenant.workspaceId));
   }
   // In the shopper's language when the page is translated (translations/contentTranslations.js).
-  return res.json(await require('../translations/contentTranslations').localizePage(req, result.data));
+  const data = await require('../translations/contentTranslations').localizePage(req, result.data);
+  // The page's own scripts (customCode/pageScripts.js), for the live store only.
+  if (data.page) data.page.scripts = await require('../customCode/pageScripts').publicScripts(req, 'page', data.page.id);
+  return res.json(data);
 });
 
 module.exports = {

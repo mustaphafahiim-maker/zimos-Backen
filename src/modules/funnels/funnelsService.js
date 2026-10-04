@@ -90,6 +90,8 @@ async function assertOfferUsable(workspaceId, offerId) {
 
 function toSnapshotSteps(stepRows) {
   return stepRows.map((s) => ({
+    // The step row it was published from: its scripts are kept under it (customCode/pageScripts.js).
+    id: s.id,
     key: s.key,
     stepType: s.stepType,
     name: s.name,
@@ -715,7 +717,7 @@ const offerUnavailable = (resource) => new AppError('FUNNEL_OFFER_UNAVAILABLE', 
 function renderStepData(snapshot, stepKey) {
   const step = (snapshot.steps || []).find((s) => s.key === stepKey);
   if (!step) throw stepNotFound();
-  return { key: step.key, name: step.name, stepType: step.stepType, tree: step.builderData, seo: step.seo || {} };
+  return { id: step.id || null, key: step.key, name: step.name, stepType: step.stepType, tree: step.builderData, seo: step.seo || {} };
 }
 
 async function resolveStepPayload(workspaceId, snapshot, stepKey, session = null) {
