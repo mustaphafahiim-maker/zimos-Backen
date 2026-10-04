@@ -80,6 +80,8 @@ async function overview(workspaceId) {
       }
     }
   }
+  // The live pages' and funnels' texts (contentTranslations.js).
+  for (const key of await require('./contentTranslations').wantedFields(workspaceId)) wanted.add(key);
   const rows = await db.Translation.findAll({
     where: { workspaceId, locale: languages },
     attributes: ['entityType', 'entityId', 'locale', 'field'],
@@ -256,6 +258,8 @@ router.get(
   validate(schemas.list),
   asyncHandler(async (req, res) => res.json({ items: await listItems(req.tenant.workspaceId, req.query) }))
 );
+// Pages and funnels: GET/PUT /content (contentTranslations.js).
+router.use(require('./contentTranslations').router);
 router.put(
   '/',
   validate(schemas.save),

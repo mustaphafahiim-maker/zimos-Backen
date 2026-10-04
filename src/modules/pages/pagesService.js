@@ -580,6 +580,8 @@ function buildRenderData(website, snapshot, snapPage, path) {
   const siteSeo = snapshot.seo || {};
   return {
     page: {
+      // Its translations are kept under it (translations/contentTranslations.js).
+      id: snapPage.id || null,
       path: snapPage.path,
       title: snapPage.title,
       pageType: snapPage.pageType,

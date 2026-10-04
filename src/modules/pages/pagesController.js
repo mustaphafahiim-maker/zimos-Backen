@@ -104,7 +104,8 @@ const publicGetPage = asyncHandler(async (req, res) => {
     res.removeHeader('Content-Security-Policy');
     return res.render('store-home', await quickstartService.storeHomeLocals(req.tenant.workspaceId));
   }
-  return res.json(result.data);
+  // In the shopper's language when the page is translated (translations/contentTranslations.js).
+  return res.json(await require('../translations/contentTranslations').localizePage(req, result.data));
 });
 
 module.exports = {
