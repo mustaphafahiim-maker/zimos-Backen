@@ -7,6 +7,7 @@ const asyncHandler = require('express-async-handler');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const env = require('../../config/env');
+const sessionGate = require('../../core/security/sessionGate');
 const validate = require('../../core/middleware/validate');
 const { AuthenticationError } = require('../../core/errors/AppError');
 const { PERMISSIONS } = require('../../core/security/permissions');
@@ -37,8 +38,9 @@ const MAX_STREAM_MS = 30 * 60 * 1000;
 
 const sign = (payload) => crypto.createHmac('sha256', env.jwt.accessSecret).update(`realtime-stream:${payload}`).digest('base64url');
 
-function issueTicket(workspaceId, userId) {
-  const payload = `${workspaceId}.${userId}.${Date.now() + TICKET_TTL_MS}`;
+// `sid`: the session the ticket was asked under; the stream ends with it (core/security/sessionGate.js).
+function issueTicket(workspaceId, userId, sid = '') {
+  const payload = `${workspaceId}.${userId}.${Date.now() + TICKET_TTL_MS}.${sid || ''}`;
   return `${Buffer.from(payload).toString('base64url')}.${sign(payload)}`;
 }
 
@@ -49,9 +51,9 @@ function readTicket(ticket) {
   const a = Buffer.from(signature);
   const b = Buffer.from(sign(payload));
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-  const [workspaceId, userId, expires] = payload.split('.');
+  const [workspaceId, userId, expires, sid] = payload.split('.');
   if (!workspaceId || !userId || Number(expires) < Date.now()) return null;
-  return { workspaceId, userId };
+  return { workspaceId, userId, sid: sid || null };
 }
 
 const select = (sql, replacements) => db.sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
@@ -211,6 +213,8 @@ streamRouter.get(
     const permissions = membership && membership.role ? membership.role.permissions || [] : [];
     const allowed = permissions.includes('*') || permissions.includes(PERMISSIONS.ANALYTICS_VIEW);
     if (!allowed) throw refused();
+    if (!(await sessionGate.isActive(ticket.sid))) throw refused();
+    sessionGate.closeWhenEnded(req, res, ticket.sid);
     await stream(ticket.workspaceId, req.query.funnelId || null, req, res);
   })
 );

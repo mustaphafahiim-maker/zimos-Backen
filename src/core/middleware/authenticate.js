@@ -4,6 +4,9 @@ const asyncHandler = require('express-async-handler');
 const { verifyAccessToken } = require('../security/tokens');
 const { AuthenticationError } = require('../errors/AppError');
 const db = require('../../db/models');
+const sessionGate = require('../security/sessionGate');
+
+const ended = () => new AuthenticationError('This session has ended. Sign in again.', 'SESSION_ENDED');
 
 /**
  * Populates req.user (the authenticated User instance) from a Bearer access
@@ -26,6 +29,9 @@ const authenticate = asyncHandler(async (req, res, next) => {
   } catch (err) {
     throw new AuthenticationError('Invalid or expired access token', 'INVALID_TOKEN');
   }
+
+  // A session ended on another device (or by a password reset) stops its tokens at once.
+  if (!(await sessionGate.isActive(payload.sid))) throw ended();
 
   const user = await db.User.findByPk(payload.sub);
   if (!user || user.status !== 'active') {
@@ -57,6 +63,8 @@ const authenticateAllowPending = asyncHandler(async (req, res, next) => {
     throw new AuthenticationError('Invalid or expired access token', 'INVALID_TOKEN');
   }
 
+  if (!(await sessionGate.isActive(payload.sid))) throw ended();
+
   const user = await db.User.findByPk(payload.sub);
   if (!user || user.status === 'suspended') {
     throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');
@@ -79,7 +87,7 @@ const optionalAuthenticate = asyncHandler(async (req, res, next) => {
 
   try {
     const payload = verifyAccessToken(token);
-    const user = await db.User.findByPk(payload.sub);
+    const user = (await sessionGate.isActive(payload.sid)) ? await db.User.findByPk(payload.sub) : null;
     if (user && user.status === 'active') {
       req.user = user;
       req.authTokenPayload = payload;

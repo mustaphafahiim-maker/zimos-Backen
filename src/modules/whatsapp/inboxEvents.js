@@ -34,8 +34,9 @@ const HEARTBEAT_MS = 25000;
 const sign = (payload) => crypto.createHmac('sha256', env.jwt.accessSecret).update(`inbox-stream:${payload}`).digest('base64url');
 
 /** A one-minute pass to open the stream as this teammate in this store. */
-function issueTicket(workspaceId, userId) {
-  const payload = `${workspaceId}.${userId}.${Date.now() + TICKET_TTL_MS}`;
+// `sid`: the session the ticket was asked under; the stream ends with it (core/security/sessionGate.js).
+function issueTicket(workspaceId, userId, sid = '') {
+  const payload = `${workspaceId}.${userId}.${Date.now() + TICKET_TTL_MS}.${sid || ''}`;
   return `${Buffer.from(payload).toString('base64url')}.${sign(payload)}`;
 }
 
@@ -48,9 +49,9 @@ function readTicket(ticket) {
   const a = Buffer.from(signature);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-  const [workspaceId, userId, expires] = payload.split('.');
+  const [workspaceId, userId, expires, sid] = payload.split('.');
   if (!workspaceId || !userId || Number(expires) < Date.now()) return null;
-  return { workspaceId, userId };
+  return { workspaceId, userId, sid: sid || null };
 }
 
 /** Something changed in a conversation of this store. */

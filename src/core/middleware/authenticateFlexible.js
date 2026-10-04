@@ -27,6 +27,10 @@ const authenticateFlexible = asyncHandler(async (req, res, next) => {
     throw new AuthenticationError('Invalid or expired access token', 'INVALID_TOKEN');
   }
 
+  if (!(await require('../security/sessionGate').isActive(payload.sid))) {
+    throw new AuthenticationError('This session has ended. Sign in again.', 'SESSION_ENDED');
+  }
+
   const user = await db.User.findByPk(payload.sub);
   if (!user || user.status !== 'active') {
     throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');

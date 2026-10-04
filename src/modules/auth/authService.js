@@ -24,9 +24,9 @@ const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 function issueTokenPair(user, req) {
-  const accessToken = signAccessToken({ sub: user.id });
+  // The access token names its session, so ending the session ends it too (core/security/sessionGate.js).
   return createSession(user, req).then(({ raw, session }) => ({
-    accessToken,
+    accessToken: signAccessToken({ sub: user.id, sid: session.id }),
     refreshToken: raw,
     sessionId: session.id,
     expiresAt: session.expiresAt,
@@ -318,7 +318,7 @@ async function refresh(rawRefreshToken, req) {
   const { raw, session: newSession } = await createSession(user, req);
   await session.update({ revokedAt: new Date(), rotatedToSessionId: newSession.id });
 
-  const accessToken = signAccessToken({ sub: user.id });
+  const accessToken = signAccessToken({ sub: user.id, sid: newSession.id });
   return { accessToken, refreshToken: raw, sessionId: newSession.id, expiresAt: newSession.expiresAt };
 }
 
