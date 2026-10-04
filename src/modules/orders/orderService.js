@@ -962,6 +962,7 @@ async function hydrateOrders(page) {
     include: [{ model: db.OrderItem, as: 'items' }],
   });
   const providers = await paymentProviders(rows);
+  const shipments = await latestShipments(rows.map((row) => row.id));
   const byId = new Map(rows.map((row) => [row.id, row]));
   return page
     .filter((row) => byId.has(row.id))
@@ -969,7 +970,22 @@ async function hydrateOrders(page) {
       ...byId.get(row.id).toJSON(),
       stage: row.stage,
       paymentProvider: providers.get(row.id) || null,
+      // The list's shipping column: the latest shipment that is not cancelled.
+      shipment: shipments.get(row.id) || null,
     }));
+}
+
+/** Each order's latest shipment that is not cancelled: courier, waybill and status. One query for the page. */
+async function latestShipments(orderIds) {
+  if (orderIds.length === 0) return new Map();
+  const rows = await db.sequelize.query(
+    `SELECT DISTINCT ON (order_id) order_id, carrier_code, waybill_number, status
+       FROM shipments
+      WHERE order_id IN (:ids) AND status <> 'cancelled'
+      ORDER BY order_id, created_at DESC, id DESC`,
+    { replacements: { ids: orderIds }, type: QueryTypes.SELECT }
+  );
+  return new Map(rows.map((r) => [r.order_id, { carrierCode: r.carrier_code, waybillNumber: r.waybill_number, status: r.status }]));
 }
 
 /**

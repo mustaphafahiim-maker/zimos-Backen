@@ -58,7 +58,7 @@ the numbers **400–449** (no lane owns them).
 
 ## P1 — Phase 1/2 features still missing
 
-- [ ] 11. Orders list (11a search by waybill, the filters below, date shortcuts and risk tab counts done): search by waybill; filters dataQuality, ipCountry,
+- [ ] 11. Orders list (11a search by waybill, the filters below, date shortcuts and risk tab counts; 11b columns IP country / data quality / shipping / address, reorderable done): search by waybill; filters dataQuality, ipCountry,
   discount code, utm source/campaign, funnel, product control, date shortcuts;
   columns IP country / data quality / shipping / address, reorderable; risk tab
   counts; bulk print invoices, resend webhook, export selected.
