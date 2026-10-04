@@ -127,6 +127,15 @@ The teammate's WhatsApp goes out from the platform's own number, not the store's
 With the store's WhatsApp connected, the row action sends the `cart_reminder` template (the same one as the ready abandoned-cart automation) from the store's number. Its variables are filled in a fixed order: name, store, recovery link, total, products, as many as the synced template has, or 3 when it was never synced. A phone that answered STOP or is blocked is refused like any marketing message. The message is logged in the inbox, and the lost order is marked contacted on the server. Without a connected number, the action still opens wa.me as before.
 French is a full storefront dictionary (`lib/i18nFr.ts`, every key, checked by the `Dictionary` type). The store opens in French when its default language is French. The switch adds French only when the store offers it (dashboard → Languages, the existing `store_languages`), so Arabic/English stores are unchanged. About a dozen components carry their own short ar/en strings; in French they show English (`pickText`). Governorates and merchant-written field labels are kept in Arabic and English only, so French shows the English versions.
 The tree holds only `html_block {blockId}`, and the tree validator checks the id's format. The HTML is a custom-code row (`hb:<id>`) with the custom-code rules: `website.publish`, audited, served with the page or step that places it, never in a staff preview, and run only on the store's own host. A new element gets its id when its code is first saved, so an unsaved block is valid and shows nothing. Saving takes effect at once, outside publishing, like page scripts. A duplicated element shares its block, so editing one changes both. A block whose element is gone is never served.
+New: `masonry_grid` (pictures with captions and links in 2–5 CSS columns). A button gets an `action`: link (the default), `add_to_cart` (opens the cart) or `buy_now` (adds the item and goes to checkout). Its variant is the one picked on the page, else `variantId`, else the first variant in stock. In a funnel a button keeps the funnel's own flow.
+
+The price element follows the variant picked on the page (`lib/pagePicks`); every variant's price is formatted on the server, so the client only swaps the text.
+
+"Sticky container" is a column setting (`sticky: top | header`). It applies from `md` up only, because columns stack on phones.
+
+Forms get one stars input (`ratingLabel`, 1–5, checked on the server) and one photo input (`fileLabel`, `fileRequired`). The photo uses the existing customer upload path, which takes JPEG, PNG or WebP only and re-encodes them. Other file types are not taken because they have no safe re-encoding step.
+
+The upload must belong to the same visitor (`visitorId` in the body). Submitting attaches it, so it stops expiring, and stores it as `data._files`. Staff see it through a signed link, and deleting the submission deletes the photo. Which inputs a form has is always read from the published page.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -278,7 +287,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 90. Lost orders: the WhatsApp row action sends the recovery template through the connected number (§6.3).
 - [x] 91. French in the storefront interface (§8.10).
 - [x] 92. A positioned custom HTML block in the builder, stored outside the tree (§8.2, §8.4).
-- [ ] 93. Builder elements: masonry grid, sticky container, file and star inputs in forms, add-to-cart / buy-now buttons, a price that follows the picked variant (§9.3).
+- [x] 93. Builder elements: masonry grid, sticky container, file and star inputs in forms, add-to-cart / buy-now buttons, a price that follows the picked variant (§9.3).
 - [ ] 94. The funnel page editor gets the website editor's tools: undo/redo, layers, page product, named styles, saved sections (§9.3).
 - [ ] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
 - [ ] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
