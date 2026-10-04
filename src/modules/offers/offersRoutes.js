@@ -137,6 +137,14 @@ router.get(
   canView,
   asyncHandler(async (req, res) => res.json(await productFeed.merchantChecklist(ws(req))))
 );
+// Each offer's impressions, acceptances and added revenue (offerStats.js), keyed by rule / bundle id.
+router.get(
+  '/stats',
+  validate({ params: wsParams, query: Joi.object({ days: Joi.number().integer().min(1).max(365).default(30) }) }),
+  canView,
+  asyncHandler(async (req, res) => res.json({ stats: await require('./offerStats').offerStats(ws(req), req.query.days) }))
+);
+
 router.get(
   '/summary',
   validate({ params: wsParams, query: Joi.object({ days: Joi.number().integer().min(1).max(365).default(30) }) }),

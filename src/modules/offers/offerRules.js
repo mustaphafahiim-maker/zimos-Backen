@@ -308,7 +308,8 @@ async function suggestCrossSell(workspaceId, productIds, placement) {
   const products = (await loadPublicProducts(workspaceId, candidates))
     .filter((p) => !p.pageSettings.hidden && p.variants.some((v) => v.inStock))
     .slice(0, limit);
-  return { source: chosen ? 'rule' : products.length > 0 ? 'bought_together' : null, products };
+  // ruleId: what the strip's impressions and add-to-carts are counted under (offerStats.js).
+  return { source: chosen ? 'rule' : products.length > 0 ? 'bought_together' : null, ruleId: chosen ? chosen.id : null, products };
 }
 
 // ------------------------------------------------------ post-purchase upsell --
