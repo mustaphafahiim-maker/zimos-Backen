@@ -138,9 +138,8 @@ function refusesFlags(rules, flags) {
 
 /** The store's country, from its locale (`ar-EG` → `EG`). */
 function storeCountry(workspace) {
-  const locale = (workspace && workspace.defaultLocale) || 'ar-EG';
-  const region = String(locale).split('-')[1];
-  return region ? region.toUpperCase() : 'EG';
+  // The country set in the store's settings, else its language's region (core/utils/storeCountry.js).
+  return require('../../core/utils/storeCountry').countryOf(workspace);
 }
 
 // Mobile numbers, digits only with the country code, per store country.
@@ -159,7 +158,7 @@ const MOBILE_PATTERNS = {
   IQ: /^9647\d{9}$/,
   LY: /^2189[1-5]\d{7}$/,
 };
-const CALLING_CODES = { EG: '20', SA: '966', AE: '971', KW: '965', QA: '974', BH: '973', OM: '968', JO: '962', MA: '212', DZ: '213', TN: '216', IQ: '964', LY: '218' };
+const { CALLING_CODES } = require('../../core/utils/storeCountry');
 
 /**
  * Whether `phone` is a mobile number of `country`. A country without a

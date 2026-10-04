@@ -63,6 +63,8 @@ const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
   await require('../../modules/risk/visitorGate').refuseBlockedVisitor(req, workspace);
 
   req.publicWorkspace = workspace;
+  // The store's country for the rest of the request: local phone numbers are read in it (core/utils/storeCountry.js).
+  require('../utils/storeCountry').bind(require('../utils/storeCountry').countryOf(workspace));
   req.tenant = { workspaceId: workspace.id, hasPermission: () => false };
   next();
 });

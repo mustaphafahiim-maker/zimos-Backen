@@ -328,7 +328,7 @@ async function createOrder(
           { contact, shippingAddress },
           {
             workspaceId,
-            country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale'], transaction })),
+            country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale', 'settings'], transaction })),
             visitor,
             secondsOnPage: req && typeof req.secondsOnPage === 'number' ? req.secondsOnPage : null,
             network,
