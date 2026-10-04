@@ -107,6 +107,7 @@ the numbers **400–449** (no lane owns them).
 - 70: category SEO uses the product's keys (title, description, imageUrl, noindex — validated with the same schema); the store's category address stays /products?collection=<slug> (its canonical), so that is what the sitemap lists, minus hidden and noindex categories. "Export" is one CSV of all categories from the page (per-row export of a single category made little sense); preview opens the category listing on the store's subdomain.
 - 71: the primary domain counts only once verified and with its certificate issued (an https link to a domain without one would not open) — domains/primaryHost.js, cached a minute, cleared on domain changes. The redirect is 307, not 301/308: a browser keeps a permanent redirect for good and merchants change or drop domains; the canonical links carry the SEO signal. Skipped for staff previews, /pay and non-GET. resolve-host now also answers platform subdomains (primary host only), which the proxy asks once a minute per host.
 - 72: no backend change — `general.country` already comes with GET /store/:ws. The forms' initial values carry the store country (lib/storeCountry), so every "EG" fallback became a fallback for an unset setting only; a hidden country field now sends the store's country rather than Egypt. Shipping quotes take the form's country (cart and bundle quotes the store's).
+- 73: one image URL per variant (product_variants.image_url, migration 421), not a gallery per variant — the product keeps its gallery and the chosen variant's picture is put first. The product page's gallery and form are separate parts of the page, so the form publishes the chosen variant's picture through a tiny store (lib/variantImage, useSyncExternalStore). Option "image" swatches (§7.2 displayType) are left as they are.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -238,7 +239,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 70. Category SEO (title, description, OG image, noindex) used by the store; the categories list's preview / in-header / export (§7.6, §8.9).
 - [x] 71. The primary domain is the store's canonical address: canonical, sitemap and feed links, redirect (§8.11).
 - [x] 72. The store country setting drives the order form's country (§8.8).
-- [ ] 73. A variant's own image (§7.2).
+- [x] 73. A variant's own image (§7.2).
 - [ ] 74. Upsell/downsell: the shopper picks the variant, the offer's countdown, card orders get the thank-you upsell (§9.5, §10.4).
 - [ ] 75. Funnel settings: change the link, funnel-wide scripts, a shipping group per funnel (§9.7).
 - [ ] 76. The funnel issues counter checks untranslated text (§9.2).
