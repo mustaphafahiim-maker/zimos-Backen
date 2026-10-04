@@ -209,6 +209,12 @@ Order exports (CSV, Excel, background) mask every phone field at any depth with 
 - The audit row records `maskedPhones`.
 - The export dialog says it, since the dashboard keeps no permission list to show it only to masked roles.
 - The shipping manifest and waybills keep full numbers: the courier needs them, and they are behind `shipping.manage`.
+The checkout autosave (`POST /store/:ws/checkout-sessions`) passes the order's bot guard (`checkoutSessions/autosaveGuard.js`), and every save keeps the shopper's IP and its country on the session.
+
+- Guard checks: the honeypot, a valid time token, and the token at least `MIN_SECONDS` old. There is no challenge: that token is spent on the order.
+- A refusal is quiet. The reply carries a random session id, so a script can't tell it was dropped. The order path treats an unknown id as no session.
+- The storefront waits out a fresh token before it saves (`botGuardAutosaveFields`), so a fast typist is never caught.
+- A later save from another address replaces the IP and country together. A save with no known address keeps the ones already stored.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -375,7 +381,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 
 - [x] 101. Store templates carry no other store's contact details: the Uokids template's WhatsApp number, address, email and social links removed (and from stores that got them), and the floating WhatsApp, footer contact and social links editable in the dashboard (§8.2, §8.8).
 - [x] 102. The orders export masks phones unless the teammate may reveal them (§3.4 #8).
-- [ ] 103. The checkout autosave goes through the bot guard and keeps the shopper's IP and country (§5.1, §6.1).
+- [x] 103. The checkout autosave goes through the bot guard and keeps the shopper's IP and country (§5.1, §6.1).
 - [ ] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
 - [ ] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
 - [ ] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
