@@ -57,6 +57,7 @@ the numbers **400–449** (no lane owns them).
 - WhatsApp bot (§19.3, part 1): `settings.wa_bot` (on/off, always or working hours on the store's clock, tone/dialect, extra information), at Inbox → Bot (changes: workspace.manage). Each typed customer message is queued (queue `ai`); the bot answers through the AI provider (`support_reply`, sandbox rules) from the store's policies and extra information, active products with price and stock, and the customer's own orders found by their WhatsApp number — never a discount. It hands the chat to the team (bell notification, conversation stays open) when it can't answer, the customer asks for a person or is upset; then it stays quiet in that conversation (migration 416 `bot_paused_at`) until someone presses "Let the bot answer". A teammate's typed reply, or "Take over", pauses it too. Only the newest waiting message is answered. Bot messages carry a badge; replies a month are counted (`sent_by_bot`) against the plan's `bot_replies` limit (unset = no limit); at the limit the conversation goes to the team. "Try it" asks the bot without sending anything.
 - WhatsApp bot (§19.3, part 2): ordering in the chat is a guided form, not left to the model — "عايز اطلب"/"order" starts it; product (numbered list of what is in stock) → option → quantity (1–10) → name → governorate → city → address → a summary with items, shipping, tax and the cash-on-delivery total from the same pricing as the website → "تأكيد" places a normal storefront COD order (prices, stock, shipping, tax and the store's fraud rules apply), tagged `whatsapp-bot` with a note; "إلغاء" stops at any step, a flow left 2 hours starts over (`bot_state`). A refused order hands the chat to the team. Bot orders keep source `store` (the source list is a shared type), the tag tells them apart.
 - Inbox "Create order" opens `/orders/new?phone=&name=` from the conversation: the number is looked up at once, and a known customer's saved name and last address fill the form (their saved name wins over the WhatsApp profile name). Frontend only.
+- Cross-sell at checkout and on the thank-you page: the same strip as the cart, asking `/cross-sell` with placement `checkout` / `thank_you` for the products in the cart / the order just placed. A product opened from the strip carries `?from=cross_sell`, and a click inside the strip (quick add) marks the next add, so `add_to_cart` is sent with `source: cross_sell` in its metadata. Storefront only.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -136,7 +137,7 @@ the numbers **400–449** (no lane owns them).
 
 ## P1 — §7–§10 (catalog, store design, funnels, offers)
 
-- [ ] 33. Cross-sell at checkout and on the thank-you page (the dashboard offers
+- [x] 33. Cross-sell at checkout and on the thank-you page (the dashboard offers
   both, the store shows only the cart); `add_to_cart` with `source=cross_sell`.
 - [ ] 34. Product order bumps on `/checkout` (only the store-wide bump shows).
 - [ ] 35. Product list uses the backend filters (collection, sku, type, stock)
