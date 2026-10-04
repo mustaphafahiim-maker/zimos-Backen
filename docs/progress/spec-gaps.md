@@ -198,6 +198,11 @@ Removed from the storefront:
 - The gallery shows Reset only on the current theme's card, behind a confirmation.
 
 **Tags.** Migration 429 seeds tags for the seeded themes from a small shared vocabulary that the dashboard translates. Only empty tag lists are filled, so console edits are never overwritten; the console already edits tags. Each card shows its tags, and a Style filter lists every tag in use.
+Contact details are each store's own settings: Store info (email, phone, address), Social links and the floating WhatsApp, all already editable in the dashboard. The rich footer and the theme's floating corner now read them from there and no longer from `themeSettings.footer.contact/social` or `floating.whatsapp`, which only templates ever wrote. So no new editor was needed.
+
+Migration 430 removes Uokids' values from the template and from any store holding them exactly. A store that is Uokids itself (by name or slug) gets them moved into its own empty settings instead. The template data file no longer seeds them.
+
+The template's demo pictures still come from uokids.com's CDN. That is sample content, not contact data, and is left as it is.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -362,7 +367,7 @@ Bugs and security first, then what blocks selling, then features.
 
 Same order: bugs and security first, then what blocks selling, then features. Left out on purpose: store-wide named styles (lane 5 decision), per-device column widths (the full style/layout tab list is not queued), a per-product currency (the store has one currency, decision 61).
 
-- [ ] 101. Store templates carry no other store's contact details: the Uokids template's WhatsApp number, address, email and social links removed (and from stores that got them), and the floating WhatsApp, footer contact and social links editable in the dashboard (§8.2, §8.8).
+- [x] 101. Store templates carry no other store's contact details: the Uokids template's WhatsApp number, address, email and social links removed (and from stores that got them), and the floating WhatsApp, footer contact and social links editable in the dashboard (§8.2, §8.8).
 - [ ] 102. The orders export masks phones unless the teammate may reveal them (§3.4 #8).
 - [ ] 103. The checkout autosave goes through the bot guard and keeps the shopper's IP and country (§5.1, §6.1).
 - [ ] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
