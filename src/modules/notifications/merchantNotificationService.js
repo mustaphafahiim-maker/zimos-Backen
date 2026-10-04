@@ -33,7 +33,8 @@ const TYPES = Object.freeze({
   'order.suspicious': { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
   'stock.low': { permission: PERMISSIONS.INVENTORY_VIEW, defaults: { inApp: true, email: false } },
   'integration.failed': { permission: PERMISSIONS.WORKSPACE_MANAGE, defaults: { inApp: true, email: true } },
-  'export.ready': { permission: null, defaults: { inApp: true, email: false } },
+  // SPEC §4.3: the link comes in the bell and by email (orders/exportFiles.js).
+  'export.ready': { permission: null, defaults: { inApp: true, email: true } },
   // A "Ship selected" batch finished (shipping/bulkShipping.js); sent to whoever started it.
   'shipping.batch_done': { permission: PERMISSIONS.ORDERS_MANAGE, defaults: { inApp: true, email: false } },
   announcement: { permission: null, defaults: { inApp: true, email: false } },

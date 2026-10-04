@@ -175,6 +175,7 @@ v1.use('/workspaces/:workspaceId/shoppable-images', shoppableImageRoutes.staff);
 v1.use('/workspaces/:workspaceId/courses', courseRoutes.staff);
 v1.use('/workspaces/:workspaceId', dashboardRoutes);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
+v1.use('/workspaces/:workspaceId/exports', require('./modules/orders/exportFileRoutes'));
 v1.use('/workspaces/:workspaceId/returns', returnRoutes);
 v1.use('/workspaces/:workspaceId/confirmation-tasks', confirmationRoutes);
 v1.use('/workspaces/:workspaceId', paymentRoutes);

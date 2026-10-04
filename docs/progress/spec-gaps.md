@@ -31,6 +31,7 @@ the numbers **400–449** (no lane owns them).
 - The storefront display currency is display only: the header switcher (and the builder `currency_converter` element, which shares the choice) adds an "≈" amount under the price in the chosen currency from the store rates; the cart, checkout and charge stay in the price currency. The choice is remembered per store in the browser; "convert automatically" picks the visitor currency from the browser language region on a first visit when the store lists it.
 - Reports add orders up in the store base currency (currencies/baseAmounts.js): the order total is its recorded `total_amount_base`, and its other amounts (refunds, discounts, shipping, lines) are converted by that order own base/total ratio, so the rate is the one of the day it was placed. Applies to attribution, ad campaigns, P&L, the overview, the analytics summary and funnel analytics. Product costs and product economics are entered in the store currency and are not converted. An order placed when no rate was known counts at its own amounts, as before.
 - `Lead` fires from the browser on a newsletter sign-up (footer band and popup) and on a funnel opt-in step, with a browser event id the server relay reuses. The builder `form` element is a contact form (`contact_form.submitted`) and sends no Lead. Headless browsers are dropped as bots by the events endpoint, so a browser check needs a desktop user agent.
+- Exporting the orders list (the Export button) is built in the `io` queue (`POST /exports/orders`, migration 407 `export_files`); the file goes to private storage and an `export.ready` notification (bell and email, now on by default) links to `/exports/:id`, where the teammate who asked downloads it with their session. Only that teammate sees it; it is kept 7 days, then the sweep removes it (410 after). Exporting ticked orders (at most 100) still downloads at once.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -82,7 +83,7 @@ the numbers **400–449** (no lane owns them).
   currency switcher, `currency_converter` element, base amounts in
   attribution/P&L; shopper consent to save a card and one-click upsell charge.
 - [x] 16. Lead pixel event from the newsletter form.
-- [ ] 17. Notifications: integration-failed for gateway / carrier / WhatsApp;
+- [ ] 17. Notifications (17b export ready done): integration-failed for gateway / carrier / WhatsApp;
   export ready.
 - [ ] 18. Analytics: `analytics_daily` rollup filled by the worker; attribution
   from `orders.attribution` with first/last touch.
