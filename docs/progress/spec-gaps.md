@@ -190,4 +190,61 @@ the numbers **400–449** (no lane owns them).
 - [x] 49. Custom code (§8.4) exercised end to end; head code server-rendered.
 - [x] 50. Front-end error reporting (§3.5): the dashboards and the storefront report to Sentry.
 
+## Second pass (2026-10-04) — five audits of §3–§20 against the code
+
+Bugs and security first, then what blocks selling, then features.
+
+- [ ] 51. The old `/shop/:ws/checkout` (quickstart) skips the bot guard, store-wide OTP and lost-order capture the store checkout has.
+- [ ] 52. Platform WhatsApp channel: production `console` reports codes as sent (no SMS fallback) and logs them unredacted; a Cloud API adapter + sandbox + README.
+- [ ] 53. Phone masking (§3.4 #8) on the lost-orders list/export and the suspicious-orders list too.
+- [ ] 54. `{{payment_link}}` carries the payment token; the payment-failed template waits an hour (§11.4).
+- [ ] 55. Hidden products left out of sitemap.xml (§7.3).
+- [ ] 56. The store-wide "pre-select a variant" switch is read by the product page (§7.2, §8.8).
+- [ ] 57. The builder countdown counts to a fixed date, never restarting per visitor (§9.3, §21).
+- [ ] 58. Funnels take every payment method the store offers: the COD form in a funnel, online and transfer payments in the funnel checkout, payment methods per funnel honoured (§9.2, §11.4).
+- [ ] 59. The product-page buy box completes manual transfers and deposits (§11.3).
+- [ ] 60. Coupons in the funnel checkout: the code field, `?coupon=`, funnel-limited coupons (§9.3, §10.5).
+- [ ] 61. The store's currency (set until the first order) and its format settings used by the storefront (§8.8, §11.5).
+- [ ] 62. Store product pages send ViewContent / InitiateCheckout / bundle AddToCart; one content id everywhere (§13.2).
+- [ ] 63. Server-side Purchase carries matching data (IP, user agent, fbp/fbc, ttclid, name, city, country) and contents (§13.2).
+- [ ] 64. The recovery link applies the automation's coupon (§6.4).
+- [ ] 65. Bulk actions on "all filter results" in the orders list (§4.3).
+- [ ] 66. Order page: pages visited, time to purchase, the customer's order count and "New customer", last action in the header (§4.2–§4.4).
+- [ ] 67. "Save as draft" on the order's shipping card (§4.4).
+- [ ] 68. The missing outbox events: order.item_added, customer.updated, product.low_stock, review.created (§3.2).
+- [ ] 69. Policies shown in funnels (§8.3).
+- [ ] 70. Category SEO (title, description, OG image, noindex) used by the store; the categories list's preview / in-header / export (§7.6, §8.9).
+- [ ] 71. The primary domain is the store's canonical address: canonical, sitemap and feed links, redirect (§8.11).
+- [ ] 72. The store country setting drives the order form's country (§8.8).
+- [ ] 73. A variant's own image (§7.2).
+- [ ] 74. Upsell/downsell: the shopper picks the variant, the offer's countdown, card orders get the thank-you upsell (§9.5, §10.4).
+- [ ] 75. Funnel settings: change the link, funnel-wide scripts, a shipping group per funnel (§9.7).
+- [ ] 76. The funnel issues counter checks untranslated text (§9.2).
+- [ ] 77. Offers hub numbers: impressions, acceptances, added revenue per offer (§10.11).
+- [ ] 78. "Create product with AI" takes product photos (§19.2).
+- [ ] 79. Subscription / instalment products in the store: the plan shown, COD refused, the card saved (§18.1).
+- [ ] 80. Subscriptions: free trial, card update in the portal, a ready "renewal failed" message (§18.1).
+- [ ] 81. `ad_id` from ad links recorded and matched to spend (§15.4).
+- [ ] 82. App store: Clarity and Google Merchant shown as available (§16.6).
+- [ ] 83. Changing the owner's email, verified (§17.3).
+- [ ] 84. Education: tutorial links by key settings, help center and Telegram cards on the home page (§15.1, §18.6).
+- [ ] 85. WhatsApp templates synced from Meta with their status, picked in automations and the inbox (§14.1).
+- [ ] 86. Product and funnel pickers for automation conditions (§14.2).
+- [ ] 87. Order emails: the store's From name and Reply-To (§14.5).
+- [ ] 88. WhatsApp as a merchant notification channel (§14.6).
+- [ ] 89. Paymob valU and Kiosk (§11.2).
+- [ ] 90. Lost orders: the WhatsApp row action sends the recovery template through the connected number (§6.3).
+- [ ] 91. French in the storefront interface (§8.10).
+- [ ] 92. A positioned custom HTML block in the builder, stored outside the tree (§8.2, §8.4).
+- [ ] 93. Builder elements: masonry grid, sticky container, file and star inputs in forms, add-to-cart / buy-now buttons, a price that follows the picked variant (§9.3).
+- [ ] 94. The funnel page editor gets the website editor's tools: undo/redo, layers, page product, named styles, saved sections (§9.3).
+- [ ] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
+- [ ] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
+- [ ] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
+- [ ] 98. Large digital files uploaded straight to storage (presigned multipart) (§18.2).
+- [ ] 99. Remove the leftover mock upsell page and helpers (§9.8).
+- [ ] 100. Theme gallery: reset the current theme, theme tags (§8.1).
+
+Not queued (decided already or waiting on the owner): cross-sell discounts and "once per customer" by phone/email (lane 3), the full style/layout tab list (lane 5), city/district shipping prices (decision 19 keeps the city as free text), service ratings (lane 8: no fake ratings), a niche-template wizard card (decision 75).
+
 §5 (fraud) and §22 Gate 1 (no mock pages, no mockCommerce.ts) are complete.
