@@ -150,6 +150,8 @@ app.use(hostResolver);
 
 // --- API v1 --------------------------------------------------------------
 const v1 = express.Router();
+// The signed-in person's name and picture (before /auth, which has no such route).
+v1.use('/auth/me/profile', require('./modules/auth/profileRoutes'));
 v1.use('/auth', authRoutes);
 // Public template gallery — no auth, shown before a workspace even exists.
 v1.use('/templates', templateRoutes);

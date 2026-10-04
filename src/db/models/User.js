@@ -14,6 +14,8 @@ module.exports = (sequelize, DataTypes) => {
       passwordHash: { type: DataTypes.STRING, allowNull: true, field: 'password_hash' },
       googleId: { type: DataTypes.STRING(64), allowNull: true, unique: true, field: 'google_id' },
       fullName: { type: DataTypes.STRING(200), allowNull: false, field: 'full_name' },
+      // A public image URL (migration 409, auth/profileRoutes.js).
+      avatarUrl: { type: DataTypes.STRING(1000), allowNull: true, field: 'avatar_url' },
       // Public handle, always lower-case, unique regardless of case (migration
       // 124; rules in modules/users/username.js). Null only for an account made
       // through Google until its owner picks one.
