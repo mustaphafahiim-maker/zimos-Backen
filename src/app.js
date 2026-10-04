@@ -238,6 +238,8 @@ v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropship
 v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
 v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
+// The store as an app for shoppers: its home-screen name, icon and colour (website.publish).
+v1.use('/workspaces/:workspaceId/store-app', require('./modules/storefront/storeApp').router);
 v1.use('/workspaces/:workspaceId/tracking-pixels', appGate.requireAppForChanges('tracking_pixels'), trackingPixelRoutes);
 v1.use('/workspaces/:workspaceId/inbox', appGate.requireAppForChanges('whatsapp', { except: ['/stream-ticket'] }), inboxRoutes);
 v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);

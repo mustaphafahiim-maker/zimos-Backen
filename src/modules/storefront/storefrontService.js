@@ -122,6 +122,8 @@ async function getStorefront(workspaceId) {
     // The "add to your order" card the store's checkout offers, or null
     // (none set, or its offer is archived / out of stock).
     orderBump: (await require('../apps/appGate').isEnabled(w.id, 'offers')) ? await presentStoreBump(w) : null,
+    // The store as an installable app for its shoppers, or null (storeApp.js).
+    storeApp: require('./storeApp').publicStoreApp(w),
     // The browser ad-pixel IDs; the rest of settings stays private.
     ...(await publicTracking(w.id)),
   };
