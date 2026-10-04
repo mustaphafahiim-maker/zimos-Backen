@@ -551,6 +551,11 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
       transaction: t,
     });
 
+    // A countdown's "N hours" becomes a fixed date the first time it goes live (pages/countdownDeadline.js).
+    for (const row of stepRows) {
+      const stamped = require('../pages/countdownDeadline').stampCountdowns(row.builderData);
+      if (stamped.changed) await row.update({ builderData: stamped.tree }, { transaction: t });
+    }
     const steps = toSnapshotSteps(stepRows);
     const edges = toSnapshotEdges(edgeRows);
 

@@ -267,6 +267,8 @@ const ELEMENT_PROP_RULES = {
 
 Object.assign(ELEMENT_PROP_RULES, showcase.propRules(check));
 Object.assign(ELEMENT_PROP_RULES, builderExtras.propRules(check));
+// A countdown's fixed end (countdownDeadline.js).
+ELEMENT_PROP_RULES.countdown = { ...(ELEMENT_PROP_RULES.countdown || {}), endsAt: require('./countdownDeadline').endsAtRule };
 
 function pushIdCheck(node, field, errors) {
   if (typeof node.id !== 'string' || node.id.trim() === '') {
