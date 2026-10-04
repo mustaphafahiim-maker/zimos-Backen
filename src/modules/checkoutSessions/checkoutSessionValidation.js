@@ -33,6 +33,9 @@ module.exports = {
         .required(),
       source: Joi.string().valid('store', 'funnel').default('store'),
       visitorId: Joi.string().min(8).max(64).required(),
+      // The bot guard's fields (autosaveGuard.js), taken off before the save.
+      website: Joi.string().max(500).allow('').optional(),
+      botToken: Joi.string().max(500).optional(),
     }),
   },
   list: {

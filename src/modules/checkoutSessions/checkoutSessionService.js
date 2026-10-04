@@ -37,7 +37,7 @@ const PHONE_MATCH_DAYS = 7;
  * the next save from that visitor inserts a new session instead, and a save
  * racing a conversion re-checks after the conversion commits and inserts too.
  */
-async function capture(workspaceId, { contact, items, source = 'store', visitorId }) {
+async function capture(workspaceId, { contact, items, source = 'store', visitorId }, visitor = {}) {
   const phoneNormalized = contact.phone ? normalizePhone(contact.phone) : null;
   if (contact.phone && !phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
   if (!phoneNormalized && !(contact.fullName && String(contact.fullName).trim())) {
@@ -68,10 +68,10 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
   const [row] = await db.sequelize.query(
     `INSERT INTO checkout_sessions
        (id, workspace_id, visitor_id, contact_fields, phone_normalized, items, subtotal_amount, currency, source,
-        last_activity_at, created_at, updated_at)
+        ip_address, ip_country, last_activity_at, created_at, updated_at)
      VALUES
        ($id, $workspaceId, $visitorId, $contactFields::jsonb, $phoneNormalized, $items::jsonb, $subtotal, $currency,
-        $source, now(), now(), now())
+        $source, $ipAddress, $ipCountry, now(), now(), now())
      ON CONFLICT (workspace_id, visitor_id) WHERE status = 'in_progress' AND visitor_id IS NOT NULL
      DO UPDATE SET
        -- A save without a number (a name typed while the number is being edited)
@@ -84,6 +84,9 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
        subtotal_amount = EXCLUDED.subtotal_amount,
        currency = EXCLUDED.currency,
        source = EXCLUDED.source,
+       -- The latest address the shopper saved from (SPEC §6.1: IP and country on the lost order).
+       ip_address = COALESCE(EXCLUDED.ip_address, checkout_sessions.ip_address),
+       ip_country = CASE WHEN EXCLUDED.ip_address IS NULL THEN checkout_sessions.ip_country ELSE EXCLUDED.ip_country END,
        last_activity_at = now(),
        updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`,
@@ -99,6 +102,8 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
         // Like createOrder: the order's currency is its first line's.
         currency: priced[0].currency,
         source,
+        ipAddress: visitor.ip || null,
+        ipCountry: visitor.ipCountry || null,
       },
       type: QueryTypes.SELECT,
     }

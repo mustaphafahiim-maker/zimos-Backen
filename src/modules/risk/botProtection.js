@@ -137,4 +137,4 @@ const guardCheckout = asyncHandler(async (req, res, next) => {
   next();
 });
 
-module.exports = { MIN_SECONDS, HONEYPOT_FIELD, issueToken, tokenAge, settingsOf, assertHuman, guardConfig, guardCheckout };
+module.exports = { MIN_SECONDS, MAX_AGE_MS, HONEYPOT_FIELD, issueToken, tokenAge, settingsOf, assertHuman, guardConfig, guardCheckout };

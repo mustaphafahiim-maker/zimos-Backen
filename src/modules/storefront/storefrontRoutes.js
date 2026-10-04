@@ -62,7 +62,7 @@ router.get('/orders/track-link', validate(schemas.trackLink), controller.trackOr
 
 // Checkout-form autosave for abandoned-checkout recovery. An upsert keyed on
 // the visitor, so a replay is harmless and it takes no Idempotency-Key.
-router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), refuseDraftOrders, checkoutSessionController.capture);
+router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), refuseDraftOrders, require('../checkoutSessions/autosaveGuard').guardAutosave, checkoutSessionController.capture);
 
 // Read-only: prices the shipping line the checkout would get.
 router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shippingQuote);
