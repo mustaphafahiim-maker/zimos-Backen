@@ -215,6 +215,19 @@ The checkout autosave (`POST /store/:ws/checkout-sessions`) passes the order's b
 - A refusal is quiet. The reply carries a random session id, so a script can't tell it was dropped. The order path treats an unknown id as no session.
 - The storefront waits out a fresh token before it saves (`botGuardAutosaveFields`), so a fast typist is never caught.
 - A later save from another address replaces the IP and country together. A save with no known address keeps the ones already stored.
+"Switch to cash on delivery" on the pay page meets what a COD checkout meets (`payments/codSwitchChecks.js`), after the platform blocklist and the refusing flags it already checked.
+
+- **Funnel payment methods:** a funnel whose list leaves out COD can't switch, and `canSwitchToCod` is false there.
+- **Per-IP rule:** `min_minutes_between_cod_orders_per_ip` runs on the order's IP while the protection app is on, and its action applies:
+  - flag: the order gets `ip_order_rate`.
+  - block / to_lost: generic ORDER_REJECTED with an `order.blocked` audit, and the order stays awaiting its payment.
+  - require_otp: a code is asked.
+- **Code by phone:** asked for `cod_only`, for `risky_only` on a risky order, and when a `require_otp` rule flagged the order. Online checkout only flags those orders.
+  - `all` was already asked at checkout, so the switch does not ask again.
+  - The pay page takes the code inline: the order's phone is never shown, only its hint.
+  - The code is sent with the switch (`otpCode`); the same call without it sends another code.
+  - The code is checked last, so a deposit error does not spend it.
+- **Deposit:** the shopper's payment status names the deposit up front (`codDeposit`). The pay page shows the transfer form once the shopper picks cash on delivery. The transfer is recorded as a `deposit` payment in the switch's transaction, on the order's COD price.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -382,7 +395,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 101. Store templates carry no other store's contact details: the Uokids template's WhatsApp number, address, email and social links removed (and from stores that got them), and the floating WhatsApp, footer contact and social links editable in the dashboard (§8.2, §8.8).
 - [x] 102. The orders export masks phones unless the teammate may reveal them (§3.4 #8).
 - [x] 103. The checkout autosave goes through the bot guard and keeps the shopper's IP and country (§5.1, §6.1).
-- [ ] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
+- [x] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
 - [ ] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
 - [ ] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
 - [ ] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
