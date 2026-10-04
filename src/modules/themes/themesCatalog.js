@@ -162,6 +162,8 @@ const schemas = {
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
 router.get('/', validate(schemas.list), asyncHandler(async (req, res) => res.json(await listForWorkspace(req.tenant.workspaceId))));
+// "Reset" on the current theme: back to its own look (themeReset.js).
+router.use(require('./themeReset').router);
 router.post(
   '/:key/activate',
   validate(schemas.activate),
