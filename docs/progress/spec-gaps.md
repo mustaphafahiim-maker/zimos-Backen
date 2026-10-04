@@ -358,6 +358,67 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 99. Remove the leftover mock upsell page and helpers (§9.8).
 - [x] 100. Theme gallery: reset the current theme, theme tags (§8.1).
 
+## Third pass (2026-10-04) — five audits of §3–§20 against the code
+
+Same order: bugs and security first, then what blocks selling, then features. Left out on purpose: store-wide named styles (lane 5 decision), per-device column widths (the full style/layout tab list is not queued), a per-product currency (the store has one currency, decision 61).
+
+- [ ] 101. Store templates carry no other store's contact details: the Uokids template's WhatsApp number, address, email and social links removed (and from stores that got them), and the floating WhatsApp, footer contact and social links editable in the dashboard (§8.2, §8.8).
+- [ ] 102. The orders export masks phones unless the teammate may reveal them (§3.4 #8).
+- [ ] 103. The checkout autosave goes through the bot guard and keeps the shopper's IP and country (§5.1, §6.1).
+- [ ] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
+- [ ] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
+- [ ] 106. Ending a session (one device, all devices, password reset) cuts access at once (§17.2).
+- [ ] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
+- [ ] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
+- [ ] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
+- [ ] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
+- [ ] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
+- [ ] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
+- [ ] 113. "Powered by ZIMOS" honours remove_branding on funnels and the rich footer (§8.11).
+- [ ] 114. No invented shipping, returns or COD promises: the product tab, FAQ fallback, trust strip and footer help read the store's own information (§8.5).
+- [ ] 115. The rich footer shows the policy links, footer pages and social links (§8.3).
+- [ ] 116. Automation conditions work on checkout, lost-order, lead and subscription triggers (§14.2).
+- [ ] 117. Trial subscriptions shown and counted in the subscriptions screen (§18.1).
+- [ ] 118. "Convert to order" keeps the coupon, the funnel and the custom answers, and cannot create two orders (§6.3).
+- [ ] 119. Recovery automations mark the lost order contacted; the ready-made recovery timing as the spec says (§6.4).
+- [ ] 120. The tracking page accepts the store's own country's phones (§14.7).
+- [ ] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
+- [ ] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
+- [ ] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
+- [ ] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
+- [ ] 125. Product feed items land on their own variant (§7.8).
+- [ ] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
+- [ ] 127. COD settlement statements read from the courier's Excel file (§15.5).
+- [ ] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
+- [ ] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
+- [ ] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
+- [ ] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
+- [ ] 132. Lost orders keep their traffic source (§6.1).
+- [ ] 133. The merchant sets when a checkout counts as lost (§6.2).
+- [ ] 134. "Notify the customer" on status changes, one order or many (§4.6).
+- [ ] 135. The order timeline shows the messages sent to the customer (§4.4).
+- [ ] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
+- [ ] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
+- [ ] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
+- [ ] 139. Contact tags from purchase buttons on website pages too (§18.4).
+- [ ] 140. Subscribers get their portal link (§18.1).
+- [ ] 141. The store's subdomain can be changed in settings (§17.3).
+- [ ] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
+- [ ] 143. AI store policies applied to the store's policies (§19.2).
+- [ ] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
+- [ ] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
+- [ ] 146. Split tests with more than two versions (§9.6).
+- [ ] 147. Copy a coupon's share link (§10.5).
+- [ ] 148. Page settings Details tab: a generic page's address and its title (§9.3).
+- [ ] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
+- [ ] 150. Formatted product descriptions, sanitized (§7.1).
+- [ ] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
+- [ ] 152. A currency switcher on attribution, reports and profit (§11.5).
+- [ ] 153. Order export presets in a courier's own layout (§12.3).
+- [ ] 154. The Pinterest tag (§13.1).
+- [ ] 155. Google Sheets sync for orders and lost orders: adapter + sandbox + README (§16.4).
+- [ ] 156. The dashboard home remembers its period; bulk tagging from the contacts list (§15.1, §18.4).
+
 Not queued (decided already or waiting on the owner): cross-sell discounts and "once per customer" by phone/email (lane 3), the full style/layout tab list (lane 5), city/district shipping prices (decision 19 keeps the city as free text), service ratings (lane 8: no fake ratings), a niche-template wizard card (decision 75).
 
 §5 (fraud) and §22 Gate 1 (no mock pages, no mockCommerce.ts) are complete.
