@@ -109,6 +109,8 @@ async function submit(workspaceId, body, req) {
   if (!phoneNormalized && !email) {
     throw new AppError('CONTACT_REQUIRED', 'A phone number or an email is required', 422);
   }
+  // A new phone is a new lead: the plan's monthly leads limit (billing/limitGuards.js).
+  await require('../billing/limitGuards').assertLeadRoom(workspaceId, phoneNormalized);
 
   const form = await publishedForm(workspaceId, body.pagePath, body.elementId);
   const tags = form ? form.tags : [];

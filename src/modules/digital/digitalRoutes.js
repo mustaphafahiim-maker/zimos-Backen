@@ -41,13 +41,15 @@ const deliveryBody = Joi.object({
 });
 
 // Digital products (SPEC §18.2). Mounted at /api/v1/workspaces/:workspaceId/digital
+// The plan's file storage limit, once the file's size is known (billing/limitGuards.js).
+const { requireStorageRoom } = require('../billing/limitGuards');
 const staff = Router({ mergeParams: true });
 staff.use(authenticate, resolveTenant);
 const view = requirePermission(P.PRODUCTS_VIEW);
 const manage = requirePermission(P.PRODUCTS_MANAGE);
 
 staff.get('/files', validate({ params: Joi.object(ws) }), view, asyncHandler(async (req, res) => res.json(await service.listFiles(wsId(req)))));
-staff.post('/files', manage, acceptFile, asyncHandler(async (req, res) => res.status(201).json({ file: await service.uploadFile(wsId(req), req.file, req) })));
+staff.post('/files', manage, acceptFile, requireStorageRoom(), asyncHandler(async (req, res) => res.status(201).json({ file: await service.uploadFile(wsId(req), req.file, req) })));
 staff.delete(
   '/files/:fileId',
   validate({ params: Joi.object({ ...ws, fileId: uuid.required() }) }),

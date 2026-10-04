@@ -38,6 +38,7 @@ the numbers **400–449** (no lane owns them).
 - The team screen groups people who joined into Admins (owner and the Admin invite, `workspace_manager`) and Members (every other role); pending invites stay in their own table. The seat counter is the API's (`/team/access-options`: members and pending invites); the old `POST /workspaces/:id/members` invite now has the same seat limit as `/team/invite`.
 - The phone verification code and the WhatsApp sign-in code go through the platform's WhatsApp provider (authentication template), SMS when WhatsApp cannot deliver, and — for sign-in — email when there is no verified phone any more, so nobody is locked out. WhatsApp two-step sign-in can only be turned on with a verified phone.
 - Account settings (`/workspaces/:id/account-settings`, workspace.manage): the timezone column, `settings.account.contact_form_email` (each `contact_form.submitted` is emailed there by contacts/jobs.js; empty = bell/list only) and `settings.account.legal` (name, company, phone, address, country) printed under the store name on invoices. A new timezone drops the store's analytics_daily rows so they are recounted on the new days. Store contact details (settings.store_info) stay the storefront's.
+- Plan limits on leads and storage (billing/limitGuards.js): `leads` = contacts created this calendar month (UTC, as usage_counters) by forms and the newsletter; past it a NEW lead is refused with 402 at the form/newsletter (someone the store knows is never refused) and the merchant gets `plan.limit_reached` once a month. Manual contacts by staff are not limited. `storage_bytes` = media library + digital product files (shoppers' photos are not counted); an upload that would pass it is refused. The usage block shows new leads this month.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -93,9 +94,9 @@ the numbers **400–449** (no lane owns them).
   export ready (17b).
 - [x] 18. Analytics: `analytics_daily` rollup filled by the worker (18a); attribution
   from `orders.attribution` with first/last touch (18b).
-- [ ] 19. (19a team screen, 19b phone verification, 19c WhatsApp sign-in code, 19d1 timezone/contact-form email/legal details, 19d2 owner name and picture done) Team screen admins/members + seat counter; phone verification screen;
-  2FA code over WhatsApp; account settings (timezone, contact-form email,
-  legal company/country, owner picture); plan limits on leads and storage.
+- [x] 19. Team screen admins/members + seat counter (19a); phone verification screen (19b);
+  2FA code over WhatsApp (19c); account settings (timezone, contact-form email,
+  legal company/country (19d1), owner picture (19d2)); plan limits on leads and storage (19e).
 - [ ] 20. Digital delivery link on the thank-you page and by message.
 - [ ] 21. AI: apply a generated funnel as funnel steps; AI entry points in the
   product form and the funnel wizard.

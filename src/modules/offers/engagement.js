@@ -225,6 +225,8 @@ async function subscribe(workspace, body) {
   const fullName = body.fullName || null;
   const email = body.email || null;
 
+  // A new subscriber is a new lead: the plan's monthly leads limit (billing/limitGuards.js).
+  await require('../billing/limitGuards').assertLeadRoom(workspace.id, phoneNormalized);
   const existing = await db.Customer.findOne({ where: { workspaceId: workspace.id, phoneNormalized } });
   if (existing) {
     await existing.update({

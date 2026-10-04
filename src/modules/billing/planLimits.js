@@ -46,6 +46,21 @@ const USAGE = {
     const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['ownerUserId'] });
     return workspace ? db.Workspace.count({ where: { ownerUserId: workspace.ownerUserId } }) : 0;
   },
+  // New contacts collected by forms and the newsletter this calendar month (UTC, as usage_counters).
+  leads: (workspaceId) => {
+    const now = new Date();
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return db.Customer.count({ where: { workspaceId, source: ['form', 'newsletter'], createdAt: { [db.Sequelize.Op.gte]: from } } });
+  },
+  // Files the store keeps: the media library and digital products.
+  storage_bytes: async (workspaceId) => {
+    const [row] = await db.sequelize.query(
+      `SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM media_assets WHERE workspace_id = :workspaceId)
+            + (SELECT COALESCE(SUM(size_bytes), 0) FROM digital_files WHERE workspace_id = :workspaceId) AS bytes`,
+      { replacements: { workspaceId }, type: db.Sequelize.QueryTypes.SELECT }
+    );
+    return Number(row.bytes);
+  },
 };
 
 async function usageFor(workspaceId, key) {

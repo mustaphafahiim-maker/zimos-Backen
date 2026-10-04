@@ -8,6 +8,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./mediaController');
 const schemas = require('./mediaValidation');
+const { requireStorageRoom } = require('../billing/limitGuards');
 
 // Mounted at /api/v1/workspaces/:workspaceId/media — staff. Uploaded images
 // go to the storage backend STORAGE_PROVIDER selects (local disk under
@@ -15,7 +16,8 @@ const schemas = require('./mediaValidation');
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.PRODUCTS_MANAGE));
 
-router.post('/', controller.acceptFile, controller.uploadMedia);
+// The plan's file storage limit, once the file's size is known (billing/limitGuards.js).
+router.post('/', controller.acceptFile, requireStorageRoom(), controller.uploadMedia);
 // The library the builder's image picker reads, and the only way to take a
 // file back out of it. Same permission as upload: whoever may add product
 // images may manage them.

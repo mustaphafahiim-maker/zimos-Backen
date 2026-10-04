@@ -35,7 +35,9 @@ const SOURCES = {
               WHERE workspace_id IS NOT NULL AND status = 'sent' AND created_at >= :from AND created_at < :to GROUP BY workspace_id`,
   ai_requests: `SELECT workspace_id, COUNT(*)::int AS value FROM ai_usage
                  WHERE created_at >= :from AND created_at < :to GROUP BY workspace_id`,
-  storage_bytes: `SELECT workspace_id, COALESCE(SUM(size_bytes), 0)::bigint AS value FROM media_assets GROUP BY workspace_id`,
+  storage_bytes: `SELECT workspace_id, COALESCE(SUM(size_bytes), 0)::bigint AS value
+                   FROM (SELECT workspace_id, size_bytes FROM media_assets UNION ALL SELECT workspace_id, size_bytes FROM digital_files) f
+                  GROUP BY workspace_id`,
 };
 
 /** Sets every store's counters for `period` from the source tables. */
@@ -75,14 +77,18 @@ async function usageFor(workspaceId, { months = 3 } = {}) {
   const view = (row) => ({ period: row.period, orders: row.orders, messages: row.messages, aiRequests: row.aiRequests, storageBytes: Number(row.storageBytes), updatedAt: row.updatedAt });
   const period = periodOf();
   const current = rows.find((row) => row.period === period);
-  const [members, domains] = await Promise.all([planLimits.usageFor(workspaceId, 'members'), planLimits.usageFor(workspaceId, 'domains')]);
+  const [members, domains, leads] = await Promise.all([
+    planLimits.usageFor(workspaceId, 'members'),
+    planLimits.usageFor(workspaceId, 'domains'),
+    planLimits.usageFor(workspaceId, 'leads'),
+  ]);
   const limits = {};
   for (const key of planLimits.LIMIT_KEYS) limits[key] = await planLimits.limitFor(workspaceId, key);
   return {
     period,
     current: current ? view(current) : { period, orders: 0, messages: 0, aiRequests: 0, storageBytes: 0, updatedAt: null },
     history: rows.filter((row) => row.period !== period).map(view),
-    seats: { members, domains },
+    seats: { members, domains, leads },
     limits,
   };
 }

@@ -37,6 +37,8 @@ const TYPES = Object.freeze({
   'export.ready': { permission: null, defaults: { inApp: true, email: true } },
   // A "Ship selected" batch finished (shipping/bulkShipping.js); sent to whoever started it.
   'shipping.batch_done': { permission: PERMISSIONS.ORDERS_MANAGE, defaults: { inApp: true, email: false } },
+  // A plan limit stopped something (billing/limitGuards.js): once a month per limit.
+  'plan.limit_reached': { permission: PERMISSIONS.WORKSPACE_MANAGE, defaults: { inApp: true, email: true } },
   announcement: { permission: null, defaults: { inApp: true, email: false } },
   // An automation's "notify the team" step (modules/automations).
   automation: { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
