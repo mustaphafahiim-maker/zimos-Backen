@@ -274,6 +274,8 @@ v1.use('/webhooks/payments', paymentWebhookRoutes);
 if (require('./modules/payments/gateways').isGateway('sandbox')) v1.use('/sandbox-pay', require('./modules/payments/sandboxPayRoutes'));
 // The sandbox courier's "advance the parcel" endpoint — only where that courier is registered.
 if (require('./modules/shipping/carriers').getAdapter('sandbox')) v1.use('/dev/sandbox', require('./modules/shipping/sandboxCarrierRoutes'));
+// Presigned-upload stand-ins for local disk (media/storage/sandboxRoutes.js) — never in production.
+if (env.storage.provider === 'local' && !env.isProduction) v1.use('/storage-sandbox', require('./modules/media/storage/sandboxRoutes'));
 v1.use('/admin', adminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.

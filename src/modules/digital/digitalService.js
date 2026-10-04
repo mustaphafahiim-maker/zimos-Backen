@@ -23,8 +23,8 @@ const { getStorage } = require('../media/storage');
  */
 
 // One request holds the file in memory, so the cap is modest. Larger files
-// (the spec's multipart upload straight to storage) are the storage
-// integration's job; `link` delivery covers them until then.
+// go in parts straight to storage (multipartUploads.js), and are downloaded
+// from storage through a signed link rather than through the API.
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const TYPES = ['file', 'link', 'license_codes'];
 
@@ -50,7 +50,9 @@ async function listFiles(workspaceId) {
   ]);
   const used = new Map();
   for (const d of deliveries) used.set(d.fileId, (used.get(d.fileId) || 0) + 1);
-  return { files: files.map((f) => fileView(f, used.get(f.id) || 0)), maxFileBytes: MAX_FILE_BYTES };
+  // Above maxFileBytes the dashboard uploads in parts, up to maxLargeFileBytes (multipartUploads.js).
+  const { MAX_BYTES, PART_SIZE } = require('./multipartUploads');
+  return { files: files.map((f) => fileView(f, used.get(f.id) || 0)), maxFileBytes: MAX_FILE_BYTES, maxLargeFileBytes: MAX_BYTES, partSizeBytes: PART_SIZE };
 }
 
 async function uploadFile(workspaceId, file, req) {
@@ -541,6 +543,12 @@ async function downloadFile(workspaceId, token) {
     throw new AppError('DOWNLOAD_UNAVAILABLE', 'This download link is no longer available', 410, { state: 'used_up' });
   }
 
+  if (Number(grant.file.sizeBytes) > MAX_FILE_BYTES) {
+    const redirect = await require('../media/storage')
+      .getMultipart()
+      .presignGet({ key: grant.file.storageKey, filename: grant.file.name, contentType: grant.file.mimeType, expiresIn: 300 });
+    return { redirect, name: grant.file.name };
+  }
   const stored = await getStorage().getPrivate(grant.file.storageKey);
   if (!stored) throw new NotFoundError('Download');
   return { buffer: stored.buffer, name: grant.file.name, mimeType: grant.file.mimeType };

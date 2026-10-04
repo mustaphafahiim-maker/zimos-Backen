@@ -50,6 +50,8 @@ const manage = requirePermission(P.PRODUCTS_MANAGE);
 
 staff.get('/files', validate({ params: Joi.object(ws) }), view, asyncHandler(async (req, res) => res.json(await service.listFiles(wsId(req)))));
 staff.post('/files', manage, acceptFile, requireStorageRoom(), asyncHandler(async (req, res) => res.status(201).json({ file: await service.uploadFile(wsId(req), req.file, req) })));
+// Large files, uploaded in parts straight to storage (multipartUploads.js).
+staff.use('/files/multipart', require('./multipartUploads').router);
 staff.delete(
   '/files/:fileId',
   validate({ params: Joi.object({ ...ws, fileId: uuid.required() }) }),
@@ -142,6 +144,11 @@ store.get(
   '/:token/file',
   asyncHandler(async (req, res) => {
     const file = await service.downloadFile(wsId(req), req.params.token);
+    // A large file is fetched from storage itself, through a short-lived signed link.
+    if (file.redirect) {
+      res.set('Cache-Control', 'private, no-store');
+      return res.redirect(302, file.redirect);
+    }
     res.set('Content-Type', file.mimeType || 'application/octet-stream');
     res.set('Content-Length', String(file.buffer.length));
     res.set('Cache-Control', 'private, no-store');
