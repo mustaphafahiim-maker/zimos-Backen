@@ -102,6 +102,7 @@ the numbers **400–449** (no lane owns them).
 - 65: "all filter results" ticks the ids (dashboard SelectAllMatching pages through GET /orders with the list's own query, up to 500) instead of sending `filter` to POST /orders/bulk, so printing, the extras and bulk shipping — which take ids — work on it too. Offered once the whole page is ticked and the list has more; the bar says when the 500 cap cut the list.
 - 66: GET /orders/:id/session-details (orders/orderSessionDetails.js) — no new storage: the shopper is the visitor_id of the analytics event that carries the order id (else orders.ad_match.visitorId), pages are its page views up to a minute after the order (last 30). Order sequence counts the customer's non-test orders up to this one; "New customer" = one order in all. The last action is the newest timeline entry (status, audit, note, automation, webhook, courier) — shown in the header line, since PageHeader's description is text.
 - 67: the draft is a JSONB on the order (orders.shipment_draft, migration 420), not a Shipment row with a 'draft' status — a shipment row drives the order's stage, counts and courier sync. Saving is allowed before the order can be booked (that is the point of preparing it); nothing is checked against the courier until booking. insertShipment clears it, so any shipment (form, bulk, auto-booking) ends the draft.
+- 68: customer.updated / review.created / staff-edit order.item_added ride on the audit bridge (the audit rows already exist); a line appended to a placed order records order.item_added in addLineToOpenOrder. product.low_stock is a ProductVariant afterUpdate hook (registered by inventoryService) firing once per downward crossing of low_stock_threshold on available = on hand − reserved — every stock path uses instance updates. All four are webhook topics.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -228,7 +229,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 65. Bulk actions on "all filter results" in the orders list (§4.3).
 - [x] 66. Order page: pages visited, time to purchase, the customer's order count and "New customer", last action in the header (§4.2–§4.4).
 - [x] 67. "Save as draft" on the order's shipping card (§4.4).
-- [ ] 68. The missing outbox events: order.item_added, customer.updated, product.low_stock, review.created (§3.2).
+- [x] 68. The missing outbox events: order.item_added, customer.updated, product.low_stock, review.created (§3.2).
 - [ ] 69. Policies shown in funnels (§8.3).
 - [ ] 70. Category SEO (title, description, OG image, noindex) used by the store; the categories list's preview / in-header / export (§7.6, §8.9).
 - [ ] 71. The primary domain is the store's canonical address: canonical, sitemap and feed links, redirect (§8.11).
