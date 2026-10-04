@@ -93,6 +93,8 @@ module.exports = (sequelize, DataTypes) => {
       attribution: { type: DataTypes.JSONB, allowNull: true },
       sessionStats: { type: DataTypes.JSONB, allowNull: true, field: 'session_stats' },
       purchaseEventSentAt: { type: DataTypes.DATE, allowNull: true, field: 'purchase_event_sent_at' },
+      // The ad platforms' browser ids sent with the checkout (migration 419, marketing/pixelMatching.js).
+      adMatch: { type: DataTypes.JSONB, allowNull: true, field: 'ad_match' },
       tags: { type: DataTypes.ARRAY(DataTypes.TEXT), allowNull: false, defaultValue: [] },
       isSeen: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_seen' },
       seenAt: { type: DataTypes.DATE, allowNull: true, field: 'seen_at' },

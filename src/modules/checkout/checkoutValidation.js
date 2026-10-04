@@ -100,6 +100,8 @@ module.exports = {
       website: Joi.string().max(500).allow('', null).optional(),
       // The browser's own id (kept by the storefront in localStorage): device blocklist and risk.
       deviceId: Joi.string().trim().min(8).max(128).allow('', null).optional(),
+      // The ad platforms' browser ids, for the server-side Purchase (marketing/pixelMatching.js). Loose: cleaned there.
+      adIds: Joi.object().pattern(/^[A-Za-z]{2,12}$/, Joi.string().max(500).allow('', null)).max(10).optional(),
       botToken: Joi.string().max(500).allow('', null).optional(),
       captchaToken: Joi.string().max(4000).allow('', null).optional(),
       // Proof that the phone was verified (POST /checkout/otp/verify) — risk/checkoutOtp.

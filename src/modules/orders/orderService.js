@@ -40,6 +40,7 @@ const orderMeta = require('./orderMetaService');
 const { applyOrderFilters } = require('./orderFilters');
 const { effectiveVariantPrice } = require('../catalog/productPage');
 const { applyBundleTiers } = require('../bundles/bundlePricing');
+const pixelMatching = require('../marketing/pixelMatching');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -505,6 +506,7 @@ async function createOrder(
         ipAddress: visitorIp,
         ipCountry: visitor.ipCountry,
         deviceId,
+        adMatch: pixelMatching.fromCheckout(req),
         riskScore: risk ? risk.score : null,
         riskLevel: risk ? risk.level : null,
         riskReasons: risk ? risk.reasons : [],

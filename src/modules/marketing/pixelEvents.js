@@ -10,6 +10,7 @@ const metaCapi = require('./pixelProviders/metaCapi');
 const tiktokCapi = require('./pixelProviders/tiktokCapi');
 const snapchatCapi = require('./pixelProviders/snapchatCapi');
 const googleMp = require('./pixelProviders/googleMp');
+const pixelMatching = require('./pixelMatching');
 
 /**
  * Server-side ad-platform conversion events ("Meta CAPI", TikTok Events API,
@@ -64,7 +65,7 @@ async function run(workspaceId, trigger, orderId) {
 
   const order = await db.Order.findOne({
     where: { id: orderId, workspaceId },
-    include: [{ model: db.OrderItem, as: 'items', attributes: ['productId'], required: false }],
+    include: [{ model: db.OrderItem, as: 'items', attributes: ['productId', 'variantId', 'skuSnapshot', 'quantity', 'unitPriceAmount'], required: false }],
   });
   if (!order) return [];
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug', 'settings'] });
@@ -89,25 +90,22 @@ async function run(workspaceId, trigger, orderId) {
   const eventId = order.id;
   const eventSourceUrl = eventSourceUrlFor(workspace, order.id);
 
-  // clientIp/userAgent are part of each provider's sendPurchase signature
-  // (Meta/TikTok/Snapchat all accept them for Advanced-Matching-style
-  // quality signals) but are not available here: this runs fire-and-forget
-  // from transaction.afterCommit with no HTTP request in scope, and the
-  // Order model does not persist the placing request's IP/user-agent
-  // anywhere. Left out rather than guessed — hashed email/phone from
-  // order.contactSnapshot is still sent, which is what each platform
-  // actually matches the conversion on.
+  // Who bought and what, for the platform to match the order to the ad
+  // click (pixelMatching.js): the IP and browser kept at checkout, the
+  // platforms' browser ids, hashed name / city / country, the lines.
+  const matching = pixelMatching.matchingFor(order);
+  const seen = { clientIp: matching.clientIp, userAgent: matching.userAgent, matching };
 
   // The providers keep their original signature (a `secrets` blob with one
   // named key per platform); each pixel's own token is handed to them in that
   // shape. Several pixels of one platform get the same event id.
   const SENDERS = {
     meta: ({ pixel, token }) =>
-      metaCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { metaAccessToken: token, metaTestEventCode: pixel.testEventCode || undefined }, order, eventId, eventSourceUrl }),
-    tiktok: ({ pixel, token }) => tiktokCapi.sendPurchase({ pixelCode: pixel.pixelId, secrets: { tiktokAccessToken: token }, order, eventId, eventSourceUrl }),
-    snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl }),
+      metaCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { metaAccessToken: token, metaTestEventCode: pixel.testEventCode || undefined }, order, eventId, eventSourceUrl, ...seen, fbp: matching.fbp, fbc: matching.fbc }),
+    tiktok: ({ pixel, token }) => tiktokCapi.sendPurchase({ pixelCode: pixel.pixelId, secrets: { tiktokAccessToken: token }, order, eventId, eventSourceUrl, ...seen }),
+    snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl, ...seen }),
     google: ({ pixel, token }) =>
-      isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId }) : null,
+      isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId, matching }) : null,
   };
 
   const results = [];

@@ -25,17 +25,13 @@ const { AppError } = require('../../../core/errors/AppError');
  * "AW-"/"GT-" one — see pixelEvents.js. The Google Ads case is left
  * unhandled; flagged rather than guessed at Enhanced Conversions' OAuth flow.
  *
- * Known limitation: GA4 MP's `client_id` is meant to be the value of the
- * shopper's own `_ga` browser cookie so this event joins their existing GA4
- * session. apps/storefront does not capture that cookie anywhere today (no
- * `_ga` read in the storefront source), so there is no real client_id to
- * forward. A deterministic pseudo client_id is derived from the order id
- * below purely to satisfy the API's required format ("two positive integers
- * joined by a period") — it lets the purchase event land in GA4 as its own
- * session/user rather than being rejected, but it will NOT merge with the
- * shopper's actual browser-side GA4 session/user. Proper attribution would
- * need the storefront to capture `_ga` and pass it through order creation,
- * which is out of scope here (same treatment as the fbp/fbc gap for Meta).
+ * client_id: GA4 MP's client_id is the shopper's own `_ga` cookie id, so the
+ * event joins their GA4 session. The storefront sends it with the checkout
+ * (orders.ad_match.gaClientId, marketing/pixelMatching.js). An order without
+ * it (no GA script, a staff order) gets a deterministic pseudo client_id from
+ * the order id, purely to satisfy the required format ("two positive integers
+ * joined by a period"): it lands in GA4 as its own user rather than being
+ * rejected, but does not merge with a browser session.
  */
 const PROVIDER = 'google';
 
@@ -76,13 +72,18 @@ async function call(measurementId, apiSecret, body) {
   return { status: res.status };
 }
 
-/** `measurementId` is workspaces.settings.tracking_pixels.google_tag (must start with "G-"). */
-async function sendPurchase({ measurementId, secrets, order, eventId }) {
+/**
+ * `measurementId` is workspaces.settings.tracking_pixels.google_tag (must
+ * start with "G-"). `matching.gaClientId` — the shopper's own _ga client id,
+ * sent by the storefront with the checkout (marketing/pixelMatching.js) —
+ * joins the purchase to their GA4 session; without it the pseudo id below.
+ */
+async function sendPurchase({ measurementId, secrets, order, eventId, matching = {} }) {
   if (!measurementId || !secrets || !secrets.googleApiSecret) {
     throw new AppError('GOOGLE_NOT_CONFIGURED', 'GA4 measurement id or API secret is not configured', 422);
   }
   const body = {
-    client_id: pseudoClientId(order.id),
+    client_id: matching.gaClientId || pseudoClientId(order.id),
     events: [
       {
         name: 'purchase',
@@ -90,6 +91,9 @@ async function sendPurchase({ measurementId, secrets, order, eventId }) {
           currency: order.currency,
           value: Number(order.totalAmount) / 100,
           transaction_id: order.id,
+          ...(matching.contents && matching.contents.length
+            ? { items: matching.contents.map((c) => ({ item_id: c.id, quantity: c.quantity, price: c.price })) }
+            : {}),
           // Not a GA4-documented dedup key (GA4 MP has none the way
           // Meta/TikTok/Snap do) — carried only for our own log correlation.
           event_id: eventId,
