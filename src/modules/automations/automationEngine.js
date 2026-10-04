@@ -29,6 +29,8 @@ const ORDER_TRIGGERS = [
   'order.postponed',
   'order.returned',
   'order.payment_failed',
+  // A paid order's digital products are ready (digital/digitalService.onOrderPaid).
+  'order.digital_delivered',
 ];
 const CHECKOUT_TRIGGERS = ['checkout.abandoned', 'lost_order.created'];
 const OTHER_TRIGGERS = ['review.request', 'lead.created', 'subscription.renewal_failed'];

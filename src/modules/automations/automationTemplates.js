@@ -93,6 +93,18 @@ const TEMPLATES = [
     whatsapp: { name: 'payment_failed', body: 'مرحبًا {{1}}، لم تكتمل عملية الدفع لطلبك رقم {{2}}. أعد المحاولة من هنا: {{3}}' },
   },
   {
+    key: 'digital_delivery',
+    trigger: 'order.digital_delivered',
+    name: { ar: 'تسليم المنتج الرقمي', en: 'Digital product delivery' },
+    description: {
+      ar: 'رابط التحميل على واتساب فور دفع طلب فيه منتج رقمي (SPEC §18.2). الرابط يفتح صفحة الطلب بروابط التحميل.',
+      en: 'The download link on WhatsApp as soon as an order with a digital product is paid. The link opens the order page with its downloads.',
+    },
+    conditions: {},
+    steps: [{ type: 'whatsapp_template', template: 'digital_delivery', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{order_link}}'] }],
+    whatsapp: { name: 'digital_delivery', body: 'مرحبًا {{1}}، شكرًا لطلبك رقم {{2}}. مشترياتك الرقمية جاهزة للتحميل من هنا: {{3}}' },
+  },
+  {
     key: 'unreachable',
     trigger: 'order.unreachable',
     name: { ar: 'لم يرد على الاتصال', en: 'Did not answer the call' },

@@ -124,6 +124,19 @@ staff.post(
 const store = Router({ mergeParams: true });
 const downloadLimiter = createIpMinuteLimiter('store-downloads', 30, { skip: () => env.isTest });
 store.use(downloadLimiter, resolvePublicWorkspace);
+// The thank-you page: an online order's download links, for the shopper who
+// holds its payment token (x-payment-token, as GET /orders/:id/payment). Empty
+// until the payment is captured; the page asks again until they appear.
+store.get(
+  '/order/:orderId',
+  // The store may be named by id or slug (resolvePublicWorkspace); the order only by id.
+  validate({ params: Joi.object({ workspaceId: Joi.string().max(100).required(), orderId: uuid.required() }) }),
+  asyncHandler(async (req, res) => {
+    const order = await require('../payments/onlinePaymentService').loadOrderForShopper(wsId(req), req.params.orderId, req.headers['x-payment-token']);
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ downloads: await service.publicGrantsForOrder(wsId(req), order.id) });
+  })
+);
 store.get('/:token', asyncHandler(async (req, res) => res.json(await service.getPublicGrant(wsId(req), req.params.token))));
 store.get(
   '/:token/file',
