@@ -159,6 +159,12 @@ Public pages are served at `GET /store/:ws/funnels/:ref/pages[/:key]` from the p
 The storefront shows a generic page at `/f/<funnel>/p/<key>`, inside the funnel's masthead and footer, with a link back to the offer and to the other generic pages.
 
 The editor lists generic pages in the map's sidebar with presets (contact with a form, about, policies, blank), each keyed by its name so the address reads well. They do not appear on the map or in the step list.
+The four P2 features use the existing AI job pipeline (`ai/featuresP2.js`), and no new tables were needed.
+
+- **Page review.** The facts are measured on the server (`ai/pageFacts.js`): where the order form and calls to action sit, the price, pictures and their descriptions, social proof, FAQ, guarantee wording and countdown. Alongside them go 30 days of numbers from the store's own analytics (page views, visitors, orders from visitors who landed there, or the funnel step's views). The provider scores from those facts; the sandbox scores by fixed rules.
+- **Ad creatives.** These are texts plus banner specs (headline, subline, badge, format) laid over the product's own pictures. Any banner on another address is dropped. The dashboard draws previews and offers a PNG download at the platform's size. Producing raster images would need an image provider, which is left to the integrations team.
+- **Store builder.** Apply creates an unpublished page and hidden collections. The suggested theme (free themes only) and the policies are shown for the merchant to switch on or copy. Nothing goes live.
+- **Suggested WhatsApp replies.** These use the bot's own facts (store info, products, the customer's orders) and fill the inbox's message box; a person sends it. The feature is gated on `orders.confirm`, and a user with only inbox access can read only `wa_reply` jobs.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -314,7 +320,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 94. The funnel page editor gets the website editor's tools: undo/redo, layers, page product, named styles, saved sections (§9.3).
 - [x] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
 - [x] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
-- [ ] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
+- [x] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
 - [ ] 98. Large digital files uploaded straight to storage (presigned multipart) (§18.2).
 - [ ] 99. Remove the leftover mock upsell page and helpers (§9.8).
 - [ ] 100. Theme gallery: reset the current theme, theme tags (§8.1).
