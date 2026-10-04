@@ -65,6 +65,7 @@ the numbers **400–449** (no lane owns them).
 - Funnel runtime: the step endpoint now returns the funnel and its own settings (as the start already did). A step page shows prices in the funnel's currency (falling back to the store's) — the page's elements, the checkout line, the orders summary and the pixel `ViewContent` — and its tab title, description and icon are the step's own SEO first, then the funnel's title/description/favicon, then the step name and the store's icon. The entry page `/f/<ref>` keeps its generic title (it only starts the session and moves on).
 - Custom-field prices: a field takes `priceDeltaAmount` (minor units, ≥ 0), added to the line's unit price when the shopper fills the field in (an empty answer adds nothing; a bundle/offer line adds it per offer unit). The amount is read from the product as it is now in `priceLine` (order, shipping quote, abandoned checkout) and the cart totals (catalog/customFieldPricing.js), and kept on the answer's snapshot so the order shows it. The product form shows "+20" by the field and a "Personalisation" row in its total; the shipping quote is not re-asked per keystroke, so a free-shipping threshold crossed only by field prices shows on the order, not the form. Staff edits keep a kept line's stored price. The waybill (A5 and the bulk labels, as many lines as fit) prints "<product> — <field>: <answer>" for every answered field, a photo as "photo on the order page".
 - Shopper reviews (reviews/shopperReviews.js): proof of purchase is the order number AND its phone for a delivered order of the product — a phone alone no longer answers "did this number buy it?". Every mismatch is the same 403 REVIEW_NOT_VERIFIED and the form is limited to 10 tries a minute per IP. Up to three photos, uploaded first like a custom-field photo (same visitor id), are moved to public storage when the review is sent and their private copies dropped; the review still waits for approval. The phone-only `submitReview` and its route are gone.
+- Reviews import (reviews/import): an importer contract (README) with a sandbox, chosen by REVIEW_IMPORT_PROVIDER and refused in production until a real one (which Shopify reviews app, and how the store hands over its token, is an open decision). The service filters (photos only, minimum rating, language), skips a review already imported (same author, rating and text on the product), keeps photo links as given and stores source `import`: named, deletable like a manual review, never "verified" (only `customer` reviews are), waiting for approval unless the merchant ticks "show now". Dashboard: "Import reviews" beside "Add review".
 
 ## P0 — correctness, compliance, launch gates
 
@@ -154,9 +155,8 @@ the numbers **400–449** (no lane owns them).
   related-products section that `hide_related_products` can hide.
 - [x] 38. Funnel runtime uses the funnel's currency, favicon and title (ties to 15).
 - [x] 39. Custom-field answers on the waybill; `priceDeltaAmount`.
-- [ ] 40. Shopper review form with a photo; reviews import (Shopify) on the
+- [x] 40. Shopper review form with a photo; reviews import (Shopify) on the
   sandbox; public review endpoint must not reveal purchases by phone.
-  (40a done: the form, photos and the purchase check.)
 - [ ] 41. Translations of pages and funnels; "Translate with AI"; server-side
   `<html lang dir>` for the store (SEO).
 - [ ] 42. Page settings in the builder: SEO and Scripts tabs.
