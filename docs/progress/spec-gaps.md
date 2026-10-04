@@ -203,6 +203,12 @@ Contact details are each store's own settings: Store info (email, phone, address
 Migration 430 removes Uokids' values from the template and from any store holding them exactly. A store that is Uokids itself (by name or slug) gets them moved into its own empty settings instead. The template data file no longer seeds them.
 
 The template's demo pictures still come from uokids.com's CDN. That is sample content, not contact data, and is left as it is.
+Order exports (CSV, Excel, background) mask every phone field at any depth with the orders list's own `maskPhonesDeep` unless the teammate has `customers.reveal_sensitive`.
+
+- A background export decides this from who started it and stores it on the export. One started before this change is masked.
+- The audit row records `maskedPhones`.
+- The export dialog says it, since the dashboard keeps no permission list to show it only to masked roles.
+- The shipping manifest and waybills keep full numbers: the courier needs them, and they are behind `shipping.manage`.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -368,7 +374,7 @@ Bugs and security first, then what blocks selling, then features.
 Same order: bugs and security first, then what blocks selling, then features. Left out on purpose: store-wide named styles (lane 5 decision), per-device column widths (the full style/layout tab list is not queued), a per-product currency (the store has one currency, decision 61).
 
 - [x] 101. Store templates carry no other store's contact details: the Uokids template's WhatsApp number, address, email and social links removed (and from stores that got them), and the floating WhatsApp, footer contact and social links editable in the dashboard (§8.2, §8.8).
-- [ ] 102. The orders export masks phones unless the teammate may reveal them (§3.4 #8).
+- [x] 102. The orders export masks phones unless the teammate may reveal them (§3.4 #8).
 - [ ] 103. The checkout autosave goes through the bot guard and keeps the shopper's IP and country (§5.1, §6.1).
 - [ ] 104. "Switch to cash on delivery" on the pay page runs the COD checks: OTP, deposit, the per-IP rule, the funnel's payment methods (§11.4, §5.6).
 - [ ] 105. The abandoned-cart email respects STOP and the blocklist (§14.5).
