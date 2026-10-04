@@ -1041,6 +1041,9 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       }
     }
 
+    // The pressed button's tags, on the customer who ordered in this session (funnelTags.js).
+    await require('./funnelTags').tagFromOutcome(workspaceId, currentStep, outcome, session, t);
+
     const outbound = edges.filter((e) => e.fromStepKey === session.currentStepKey);
     const nextEdge = pickNextEdge(outbound, outcome);
 

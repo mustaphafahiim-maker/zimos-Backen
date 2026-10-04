@@ -65,18 +65,33 @@ function findFormNode(node, elementId, depth = 0) {
 /** The form element as published: its name and the tags it adds. */
 async function publishedForm(workspaceId, pagePath, elementId) {
   if (!elementId) return null;
+  let node = null;
   try {
     const found = await require('../pages/pagesService').getPublishedPageForStore(workspaceId, pagePath || '/');
-    if (found.kind !== 'page') return null;
-    const node = findFormNode(found.data.page.tree, String(elementId));
-    if (!node) return null;
-    const props = node.props || {};
-    const tags = Array.isArray(props.tags) ? props.tags : String(props.tags || '').split(',');
-    return { name: String(props.formName || props.title || '').trim(), tags: cleanTags(tags) };
+    if (found.kind === 'page') node = findFormNode(found.data.page.tree, String(elementId));
   } catch (err) {
-    // An unpublished page or a funnel step: the submission is still kept.
-    return null;
+    // Not a store page (a funnel step's path, or unpublished): looked for below.
   }
+  // A form on a published funnel's step (its path is the funnel's, not a page's).
+  if (!node) node = await funnelFormNode(workspaceId, String(elementId));
+  if (!node) return null;
+  const props = node.props || {};
+  const tags = Array.isArray(props.tags) ? props.tags : String(props.tags || '').split(',');
+  return { name: String(props.formName || props.title || '').trim(), tags: cleanTags(tags) };
+}
+
+async function funnelFormNode(workspaceId, elementId) {
+  const funnels = await db.Funnel.findAll({ where: { workspaceId, status: 'published' }, attributes: ['publishedRevisionId'] });
+  const ids = funnels.map((f) => f.publishedRevisionId).filter(Boolean);
+  if (ids.length === 0) return null;
+  const revisions = await db.FunnelRevision.findAll({ where: { id: ids, workspaceId }, attributes: ['snapshot'] });
+  for (const revision of revisions) {
+    for (const step of (revision.snapshot && revision.snapshot.steps) || []) {
+      const node = findFormNode(step.builderData, elementId);
+      if (node) return node;
+    }
+  }
+  return null;
 }
 
 /**
