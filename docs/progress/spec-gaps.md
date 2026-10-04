@@ -118,6 +118,7 @@ Saving a card with no payment is an optional gateway contract (`createCardSetup`
 `ad_id` from the landing URL is kept in the order's touch (`adId`). Spend is still kept per campaign per day; an ad-level CSV (with an "Ad ID" column) is added up into those rows and keeps the ads' ids. An order is counted under a campaign by its `utm_campaign` (name or id) first, then by the campaign its ad belongs to. That rescues renamed campaigns and unfilled `{{campaign.name}}` templates. Ad ids are matched whatever the day they were imported on. Manual spend entry has no ad ids. The P&L by campaign still groups by `utm_campaign` only.
 Both are `standard` apps (on until uninstalled), like the other features stores already had, so no store loses its feed or Clarity script. Uninstalling Google Merchant makes only the `google` feed channel answer 404; the Meta, TikTok and Snapchat feeds stay. Uninstalling Clarity removes Clarity pixels from the storefront payload; the other pixels stay under Tracking tools. "Open" goes to /offers/feed and /marketing. No frontend change was needed: the apps page renders from the catalogue.
 The email changes only when the link sent to the new address is opened (24 hours, single use), and that counts as verifying it. The old address is told at the request and at the change. The password is asked for when the account has one; a Google-only account relies on its session. A wrong password answers 400 `INVALID_PASSWORD`, not 401, because the dashboard reads 401 as an expired session. Pending changes are their own table (`email_changes`), not a new `verification_tokens` enum value. Other sessions are not signed out.
+The links are a platform setting (`platform_settings.education_links`), not code, because the URLs are ZIMOS's own and change. The console page uses the announcements permissions. Ten dashboard topics each have one tutorial link, shown under the page title through a `tutorial` prop on PageHeader. The help center, Telegram and support chat are cards at the bottom of the home page. Anything unset is not shown, so nothing appears until the platform team fills it in.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -260,7 +261,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 81. `ad_id` from ad links recorded and matched to spend (§15.4).
 - [x] 82. App store: Clarity and Google Merchant shown as available (§16.6).
 - [x] 83. Changing the owner's email, verified (§17.3).
-- [ ] 84. Education: tutorial links by key settings, help center and Telegram cards on the home page (§15.1, §18.6).
+- [x] 84. Education: tutorial links by key settings, help center and Telegram cards on the home page (§15.1, §18.6).
 - [ ] 85. WhatsApp templates synced from Meta with their status, picked in automations and the inbox (§14.1).
 - [ ] 86. Product and funnel pickers for automation conditions (§14.2).
 - [ ] 87. Order emails: the store's From name and Reply-To (§14.5).
