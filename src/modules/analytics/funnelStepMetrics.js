@@ -16,8 +16,8 @@ const { rate } = require('./analyticsService');
  *   ctr          movedOn ÷ visits
  *   conversions  what the step is for: the order on a checkout or sales step
  *                (sessions that reached it and ordered), accepted offers on an
- *                upsell or downsell step, sign-ups on an opt-in step (moving
- *                on from it is submitting the form); null on other steps
+ *                upsell or downsell step, sign-ups on an opt-in step (the
+ *                session's stored sign-up, funnels/funnelOptIn.js); null on other steps
  *   cr           conversions ÷ visits
  *   optIns       the opt-in step's sign-ups (null elsewhere)
  *
@@ -51,17 +51,19 @@ async function stepMetrics(workspaceId, funnelId, steps, sessions, { start, end 
     let visits = 0;
     let movedOn = 0;
     let ordered = 0;
+    let signedUp = 0;
     for (const s of sessions) {
       const passed = (s.path || []).includes(step.key);
       if (!passed && s.currentStepKey !== step.key) continue;
       visits += 1;
       if (passed) movedOn += 1;
       if (s.orderId) ordered += 1;
+      if (s.optIns && s.optIns[step.key]) signedUp += 1;
     }
     let conversions = null;
     if (ORDER_TYPES.has(step.stepType)) conversions = ordered;
     else if (OFFER_TYPES.has(step.stepType)) conversions = acceptedBy.get(step.key) || 0;
-    else if (step.stepType === 'opt_in') conversions = movedOn;
+    else if (step.stepType === 'opt_in') conversions = signedUp;
     out.set(step.key, {
       visits,
       views: viewsBy.get(step.key) || 0,
@@ -69,7 +71,7 @@ async function stepMetrics(workspaceId, funnelId, steps, sessions, { start, end 
       ctr: rate(movedOn, visits),
       conversions,
       cr: conversions === null ? null : rate(conversions, visits),
-      optIns: step.stepType === 'opt_in' ? movedOn : null,
+      optIns: step.stepType === 'opt_in' ? signedUp : null,
     });
   }
   return out;

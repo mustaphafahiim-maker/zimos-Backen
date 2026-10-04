@@ -1031,6 +1031,9 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       return { session: publicSession(session), ...restarted };
     }
 
+    // An opt-in step moves on only once the visitor signed up on it (funnelOptIn.js).
+    require('./funnelOptIn').assertOptedIn(currentStep, session);
+
     // Accepted upsell/downsell, in this same transaction so it cannot outlive
     // a failed advance: joined to the checkout order while its offer window is
     // open when the store has turned that on (funnelOfferMerge), else a linked

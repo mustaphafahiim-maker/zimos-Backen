@@ -18,6 +18,8 @@ router.post('/:funnelRef/sessions', validate(schemas.startSession), controller.s
 router.get('/:funnelId/sessions/:sessionId/step', validate(schemas.sessionStep), controller.getSessionStep);
 // Produce an outcome for the current step and route to the next one.
 router.post('/:funnelId/sessions/:sessionId/advance', validate(schemas.advance), refuseDraftOrders, controller.advance);
+// The opt-in step's sign-up, before it moves on (funnelOptIn.js).
+router.use(require('./funnelOptIn').router);
 // The funnel's generic pages — contact, about, policies — off the path (genericPages.js).
 const genericPages = require('./genericPages');
 router.get('/:funnelRef/pages', validate(genericPages.schemas.list), genericPages.list);

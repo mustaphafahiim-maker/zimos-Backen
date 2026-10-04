@@ -6,7 +6,7 @@ const { NotFoundError } = require('../../core/errors/AppError');
 const { resolveRange, dayKey, rate, toNumber, DAY_MS } = require('./analyticsService');
 const base = require('../currencies/baseAmounts');
 
-const SESSION_ATTRIBUTES = ['id', 'funnelId', 'currentStepKey', 'path', 'orderId', 'attribution', 'status', 'createdAt'];
+const SESSION_ATTRIBUTES = ['id', 'funnelId', 'currentStepKey', 'path', 'orderId', 'attribution', 'status', 'createdAt', 'optIns'];
 const ORDER_ATTRIBUTES = ['id', 'funnelId', 'linkedFromOrderId', ...base.ATTRIBUTES, 'cancelledAt', 'confirmationState', 'createdAt'];
 const FUNNEL_ATTRIBUTES = ['id', 'name', 'subdomain', 'status', 'publishedRevisionId'];
 
