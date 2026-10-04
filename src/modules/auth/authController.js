@@ -156,7 +156,7 @@ const resetPassword = asyncHandler(async (req, res) => {
 const requestPhoneVerification = [
   authenticateAllowPending,
   asyncHandler(async (req, res) => {
-    const result = await authService.requestPhoneVerification(req.user.id, req.body.phone);
+    const result = await authService.requestPhoneVerification(req.user.id, req.body.phone, req.body.channel);
     res.json(result);
   }),
 ];

@@ -433,9 +433,9 @@ async function confirmVerificationCode(user, code, req) {
 
 // --- Phone verification (during/after registration) ----------------------
 
-async function requestPhoneVerification(userId, phone) {
-  await otpService.generateAndSendOtp(phone, 'phone_verification');
-  return { sent: true };
+async function requestPhoneVerification(userId, phone, channel = 'sms') {
+  const { sentVia } = await otpService.generateAndSendOtp(phone, 'phone_verification', { channel });
+  return { sent: true, sentVia };
 }
 
 async function confirmPhoneVerification(user, phone, code, req) {

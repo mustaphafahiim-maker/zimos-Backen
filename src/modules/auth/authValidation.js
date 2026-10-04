@@ -108,7 +108,8 @@ module.exports = {
   },
   phoneCode: Joi.string().pattern(/^\d{6}$/),
   verifyPhoneRequest: {
-    body: Joi.object({ phone: Joi.string().min(6).max(32).required() }),
+    // WhatsApp sends the authentication template, falling back to SMS.
+    body: Joi.object({ phone: Joi.string().min(6).max(32).required(), channel: Joi.string().valid('sms', 'whatsapp').default('sms') }),
   },
   verifyPhoneConfirm: {
     body: Joi.object({ phone: Joi.string().min(6).max(32).required(), code: Joi.string().pattern(/^\d{6}$/).required() }),

@@ -91,7 +91,7 @@ the numbers **400–449** (no lane owns them).
   export ready (17b).
 - [x] 18. Analytics: `analytics_daily` rollup filled by the worker (18a); attribution
   from `orders.attribution` with first/last touch (18b).
-- [ ] 19. (19a team screen done) Team screen admins/members + seat counter; phone verification screen;
+- [ ] 19. (19a team screen, 19b phone verification done) Team screen admins/members + seat counter; phone verification screen;
   2FA code over WhatsApp; account settings (timezone, contact-form email,
   legal company/country, owner picture); plan limits on leads and storage.
 - [ ] 20. Digital delivery link on the thank-you page and by message.
