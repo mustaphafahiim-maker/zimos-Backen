@@ -89,7 +89,14 @@ async function settingsRow(userId) {
 async function status(user) {
   const row = await db.UserTwoFactor.findByPk(user.id);
   const devices = await db.TrustedDevice.count({ where: { userId: user.id, expiresAt: { [db.Sequelize.Op.gt]: new Date() } } });
-  return { mode: row ? row.mode : 'off', enabledAt: row ? row.enabledAt : null, rememberedDevices: devices, hasPassword: Boolean(user.passwordHash) };
+  return {
+    mode: row ? row.mode : 'off',
+    enabledAt: row ? row.enabledAt : null,
+    rememberedDevices: devices,
+    hasPassword: Boolean(user.passwordHash),
+    // Backup codes left (twoFactorRecovery.js).
+    ...require('./twoFactorRecovery').backupStatus(row),
+  };
 }
 
 /** Changing the second step asks for the password again (when the account has one). */
@@ -147,7 +154,7 @@ async function confirmTotp(user, { code }, req) {
 async function disable(user, { password }, req) {
   await assertPassword(user, password);
   const row = await settingsRow(user.id);
-  await row.update({ mode: 'off', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: null });
+  await row.update({ mode: 'off', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: null, backupCodes: [], backupCodesCreatedAt: null });
   await db.TrustedDevice.destroy({ where: { userId: user.id } });
   await recordAudit({ actorUserId: user.id, action: 'user.two_factor_disable', entityType: 'User', entityId: user.id, req });
   return status(user);
@@ -188,7 +195,11 @@ async function challengeIfNeeded(user, req, { locale = 'ar' } = {}) {
 
   // Not more than five codes in ten minutes for one account.
   const recent = await db.LoginChallenge.count({ where: { userId: user.id, createdAt: { [db.Sequelize.Op.gt]: new Date(Date.now() - CODE_TTL_MS) } } });
-  if (recent >= 5) throw new AppError('TOO_MANY_CODES', 'Too many codes were sent. Try again in a few minutes.', 429);
+  if (recent >= 5) {
+    // No new code for now, but the step still opens: a backup code works in it (twoFactorRecovery.js).
+    const challenge = await db.LoginChallenge.create(base);
+    return { twoFactorRequired: true, challengeToken: challenge.id, channel: row.mode, codeNotSent: true };
+  }
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   const challenge = await db.LoginChallenge.create({ ...base, codeHash: sha256(`${user.id}:${code}`) });
   const minutes = CODE_TTL_MS / 60000;
@@ -217,6 +228,8 @@ async function verifyChallenge({ challengeToken, code, rememberDevice }, req, re
     const given = sha256(`${user.id}:${String(code || '').replace(/\s/g, '')}`);
     ok = Boolean(challenge.codeHash) && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(challenge.codeHash));
   }
+  // A backup code works in place of any channel's code (twoFactorRecovery.js).
+  if (!ok) ok = await require('./twoFactorRecovery').useBackupCode(user, code, req);
   if (!ok) {
     await challenge.increment('attempts');
     throw invalid();

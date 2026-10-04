@@ -140,6 +140,27 @@ ${codeHtml}
     };
   },
 
+  // Something changed in how the person signs in (auth/twoFactorRecovery.js,
+  // auth/newDeviceSignIn.js). `kind` picks the text; no link, nothing to click.
+  security_notice(data = {}) {
+    const left = Number(data.left) || 0;
+    const en = data.locale === 'en';
+    const texts = {
+      backup_code_used: en
+        ? ['A backup code was used on your Zimos account', `Someone signed in to your Zimos account with one of your backup codes. You have ${left} left.`]
+        : ['تم استخدام رمز احتياطي في حسابك على Zimos', `حد سجّل دخول لحسابك على Zimos بواحد من الرموز الاحتياطية. فاضل معاك ${left}.`],
+      two_factor_reset: en
+        ? ['Two-step sign-in was turned off on your Zimos account', 'At your request, the Zimos team turned off two-step sign-in on your account and signed you out everywhere. Sign in and turn it back on from Settings → Security.']
+        : ['تم إيقاف التحقق بخطوتين في حسابك على Zimos', 'بناءً على طلبك، فريق Zimos وقّف التحقق بخطوتين في حسابك وسجّل خروجك من كل الأجهزة. سجّل دخول وشغّله تاني من الإعدادات ← الأمان.'],
+    };
+    const [subject, line] = texts[data.kind] || texts.two_factor_reset;
+    const warn = en ? 'If this was not you, change your password now and contact support.' : 'لو مش إنت، غيّر كلمة السر حالًا وكلّم الدعم.';
+    return {
+      subject,
+      ...wrap(`<p>${escapeHtml(line)}</p>\n<p style="color:#6b7280">${escapeHtml(warn)}</p>`, `${line}\n\n${warn}`, { dir: en ? 'ltr' : 'rtl' }),
+    };
+  },
+
   // A store's email to its customer about an order (orderEmailService.js):
   // the merchant's subject and text under the store's logo and colour.
   order_email(data = {}) {

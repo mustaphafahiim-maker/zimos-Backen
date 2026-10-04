@@ -95,6 +95,9 @@ router.post(
 
 // ───────────────────────────── two-step sign-in ─────────────────────────────
 
+// Backup codes (twoFactorRecovery.js).
+router.use(require('./twoFactorRecovery').router);
+
 const password = Joi.string().max(200).allow('', null).optional();
 const code = Joi.string().trim().min(6).max(10).required();
 

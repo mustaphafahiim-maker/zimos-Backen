@@ -386,6 +386,8 @@ async function resetPassword(rawToken, newPassword) {
   // compromised — revoke every existing session so old refresh tokens
   // (possibly in an attacker's hands) stop working immediately.
   await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
+  // Two-step sign-in stays on; every browser asks for it again (twoFactorRecovery.js).
+  await db.TrustedDevice.destroy({ where: { userId: user.id } });
   await recordAudit({ actorUserId: user.id, action: 'user.password_reset', entityType: 'User', entityId: user.id });
 
   return { success: true };
@@ -465,6 +467,7 @@ async function resetPasswordSms(phone, code, newPassword) {
 
   await user.update({ passwordHash: await hashPassword(newPassword) });
   await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
+  await db.TrustedDevice.destroy({ where: { userId: user.id } });
   await recordAudit({ actorUserId: user.id, action: 'user.password_reset_sms', entityType: 'User', entityId: user.id });
   return { success: true };
 }

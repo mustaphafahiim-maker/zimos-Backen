@@ -147,6 +147,8 @@ router.post('/payment-gateways/:code/health-check', can(P.PROVIDERS_VIEW), valid
 // Agents never held it and still see only their own referrals (/my/*).
 router.get('/users', can(P.WORKSPACES_VIEW), validate(schemas.searchUsers), controller.searchUsers);
 router.get('/users/:userId', can(P.WORKSPACES_VIEW), validate(schemas.userParams), controller.getUser);
+// Turning off a person's two-step sign-in when they lost every way through it (support.manage).
+router.use(require('../auth/twoFactorRecovery').adminRouter);
 
 // --- Platform users (roles and permissions) --------------------------------
 // A role and a permission set on an existing account: no invitations. Only a
