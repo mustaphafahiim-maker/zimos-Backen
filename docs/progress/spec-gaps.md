@@ -328,6 +328,13 @@ Linked saved sections now work inside funnels as they do on the website.
 - The funnel editor's library lists the store's sections plus that funnel's own, marked "This funnel".
 - Saving a section there can be "Only in this funnel".
 - A funnel-only section fills links inside its own funnel only. A website page or another funnel linking it keeps its own copy, and a website publish now resolves global sections only.
+A paid order's subscription and course enrolment now start from the `order.paid` outbox event (consumers `subscriptions_start` and `courses_enroll` on the `default` queue), not from an after-commit call that nothing recorded.
+
+- The event is written in the payment's own transaction.
+- A failed attempt is retried by the queue, and a worker that dies mid-job has its job picked up again after the stale-lock timeout (10 minutes).
+- Both are safe to repeat: a line's subscription is unique per order line, and an existing enrolment is not made twice.
+- `startForOrder` and `enrollForOrder` still never throw for other callers. The consumers ask them to re-throw so the queue sees the failure.
+- Verified by killing the server right after a payment: the subscription and enrolment were made after restart.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -503,7 +510,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
 - [x] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
 - [x] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
-- [ ] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
+- [x] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
 - [ ] 113. "Powered by ZIMOS" honours remove_branding on funnels and the rich footer (§8.11).
 - [ ] 114. No invented shipping, returns or COD promises: the product tab, FAQ fallback, trust strip and footer help read the store's own information (§8.5).
 - [ ] 115. The rich footer shows the policy links, footer pages and social links (§8.3).
