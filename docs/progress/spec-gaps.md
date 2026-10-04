@@ -150,6 +150,15 @@ The frame edits in place with `contenteditable=plaintext-only`. Enter commits a 
 X-ray is a preview toolbar switch that injects outlines for sections, rows, columns and elements into the frame. The funnel step editor's preview now uses the same canvas, so it gets these tools along with picking, inserting, dragging and resizing.
 
 Scratch env: the dashboard dev server now gets `VITE_STOREFRONT_URL`, so the canvas loads.
+A generic page is a `custom` step that no edge touches. It needs no new column or migration, and a `custom` step joined to the map stays an ordinary step.
+
+The backend (`funnels/genericPages.js`) and the editor (`genericPageRules.ts`) leave generic pages out of the entry and "unreachable" checks. Every step counts when all of them are generic, so a one-page funnel still works.
+
+Public pages are served at `GET /store/:ws/funnels/:ref/pages[/:key]` from the published revision, localized and with their scripts and HTML blocks. A step on the path is refused (404), because those are reached through a session.
+
+The storefront shows a generic page at `/f/<funnel>/p/<key>`, inside the funnel's masthead and footer, with a link back to the offer and to the other generic pages.
+
+The editor lists generic pages in the map's sidebar with presets (contact with a form, about, policies, blank), each keyed by its name so the address reads well. They do not appear on the map or in the step list.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -304,7 +313,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 93. Builder elements: masonry grid, sticky container, file and star inputs in forms, add-to-cart / buy-now buttons, a price that follows the picked variant (§9.3).
 - [x] 94. The funnel page editor gets the website editor's tools: undo/redo, layers, page product, named styles, saved sections (§9.3).
 - [x] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
-- [ ] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
+- [x] 96. Generic pages (contact, about, policies) outside the funnel map (§9.2).
 - [ ] 97. AI P2: page evaluation, ad creatives, build a full store, suggested WhatsApp replies (§19.2).
 - [ ] 98. Large digital files uploaded straight to storage (presigned multipart) (§18.2).
 - [ ] 99. Remove the leftover mock upsell page and helpers (§9.8).
