@@ -32,6 +32,7 @@ the numbers **400–449** (no lane owns them).
 - Reports add orders up in the store base currency (currencies/baseAmounts.js): the order total is its recorded `total_amount_base`, and its other amounts (refunds, discounts, shipping, lines) are converted by that order own base/total ratio, so the rate is the one of the day it was placed. Applies to attribution, ad campaigns, P&L, the overview, the analytics summary and funnel analytics. Product costs and product economics are entered in the store currency and are not converted. An order placed when no rate was known counts at its own amounts, as before.
 - `Lead` fires from the browser on a newsletter sign-up (footer band and popup) and on a funnel opt-in step, with a browser event id the server relay reuses. The builder `form` element is a contact form (`contact_form.submitted`) and sends no Lead. Headless browsers are dropped as bots by the events endpoint, so a browser check needs a desktop user agent.
 - Exporting the orders list (the Export button) is built in the `io` queue (`POST /exports/orders`, migration 407 `export_files`); the file goes to private storage and an `export.ready` notification (bell and email, now on by default) links to `/exports/:id`, where the teammate who asked downloads it with their session. Only that teammate sees it; it is kept 7 days, then the sweep removes it (410 after). Exporting ticked orders (at most 100) still downloads at once.
+- `integration.failed` (notifications/integrationAlerts.js) is sent for the connection itself only: a gateway that refuses the keys or does not answer (starting a payment, refunds, status checks, saved-card charges), a payment webhook whose signature does not match the stored secret, a courier refusing the stored key or a permission (every call through `withAuthHandling`), WhatsApp refusing the token or not answering. A declined card, an address or an undeliverable number are not. Once a day per integration and reason; it never waits on or fails the call. WhatsApp webhooks with a bad signature send nothing: the URL carries only the public store id, so anyone could trigger it. Still open: a subscription renewal whose gateway refuses the keys is counted against the shopper (subscriptions/subscriptionService failRenewal) — the merchant is now told, but the renewal still fails.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -83,8 +84,8 @@ the numbers **400–449** (no lane owns them).
   currency switcher, `currency_converter` element, base amounts in
   attribution/P&L; shopper consent to save a card and one-click upsell charge.
 - [x] 16. Lead pixel event from the newsletter form.
-- [ ] 17. Notifications (17b export ready done): integration-failed for gateway / carrier / WhatsApp;
-  export ready.
+- [x] 17. Notifications: integration-failed for gateway / carrier / WhatsApp (17a);
+  export ready (17b).
 - [ ] 18. Analytics: `analytics_daily` rollup filled by the worker; attribution
   from `orders.attribution` with first/last touch.
 - [ ] 19. Team screen admins/members + seat counter; phone verification screen;

@@ -164,6 +164,8 @@ async function acceptWebhook(code, token, req) {
   if (!parsed.valid) {
     // Never log the received or expected signature.
     logger.warn('Payment webhook with an invalid signature', { workspaceId: account.workspaceId, providerCode: code });
+    // A wrong webhook secret looks the same as a forged call: say it once a day.
+    require('../notifications/integrationAlerts').badSignature(account.workspaceId, { kind: 'gateway', code, name: adapter.name || code, link: '/payments' });
     throw new AppError('WEBHOOK_SIGNATURE_INVALID', 'Signature does not match', 401);
   }
 

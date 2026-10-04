@@ -219,6 +219,8 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
       code: err.code,
       reason: err.message,
     });
+    // Rejected keys or a gateway that does not answer: the merchant is told (once a day).
+    require('../notifications/integrationAlerts').gateway(order.workspaceId, provider, err);
     await attempt.update({ status: 'failed', failureReason: String(err.message || 'The payment could not be started').slice(0, 300) });
   }
   return attempt;
@@ -481,6 +483,7 @@ async function inquireOpenAttempts(orderId, { throttle = false } = {}) {
     } catch (err) {
       unknown += 1;
       logger.warn('Payment inquiry failed', { orderId, attemptId: attempt.id, code: err.code, reason: err.message });
+      require('../notifications/integrationAlerts').gateway(attempt.workspaceId, attempt.providerCode, err);
     }
   }
   return { unknown };

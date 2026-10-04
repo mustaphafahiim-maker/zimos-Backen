@@ -135,6 +135,7 @@ async function sendMessage(workspaceId, { to, text, template, orderId = null }, 
   } catch (err) {
     await db.WhatsappMessage.create({ ...record, status: 'failed', error: String(err.message).slice(0, 500) });
     if (err.code === 'WHATSAPP_AUTH_FAILED') await integration.update({ status: 'error', lastError: String(err.message).slice(0, 500) });
+    require('../notifications/integrationAlerts').whatsapp(workspaceId, err);
     throw err;
   }
 }

@@ -209,6 +209,7 @@ async function processRefund(workspaceId, orderId, { amount, reason, paymentId }
   try {
     result = await gatewayRuntime.refund(workspaceId, plan.payment, amount);
   } catch (err) {
+    require('../notifications/integrationAlerts').gateway(workspaceId, plan.payment.providerCode, err);
     if (err instanceof GatewayRejectedError || err instanceof GatewayAuthError) {
       result = { status: 'failed', failureReason: err.message };
     } else {

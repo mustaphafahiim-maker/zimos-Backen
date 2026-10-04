@@ -242,6 +242,8 @@ async function withAuthHandling(account, fn) {
   try {
     return await fn();
   } catch (err) {
+    // Rejected credentials or a missing permission: the merchant is told (once a day).
+    if (account) require('../notifications/integrationAlerts').carrier(account.workspaceId, account.carrierCode, err);
     if (err instanceof CarrierAuthError && account && account.id) {
       await db.CarrierAccount.update({ status: 'invalid' }, { where: { id: account.id } }).catch((updateErr) =>
         logger.error('Could not mark carrier account invalid', { accountId: account.id, message: updateErr.message })

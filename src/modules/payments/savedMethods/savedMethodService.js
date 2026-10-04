@@ -140,6 +140,10 @@ async function chargeOrder(workspaceId, savedId, orderId, req) {
     currency: order.currency,
     reference: order.id,
     settings: ctx.settings,
+  }).catch((err) => {
+    // Rejected keys or no answer is the store's connection, not the shopper's card.
+    require('../../notifications/integrationAlerts').gateway(workspaceId, saved.providerCode, err);
+    throw err;
   });
   if (!result || result.status !== 'paid') {
     throw new AppError('SAVED_METHOD_DECLINED', (result && result.failureReason) || 'The saved card was declined', 422);
