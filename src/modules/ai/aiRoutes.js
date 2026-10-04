@@ -10,6 +10,7 @@ const { requireCreationAllowed } = require('../../core/middleware/subscriptionGu
 const { PERMISSIONS: P } = require('../../core/security/permissions');
 const { FEATURE_KEYS } = require('./features');
 const service = require('./aiService');
+const { AuthorizationError } = require('../../core/errors/AppError');
 
 const uuid = Joi.string().uuid();
 const ws = { workspaceId: uuid.required() };
@@ -19,12 +20,21 @@ const wsId = (req) => req.tenant.workspaceId;
 // Whoever may edit products or the website may generate drafts for them.
 const router = Router({ mergeParams: true });
 // The funnel wizard's "AI template" generates too (applyFunnel.js).
-router.use(authenticate, resolveTenant, requireAnyPermission(P.PRODUCTS_MANAGE, P.WEBSITE_EDIT, P.FUNNELS_MANAGE));
+// The inbox's suggested reply (featuresP2.js) is for whoever answers customers.
+const EDITORS = [P.PRODUCTS_MANAGE, P.WEBSITE_EDIT, P.FUNNELS_MANAGE];
+router.use(authenticate, resolveTenant, requireAnyPermission(...EDITORS, P.ORDERS_CONFIRM));
+const editors = requireAnyPermission(...EDITORS);
+/** A feature's own permission (featuresP2.PERMISSION), else the editors'. */
+const featureGate = (req, res, next) => {
+  const own = require('./featuresP2').PERMISSION[req.body && req.body.feature];
+  return own ? requireAnyPermission(own)(req, res, next) : editors(req, res, next);
+};
 
 router.get('/usage', validate({ params: Joi.object(ws) }), asyncHandler(async (req, res) => res.json(await service.usage(wsId(req)))));
 
 router.get(
   '/jobs',
+  editors,
   validate({
     params: Joi.object(ws),
     query: Joi.object({ feature: Joi.string().valid(...FEATURE_KEYS), limit: Joi.number().integer().min(1).max(100).default(20) }),
@@ -39,14 +49,28 @@ router.post(
     params: Joi.object(ws),
     body: Joi.object({ feature: Joi.string().valid(...FEATURE_KEYS).required(), input: Joi.object().unknown(true).required() }),
   }),
+  featureGate,
   asyncHandler(async (req, res) => res.status(202).json({ job: await service.createJob(wsId(req), req.body.feature, req.body.input, req) }))
 );
 
 const jobParams = Joi.object({ ...ws, jobId: uuid.required() });
-router.get('/jobs/:jobId', validate({ params: jobParams }), asyncHandler(async (req, res) => res.json({ job: await service.getJob(wsId(req), req.params.jobId) })));
+router.get(
+  '/jobs/:jobId',
+  validate({ params: jobParams }),
+  asyncHandler(async (req, res) => {
+    const job = await service.getJob(wsId(req), req.params.jobId);
+    // Someone who only answers customers reads only the suggested replies.
+    const own = require('./featuresP2').PERMISSION[job.feature];
+    if (!EDITORS.some((p) => req.tenant.hasPermission(p)) && !(own && req.tenant.hasPermission(own))) {
+      throw new AuthorizationError('Missing required permission for this AI result');
+    }
+    res.json({ job });
+  })
+);
 
 router.post(
   '/jobs/:jobId/apply',
+  editors,
   validate({
     params: jobParams,
     body: Joi.object({

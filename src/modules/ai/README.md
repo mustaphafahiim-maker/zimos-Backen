@@ -27,12 +27,12 @@ module.exports = {
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `feature` | `'product' \| 'page' \| 'translate' \| 'policies'` | Which feature (see `features.js`). |
+| `feature` | `'product' \| 'page' \| 'translate' \| 'policies' \| 'page_review' \| 'ad_creatives' \| 'store_builder' \| 'wa_reply'` | Which feature (see `features.js`; the last four in `featuresP2.js`). |
 | `prompt` | string | The rendered prompt from `prompts/<file>.vN.md`, placeholders filled. Send this to the model. |
 | `promptVersion` | string | e.g. `product_content.v1`. |
 | `input` | object | The merchant's validated input (`features.js` → `input`). |
 | `images` | string[] | Public http(s) URLs of the product photos the merchant attached (`product` only, at most 6; `[]` otherwise). Send them to a vision-capable model with the prompt; the prompt says how many there are. |
-| `context` | object | Server-side facts the prompt was built from. `page`: `{ product: { id, name, slug, description, imageUrl, features[], faqs[] }, allowedElements[] }`. Others: `{}`. |
+| `context` | object | Server-side facts the prompt was built from. `page`: `{ product: { id, name, slug, description, imageUrl, features[], faqs[] }, allowedElements[] }`. `page_review`: `{ pageKind, pageName, metrics, facts, outline }` (facts measured from the tree, `pageFacts.js`). `ad_creatives`: `{ product: { name, description, price, compareAtPrice, specialOfferText, features[], images[] } }`. `store_builder`: `{ themes[], allowedElements[] }`. `wa_reply`: `{ storeName, dialect, facts, products, orders, history, lastMessage, brain }`. Others: `{}`. |
 | `workspaceId`, `jobId` | uuid | For the provider's own logging. No customer data is ever in a request. |
 
 ### Return value
@@ -56,7 +56,12 @@ merchant on the failed job, so it must not contain secrets.
 ## What the module guarantees around a provider
 
 - **Draft only.** Output is stored on the job. "Apply" creates a *draft*
-  product or an *unpublished* page; the merchant publishes.
+  product or an *unpublished* page; the merchant publishes. `store_builder`
+  applies as an unpublished page plus *hidden* collections — the theme and
+  policies it suggests are switched on by the merchant. `ad_creatives`
+  banners must sit on the product's own images (others are dropped), and
+  `store_builder`'s `home.tree` must pass `validatePageTree`. `wa_reply` only
+  fills the inbox's message box; a person sends it.
 - **Limits.** A request is refused before the provider is called when the
   store is over its plan's `ai_requests_per_month` (read from the plan's
   features; absent = no monthly limit) or over the abuse guard of 30 requests

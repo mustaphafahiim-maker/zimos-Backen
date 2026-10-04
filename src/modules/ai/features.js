@@ -69,6 +69,9 @@ const FEATURES = {
   },
 };
 
+// The P2 rows: page review, ad creatives, store builder, suggested WhatsApp replies (featuresP2.js).
+Object.assign(FEATURES, require('./featuresP2').specs(DIALECTS, text));
+
 const FEATURE_KEYS = Object.keys(FEATURES);
 
 /** The element types a generated page may use — what the page validator allows. */

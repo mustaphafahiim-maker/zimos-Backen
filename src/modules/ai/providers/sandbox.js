@@ -135,7 +135,7 @@ function orderCheck({ input }) {
 // whatsapp/bot: the customer service bot's reply (sandboxSupport.js).
 const { supportReply } = require('./sandboxSupport');
 
-const HANDLERS = { product, page, translate, policies, order_check: orderCheck, support_reply: supportReply };
+const HANDLERS = { product, page, translate, policies, order_check: orderCheck, support_reply: supportReply, ...require('./sandboxP2') };
 
 module.exports = {
   name: 'sandbox',

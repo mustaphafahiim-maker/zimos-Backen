@@ -11,6 +11,7 @@ const { recordAudit } = require('../audit/auditService');
 const { validatePageTree } = require('../pages/pageTree');
 const { FEATURES, allowedElements } = require('./features');
 const { getProvider, describeProvider } = require('./providers');
+const P2 = require('./featuresP2');
 
 /**
  * The AI module (SPEC §19). A request becomes a job on the `ai` queue; the
@@ -130,6 +131,7 @@ async function createJob(workspaceId, feature, rawInput, req) {
   // Fails here, not in the queue, when no provider can answer.
   const provider = getProvider();
   if (feature === 'page') await scoped(db.Product, workspaceId, 'Product').findByPkOrThrow(input.productId);
+  await P2.precheck(workspaceId, feature, input);
   await assertWithinLimits(workspaceId);
 
   const job = await db.AiJob.create({
@@ -156,6 +158,7 @@ async function createJob(workspaceId, feature, rawInput, req) {
 
 /** What the prompt needs beyond the merchant's input, read on the server. */
 async function buildContext(job) {
+  if (P2.CONTEXT[job.feature]) return P2.CONTEXT[job.feature](job);
   if (job.feature !== 'page') return {};
   const product = await db.Product.findOne({ where: { id: job.input.productId, workspaceId: job.workspaceId } });
   if (!product) {
@@ -179,7 +182,7 @@ async function buildContext(job) {
   };
 }
 
-function validateOutput(feature, output) {
+function validateOutput(feature, output, context = null) {
   const { value, error } = FEATURES[feature].output.validate(output, { abortEarly: false, stripUnknown: true });
   if (error) {
     const err = new Error(`The AI answer did not have the expected shape (${error.details[0].message})`);
@@ -196,7 +199,7 @@ function validateOutput(feature, output) {
       throw err;
     }
   }
-  return value;
+  return P2.checkOutput(feature, value, context);
 }
 
 /** The `ai` queue processor: one job, start to finish. */
@@ -220,7 +223,7 @@ async function runJob(jobId, { lastAttempt = true } = {}) {
       workspaceId: job.workspaceId,
       jobId: job.id,
     });
-    const output = validateOutput(job.feature, answer && answer.output);
+    const output = validateOutput(job.feature, answer && answer.output, context);
     const used = (answer && answer.usage) || {};
     await db.sequelize.transaction(async (transaction) => {
       await job.update({ status: 'succeeded', output, error: null, provider: provider.name, finishedAt: new Date() }, { transaction });
@@ -294,6 +297,8 @@ async function applyJob(workspaceId, jobId, { overrides, path: pagePath, target,
   } else if (job.feature === 'page' && target === 'funnel') {
     // The page as the sales step of a new draft funnel (applyFunnel.js).
     applied = await require('./applyFunnel').applyAsFunnel(workspaceId, job, { name, subdomain }, req);
+  } else if (P2.APPLY[job.feature]) {
+    applied = await P2.APPLY[job.feature](workspaceId, job, { path: pagePath }, req);
   } else if (job.feature === 'page') {
     const website = await db.Website.findOne({ where: { workspaceId }, order: [['updatedAt', 'DESC']] });
     if (!website) throw new AppError('WEBSITE_REQUIRED', 'Create your store website first, then add the page to it', 409);
