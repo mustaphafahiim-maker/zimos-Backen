@@ -73,6 +73,10 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
   const bundle = (await bundlePricing.bundlesForProducts(workspaceId, [product.id])).get(product.id);
   return {
     ...publicProduct,
+    // The website page the merchant built as this product's page (page settings → landing page), or null.
+    landingPagePath: await require('../catalog/productLanding').landingPathFor(workspaceId, product.pageSettings),
+    // For the "similar products" section: products sharing a collection.
+    collectionIds: (await db.ProductCollection.findAll({ where: { productId: product.id }, attributes: ['collectionId'] })).map((r) => r.collectionId),
     bundle: bundle ? bundlePricing.presentBundle(bundle, publicProduct.variants) : null,
     rating,
     reviews,
