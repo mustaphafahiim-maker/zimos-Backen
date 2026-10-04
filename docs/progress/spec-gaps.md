@@ -302,6 +302,22 @@ Two places where a countdown could go live still counting "N hours from now" for
 
 **Linked saved sections**
 - A website publish freezes linked sections with the saved section's content. That content's countdowns are now dated in the saved section itself, so every page linking it and every later publish show the same deadline.
+The opt-in step collects the visitor's details before the funnel moves on (`funnels/funnelOptIn.js`, migration 433).
+
+**What gets saved**
+- The form asks for a name and a mobile or an email.
+- The sign-up is kept like a page form's: a form submission named after the funnel and step, plus a contact when it carries a phone.
+- The contact is tagged `opt_in`, has source `funnel`, and gets marketing consent. The form says so beside its button, along with how to STOP.
+- A sign-up clears an earlier STOP.
+- A new phone is a lead (`lead.created` with the funnel, inside the plan's leads limit).
+- The checkout's bot guard applies, and a bot is answered without anything being kept.
+
+**Effects on the funnel**
+- The session keeps the sign-up under the step (`opt_ins`).
+- Advancing from an opt-in step without one is refused with `OPT_IN_REQUIRED`.
+- The page's own "next" buttons bring the visitor to the form instead of skipping it.
+- The step's Opt-ins count (and its conversion rate) is stored sign-ups, not every move past the step.
+- The ad platforms' Lead fires only after a stored sign-up.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -475,7 +491,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 107. Two-step sign-in recovery: backup codes, a reset by the platform, and what a password reset does (§17.2).
 - [x] 108. A code on sign-in from a new device, and a "new sign-in" alert (§17.2).
 - [x] 109. Countdowns stay fixed on split-test pages and in linked saved sections (§9.3, §21).
-- [ ] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
+- [x] 110. The opt-in step collects the visitor's details before moving on; Lead and the opt-ins count follow real sign-ups (§9.2, §9.9).
 - [ ] 111. Linked saved sections update inside funnels; funnel-only saved sections (§9.3).
 - [ ] 112. A paid order's subscription and course enrolment start through the outbox, never lost after payment (§3.2).
 - [ ] 113. "Powered by ZIMOS" honours remove_branding on funnels and the rich footer (§8.11).
