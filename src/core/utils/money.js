@@ -61,4 +61,20 @@ function toDisplay(amountMinorUnits, minorUnitDigits = 2) {
   return (amountMinorUnits / factor).toFixed(minorUnitDigits);
 }
 
-module.exports = { assertInt, add, subtract, multiplyByQuantity, applyBasisPoints, toDisplay };
+/**
+ * Currency conversion: an integer amount times an exchange rate, rounded
+ * half-up (away from zero) to the nearest minor unit. The rate is taken to 8
+ * decimal places — the precision fx_rates stores — and the multiplication is
+ * done in integers, so the result does not depend on floating-point rounding.
+ */
+function convertAmount(amount, rate) {
+  const n = assertInt(amount);
+  if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0) throw new TypeError(`rate must be a non-negative number, got: ${rate}`);
+  const SCALE = 100000000n;
+  const scaled = BigInt(Math.round(rate * 1e8));
+  const product = BigInt(Math.abs(n)) * scaled;
+  const rounded = (product + SCALE / 2n) / SCALE;
+  return Number(n < 0 ? -rounded : rounded);
+}
+
+module.exports = { assertInt, add, subtract, multiplyByQuantity, applyBasisPoints, toDisplay, convertAmount };

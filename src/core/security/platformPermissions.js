@@ -46,12 +46,17 @@ const PLATFORM_PERMISSIONS = Object.freeze({
   RISK_MANAGE: 'risk.manage',
   // Carriers and payment gateways, including their health checks.
   PROVIDERS_VIEW: 'providers.view',
+  // The shared courier areas map, for every store (migration 413).
+  PROVIDERS_MANAGE: 'providers.manage',
   // System health, including the live re-check.
   SYSTEM_VIEW: 'system.view',
   FEATURE_FLAGS_VIEW: 'feature_flags.view',
   FEATURE_FLAGS_MANAGE: 'feature_flags.manage',
   ANNOUNCEMENTS_VIEW: 'announcements.view',
   ANNOUNCEMENTS_MANAGE: 'announcements.manage',
+  // The merchants' services directory (modules/serviceListings).
+  SERVICE_LISTINGS_VIEW: 'service_listings.view',
+  SERVICE_LISTINGS_MANAGE: 'service_listings.manage',
   SUPPORT_VIEW: 'support.view',
   SUPPORT_MANAGE: 'support.manage',
   AUDIT_LOG_VIEW: 'audit_log.view',
