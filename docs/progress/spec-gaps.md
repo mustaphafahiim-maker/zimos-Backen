@@ -384,6 +384,15 @@ They are not in the "per period" amount: nothing has been charged for them yet.
   - A refused checkout now stores each line's custom-field answers, including lines added beside a "Buy now", which were dropped before.
   - It also stores the checkout form's extra answers. Both go onto the converted order (the shopper's photos are checked against their visitor id).
   - Lines the merchant edited in the convert dialog use what the dialog sends.
+**Recovery messages mark the lost order contacted**
+- A recovery automation's message (WhatsApp, SMS, email) that goes out marks the lost order "contacted", as the manual WhatsApp button does (`automations/recoveryContacted.js`).
+- Only an order nobody has dealt with yet: a merchant's "recovered" or "lost" stays.
+- The sequence's stop check treats contacted like not contacted, so the next reminder still goes. A merchant's recovered or lost still stops it.
+
+**The ready-made abandoned-cart recovery follows SPEC §6.4**
+- Timing: a reminder after about 30 minutes, then a last one after 24 hours. The checkout counts as abandoned after 15 minutes by default, so the template waits 15 more.
+- Coupon: given when switching it on (an optional field on the template card), the last reminder becomes `cart_reminder_coupon`, which offers the code, and only that message's link applies it.
+- Without a coupon, the last reminder stays the plain one. A WhatsApp template can't carry an empty coupon parameter.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -566,7 +575,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 116. Automation conditions work on checkout, lost-order, lead and subscription triggers (§14.2).
 - [x] 117. Trial subscriptions shown and counted in the subscriptions screen (§18.1).
 - [x] 118. "Convert to order" keeps the coupon, the funnel and the custom answers, and cannot create two orders (§6.3).
-- [ ] 119. Recovery automations mark the lost order contacted; the ready-made recovery timing as the spec says (§6.4).
+- [x] 119. Recovery automations mark the lost order contacted; the ready-made recovery timing as the spec says (§6.4).
 - [ ] 120. The tracking page accepts the store's own country's phones (§14.7).
 - [ ] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
 - [ ] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
