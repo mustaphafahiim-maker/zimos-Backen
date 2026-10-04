@@ -260,6 +260,8 @@ router.get(
 );
 // Pages and funnels: GET/PUT /content (contentTranslations.js).
 router.use(require('./contentTranslations').router);
+// "Translate what's missing with AI": POST /ai and /ai/apply (aiFill.js).
+router.use(require('./aiFill').router);
 router.put(
   '/',
   validate(schemas.save),
@@ -272,6 +274,7 @@ module.exports = {
   storeLanguagesSchema,
   languagesOf,
   overview,
+  listItems,
   localizeProducts,
   localizeCollections,
 };

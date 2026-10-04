@@ -68,6 +68,7 @@ the numbers **400–449** (no lane owns them).
 - Reviews import (reviews/import): an importer contract (README) with a sandbox, chosen by REVIEW_IMPORT_PROVIDER and refused in production until a real one (which Shopify reviews app, and how the store hands over its token, is an open decision). The service filters (photos only, minimum rating, language), skips a review already imported (same author, rating and text on the product), keeps photo links as given and stores source `import`: named, deletable like a manual review, never "verified" (only `customer` reviews are), waiting for approval unless the merchant ticks "show now". Dashboard: "Import reviews" beside "Add review".
 - Store `<html lang dir>` is server-rendered: the proxy names the store on every store request (`x-store-ref`: the subdomain slug, or the id from /store/<id>/…), and the root layout reads the store and the shopper's language cookie, so the first HTML already says ar/rtl or en/ltr. Anything that is not a store keeps en/ltr. (41a)
 - Page and funnel translations (translations/contentTranslations.js): what is offered is what is live — the published website's pages (their tree texts and title) and published funnels (all steps' tree texts, one entity per funnel). Texts are the text props of elements (headings, paragraphs, labels, Q&A, bullet items; never links, images, ids, bound data, form choices) and each is stored with `field` = a hash of the original, so a repeated sentence is translated once, moving an element keeps it, and an edited sentence shows as untranslated. The public page and funnel step answers are laid over for X-Store-Locale when the store offers that language; the Languages overview counts these texts too. Dashboard: Pages and Funnels tabs in Store settings → Languages. (41b)
+- "Translate what's missing with AI" (translations/aiFill.js): per language and kind (products, collections, pages, funnels), the untranslated texts go to the AI `translate` feature as ordinary AI jobs of 20 texts, at most five jobs per click (the plan's AI limits and usage apply; the sandbox answers until a provider is chosen). Each job remembers which text every answer is for; the dashboard polls /ai/apply, which saves the answers and never overwrites a translation saved meanwhile. AI translation is offered for Arabic, English and French (the AI feature's languages); the others are translated by hand. (41c)
 
 ## P0 — correctness, compliance, launch gates
 
@@ -159,8 +160,8 @@ the numbers **400–449** (no lane owns them).
 - [x] 39. Custom-field answers on the waybill; `priceDeltaAmount`.
 - [x] 40. Shopper review form with a photo; reviews import (Shopify) on the
   sandbox; public review endpoint must not reveal purchases by phone.
-- [ ] 41. Translations of pages and funnels; "Translate with AI"; server-side
-  `<html lang dir>` for the store (SEO). (41a done: `<html lang dir>`; 41b: pages and funnels.)
+- [x] 41. Translations of pages and funnels; "Translate with AI"; server-side
+  `<html lang dir>` for the store (SEO).
 - [ ] 42. Page settings in the builder: SEO and Scripts tabs.
 - [ ] 43. Funnel map editor (pan/zoom, link points per button, thumbnails,
   stats); wizard with currency step and template gallery.
