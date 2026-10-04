@@ -3,6 +3,7 @@
 const { ValidationError } = require('../../core/errors/AppError');
 const { validateElementStyle, namedStyleProblems } = require('./elementStyle');
 const showcase = require('./showcaseElements');
+const builderExtras = require('./builderExtras');
 
 /**
  * Pages are stored as a structured JSON tree, never raw HTML. Shape:
@@ -68,6 +69,8 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'repeater',
   // Full-width storefront bands (slider, tiles, product rails…): showcaseElements.js.
   ...showcase.TYPES,
+  // Gallery with thumbnails, variant and bundle pickers, review form: builderExtras.js.
+  ...builderExtras.TYPES,
 ]);
 
 const MAX_NODES = 10000;
@@ -263,6 +266,7 @@ const ELEMENT_PROP_RULES = {
 };
 
 Object.assign(ELEMENT_PROP_RULES, showcase.propRules(check));
+Object.assign(ELEMENT_PROP_RULES, builderExtras.propRules(check));
 
 function pushIdCheck(node, field, errors) {
   if (typeof node.id !== 'string' || node.id.trim() === '') {

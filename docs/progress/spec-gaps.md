@@ -73,6 +73,7 @@ the numbers **400–449** (no lane owns them).
 - Funnel map (FlowMapTools.tsx): the wheel zooms around the pointer (40–160%, plus −/+/fit buttons) and dragging the empty map pans it; each card shows a schematic thumbnail of its page (a row per section, a block per element, the first four sections) and its numbers for 7/30/90 days from the funnel analytics: visits (sessions that reached it), moved on (reached − stopped there) and CTR = moved on ÷ visits. Cards are taller (172px) to hold them. (43a)
 - Funnel map link points (FlowLinkPoints.tsx): each card shows its ways out as dots on its end edge — the order form / checkout (completed_checkout), an offer's Yes / No, and every button with no link of its own (clicked_through + its element id, which the runtime already routes per button), or Continue when the page has none; at most five. Dragging a dot onto a card draws that path (replacing the dot's previous one), dropping it on the empty map or picking "A new step…" adds a step there; pressing a dot (Enter/Space) lists the steps instead of dragging. A button's path has priority 2 so it beats the step's general "always" path; connectors leave from their dot and are labelled with the button text. (43b)
 - Funnel wizard (FunnelTemplateGallery.tsx): the starter templates can be filtered by kind (cash on delivery, with an upsell, leads, advertorial), switched between their Arabic and English versions and previewed page by page; "Your funnels" lists the store's own funnels (newest first) to start from a copy (POST /funnels/:id/duplicate, which now takes the chosen link). No "bought" tab, prices or usage counts: there is no template marketplace. Step 3 is "Name, link and currency": a currency other than the store's is saved as the funnel's own (settings.currency) for every way of creating it. (43c)
+- Builder elements, first batch (pages/builderExtras.js, page-renderer/builderExtras.tsx, editor builderExtraBlocks.ts — registered like the showcase ones, PAGE_ELEMENT_TYPES untouched): `image_gallery` (own pictures, else the product's; thumbnails below or beside), `variant_selector` (option chips with stock and price), `bundle_selector` (the product's quantity offers), `review_form` (the shopper review form alone). An empty productId means the page's product. A pick on the variant or bundle picker is kept for the visit (sessionStorage) and announced on the page: the order form beside it follows it at once and the funnel checkout starts from the picked variant. Each draws nothing when there is nothing to show (no pictures, no options, fewer than two offers). (44a)
 
 ## P0 — correctness, compliance, launch gates
 
@@ -170,7 +171,7 @@ the numbers **400–449** (no lane owns them).
 - [x] 43. Funnel map editor (pan/zoom, link points per button, thumbnails,
   stats); wizard with currency step and template gallery.
 - [ ] 44. Missing builder elements (container, popup, image_gallery,
-  variant_selector, bundle_selector, review_form, checkout elements…).
+  variant_selector, bundle_selector, review_form, checkout elements…). (44a done: image_gallery, variant_selector, bundle_selector, review_form.)
 - [ ] 45. Funnel analytics: EPC, per-page CTR/CR/opt-ins (events carry stepKey).
 - [ ] 46. Product video (mp4) upload.
 - [ ] 47. Themes catalog (`themes`, `workspace_themes`) instead of presets.
