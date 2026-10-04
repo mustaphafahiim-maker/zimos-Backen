@@ -202,7 +202,9 @@ async function publicPixels(workspaceId) {
     attributes: ['id', 'platform', 'pixelId', 'scopeType', 'scopeIds', 'config'],
     order: [['createdAt', 'ASC']],
   });
-  return pixels.map((p) => ({
+  // Clarity has an app of its own (apps/appCatalogue.js): taken off, its script stays out of the shop.
+  const clarityOn = !pixels.some((p) => p.platform === 'clarity') || (await require('../apps/appGate').isEnabled(workspaceId, 'clarity'));
+  return pixels.filter((p) => clarityOn || p.platform !== 'clarity').map((p) => ({
     platform: p.platform,
     pixelId: p.pixelId,
     scope: { type: p.scopeType, ids: p.scopeIds || [] },

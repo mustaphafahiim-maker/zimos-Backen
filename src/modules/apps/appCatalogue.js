@@ -42,8 +42,10 @@ const APPS = [
   app('shopify', 'store', 'integration', { en: 'Shopify', ar: 'شوبيفاي' }, { en: 'Import products and push orders to a Shopify store.', ar: 'استورد المنتجات وابعت الطلبات لمتجر شوبيفاي.' }, soon),
   app('woocommerce', 'store', 'integration', { en: 'WooCommerce', ar: 'ووكومرس' }, { en: 'Import products and receive orders from WordPress.', ar: 'استورد المنتجات واستقبل الطلبات من ووردبريس.' }, soon),
   app('google_sheets', 'orders', 'integration', { en: 'Google Sheets', ar: 'جوجل شيتس' }, { en: 'New orders and status changes written to a sheet.', ar: 'الطلبات الجديدة وتغيّر حالتها تتكتب في شيت.' }, soon),
-  app('google_merchant', 'seo', 'integration', { en: 'Google Merchant', ar: 'جوجل ميرشانت' }, { en: 'A product feed for Google Shopping.', ar: 'ملف منتجات لجوجل شوبنج.' }, soon),
-  app('clarity', 'tracking', 'integration', { en: 'Microsoft Clarity', ar: 'مايكروسوفت كلاريتي' }, { en: 'Session recordings and heatmaps.', ar: 'تسجيل الجلسات وخرائط الحرارة.' }, soon),
+  // The store's product feed for Google (offers/productFeed.js): Merchant Center fetches it by URL.
+  app('google_merchant', 'seo', 'integration', { en: 'Google Merchant', ar: 'جوجل ميرشانت' }, { en: 'A product feed for Google Shopping, with a checklist of what Merchant Center needs.', ar: 'ملف منتجات لجوجل شوبنج، مع قائمة بما يحتاجه Merchant Center.' }, { openPath: '/offers/feed', standard: true }),
+  // A Clarity project id among the tracking pixels (marketing/trackingPixelService.js) loads its script in the store.
+  app('clarity', 'tracking', 'integration', { en: 'Microsoft Clarity', ar: 'مايكروسوفت كلاريتي' }, { en: 'Session recordings and heatmaps: add your Clarity project id under Tracking tools.', ar: 'تسجيل الجلسات وخرائط الحرارة: أضف معرّف مشروع كلاريتي في أدوات التتبع.' }, { openPath: '/marketing', standard: true }),
   app('mailchimp', 'marketing', 'integration', { en: 'Mailchimp', ar: 'ميل شيمب' }, { en: 'Sync contacts and segments.', ar: 'مزامنة جهات الاتصال والشرائح.' }, soon),
 ];
 

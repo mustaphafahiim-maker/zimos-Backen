@@ -295,6 +295,8 @@ publicRouter.get(
       attributes: ['id', 'name', 'slug', 'settings'],
     });
     if (!workspace || !readFeedSettings(workspace.settings).enabled) throw new NotFoundError('Feed');
+    // The Google feed is the Google Merchant app (apps/appCatalogue.js): taken off, Google gets nothing.
+    if (match[1] === 'google' && !(await require('../apps/appGate').isEnabled(workspace.id, 'google_merchant'))) throw new NotFoundError('Feed');
     const feed = await renderFeed(workspace, match[2]);
     res.set('Content-Type', match[2] === 'csv' ? 'text/csv; charset=utf-8' : 'application/xml; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=600');
