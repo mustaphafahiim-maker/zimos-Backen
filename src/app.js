@@ -187,6 +187,8 @@ v1.use('/workspaces/:workspaceId/bundles', require('./modules/bundles/bundleRout
 v1.use('/workspaces/:workspaceId/offers', require('./modules/offers/offersRoutes'));
 // Product feeds for ad channels: /feeds/:workspaceSlug/:channel.xml|csv (public, no auth).
 v1.use('/feeds', require('./modules/offers/productFeed').publicRouter);
+// Before the shipping router: shipping groups (shipping/shippingProfiles.js).
+v1.use('/workspaces/:workspaceId/shipping/profiles', require('./modules/shipping/shippingProfiles').router);
 v1.use('/workspaces/:workspaceId/shipping', shippingRoutes);
 v1.use('/workspaces/:workspaceId/tax-rates', taxRoutes);
 v1.use('/workspaces/:workspaceId/websites', pagesRoutes);

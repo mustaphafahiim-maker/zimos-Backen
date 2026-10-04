@@ -45,6 +45,8 @@ module.exports = (sequelize, DataTypes) => {
         field: 'shipping_mode',
       },
       shippingExtraAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'shipping_extra_amount' },
+      // Its shipping group, when it has its own prices (migration 410, shipping/shippingProfiles.js).
+      shippingProfileId: { type: DataTypes.UUID, allowNull: true, field: 'shipping_profile_id' },
       // Fields the shopper fills in when ordering (catalog/customFields.js), at most five.
       customFields: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'custom_fields' },
       // SPEC §7.1–7.4 — see migration 185 and catalog/productPage.js.

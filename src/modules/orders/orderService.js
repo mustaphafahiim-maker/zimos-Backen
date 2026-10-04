@@ -138,7 +138,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
 // The product's shipping mode for shippingRules.productShipping: `units` is
 // how many units of it the line ships.
 function productShippingRule(product, units) {
-  return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units };
+  return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units, profileId: product.shippingProfileId || null };
 }
 
 // One component of a line's unit, for shippingWeight.summarizeWeight.
