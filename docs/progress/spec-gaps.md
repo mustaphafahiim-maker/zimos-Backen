@@ -393,6 +393,12 @@ They are not in the "per period" amount: nothing has been charged for them yet.
 - Timing: a reminder after about 30 minutes, then a last one after 24 hours. The checkout counts as abandoned after 15 minutes by default, so the template waits 15 more.
 - Coupon: given when switching it on (an optional field on the template card), the last reminder becomes `cart_reminder_coupon`, which offers the code, and only that message's link applies it.
 - Without a coupon, the last reminder stays the plain one. A WhatsApp template can't carry an empty coupon parameter.
+The order tracking page checks the phone the way the store's checkout does, by the store's country (`general.country`):
+
+- in Egypt, an Egyptian mobile
+- elsewhere, a full number of 8–15 digits, with the matching error message
+
+The Egyptian placeholder shows only in Egypt. The number goes to the API as digits only (a "+" used to be refused there), and the server normalizes it as it did at checkout. Applying the store's country on the server is the next item (121).
 
 ## P0 — correctness, compliance, launch gates
 
@@ -576,7 +582,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 117. Trial subscriptions shown and counted in the subscriptions screen (§18.1).
 - [x] 118. "Convert to order" keeps the coupon, the funnel and the custom answers, and cannot create two orders (§6.3).
 - [x] 119. Recovery automations mark the lost order contacted; the ready-made recovery timing as the spec says (§6.4).
-- [ ] 120. The tracking page accepts the store's own country's phones (§14.7).
+- [x] 120. The tracking page accepts the store's own country's phones (§14.7).
 - [ ] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
 - [ ] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
 - [ ] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
