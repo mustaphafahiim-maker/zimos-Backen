@@ -27,6 +27,8 @@ router.use(resolvePublicWorkspace);
 
 // Order bumps, cross-sell, the thank-you upsell and the exit popup (modules/offers).
 router.use(require('../offers/publicOfferRoutes'));
+// Shoppers following their order by push (notifications/push/orderPush.js).
+router.use(require('../notifications/push/orderPush').router);
 
 // What the checkout form needs to pass the bot guard (a fresh time token).
 router.get('/checkout/guard', botProtection.guardConfig);

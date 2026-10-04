@@ -19,5 +19,14 @@ module.exports = {
       events: orderEmailService.EVENTS,
       handle: (event) => orderEmailService.handleEvent(event.workspaceId, event.type, event.payload),
     },
+    {
+      // Shoppers who asked the thank-you page for updates on their order (push/orderPush.js).
+      name: 'order_push',
+      queue: 'notifications',
+      // eslint-disable-next-line global-require
+      events: require('./push/orderPush').EVENTS,
+      // eslint-disable-next-line global-require
+      handle: (event) => require('./push/orderPush').sendForEvent(event),
+    },
   ],
 };
