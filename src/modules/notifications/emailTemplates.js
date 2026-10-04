@@ -182,6 +182,50 @@ ${paragraphs}
 
   // A merchant notification sent by email (merchantNotificationService): the
   // same title and body the dashboard bell shows, with a link to the page.
+  // Changing the sign-in email (auth/emailChange.js): the link to the new
+  // address, and the two notices to the old one. Arabic first, then English.
+  email_change_confirm(data = {}) {
+    const url = link('/account/email-change', data.token || '');
+    const to = escapeHtml(data.newEmail || '');
+    return {
+      subject: 'أكّد بريدك الجديد في Zimos — Confirm your new Zimos email',
+      ...wrap(
+        `<p dir="rtl">طلبت تغيير بريد الدخول لحسابك في Zimos إلى <strong>${to}</strong>. افتح الرابط خلال ٢٤ ساعة لتأكيده:</p>
+<p><a href="${url}">تأكيد البريد الجديد — Confirm my new email</a></p>
+<p dir="ltr">You asked to change the email you sign in to Zimos with to <strong>${to}</strong>. Open the link within 24 hours to confirm it. If you didn't ask for this, ignore this email.</p>
+<p dir="ltr" style="color:#6b7280">${url}</p>`,
+        `طلبت تغيير بريد الدخول لحسابك في Zimos إلى ${data.newEmail}. افتح الرابط خلال ٢٤ ساعة لتأكيده:\n${url}\n\nYou asked to change your Zimos sign-in email to ${data.newEmail}. Confirm within 24 hours:\n${url}`,
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  email_change_requested(data = {}) {
+    const to = escapeHtml(data.newEmail || '');
+    return {
+      subject: 'طلب تغيير بريد حسابك في Zimos — Zimos email change requested',
+      ...wrap(
+        `<p dir="rtl">طُلب تغيير بريد الدخول لحسابك إلى <strong>${to}</strong>. لن يتغيّر شيء حتى يُفتح رابط التأكيد المرسل إلى العنوان الجديد. إذا لم تطلب ذلك فغيّر كلمة مرورك.</p>
+<p dir="ltr">Someone asked to change your Zimos sign-in email to <strong>${to}</strong>. Nothing changes until the link sent to that address is opened. If this wasn't you, change your password.</p>`,
+        `طُلب تغيير بريد الدخول لحسابك إلى ${data.newEmail}. إذا لم تطلب ذلك فغيّر كلمة مرورك.\n\nSomeone asked to change your Zimos sign-in email to ${data.newEmail}. If this wasn't you, change your password.`,
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  email_changed(data = {}) {
+    const to = escapeHtml(data.newEmail || '');
+    return {
+      subject: 'تم تغيير بريد حسابك في Zimos — Your Zimos email was changed',
+      ...wrap(
+        `<p dir="rtl">أصبح بريد الدخول لحسابك في Zimos <strong>${to}</strong>. إذا لم تقم بذلك فتواصل مع الدعم فورًا.</p>
+<p dir="ltr">Your Zimos sign-in email is now <strong>${to}</strong>. If you didn't do this, contact support right away.</p>`,
+        `أصبح بريد الدخول لحسابك في Zimos ${data.newEmail}.\n\nYour Zimos sign-in email is now ${data.newEmail}. If you didn't do this, contact support right away.`,
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
   merchant_notification(data = {}) {
     const title = String(data.title || '');
     const body = data.body ? String(data.body) : '';

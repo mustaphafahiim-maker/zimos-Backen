@@ -157,6 +157,9 @@ v1.use('/me/push', require('./modules/notifications/push/pushService').router);
 v1.use('/me/referrals', require('./modules/referrals/merchantReferrals').me);
 // The signed-in person's name and picture (before /auth, which has no such route).
 v1.use('/auth/me/profile', require('./modules/auth/profileRoutes'));
+// Changing the sign-in email, confirmed from the new address (auth/emailChange.js).
+v1.use('/auth/me/email', require('./modules/auth/emailChange').me);
+v1.use('/auth/email-change', require('./modules/auth/emailChange').publicRouter);
 v1.use('/auth', authRoutes);
 // Public template gallery — no auth, shown before a workspace even exists.
 v1.use('/templates', templateRoutes);
