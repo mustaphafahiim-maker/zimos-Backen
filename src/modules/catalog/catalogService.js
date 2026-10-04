@@ -94,7 +94,14 @@ async function createProduct(workspaceId, data, req) {
 
     const { stockOnHand, ...variantFields } = variantData;
     const variant = await db.ProductVariant.create(
-      { ...variantFields, workspaceId, productId: product.id, stockOnHand: 0 },
+      {
+        ...variantFields,
+        // Priced in the store's currency unless told otherwise (currencies/baseCurrency.js).
+        currency: variantFields.currency || (await require('../currencies/baseCurrency').storeCurrency(workspaceId, t)),
+        workspaceId,
+        productId: product.id,
+        stockOnHand: 0,
+      },
       { transaction: t }
     );
     await recordAudit({
@@ -236,7 +243,8 @@ async function createVariant(workspaceId, productId, data, req) {
   // first one — goes through the one code path that writes an
   // InventoryMovement audit row. Never set it directly here.
   const { stockOnHand, ...createData } = data;
-  const variant = await db.ProductVariant.create({ ...createData, workspaceId, productId: product.id, stockOnHand: 0 });
+  const currency = createData.currency || (await require('../currencies/baseCurrency').storeCurrency(workspaceId));
+  const variant = await db.ProductVariant.create({ ...createData, currency, workspaceId, productId: product.id, stockOnHand: 0 });
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -910,7 +918,7 @@ async function createOffer(workspaceId, productId, data, req) {
         name: data.name,
         pricingMode: data.pricingMode,
         priceAmount: data.priceAmount,
-        currency: data.currency,
+        currency: data.currency || (await require('../currencies/baseCurrency').storeCurrency(workspaceId, t)),
         badge: data.badge,
         isDefault: data.isDefault,
         shippingOverride: data.shippingOverride,

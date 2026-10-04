@@ -125,7 +125,8 @@ const variant = {
     compareAtAmount: Joi.number().integer().min(0).allow(null).optional(),
     costAmount: Joi.number().integer().min(0).allow(null).optional(),
     lowStockThreshold: Joi.number().integer().min(0).max(1000000).allow(null).optional(),
-    currency: Joi.string().length(3).default('EGP'),
+    // Unset: the store's own currency (currencies/baseCurrency.js).
+    currency: Joi.string().length(3).uppercase().optional(),
     allowOverselling: Joi.boolean().default(false),
     weightGrams: weightGrams.optional(),
     dimensions: dimensions.optional(),
@@ -162,7 +163,8 @@ const offer = {
     name: Joi.string().min(1).max(200).required(),
     pricingMode: Joi.string().valid('fixed', 'computed').default('fixed'),
     priceAmount: Joi.number().integer().min(0).when('pricingMode', { is: 'fixed', then: Joi.required() }),
-    currency: Joi.string().length(3).default('EGP'),
+    // Unset: the store's own currency (currencies/baseCurrency.js).
+    currency: Joi.string().length(3).uppercase().optional(),
     badge: Joi.string().max(100).allow(null, '').optional(),
     isDefault: Joi.boolean().default(false),
     shippingOverride: Joi.object().allow(null).optional(),

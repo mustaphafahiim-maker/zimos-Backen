@@ -102,6 +102,8 @@ async function getStorefront(workspaceId) {
     tagline: w.tagline,
     themeSettings: w.themeSettings || {},
     currency: w.defaultCurrency,
+    // The store's currency format (dashboard → currencies): symbol position and decimals.
+    currencyFormat: (({ symbolPosition = 'auto', decimals = 'auto' }) => ({ symbolPosition, decimals }))((w.settings && w.settings.currencies) || {}),
     // Which optional fields the checkout form should show or demand. Always
     // fully populated — an unconfigured store gets the defaults, which are
     // what the checkout already enforced before this existed.
