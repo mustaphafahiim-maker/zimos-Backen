@@ -227,14 +227,15 @@ const PRODUCT_ELEMENTS = new Set(['product_card', 'cod_form', 'price', 'product_
  * that block publishing (funnelGraph.validateGraph, content included);
  * `warning` issues do not block it: a selling page with no product on it, a
  * button that goes nowhere, a picture with no description, an offer page with
- * no offer buttons, a store with no policies.
+ * no offer buttons, a store with no policies, text not translated into one of
+ * the store's languages.
  */
 async function listIssues(workspaceId, funnelId) {
   await loadFunnel(workspaceId, funnelId);
   const [steps, edges, workspace] = await Promise.all([
     db.FunnelStep.findAll({ where: { workspaceId, funnelId }, order: [['createdAt', 'ASC']] }),
     db.FunnelEdge.findAll({ where: { workspaceId, funnelId } }),
-    db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'] }),
+    db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings', 'defaultLocale'] }),
   ]);
 
   const issues = [];
@@ -272,6 +273,9 @@ async function listIssues(workspaceId, funnelId) {
       }
     }
   }
+
+  // Texts with no translation in one of the store's languages (funnelTranslationIssues.js).
+  if (workspace) issues.push(...(await require('./funnelTranslationIssues').untranslatedIssues(workspace, funnelId, steps)));
 
   const legal = (workspace && workspace.settings && workspace.settings.legal) || {};
   if (!['refund_policy', 'privacy_policy', 'terms_of_service'].some((key) => !blank(legal[key]))) {
