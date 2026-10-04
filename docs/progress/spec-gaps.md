@@ -25,6 +25,7 @@ the numbers **400–449** (no lane owns them).
 - "Notify the customer" on a cancellation or refund is `notifyCustomer` on the event payload: false sends no order email and skips the store's automations for that event (webhooks and everything else still run); true sends the order email even while that template is switched off; unset follows the settings. A gateway refund settled later by webhook follows the settings. A cancellation with `refundAmount` stands when the refund fails (`refundError`).
 - "Confirm via WhatsApp" sends the ready-made automation's `order_confirmation` template (it must be approved on Meta under that name); without WhatsApp it is a wa.me link from the merchant's own phone. Editing the customer on an order changes the order's snapshot only, not the customer profile.
 - A checkout is captured from a name alone (phone_normalized null, migration 406) or from a valid number for the form's country (an Egyptian mobile on an Egyptian form, 8–15 digits otherwise), 800 ms after typing stops. A save without a number keeps the number the session already has. The server still normalises a non-Egyptian local number with the Egyptian default, as orders do; a store country setting would fix both.
+- `checkout.created` is the first autosave of a session; `checkout.updated` follows a new number or other lines at once, and a name/email edit at most once a minute per session (autosaves fire at every pause in typing). The payload carries the contact, the lines, the total and the product ids (for endpoint filters).
 
 ## P0 — correctness, compliance, launch gates
 
@@ -71,7 +72,7 @@ the numbers **400–449** (no lane owns them).
   coupon + bundle discount card; cancel with refund + notify; refund notify.
 - [x] 13. Lost orders capture on a name or any valid phone for the store's
   country, 800 ms debounce.
-- [ ] 14. Webhook topics `checkout.created` / `checkout.updated` (`lead.created` is recorded since item 3).
+- [x] 14. Webhook topics `checkout.created` / `checkout.updated` (`lead.created` is recorded since item 3).
 - [ ] 15. Payments: funnel currency applied to orders, storefront display
   currency switcher, `currency_converter` element, base amounts in
   attribution/P&L; shopper consent to save a card and one-click upsell charge.

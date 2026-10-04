@@ -84,7 +84,7 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
        source = EXCLUDED.source,
        last_activity_at = now(),
        updated_at = now()
-     RETURNING id`,
+     RETURNING id, (xmax = 0) AS inserted`,
     {
       bind: {
         id: crypto.randomUUID(),
@@ -102,7 +102,58 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
     }
   );
 
+  await announce(workspaceId, row, { contactFields, snapshot, priced, source });
   return { id: row.id };
+}
+
+// checkout.updated for a name or email edit at most this often per session: an autosave fires every pause in typing.
+const UPDATED_EVERY_SECONDS = 60;
+
+/**
+ * The checkout.created / checkout.updated webhook topics (webhooks/webhookTopics.js):
+ * the first save of a session, then each new number or change of lines, and
+ * other edits (the name, the email) at most once a minute. The payload is
+ * what the webhook sends: the contact, the lines and the total.
+ */
+async function announce(workspaceId, row, { contactFields, snapshot, priced, source }) {
+  try {
+    const outbox = require('../../core/outbox/outbox');
+    const aggregate = { aggregateType: 'checkout', aggregateId: row.id };
+    if (!row.inserted) {
+      // Within a minute of the last announcement, only a new number or other lines are worth another.
+      const [last] = await db.sequelize.query(
+        `SELECT payload, occurred_at > now() - make_interval(secs => $secs) AS recent FROM domain_events
+          WHERE aggregate_type = 'checkout' AND aggregate_id = $id AND type IN ('checkout.created', 'checkout.updated')
+          ORDER BY occurred_at DESC
+          LIMIT 1`,
+        { bind: { id: row.id, secs: UPDATED_EVERY_SECONDS }, type: QueryTypes.SELECT }
+      );
+      const before = last && last.payload ? last.payload : {};
+      const samePhone = ((before.contact && before.contact.phone) || null) === (contactFields.phone || null);
+      // Compared field by field: jsonb gives the stored lines back with their keys reordered.
+      const lineKey = (lines) => (lines || []).map((l) => `${l.variantId}:${l.quantity}:${l.lineTotalAmount}`).join('|');
+      const sameLines = lineKey(before.items) === lineKey(snapshot);
+      if (last && last.recent && samePhone && sameLines) return;
+    }
+    await outbox.record(
+      null,
+      row.inserted ? 'checkout.created' : 'checkout.updated',
+      {
+        workspaceId,
+        checkoutSessionId: row.id,
+        contact: contactFields,
+        items: snapshot,
+        subtotalAmount: String(add(...priced.map((line) => line.lineTotalAmount))),
+        currency: priced[0].currency,
+        source,
+        productIds: [...new Set(snapshot.map((line) => line.productId).filter(Boolean))],
+      },
+      aggregate
+    );
+  } catch (err) {
+    // The autosave must never fail on its announcement.
+    logger.warn('Could not record a checkout event', { workspaceId, checkoutSessionId: row.id, message: err.message });
+  }
 }
 
 /**
