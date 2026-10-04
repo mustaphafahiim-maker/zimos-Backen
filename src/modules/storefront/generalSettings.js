@@ -95,8 +95,8 @@ const SITEMAP_PRODUCT_LIMIT = 5000;
  * Every public address of a store, as paths relative to its origin, for the
  * storefront's sitemap.xml: home, the product listing, each active product,
  * the published and active website pages, and the legal policies the store
- * has written. Pages marked noindex are left out. Collections have no address
- * of their own in the store (they filter the listing), so none is listed.
+ * has written, and each category's listing (/products?collection=<slug>, its
+ * canonical address). Anything marked noindex, and hidden categories, are left out.
  */
 async function storeSitemap(workspace) {
   const workspaceId = workspace.id;
@@ -111,6 +111,12 @@ async function storeSitemap(workspace) {
   });
   // A product the merchant hid from search engines (seo.noindex) is left out.
   for (const p of products.filter((x) => !(x.seo && x.seo.noindex === true))) entries.push({ path: `/products/${p.slug || p.id}`, updatedAt: p.updatedAt });
+
+  const collections = await db.Collection.findAll({ where: { workspaceId, hidden: false }, attributes: ['slug', 'seo', 'updatedAt'], order: [['position', 'ASC']] });
+  for (const c of collections.filter((x) => !(x.seo && x.seo.noindex === true))) {
+    // Raw like the product paths: the storefront encodes the whole path (encodeURI).
+    entries.push({ path: `/products?collection=${c.slug}`, updatedAt: c.updatedAt });
+  }
 
   const website = await db.Website.findOne({
     where: { workspaceId, status: 'published', publishedRevisionId: { [Op.ne]: null } },

@@ -225,7 +225,8 @@ const collection = {
     slug: Joi.string().max(200).optional(),
     description: Joi.string().allow('').optional(),
     rules: Joi.object().allow(null).optional(),
-    seo: Joi.object().default({}),
+    // Same keys as a product's (title, description, imageUrl, noindex): the store's category page reads them.
+    seo: productFields.seo.default({}),
     // Null (or absent) is a top-level collection.
     parentId: uuid.allow(null).optional(),
     // Absent puts it after its siblings.
@@ -249,7 +250,7 @@ const collectionUpdate = {
     slug: Joi.string().max(200).optional(),
     description: Joi.string().allow('').optional(),
     rules: Joi.object().allow(null).optional(),
-    seo: Joi.object().optional(),
+    seo: productFields.seo.optional(),
     parentId: uuid.allow(null).optional(),
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
