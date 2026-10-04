@@ -22,7 +22,9 @@ const notify = require('./notify');
  * more key in CHANNELS and one more branch in deliver().
  */
 
-const CHANNELS = ['inApp', 'email'];
+const CHANNELS = ['inApp', 'email', 'push'];
+// Push (notifications/push) is on by default for what needs a quick look; off for the rest.
+const PUSH_ON = new Set(['order.new', 'order.suspicious', 'integration.failed', 'export.ready', 'shipping.batch_done', 'automation', 'plan.limit_reached']);
 
 /**
  * type → the permission needed to receive it (null = every teammate) and
@@ -55,7 +57,8 @@ function resolveChannels(stored) {
   for (const type of TYPE_NAMES) {
     out[type] = {};
     for (const channel of CHANNELS) {
-      const value = saved[type] && typeof saved[type][channel] === 'boolean' ? saved[type][channel] : TYPES[type].defaults[channel];
+      const fallback = TYPES[type].defaults[channel] ?? (channel === 'push' && PUSH_ON.has(type));
+      const value = saved[type] && typeof saved[type][channel] === 'boolean' ? saved[type][channel] : fallback;
       out[type][channel] = value;
     }
   }
@@ -140,6 +143,12 @@ async function create(workspaceId, { type, title, body = null, link = null, data
       if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
       await notify.email({ recipient: m.user.email, template: 'merchant_notification', data: { title, body, link }, workspaceId });
       emailed += 1;
+    }
+    // Push to the person's devices (notifications/push), with the same once-only rule as email.
+    for (const m of members) {
+      if (!channelsFor(m.userId).push) continue;
+      if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
+      await require('./push/pushService').sendToUser(m.userId, { title, body, link, type, workspaceId });
     }
     return { created: deliveredTo.size, emailed };
   } catch (err) {

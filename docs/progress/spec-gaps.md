@@ -43,6 +43,7 @@ the numbers **400–449** (no lane owns them).
 - Shipping groups (migration 410 `shipping_profiles`, `products.shipping_profile_id`): a group's price for a destination is its governorate price, else its flat price, else none. The parcel travels once, so an order pays the dearest price that applies — each group's for its products and the store's own rate for products in no group (rule `profile_rate`). Free shipping, offer overrides and the free threshold still win first; extra-fee products still add their fee. Products are assigned from the group (a product is in one group at most); deleting a group sends its products back to the store's prices.
 - AI funnel: a generated page (feature `page`) applied with `target: funnel` becomes a new draft funnel in one transaction — the page as the sales step (its product-page button links removed so the funnel's edges lead on), a checkout with the COD form and a thank-you page, edges always / completed_checkout, step names in the job's dialect, a link made unique like createFunnel's, counted against the plan. Needs funnels.manage (the AI routes now also accept it). The product form's "Write with AI" fills the description field only (not saved until the product is); creating a whole product stays in the AI Studio.
 - Shipping options (settings.shipping_options): `standard` is always the store's computed price (groups, free shipping and all); up to five more either add an amount to it (express: still charged when shipping is free) or cost exactly an amount (pickup). The quote lists them once a price is known; the checkout sends `shippingOption`, an unknown or switched-off one is refused, and the order keeps the pick in `shipping_snapshot.option` (shown on the order page). No extra option = no choice, exactly as before. Wired into the cart checkout and the product page form; funnel COD forms still charge the standard price.
+- Push: `device_tokens` (migration 411) per person, registered from the dashboard (`/me/push/devices`); `push` is a third merchant-notification channel, on by default for new/suspicious orders, integration failures, exports, bulk shipping, automations and plan limits. Providers follow notifications/push/README.md; only `sandbox` exists (records each push in notification_logs, channel `push`, added to its enum); the real `webpush` adapter needs VAPID keys and the `web-push` package (not installed). The dashboard service worker already shows `{title, body, link}` and opens the link on tap.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -106,7 +107,7 @@ the numbers **400–449** (no lane owns them).
   product form and the funnel wizard.
 - [x] 22. Shipping profiles + products.shippingProfileId (22a); shipping options the
   shopper chooses between.
-- [ ] 23. Merchant PWA web push + `device_tokens`.
+- [x] 23. Merchant PWA web push + `device_tokens`.
 
 ## P2
 

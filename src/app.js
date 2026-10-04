@@ -150,6 +150,8 @@ app.use(hostResolver);
 
 // --- API v1 --------------------------------------------------------------
 const v1 = express.Router();
+// The signed-in person's devices for push notifications (notifications/push).
+v1.use('/me/push', require('./modules/notifications/push/pushService').router);
 // The signed-in person's name and picture (before /auth, which has no such route).
 v1.use('/auth/me/profile', require('./modules/auth/profileRoutes'));
 v1.use('/auth', authRoutes);
