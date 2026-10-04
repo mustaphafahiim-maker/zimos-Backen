@@ -18,7 +18,8 @@ const logger = require('../../core/utils/logger');
  * arrives (blocked tracker, manual order) simply has no attribution.
  */
 
-const TOUCH_KEYS = ['source', 'medium', 'campaign', 'content', 'term', 'fbclid', 'ttclid', 'gclid', 'scCid', 'ref', 'referrer', 'landingPage', 'at'];
+// adId: the ad_id URL parameter the suggested ad links carry (profit/adIdMatching.js).
+const TOUCH_KEYS = ['source', 'medium', 'campaign', 'content', 'term', 'adId', 'fbclid', 'ttclid', 'gclid', 'scCid', 'ref', 'referrer', 'landingPage', 'at'];
 
 function cleanTouch(touch) {
   if (!touch || typeof touch !== 'object') return null;

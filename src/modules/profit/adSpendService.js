@@ -9,6 +9,7 @@ const { resolveWindow } = require('../analytics/overviewService');
 const { PLATFORM_OF_SOURCE } = require('../analytics/attributionService');
 const base = require('../currencies/baseAmounts');
 const { campaignSql } = require('../analytics/orderTouch');
+const adIds = require('./adIdMatching');
 
 /**
  * Ad spend per day (SPEC §15.4): manual entry, CSV import and the campaigns
@@ -28,6 +29,7 @@ function serialize(r) {
     platform: r.platform,
     campaignName: r.campaignName,
     campaignId: r.campaignId,
+    adIds: r.adIds || [],
     spendAmount: Number(r.spendAmount),
     currency: r.currency,
     impressions: num(r.impressions),
@@ -67,6 +69,8 @@ async function upsertOne(workspaceId, entry, { source, userId, currency, transac
     clicks: entry.clicks ?? null,
     currency,
     source,
+    // The ads of an ad-level import (adIdMatching.js); kept as they were otherwise.
+    ...(Array.isArray(entry.adIds) ? { adIds: entry.adIds.length ? entry.adIds : null } : {}),
   };
   const existing = await db.AdSpendDaily.findOne({
     where: { workspaceId, day: entry.day, platform: entry.platform, campaignKey: key },
@@ -149,6 +153,8 @@ const HEADER_ALIASES = {
   impressions: ['impressions', 'مرات الظهور'],
   clicks: ['clicks', 'link clicks', 'النقرات'],
   campaignId: ['campaign id', 'campaign_id'],
+  // An ad-level export: its rows are added up per campaign and day (adIdMatching.js).
+  adId: adIds.AD_ID_HEADERS,
 };
 const PLATFORM_ALIASES = { ...PLATFORM_OF_SOURCE, snap: 'snapchat', 'google ads': 'google', adwords: 'google' };
 
@@ -215,7 +221,7 @@ async function importCsv(workspaceId, { csv, defaultPlatform, dryRun = false }, 
   const currency = await storeCurrency(workspaceId);
   const digits = currencyDigits(currency);
   const errors = [];
-  const valid = [];
+  let valid = [];
   const cell = (row, field) => (col[field] >= 0 ? (row[col[field]] || '').trim() : '');
   const int = (v) => (v === '' ? null : Number.isFinite(Number(v.replace(/,/g, ''))) ? Math.round(Number(v.replace(/,/g, ''))) : null);
   table.slice(1).forEach((row, i) => {
@@ -236,9 +242,11 @@ async function importCsv(workspaceId, { csv, defaultPlatform, dryRun = false }, 
         day, platform, campaignName, spendAmount,
         impressions: int(cell(row, 'impressions')), clicks: int(cell(row, 'clicks')),
         campaignId: cell(row, 'campaignId') || null,
+        ...(col.adId >= 0 ? { adId: cell(row, 'adId') } : {}),
       });
     }
   });
+  if (col.adId >= 0) valid = adIds.foldAdRows(valid);
 
   let created = 0;
   let updated = 0;
@@ -282,7 +290,7 @@ async function campaigns(workspaceId, query = {}) {
   const tz = (ws && ws.timezone) || 'UTC';
   const replacements = { workspaceId, start, end, tz };
   const run = (sql) => db.sequelize.query(sql, { replacements, type: db.Sequelize.QueryTypes.SELECT });
-  const [spend, orders] = await Promise.all([
+  const [spend, orderGroups, adLinks] = await Promise.all([
     run(`SELECT platform, campaign_key, max(campaign_name) AS name, max(lower(campaign_id)) AS campaign_id,
                 sum(spend_amount) AS spend, sum(impressions) AS impressions, sum(clicks) AS clicks,
                 min(day) AS first_day, max(day) AS last_day
@@ -295,16 +303,20 @@ async function campaigns(workspaceId, query = {}) {
                   (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live,
                   (o.confirmation_state = 'confirmed') AS confirmed,
                   -- The order's last touch (analytics/orderTouch.js), as attribution has it.
-                  ${campaignSql()} AS campaign
+                  ${campaignSql()} AS campaign,
+                  ${adIds.adIdSql()} AS ad_id
              FROM orders o${LATEST_SHIPMENT_JOIN}
             WHERE o.workspace_id = :workspaceId AND o.created_at >= :start AND o.created_at < :end AND ${countsAsSaleSql('o')})
-         SELECT campaign, count(*) AS orders, count(*) FILTER (WHERE confirmed) AS confirmed,
+         SELECT campaign, ad_id, count(*) AS orders, count(*) FILTER (WHERE confirmed) AS confirmed,
                 count(*) FILTER (WHERE stage = 'delivered') AS delivered,
                 count(*) FILTER (WHERE stage = 'returned') AS returned,
                 coalesce(sum(total_amount) FILTER (WHERE live), 0) AS sales,
                 coalesce(sum(total_amount) FILTER (WHERE stage = 'delivered'), 0) AS delivered_sales
-           FROM ord WHERE campaign <> '' GROUP BY campaign`),
+           FROM ord WHERE campaign <> '' OR ad_id <> '' GROUP BY campaign, ad_id`),
+    run(adIds.AD_LINKS_SQL),
   ]);
+  // By campaign name or id, else by the ad's id (adIdMatching.js).
+  const orders = adIds.foldOrders(orderGroups, spend, adLinks, ['orders', 'confirmed', 'delivered', 'returned', 'sales', 'delivered_sales']);
   const byCampaign = new Map(orders.map((r) => [r.campaign, r]));
   const matched = new Set();
   const rows = spend.map((s) => {

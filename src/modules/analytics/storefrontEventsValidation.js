@@ -54,6 +54,7 @@ const touch = Joi.object({
   campaign: touchField,
   content: touchField,
   term: touchField,
+  adId: touchField,
   fbclid: touchField,
   ttclid: touchField,
   gclid: touchField,
