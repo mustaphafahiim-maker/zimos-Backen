@@ -126,6 +126,7 @@ The teammate's WhatsApp goes out from the platform's own number, not the store's
 `valu` and `kiosk` are real order payment methods: new enum values, named once in `payments/methodNames.js`. They are not card or wallet in disguise, so reports and rules can tell them apart. Paymob has one integration id per method. A kiosk order holds its stock for 48 hours (`PAYMENT_KIOSK_TTL_MINUTES`), because the cash reference is paid later. One-click upsells after a paid order remain card and wallet only. Staff manual orders do not offer them.
 With the store's WhatsApp connected, the row action sends the `cart_reminder` template (the same one as the ready abandoned-cart automation) from the store's number. Its variables are filled in a fixed order: name, store, recovery link, total, products, as many as the synced template has, or 3 when it was never synced. A phone that answered STOP or is blocked is refused like any marketing message. The message is logged in the inbox, and the lost order is marked contacted on the server. Without a connected number, the action still opens wa.me as before.
 French is a full storefront dictionary (`lib/i18nFr.ts`, every key, checked by the `Dictionary` type). The store opens in French when its default language is French. The switch adds French only when the store offers it (dashboard → Languages, the existing `store_languages`), so Arabic/English stores are unchanged. About a dozen components carry their own short ar/en strings; in French they show English (`pickText`). Governorates and merchant-written field labels are kept in Arabic and English only, so French shows the English versions.
+The tree holds only `html_block {blockId}`, and the tree validator checks the id's format. The HTML is a custom-code row (`hb:<id>`) with the custom-code rules: `website.publish`, audited, served with the page or step that places it, never in a staff preview, and run only on the store's own host. A new element gets its id when its code is first saved, so an unsaved block is valid and shows nothing. Saving takes effect at once, outside publishing, like page scripts. A duplicated element shares its block, so editing one changes both. A block whose element is gone is never served.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -276,7 +277,7 @@ Bugs and security first, then what blocks selling, then features.
 - [x] 89. Paymob valU and Kiosk (§11.2).
 - [x] 90. Lost orders: the WhatsApp row action sends the recovery template through the connected number (§6.3).
 - [x] 91. French in the storefront interface (§8.10).
-- [ ] 92. A positioned custom HTML block in the builder, stored outside the tree (§8.2, §8.4).
+- [x] 92. A positioned custom HTML block in the builder, stored outside the tree (§8.2, §8.4).
 - [ ] 93. Builder elements: masonry grid, sticky container, file and star inputs in forms, add-to-cart / buy-now buttons, a price that follows the picked variant (§9.3).
 - [ ] 94. The funnel page editor gets the website editor's tools: undo/redo, layers, page product, named styles, saved sections (§9.3).
 - [ ] 95. Both editors: double-click text editing, X-ray outlines, duplicate element/section (§9.3).
