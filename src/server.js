@@ -7,9 +7,11 @@ const logger = require('./core/utils/logger');
 const { describeStorage, r2ConfigError } = require('./modules/media/storage');
 const { logRollout: logCarrierRollout } = require('./modules/shipping/carriers');
 const { imageProcessingStatus } = require('./modules/media/imageProcessing');
-const { startUploadSweep } = require('./modules/customerUploads/customerUploadService');
 const signupPolicy = require('./modules/auth/signupPolicy');
 const { releaseDraftsWhenOff } = require('./modules/billing/goLiveService');
+const { startUploadSweep } = require('./modules/customerUploads/customerUploadService');
+const webhookWorker = require('./modules/webhooks/webhookWorker');
+const workerRuntime = require('./core/workerRuntime');
 
 async function start() {
   try {
@@ -38,6 +40,7 @@ async function start() {
   // Shoppers' photos no order took are deleted after CUSTOMER_UPLOAD_TTL_HOURS.
   startUploadSweep();
 
+
   // And for couriers: which adapters this process actually switched on, from
   // CARRIERS_ENABLED / CARRIERS_BETA / CARRIERS_BETA_WORKSPACES as parsed.
   await logCarrierRollout(logger);
@@ -58,9 +61,21 @@ async function start() {
     logger.info(`Zimos backend listening on port ${env.port}`, { env: env.nodeEnv });
   });
 
+  // Outbound webhooks: find order changes and send them, every few seconds
+  // Only with WEBHOOKS_IN_PROCESS=true; otherwise scripts/dispatch-webhooks.js does it.
+  if (env.webhooks.inProcess) webhookWorker.start();
+
+  // Background jobs and domain events (core/queue, core/outbox): run here only
+  // with WORKER_IN_PROCESS=true; a separate `node src/worker.js` can run them instead.
+  if (env.queue.inProcess) {
+    workerRuntime.start().catch((err) => logger.error('Could not start the in-process worker', { message: err.message }));
+  }
+
   const shutdown = (signal) => {
     logger.info(`Received ${signal}, shutting down gracefully`);
+    webhookWorker.stop();
     server.close(async () => {
+      await workerRuntime.stop();
       await db.sequelize.close();
       process.exit(0);
     });
