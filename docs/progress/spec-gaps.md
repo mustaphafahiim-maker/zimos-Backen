@@ -492,6 +492,15 @@ The builder's product list now honours its source (SPEC §8.2). Before, all thre
 - Both are sorts of the public listing (`storefront/productSearch.js`, `?sort=featured|best_selling`) and allowed as a shop's default sort.
 - The storefront asks for them through `api-client/endpoints/productListSources.ts`.
 - The single-product block without a product picked now takes the newest product, as its comment always said; it took the first by id before.
+A failed online payment is now marked on the order and fires its event in every case (SPEC §11.4; new `payments/paymentFailure.js`).
+
+- **The order's financial state becomes `failed`.** The value was in the enum but nothing ever set it. The orders list, its filter and the export already label it "Payment failed".
+- **`order.payment_failed` fires once per failed attempt.** It is the trigger of the ready-made "payment failed + try again" automation.
+  - Before, it fired only when the gateway declined.
+  - It now also fires when the gateway refuses to start the payment at all (keys refused, no answer, a currency it does not take). That attempt was marked failed with no event, so the shopper got no reminder.
+- **Back to `pending`:** starting another attempt (retry) or switching to cash on delivery. A capture makes it `paid` as before.
+- **Left alone:** a cancelled order, or one with money already paid on it.
+- The state change goes through `orderStateService.setFinancialState` (audited, stage tracked). The audit→event bridge maps no event to `failed`, so the event is recorded once, explicitly.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -684,7 +693,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
 - [x] 127. COD settlement statements read from the courier's Excel file (§15.5).
 - [x] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
-- [ ] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
+- [x] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
 - [ ] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
 - [ ] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
 - [ ] 132. Lost orders keep their traffic source (§6.1).
