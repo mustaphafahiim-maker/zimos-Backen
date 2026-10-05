@@ -638,6 +638,24 @@ Subscribers now get their portal link (SPEC §18.1: "cancel or update the card v
   - The automation engine now treats an event that names a subscription as about the subscription, even when it also names the order.
 - **Tracking page.** The order's tracking page lists the subscriptions that order started, with their status and a "Manage" link (`subscriptions` on the tracking answer, `subscriptions/subscriptionLinks.js`).
 - **Dashboard.** The merchant's "Copy portal link" on the subscriptions screen was already there.
+The store's subdomain can be changed from Settings (SPEC §17.3 account settings: "the subdomain").
+
+- **Dashboard.** A new "Store address" section above Account settings:
+  - Shows the current `<slug>.zimos.co`. "Change address" opens the existing address field, now translated and read left to right, with the live check. The check passes this store's id, so its own current and previous addresses read as available.
+  - Moving asks for confirmation in a Base UI Dialog, saying the old links keep working.
+  - The section lists the previous addresses that still forward here.
+  - The change needs workspace.manage (owner, manager). A 403 hides the button.
+- **Decision: old addresses are kept** (new `workspace_slug_history`, migration 438; `workspaces/slugHistory.js`), so a change does not break links already handed out:
+  - The old address stays the store's. check-slug answers "taken" for anyone else, the PATCH refuses it, and a new store's automatic slug skips it.
+  - The same store can take one back, which removes it from the list.
+  - The last 3 are kept per store; an older one is released.
+  - `resolve-host` answers an old platform host with `redirectTo` the store's primary domain, else its current subdomain. The storefront proxy redirects (307, same path and query) for page loads.
+  - Everything else still reaches the store by the old slug: the public `/store/:slug` lookup and the API's host resolver fall back to the history.
+- **Tested** on the scratch DB:
+  - Moved the demo store to demo-store-two by API and back again through the dashboard in Arabic.
+  - The old host resolved with redirectTo, the storefront answered 307 to the new host, and the public lookup by the old slug worked.
+  - Restored to demo-store with no history.
+- **Next free migration: 439.**
 
 ## P0 — correctness, compliance, launch gates
 
@@ -842,7 +860,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
 - [x] 139. Contact tags from purchase buttons on website pages too (§18.4).
 - [x] 140. Subscribers get their portal link (§18.1).
-- [ ] 141. The store's subdomain can be changed in settings (§17.3).
+- [x] 141. The store's subdomain can be changed in settings (§17.3).
 - [ ] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
 - [ ] 143. AI store policies applied to the store's policies (§19.2).
 - [ ] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
