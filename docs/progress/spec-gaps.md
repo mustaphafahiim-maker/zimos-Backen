@@ -467,6 +467,15 @@ Each product feed item now links to its own variant (SPEC §7.8: the item `id` i
   - Without the parameter, the first variant in stock as before.
 - **ViewContent** is reported with that variant's id (its SKU, else its id — the same id the feed item has), so catalog ads match the visit to the item.
 - The canonical link stays the product's plain URL, so search engines still see one page per product.
+A funnel's sales page with an order form (a `cod_form` element) now has order bumps (SPEC §9.5, §10.3).
+
+- **The step's own bump:** a sales step can carry `bumpOfferId`, as a checkout step already could (`orderBump.BUMP_STEP_TYPES`: checkout and sales). The funnel editor shows the bump picker on sales steps too.
+  - The runtime sends the bump for the step, the funnel session context passes it to the page's form (`FunnelCodForm`), and the server accepts it from a published sales step.
+  - The publish checks (bump usable, priced in the funnel's currency) cover it unchanged, since they already went over every step's `bumpOfferId`.
+- **The product's own bumps** (Offers → Order bumps) show on the funnel's order form, on a sales page and on the checkout step alike, as on the store's product page.
+  - They join the order as `orderBumps`, alongside the step's bump.
+  - A refusal unticks them; the autosave and the purchase event count them.
+- **Currency:** an add-on priced in another currency than the order's is not offered. The storefront filters them by currency, and the server refuses one with `ORDER_BUMP_UNAVAILABLE` (`offerRules.resolveBumpItems`), so a funnel selling in dollars never gets a line priced in pounds.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -656,7 +665,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
 - [x] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
 - [x] 125. Product feed items land on their own variant (§7.8).
-- [ ] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
+- [x] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
 - [ ] 127. COD settlement statements read from the courier's Excel file (§15.5).
 - [ ] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
 - [ ] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
