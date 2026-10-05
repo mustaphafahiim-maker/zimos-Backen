@@ -501,6 +501,18 @@ A failed online payment is now marked on the order and fires its event in every 
 - **Back to `pending`:** starting another attempt (retry) or switching to cash on delivery. A capture makes it `paid` as before.
 - **Left alone:** a cancelled order, or one with money already paid on it.
 - The state change goes through `orderStateService.setFinancialState` (audited, stage tracked). The audit→event bridge maps no event to `failed`, so the event is recorded once, explicitly.
+A rejected transfer now reaches the shopper, who can send a new receipt (SPEC §11.3; new `payments/transferResubmit.js`).
+
+- **Telling the customer:** the merchant's "Reject" fires `order.transfer_rejected`.
+  - It sends the new `transfer_rejected` order email (built-in Arabic text, with the order link) unless the merchant unticks "Tell the customer" in the reject dialog (`notifyCustomer`, on by default). The email is sent even when the store has not switched order emails on, like a refund's "notify the customer".
+  - The same event drives a new ready-made WhatsApp automation, "Transfer rejected + send a new receipt", for stores that enable it.
+- **The tracking page** (phone + number, or the signed link) shows the order's transfer:
+  - under review; or
+  - rejected, with the store's note and the method's instructions, and the checkout's own receipt form to send it again.
+- **Sending it again:** `POST /store/:ws/orders/track-link/transfer`, authorised by the order's signed tracking token (the one the message's link and the tracking answer carry).
+  - The receipt is checked like a checkout's: this visitor's upload, the method's required fields.
+  - It becomes a new pending transfer of the same amount and purpose (a deposit stays a deposit), back in the merchant's review queue, audited as `manual_transfer.resubmit`. Rate limit: 6 per minute per IP.
+  - A method the store has since removed can't be resent: the shopper is told to contact the store.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -694,7 +706,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 127. COD settlement statements read from the courier's Excel file (§15.5).
 - [x] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
 - [x] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
-- [ ] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
+- [x] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
 - [ ] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
 - [ ] 132. Lost orders keep their traffic source (§6.1).
 - [ ] 133. The merchant sets when a checkout counts as lost (§6.2).
