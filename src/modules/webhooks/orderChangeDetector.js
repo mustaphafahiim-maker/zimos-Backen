@@ -207,7 +207,16 @@ async function scanOnce({ now = new Date(), limit = BATCH_SIZE } = {}) {
           : `order.status_changed:${row.id}:${changedAt.get(row.id).getTime()}:${shortHash(signature)}`;
       const data = type === 'order.created'
         ? { order: orders.get(row.id), current }
-        : { order: orders.get(row.id), previous, current, changed: changedKeys(previous, current) };
+        : {
+            order: orders.get(row.id),
+            // SPEC §16.1: the order's status (its stage, as the orders screen shows it) before and after.
+            // old_status is null for an order placed before the endpoint existed.
+            old_status: previous ? previous.stage : null,
+            new_status: current.stage,
+            previous,
+            current,
+            changed: changedKeys(previous, current),
+          };
       return {
         workspaceId: row.workspace_id,
         endpointId: endpoint.id,

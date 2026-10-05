@@ -10,7 +10,7 @@
 const EVENT_TYPES = Object.freeze({
   'order.created': 'A new order was placed.',
   'order.status_changed':
-    "An order's stage, confirmation, payment or fulfilment state changed, or its shipment moved (shipped, out for delivery, delivered, returned…).",
+    "An order's stage, confirmation, payment or fulfilment state changed, or its shipment moved (shipped, out for delivery, delivered, returned…). old_status and new_status are its stage before and after.",
   // The topics fed by the event outbox (webhookTopics.js).
   ...require('./webhookTopics').TOPICS,
 });

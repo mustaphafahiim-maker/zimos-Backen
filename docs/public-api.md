@@ -280,6 +280,8 @@ X-Zimos-Signature: t=1790000000,v1=5d1f0a…
   "workspaceId": "de139192-…",
   "data": {
     "order": { "…the order object…": "" },
+    "old_status": "pending_confirmation",
+    "new_status": "ready_to_ship",
     "previous": { "stage": "pending_confirmation", "confirmationState": "pending", "financialState": "pending", "fulfillmentState": "unfulfilled", "shipmentStatus": null },
     "current":  { "stage": "ready_to_ship",        "confirmationState": "confirmed", "financialState": "pending", "fulfillmentState": "unfulfilled", "shipmentStatus": null },
     "changed": ["stage", "confirmationState"]
@@ -287,10 +289,15 @@ X-Zimos-Signature: t=1790000000,v1=5d1f0a…
 }
 ```
 
+`old_status` and `new_status` are the order's **stage** before and after —
+the status the orders screen shows (`pending_confirmation`, `ready_to_ship`,
+`shipped`, `delivered`, `cancelled`…). They are equal when only a state
+behind the stage moved (a payment, say): `changed` lists what did.
+
 `order.created` carries `data.order` and `data.current`. An order placed
 **before** the endpoint was added, changing now, arrives as
-`order.status_changed` with `previous: null` — its state is news, its previous
-state isn't known.
+`order.status_changed` with `previous: null` and `old_status: null` — its
+state is news, its previous state isn't known.
 
 ### Responding, retries, duplicates
 
