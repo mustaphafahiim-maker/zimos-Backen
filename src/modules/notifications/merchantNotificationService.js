@@ -88,13 +88,16 @@ const inboxWhere = (workspaceId, userId) => ({ workspaceId, [Op.or]: [{ userId }
  *   type       one of TYPE_NAMES
  *   title/body the text in the store's language (Arabic); `data` carries the
  *              values so the dashboard can render it in the viewer's language
+ *   localized  optional { en: { title, body }, ar: { title, body } }: each
+ *              teammate's row, push, email and WhatsApp in their own language
+ *              (users.locale, set by the dashboard); title/body otherwise
  *   link       a dashboard path
  *   dedupeKey  the same key is delivered to a person at most once
  *   userIds    only these teammates (still subject to permission/preferences)
  *
  * Never throws: a notification must not fail the action that caused it.
  */
-async function create(workspaceId, { type, title, body = null, link = null, data = {}, dedupeKey = null, userIds = null }) {
+async function create(workspaceId, { type, title, body = null, link = null, data = {}, dedupeKey = null, userIds = null, localized = null }) {
   try {
     const spec = TYPES[type];
     if (!spec) throw new Error(`unknown notification type "${type}"`);
@@ -104,7 +107,7 @@ async function create(workspaceId, { type, title, body = null, link = null, data
       where,
       include: [
         { model: db.Role, as: 'role' },
-        { model: db.User, as: 'user', attributes: ['id', 'email', 'phone', 'phoneVerifiedAt'] },
+        { model: db.User, as: 'user', attributes: ['id', 'email', 'phone', 'phoneVerifiedAt', 'locale'] },
       ],
     });
     const members = memberships.filter((m) => m.user && roleAllows(m.role, spec.permission));
@@ -113,6 +116,11 @@ async function create(workspaceId, { type, title, body = null, link = null, data
     const prefs = await db.NotificationPreference.findAll({ where: { workspaceId, userId: members.map((m) => m.userId) } });
     const prefsByUser = new Map(prefs.map((p) => [p.userId, p]));
     const channelsFor = (userId) => resolveChannels(prefsByUser.get(userId) && prefsByUser.get(userId).channels)[type];
+    // The words each teammate reads: their language's, when the caller wrote it in more than one.
+    const textFor = (m) => {
+      const own = localized && localized[m.user && m.user.locale === 'en' ? 'en' : 'ar'];
+      return own && own.title ? { title: own.title, body: own.body === undefined ? body : own.body } : { title, body };
+    };
 
     const rows = members
       .filter((m) => channelsFor(m.userId).inApp)
@@ -120,8 +128,8 @@ async function create(workspaceId, { type, title, body = null, link = null, data
         workspaceId,
         userId: m.userId,
         type,
-        title: String(title).slice(0, 200),
-        body,
+        title: String(textFor(m).title).slice(0, 200),
+        body: textFor(m).body,
         link,
         data,
         dedupeKey,
@@ -142,20 +150,20 @@ async function create(workspaceId, { type, title, body = null, link = null, data
       if (!channelsFor(m.userId).email) continue;
       // With a dedupe key, email only alongside a row that was really new.
       if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
-      await notify.email({ recipient: m.user.email, template: 'merchant_notification', data: { title, body, link }, workspaceId });
+      await notify.email({ recipient: m.user.email, template: 'merchant_notification', data: { ...textFor(m), link }, workspaceId });
       emailed += 1;
     }
     // Push to the person's devices (notifications/push), with the same once-only rule as email.
     for (const m of members) {
       if (!channelsFor(m.userId).push) continue;
       if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
-      await require('./push/pushService').sendToUser(m.userId, { title, body, link, type, workspaceId });
+      await require('./push/pushService').sendToUser(m.userId, { ...textFor(m), link, type, workspaceId });
     }
     // WhatsApp from the platform's number to a verified phone (platformWhatsapp.js), same once-only rule.
     for (const m of members) {
       if (!channelsFor(m.userId).whatsapp || !m.user.phone || !m.user.phoneVerifiedAt) continue;
       if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
-      await notify.whatsapp({ recipient: m.user.phone, template: 'merchant_notification', data: { title, body, link }, workspaceId });
+      await notify.whatsapp({ recipient: m.user.phone, template: 'merchant_notification', data: { ...textFor(m), link }, workspaceId });
     }
     return { created: deliveredTo.size, emailed };
   } catch (err) {
