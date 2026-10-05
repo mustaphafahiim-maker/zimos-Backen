@@ -556,6 +556,23 @@ The merchant now sets when a checkout counts as lost (SPEC §6.2 `abandoned_afte
   - The order page's "Change status" dialog shows the same "Notify the customer" toggle as cancel and refund (ticked by default). So does the orders bulk bar's "Change status".
   - The toggle only appears for moves the customer hears about: confirmed, follow-up, shipped, out for delivery, delivered, returned, cancelled.
   - It does not appear for reopening or sending an order back to the queue, which send the customer nothing. The list of those moves is `ORDER_STAGES_THAT_NOTIFY` in the api-client.
+The order timeline now lists the messages the customer was sent about the order (SPEC §4.4 card 11 "message sent").
+
+- **Migration 436:** `notification_logs.order_id` and `subject`, plus a partial index on order_id.
+  - `notify.email/sms/whatsapp` take an optional `orderId`. When it is given, the log keeps it with the message's line: an email's subject, an SMS's text, a push's title.
+  - Sign-in codes and staff notifications pass no order, so they keep neither field and no code is ever stored.
+- **What passes the order:**
+  - the order emails (orderEmailService.handleEvent);
+  - an automation's SMS and email steps;
+  - the shopper's order push (the sandbox provider logs it).
+  - WhatsApp messages from the store's number already carried `order_id`.
+- **`GET /orders/:id/timeline` adds `message` events:** `{ channel, template, subject, status, error, bot? }`.
+  - From notification_logs, and from the store's outbound whatsapp_messages, with who sent them and whether WhatsApp reported them delivered or read.
+  - The automation run line stays as it was. The message line under it shows what was actually sent.
+- **The order page's timeline shows:**
+  - "Email / SMS / WhatsApp / Notification to the customer — sent / delivered / read / not sent";
+  - the message's line, and the provider's error when it failed.
+- **Next free migration: 437.**
 
 ## P0 — correctness, compliance, launch gates
 
@@ -754,7 +771,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 132. Lost orders keep their traffic source (§6.1).
 - [x] 133. The merchant sets when a checkout counts as lost (§6.2).
 - [x] 134. "Notify the customer" on status changes, one order or many (§4.6).
-- [ ] 135. The order timeline shows the messages sent to the customer (§4.4).
+- [x] 135. The order timeline shows the messages sent to the customer (§4.4).
 - [ ] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
 - [ ] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
 - [ ] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
