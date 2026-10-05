@@ -521,6 +521,15 @@ The deposit rule's "risky customers only" now reads the platform-wide delivery r
 - **No platform history** (new to ZIMOS, or the network score not switched on for the store — the `customer_network_score` flag): the store's own record decides as before — a reliability score below the threshold, or a rejected order.
 - **A first-time shopper nobody knows** is never asked.
 - The threshold keeps its stored name (`maxReliabilityScore`, 1–100). The dashboard now calls it "Delivery rate below (%)" and explains both sources.
+Lost orders now keep where the shopper came from (SPEC §6.1 attribution).
+
+- **Sent with every autosave:** the storefront's first and last touch (`lib/touches.ts`: UTM values, ad id, click ids, referrer, landing page) go out with each save (`attribution`). They are stored on `checkout_sessions.attribution`.
+- **A save with no touches keeps the stored pair.** Unknown keys are dropped rather than refusing the save. Nothing personal is accepted.
+- **The lost order shows `trafficSource`:** the last touch, else the first.
+  - Source: the UTM source, else the platform the click id points to, else the referring site.
+  - Also medium, campaign, ad id and landing page.
+- **The dashboard row reads "Came from facebook · autumn-sale".** Hovering shows the medium, ad and landing page. The CSV export gains "Traffic source" and "Campaign" columns, at the end so existing columns keep their places.
+- **Converting a lost order copies its touches onto the order** when the order has none. The reports by source and campaign (`analytics/orderTouch.js`) then count it like any other order.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -716,7 +725,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
 - [x] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
 - [x] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
-- [ ] 132. Lost orders keep their traffic source (§6.1).
+- [x] 132. Lost orders keep their traffic source (§6.1).
 - [ ] 133. The merchant sets when a checkout counts as lost (§6.2).
 - [ ] 134. "Notify the customer" on status changes, one order or many (§4.6).
 - [ ] 135. The order timeline shows the messages sent to the customer (§4.4).
