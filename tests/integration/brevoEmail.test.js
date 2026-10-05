@@ -35,7 +35,7 @@ describe('Brevo email adapter', () => {
     const email = uniqueEmail('brevo');
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email, password: 'Passw0rd!123', fullName: 'Brevo Tester' });
+      .send({ phone: '01012345678', email, password: 'Passw0rd!123', fullName: 'Brevo Tester' });
     expect(res.status).toBe(201);
 
     expect(brevo.sendEmail).toHaveBeenCalledTimes(1);
@@ -100,7 +100,7 @@ describe('Brevo email adapter', () => {
     const email = uniqueEmail('console');
     await request(app)
       .post('/api/v1/auth/register')
-      .send({ email, password: 'Passw0rd!123', fullName: 'Console Tester' })
+      .send({ phone: '01012345678', email, password: 'Passw0rd!123', fullName: 'Console Tester' })
       .expect(201);
 
     expect(brevo.sendEmail).not.toHaveBeenCalled();

@@ -21,7 +21,7 @@ async function registerAndActivate(overrides = {}) {
   const password = overrides.password || 'Passw0rd!123';
   const fullName = overrides.fullName || 'Test User';
 
-  const res = await request(app).post('/api/v1/auth/register').send({ email, password, fullName });
+  const res = await request(app).post('/api/v1/auth/register').send({ phone: '01012345678', email, password, fullName });
   if (res.status !== 201) {
     throw new Error(`registerAndActivate failed: ${res.status} ${JSON.stringify(res.body)}`);
   }

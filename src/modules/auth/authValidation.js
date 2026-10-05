@@ -3,6 +3,20 @@
 const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
 const { usernameSchema } = require('../users/username');
+const { normalizePhone } = require('../../core/utils/phone');
+
+// The sign-up phone, stored the way every other phone is (core/utils/phone):
+// digits with the country code. Required; what cannot be a mobile number is a
+// VALIDATION_ERROR on `phone`.
+const signupPhone = Joi.string()
+  .trim()
+  .max(32)
+  .required()
+  .custom((value, helpers) => {
+    const phone = normalizePhone(value);
+    if (!phone || !/^\d{10,15}$/.test(phone)) return helpers.message('Enter a valid mobile number');
+    return phone;
+  });
 
 // Password strength is enforced here, server-side, so that a request hitting
 // the API directly (bypassing the frontend's own check) still can't set a weak
@@ -30,7 +44,7 @@ module.exports = {
       email: joiEmail().max(255).required(),
       password,
       fullName: Joi.string().min(2).max(200).required(),
-      phone: Joi.string().max(32).optional(),
+      phone: signupPhone,
       // The sign-up form requires it. Checked strictly when given; a client
       // that sends none (from before usernames) gets one made from the email.
       username: usernameSchema.optional(),

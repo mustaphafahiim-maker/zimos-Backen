@@ -9,7 +9,7 @@ describe('Authentication', () => {
       const email = uniqueEmail();
       const res = await request(app)
         .post('/api/v1/auth/register')
-        .send({ email, password: 'Passw0rd!123', fullName: 'Jane Doe' });
+        .send({ phone: '01012345678', email, password: 'Passw0rd!123', fullName: 'Jane Doe' });
 
       expect(res.status).toBe(201);
       expect(res.body.user.email).toBe(email);
@@ -20,8 +20,8 @@ describe('Authentication', () => {
 
     it('rejects duplicate email registration', async () => {
       const email = uniqueEmail();
-      await request(app).post('/api/v1/auth/register').send({ email, password: 'Passw0rd!123', fullName: 'First User' });
-      const res = await request(app).post('/api/v1/auth/register').send({ email, password: 'Passw0rd!123', fullName: 'Second User' });
+      await request(app).post('/api/v1/auth/register').send({ phone: '01012345678', email, password: 'Passw0rd!123', fullName: 'First User' });
+      const res = await request(app).post('/api/v1/auth/register').send({ phone: '01012345678', email, password: 'Passw0rd!123', fullName: 'Second User' });
 
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('EMAIL_TAKEN');
@@ -33,7 +33,7 @@ describe('Authentication', () => {
       for (const password of weak) {
         const res = await request(app)
           .post('/api/v1/auth/register')
-          .send({ email: uniqueEmail(), password, fullName: 'Weak Pw' });
+          .send({ phone: '01012345678', email: uniqueEmail(), password, fullName: 'Weak Pw' });
         expect(res.status).toBe(422);
         expect(res.body.error.code).toBe('VALIDATION_ERROR');
         expect(res.body.error.details.some((d) => d.field === 'password')).toBe(true);
@@ -43,8 +43,38 @@ describe('Authentication', () => {
     it('accepts a password with lowercase, uppercase and a digit/special char', async () => {
       const res = await request(app)
         .post('/api/v1/auth/register')
-        .send({ email: uniqueEmail(), password: 'Passw0rd!123', fullName: 'Strong Pw' });
+        .send({ phone: '01012345678', email: uniqueEmail(), password: 'Passw0rd!123', fullName: 'Strong Pw' });
       expect(res.status).toBe(201);
+    });
+
+    it('requires a phone: missing is a VALIDATION_ERROR on phone', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: uniqueEmail(), password: 'Passw0rd!123', fullName: 'No Phone' });
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.body.error.details.some((d) => d.field === 'phone')).toBe(true);
+    });
+
+    it('refuses a phone that cannot be a mobile number', async () => {
+      for (const phone of ['123', 'abcdefghij', '+12']) {
+        const res = await request(app)
+          .post('/api/v1/auth/register')
+          .send({ phone, email: uniqueEmail(), password: 'Passw0rd!123', fullName: 'Bad Phone' });
+        expect(res.status).toBe(422);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        expect(res.body.error.details.some((d) => d.field === 'phone')).toBe(true);
+      }
+    });
+
+    it('stores the phone normalized', async () => {
+      const email = uniqueEmail();
+      const res = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ phone: '010 1234-5678', email, password: 'Passw0rd!123', fullName: 'Good Phone' });
+      expect(res.status).toBe(201);
+      const user = await db.User.findOne({ where: { email } });
+      expect(user.phone).toBe('201012345678');
     });
   });
 

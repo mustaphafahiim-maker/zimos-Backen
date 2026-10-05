@@ -122,7 +122,7 @@ describe('phone verification during registration', () => {
     const email = uniqueEmail('otp');
     const reg = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email, password: 'Passw0rd!123', fullName: 'OTP User' });
+      .send({ phone: '01012345678', email, password: 'Passw0rd!123', fullName: 'OTP User' });
     expect(reg.status).toBe(201);
     const token = reg.body.accessToken;
 
