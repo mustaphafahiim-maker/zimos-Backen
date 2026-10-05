@@ -47,6 +47,11 @@ const AUDIT_FIELDS = [
   'cancellationReason',
   'paymentMethod',
   'providerCode',
+  // Dropshipping (dropship/dropshipOrders.js): the supplier, its order number and status, a refusal.
+  'provider',
+  'externalOrderId',
+  'externalStatus',
+  'error',
 ];
 
 function pickFields(state) {

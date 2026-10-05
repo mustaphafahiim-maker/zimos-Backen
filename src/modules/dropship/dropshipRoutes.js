@@ -33,6 +33,13 @@ router.delete(
   asyncHandler(async (req, res) => res.json(await service.disconnect(wid(req), req.params.code, req)))
 );
 
+// Forward orders by themselves (off / when placed / once confirmed) and apply the supplier's status (dropshipOrders.js).
+router.patch(
+  '/providers/:code/settings',
+  validate({ params: Joi.object({ ...ws, code }), body: require('./dropshipOrders').settingsSchema }),
+  asyncHandler(async (req, res) => res.json(await require('./dropshipOrders').updateSettings(wid(req), req.params.code, req.body, req)))
+);
+
 router.post(
   '/providers/:code/import',
   validate({ params: Joi.object({ ...ws, code }), body: Joi.object({ code: Joi.string().trim().min(1).max(120).required() }) }),

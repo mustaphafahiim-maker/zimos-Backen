@@ -27,6 +27,13 @@ Endpoints (permission `apps.manage`, under `/workspaces/:workspaceId/dropship`):
 | `POST /providers/:code/import` | `{ code }` → a draft product |
 | `POST /providers/:code/orders/:orderId/push` | forward an order |
 | `POST /providers/:code/sync-stock` | copy the provider's stock onto imported variants |
+| `PATCH /providers/:code/settings` | `{ autoForward: "off" \| "created" \| "confirmed", applyStatus }` — forward orders by themselves, apply the supplier's status to the order |
+
+On the order (`orders.view` / `orders.manage`, under `/workspaces/:workspaceId/orders/:orderId`,
+`../dropshipOrders.js`): `GET /dropship` (what was forwarded, where it stands,
+which connected suppliers supply its lines), `POST /dropship/:code/push`,
+`POST /dropship/refresh` (ask the supplier now). A mixed order sends each
+supplier only the lines whose product came from it.
 
 ## The adapter
 
@@ -57,6 +64,11 @@ module.exports = {
   // → [{ externalId, code, stock }]
   async syncStock(credentials, externalIds) {},
 
+  // Optional. Where a forwarded order stands now; with it, forwarded orders
+  // are followed every few minutes until delivered / returned / cancelled.
+  // `ref.pushedAt` is when it was forwarded. → { externalStatus }
+  async getOrderStatus(credentials, externalOrderId, ref) {},
+
   // The provider's order status → a ZIMOS order stage, or null for "no change".
   mapStatus(externalStatus) {},
 };
@@ -83,5 +95,7 @@ message.
 
 `sandbox.js` answers without any network: products `SBX-1001` (two colours)
 and `SBX-1002`, order numbers `SBX-ORD-######` derived from the order number,
-fixed stock. It is registered only when `NODE_ENV` is not `production` and
+fixed stock. Its orders move on with time (confirmed after 1 minute, shipped
+after 3, delivered after 6; an order number ending in 0 comes back cancelled).
+It is registered only when `NODE_ENV` is not `production` and
 appears in the dashboard as "Test".

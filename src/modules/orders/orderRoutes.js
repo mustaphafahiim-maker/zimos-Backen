@@ -250,5 +250,7 @@ router.get(
 router.use(require('./orderSessionDetails').router);
 // The shipping card's "Save as draft" (shipmentDraft.js).
 router.use(require('./shipmentDraft').router);
+// The Supplier card: forward to a dropshipping supplier and follow it there (dropship/dropshipOrders.js).
+router.use(require('../dropship/dropshipOrders').router);
 
 module.exports = router;

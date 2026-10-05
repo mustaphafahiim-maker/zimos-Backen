@@ -70,6 +70,18 @@ module.exports = {
     return out;
   },
 
+  /**
+   * Where a forwarded order stands. The test supplier moves on with time, so
+   * following can be watched: confirmed after 1 minute, shipped after 3,
+   * delivered after 6. A number ending in 0 is refused at the door (cancelled).
+   */
+  async getOrderStatus(credentials, externalOrderId, { pushedAt } = {}) {
+    if (/0$/.test(String(externalOrderId))) return { externalStatus: 'cancelled' };
+    const minutes = (Date.now() - new Date(pushedAt || Date.now()).getTime()) / 60000;
+    const externalStatus = minutes >= 6 ? 'delivered' : minutes >= 3 ? 'shipped' : minutes >= 1 ? 'confirmed' : 'received';
+    return { externalStatus };
+  },
+
   /** The provider's order status → the ZIMOS order stage it means (null = no change). */
   mapStatus(externalStatus) {
     return { received: null, confirmed: 'ready_to_ship', shipped: 'shipped', delivered: 'delivered', returned: 'returned', cancelled: 'cancelled' }[externalStatus] ?? null;
