@@ -627,6 +627,17 @@ Contact tags from purchase buttons and order forms on website pages too (SPEC §
   - Ordering through the page gave the customer `cap-lover` and `summer 2026`.
   - Forged references (a heading, an unknown page) added nothing.
   - The snapshot was restored exactly.
+Subscribers now get their portal link (SPEC §18.1: "cancel or update the card via a signed link sent to them by email/WhatsApp"). Before, it only reached them when a renewal failed.
+
+- **Email.** A new order email "Subscription started" (`subscription_started`, on `subscription.created`) carries `{{subscription_link}}`: the portal at `/subscriptions/<portal token>`, where the subscriber changes the card or cancels.
+  - **Decision: it is on by default** (`defaultOn`), unlike the other order emails, because it is the customer's only way into their subscription.
+  - A template never touched counts as on. Editing its text keeps it on. The merchant can turn it off under Order emails.
+- **Subject and variables.** A subscription event's email speaks about the subscription (product, amount, page) through the automation's subscription subject. The new token `subscription_link` exists for automations too, and `payment_link` stays the portal on subscription triggers as before.
+- **WhatsApp.** `subscription.created` is now an automation trigger, with a ready WhatsApp template "Subscription started + its link".
+  - It is WhatsApp only: the email already goes out from Order emails.
+  - The automation engine now treats an event that names a subscription as about the subscription, even when it also names the order.
+- **Tracking page.** The order's tracking page lists the subscriptions that order started, with their status and a "Manage" link (`subscriptions` on the tracking answer, `subscriptions/subscriptionLinks.js`).
+- **Dashboard.** The merchant's "Copy portal link" on the subscriptions screen was already there.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -830,7 +841,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
 - [x] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
 - [x] 139. Contact tags from purchase buttons on website pages too (§18.4).
-- [ ] 140. Subscribers get their portal link (§18.1).
+- [x] 140. Subscribers get their portal link (§18.1).
 - [ ] 141. The store's subdomain can be changed in settings (§17.3).
 - [ ] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
 - [ ] 143. AI store policies applied to the store's policies (§19.2).
