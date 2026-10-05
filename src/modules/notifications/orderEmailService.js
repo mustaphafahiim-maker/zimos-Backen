@@ -234,6 +234,8 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
         recipient: subject.email,
         template: 'order_email',
         workspaceId,
+        // Listed on the order's timeline (orderTimeline.js).
+        orderId: payload.orderId || null,
         data: { ...composeData(current, subject.vars, brand), ...(await require('./orderEmailSender').senderFor(workspaceId)), unsubscribeUrl },
       });
       results.push({ key: row.key, status: sent.status });

@@ -20,6 +20,9 @@ async function send(device, message) {
     status: 'sent',
     error: null,
     attempts: 1,
+    // A shopper's order push: listed on the order's timeline.
+    orderId: message.orderId || null,
+    subject: message.orderId && message.title ? String(message.title).slice(0, 300) : null,
   });
   return { status: 'sent' };
 }

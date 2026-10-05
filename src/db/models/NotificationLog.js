@@ -13,6 +13,9 @@ module.exports = (sequelize, DataTypes) => {
       status: { type: DataTypes.ENUM('sent', 'failed'), allowNull: false },
       error: { type: DataTypes.STRING(500), allowNull: true },
       attempts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+      // The order a customer message was about, and what it said in a line (migration 436).
+      orderId: { type: DataTypes.UUID, allowNull: true, field: 'order_id' },
+      subject: { type: DataTypes.STRING(300), allowNull: true },
     },
     { tableName: 'notification_logs', updatedAt: false }
   );

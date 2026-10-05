@@ -61,6 +61,8 @@ async function sendForEvent(event) {
   const message = {
     workspaceId: workspace.id,
     type: `shopper.${event.type}`,
+    // Logged with the order by the provider (the order's timeline).
+    orderId: order.id,
     title,
     body: body.replace('{n}', order.orderNumber),
     // The store's canonical address (its primary domain when it has one).
