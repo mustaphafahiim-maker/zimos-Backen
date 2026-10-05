@@ -50,8 +50,28 @@ const allowlistCors = cors({
   credentials: true,
 });
 
-function corsPolicy(req, res, next) {
-  return isStorefrontApiPath(req.path) ? storefrontCors(req, res, next) : allowlistCors(req, res, next);
+// The marketing site's anonymous beacon (siteAnalytics/siteEventsRoutes): only
+// SITE_ANALYTICS_ORIGINS, no credentials, read per request so the flag and the
+// list can change at runtime. Off, no origin gets the headers.
+const SITE_EVENTS_PATH = `/api/${env.apiVersion}/public/site-events`;
+
+function isSiteEventsPath(p) {
+  const lower = String(p || '').toLowerCase().replace(/\/+$/, '');
+  return lower === SITE_EVENTS_PATH;
 }
 
-module.exports = { corsPolicy, isStorefrontApiPath };
+const siteEventsCors = cors({
+  origin: (origin, callback) =>
+    callback(null, Boolean(env.siteAnalytics.enabled && origin && env.siteAnalytics.origins.includes(String(origin).toLowerCase()))),
+  methods: ['POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  maxAge: 7200,
+});
+
+function corsPolicy(req, res, next) {
+  if (isStorefrontApiPath(req.path)) return storefrontCors(req, res, next);
+  if (isSiteEventsPath(req.path)) return siteEventsCors(req, res, next);
+  return allowlistCors(req, res, next);
+}
+
+module.exports = { corsPolicy, isStorefrontApiPath, isSiteEventsPath };
