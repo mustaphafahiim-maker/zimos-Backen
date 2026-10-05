@@ -98,4 +98,26 @@ describe('admin user search', () => {
     expect(res.body.user.workspaces).toEqual([expect.objectContaining({ id: w.store.id, role: 'editor' })]);
     expect((await request(app).get('/api/v1/admin/users/00000000-0000-4000-8000-000000000000').set(w.admin.H)).status).toBe(404);
   });
+
+  it('leaves deleted accounts out unless includeDeleted=true', async () => {
+    const w = await world();
+    const H = w.admin.H;
+    await db.User.update({ deletedAt: new Date() }, { where: { id: w.other.userId } });
+
+    const all = await search(H, { q: '' });
+    expect(ids(all)).not.toContain(w.other.userId);
+    expect(ids(all)).toContain(w.ahmed.userId);
+    expect(ids(await search(H, { q: 'karim.o' }))).toEqual([]);
+    expect((await search(H, { q: 'karim.o' })).body.total).toBe(0);
+
+    const withDeleted = await search(H, { q: '', includeDeleted: 'true' });
+    expect(ids(withDeleted)).toContain(w.other.userId);
+    expect(withDeleted.body.total).toBe(all.body.total + 1);
+    const found = await search(H, { q: 'karim.o', includeDeleted: true });
+    expect(found.body.users).toEqual([expect.objectContaining({ id: w.other.userId, deleted: true })]);
+    expect((await search(H, { q: '', includeDeleted: 'false' })).body.total).toBe(all.body.total);
+
+    // The account itself is still there by id.
+    expect((await request(app).get(`/api/v1/admin/users/${w.other.userId}`).set(H)).status).toBe(200);
+  });
 });
