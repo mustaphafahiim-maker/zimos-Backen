@@ -35,6 +35,12 @@ const hostResolver = asyncHandler(async (req, res, next) => {
     if (slug && !slug.includes('.')) {
       const ws = await db.Workspace.findOne({ where: { slug, status: 'active' }, attributes: ['id'] });
       if (ws) workspaceId = ws.id;
+      // A store's previous address still reaches it (modules/workspaces/slugHistory.js).
+      else {
+        const formerId = await require('../../modules/workspaces/slugHistory').ownerOf(slug);
+        const moved = formerId ? await db.Workspace.findOne({ where: { id: formerId, status: 'active' }, attributes: ['id'] }) : null;
+        if (moved) workspaceId = moved.id;
+      }
     }
   } else {
     const domain = await db.Domain.findOne({ where: { hostname: host }, attributes: ['workspaceId', 'status'] });

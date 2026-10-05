@@ -351,6 +351,16 @@ async function resolveHost(rawHost) {
     const store = platformSlug
       ? await db.Workspace.findOne({ where: { slug: platformSlug, status: ['active', 'suspended'] }, attributes: ['id', 'slug'] })
       : null;
+    if (!store && platformSlug) {
+      // A store's previous address (workspaces/slugHistory.js): visitors go on to where it is now, same path.
+      const formerId = await require('../workspaces/slugHistory').ownerOf(platformSlug);
+      const moved = formerId ? await db.Workspace.findOne({ where: { id: formerId, status: ['active', 'suspended'] }, attributes: ['id', 'slug'] }) : null;
+      if (moved) {
+        const primary = await primaryHost.primaryHostOf(moved.id);
+        const current = `${moved.slug}.${String(env.platformRootDomain).toLowerCase()}`;
+        return { host, workspaceId: moved.id, slug: moved.slug, homeFunnel: null, primaryHost: primary, sslStatus: null, redirectTo: primary || current };
+      }
+    }
     if (!store) throw new NotFoundError('Host');
     return { host, workspaceId: store.id, slug: store.slug, homeFunnel: null, primaryHost: await primaryHost.primaryHostOf(store.id), sslStatus: null };
   }

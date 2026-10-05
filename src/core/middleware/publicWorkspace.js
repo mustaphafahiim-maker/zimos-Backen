@@ -31,12 +31,17 @@ const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
   // lower-cased and hostnames are case-insensitive, so the lookup matches
   // however the shopper happened to type it.
   const ref = req.params.workspaceId;
-  const workspace = await db.Workspace.findOne({
+  let workspace = await db.Workspace.findOne({
     where: {
       status: ['active', 'suspended'],
       ...(isUuid(ref) ? { id: ref } : { slug: normalizeSlug(ref) }),
     },
   });
+  // A store that changed its address is still found at a previous one (workspaces/slugHistory.js).
+  if (!workspace && !isUuid(ref)) {
+    const formerId = await require('../../modules/workspaces/slugHistory').ownerOf(normalizeSlug(ref));
+    if (formerId) workspace = await db.Workspace.findOne({ where: { id: formerId, status: ['active', 'suspended'] } });
+  }
 
   if (!workspace) {
     throw new NotFoundError('Workspace');

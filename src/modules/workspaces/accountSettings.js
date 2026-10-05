@@ -97,6 +97,14 @@ async function save(workspaceId, input, req) {
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
 
+// The store's previous addresses, which still send visitors to the current one (slugHistory.js).
+router.get(
+  '/previous-addresses',
+  requirePermission(PERMISSIONS.WORKSPACE_MANAGE),
+  validate({ params: Joi.object(ws) }),
+  asyncHandler(async (req, res) => res.json({ addresses: await require('./slugHistory').listFor(req.tenant.workspaceId) }))
+);
+
 router.get(
   '/',
   requirePermission(PERMISSIONS.WORKSPACE_MANAGE),
