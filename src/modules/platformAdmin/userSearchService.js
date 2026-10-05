@@ -21,6 +21,8 @@ const siteTraffic = require('../siteAnalytics/siteTrafficService');
  * of them matched. Every value is a bind parameter. The trigram indexes of
  * migration 124 carry the "contains" matches.
  *
+ * Deleted accounts (deleted_at set) are left out unless includeDeleted=true.
+ *
  * Who may search: the platform permission the store list uses
  * (workspaces.view — creators and admins). An agent has never had it and still
  * does not; agents see their own referred stores through /my/referrals only.
@@ -61,18 +63,24 @@ const USER_MATCH = `(
   OR ($idPrefix::text IS NOT NULL AND u.id::text LIKE $idPrefix)
 )`;
 
-async function matchingIds({ q, limit, offset }) {
+// Keeps deleted accounts out of the list unless they were asked for.
+const LISTED = '($includeDeleted::boolean OR u.deleted_at IS NULL)';
+
+async function matchingIds({ q, limit, offset, includeDeleted }) {
   const terms = termsFor(q);
   if (!terms) {
-    const [{ total }] = await db.sequelize.query('SELECT COUNT(*)::int AS total FROM users', { type: QueryTypes.SELECT });
+    const [{ total }] = await db.sequelize.query(`SELECT COUNT(*)::int AS total FROM users u WHERE ${LISTED}`, {
+      bind: { includeDeleted },
+      type: QueryTypes.SELECT,
+    });
     const rows = await db.sequelize.query(
-      'SELECT id FROM users ORDER BY created_at DESC, id DESC LIMIT $limit OFFSET $offset',
-      { bind: { limit, offset }, type: QueryTypes.SELECT }
+      `SELECT u.id FROM users u WHERE ${LISTED} ORDER BY u.created_at DESC, u.id DESC LIMIT $limit OFFSET $offset`,
+      { bind: { limit, offset, includeDeleted }, type: QueryTypes.SELECT }
     );
     return { total, ids: rows.map((r) => r.id), matchedWorkspaces: new Set() };
   }
 
-  const bind = { ...terms, limit, offset };
+  const bind = { ...terms, limit, offset, includeDeleted };
   const matched = `
     SELECT u.id FROM users u WHERE ${USER_MATCH}
     UNION
@@ -80,12 +88,12 @@ async function matchingIds({ q, limit, offset }) {
     UNION
     SELECT m.user_id FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
      WHERE m.user_id IS NOT NULL AND ${WORKSPACE_MATCH}`;
-  const [{ total }] = await db.sequelize.query(`SELECT COUNT(*)::int AS total FROM (${matched}) x`, {
-    bind,
-    type: QueryTypes.SELECT,
-  });
+  const [{ total }] = await db.sequelize.query(
+    `SELECT COUNT(*)::int AS total FROM users u JOIN (${matched}) x ON x.id = u.id WHERE ${LISTED}`,
+    { bind, type: QueryTypes.SELECT }
+  );
   const rows = await db.sequelize.query(
-    `SELECT u.id FROM users u JOIN (${matched}) x ON x.id = u.id
+    `SELECT u.id FROM users u JOIN (${matched}) x ON x.id = u.id WHERE ${LISTED}
       ORDER BY u.created_at DESC, u.id DESC LIMIT $limit OFFSET $offset`,
     { bind, type: QueryTypes.SELECT }
   );
@@ -162,11 +170,16 @@ function toRow(user, stores) {
   };
 }
 
-/** GET /admin/users?q=&page=&limit= */
-async function searchUsers({ q = '', page = 1, limit = 25 } = {}) {
+/** GET /admin/users?q=&page=&limit=&includeDeleted= */
+async function searchUsers({ q = '', page = 1, limit = 25, includeDeleted = false } = {}) {
   const size = Math.min(Math.max(Number(limit) || 25, 1), MAX_LIMIT);
   const pageNo = Math.max(Number(page) || 1, 1);
-  const { total, ids, matchedWorkspaces } = await matchingIds({ q, limit: size, offset: (pageNo - 1) * size });
+  const { total, ids, matchedWorkspaces } = await matchingIds({
+    q,
+    limit: size,
+    offset: (pageNo - 1) * size,
+    includeDeleted: includeDeleted === true,
+  });
   const users = ids.length ? await db.User.findAll({ where: { id: ids }, attributes: USER_ATTRIBUTES }) : [];
   const byId = new Map(users.map((u) => [u.id, u]));
   const stores = await storesFor(ids, matchedWorkspaces);

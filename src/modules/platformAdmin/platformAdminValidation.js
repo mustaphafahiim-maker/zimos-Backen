@@ -272,6 +272,8 @@ module.exports = {
       q: Joi.string().trim().max(200).allow('').default(''),
       page: Joi.number().integer().min(1).max(10000).default(1),
       limit: Joi.number().integer().min(1).max(50).default(25),
+      // Deleted accounts are hidden from the list unless asked for.
+      includeDeleted: Joi.boolean().default(false),
     }),
   },
   userParams: { params: Joi.object({ userId: uuid.required() }) },
