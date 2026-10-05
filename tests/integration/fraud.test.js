@@ -442,7 +442,8 @@ describe('GET /fraud/flagged-orders', () => {
     expect(res.body.nextCursor).toBeNull();
 
     const order = await db.Order.findByPk(flagged[0]);
-    expect(res.body.orders[0]).toEqual({
+    // The row also carries the risk score and the visitor's address (risk/riskService).
+    expect(res.body.orders[0]).toMatchObject({
       id: order.id,
       orderNumber: order.orderNumber,
       createdAt: order.createdAt.toISOString(),
