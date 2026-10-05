@@ -242,7 +242,9 @@ describe('Funnel analytics — detail', () => {
     await ctx.createStep(funnel.id, { key: 'landing', stepType: 'landing', name: 'Landing', builderData: tree('l') });
     const res = await ctx.detail(funnel.id);
     expect(res.status).toBe(200);
-    expect(res.body.steps).toEqual([{ key: 'landing', name: 'Landing', stepType: 'landing', reached: 0, dropped: 0, reachRate: null }]);
+    // Each step also carries its own visits, views and rates now (analytics/funnelStepMetrics.js).
+    expect(res.body.steps).toHaveLength(1);
+    expect(res.body.steps[0]).toMatchObject({ key: 'landing', name: 'Landing', stepType: 'landing', reached: 0, dropped: 0, reachRate: null });
     expect(res.body.sources).toEqual([]);
     expect(res.body.conversionRate).toBeNull();
   });
