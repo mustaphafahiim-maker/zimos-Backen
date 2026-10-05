@@ -587,6 +587,24 @@ The orders list and the order page show product pictures, the funnel's name as t
   - Each line in the items card has its picture.
   - The source badge reads "Funnel: <name>".
   - The picture component (`OrderLineThumb`) is shared by the list and the page.
+Dropshipping: send an order to the supplier from the order page, forward automatically, and follow its status (SPEC §16.5). It is built on the `DropshipProvider` contract and its sandbox. Real suppliers stay out of scope (§16 boundary).
+
+- **The order page's Supplier card** (new `dropship/dropshipOrders.js`, mounted in the orders router):
+  - Shown only when a supplier is connected (its app installed) or the order was already forwarded.
+  - Lists what was forwarded: the supplier's order number, its status in the supplier's own words (translated when it is one of the usual ones), what that status means here, and when it was last checked.
+  - "Send to <supplier>" and "Ask the supplier now" need orders.manage. Viewing needs orders.view.
+- **Mixed orders:** each supplier gets only the lines whose product was imported from it (`linesFor`, used by `pushOrder` everywhere).
+- **Automatic forwarding**, set per supplier on the suppliers page (stored in the connection's config, `PATCH /dropship/providers/:code/settings`):
+  - Off, as soon as the order is placed, or once it is confirmed.
+  - The `dropship_forward` consumer on order.created / order.confirmed forwards orders holding that supplier's products.
+  - Test orders and unpaid online orders are never forwarded.
+  - A refusal is logged on the order (`dropship.forward_failed`) so the merchant can send it by hand.
+- **Following:**
+  - The contract gains an optional `getOrderStatus(credentials, externalOrderId, ref)`. The `dropship.follow_orders` job (every 5 minutes) asks about forwarded orders not checked in the last 10 minutes, for up to 60 days, until delivered, returned or cancelled.
+  - A new status is recorded and appears on the timeline as "The supplier updated the order".
+  - With "Move the order when the supplier's status changes" on, the mapped stage is applied through the normal status change (owner as actor, reason "<supplier>: <status>"), and only when the order can make that move by hand.
+  - The sandbox moves with time: confirmed at 1 minute, shipped at 3, delivered at 6. A number ending in 0 comes back cancelled.
+- **Migration 437:** `dropship_order_refs.checked_at`, `last_error`, `forwarded_by`. **Next free migration: 438.**
 
 ## P0 — correctness, compliance, launch gates
 
@@ -787,7 +805,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 134. "Notify the customer" on status changes, one order or many (§4.6).
 - [x] 135. The order timeline shows the messages sent to the customer (§4.4).
 - [x] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
-- [ ] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
+- [x] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
 - [ ] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
 - [ ] 139. Contact tags from purchase buttons on website pages too (§18.4).
 - [ ] 140. Subscribers get their portal link (§18.1).
