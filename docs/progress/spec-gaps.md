@@ -573,6 +573,20 @@ The order timeline now lists the messages the customer was sent about the order 
   - "Email / SMS / WhatsApp / Notification to the customer — sent / delivered / read / not sent";
   - the message's line, and the provider's error when it failed.
 - **Next free migration: 437.**
+The orders list and the order page show product pictures, the funnel's name as the source, and "New customer" (SPEC §4.3 columns, §4.4 card 1).
+
+- **Backend:** new `orders/orderListDecor.js`, called from `hydrateOrders` (the list) and `getOrder` (the page). It runs one query per kind for the whole page.
+  - `items[].imageUrl`: the variant's image, else the product's first media. It is read live, so a changed photo shows on old orders, and it is null when there is none.
+  - `funnelName` for a funnel order.
+  - `isNewCustomer` (list only): no earlier non-test order from the same customer in this store. The order page already had "New customer / Returning" from the session details.
+- **Dashboard list:**
+  - A "Products" column with the first three lines' pictures (a package box when there is none), "+N" for more, and name × quantity on hover. It is on by default, for teammates who never picked their columns.
+  - A "New customer" badge under the customer.
+  - The funnel's name under "Funnel" in the Source column.
+- **Order page:**
+  - Each line in the items card has its picture.
+  - The source badge reads "Funnel: <name>".
+  - The picture component (`OrderLineThumb`) is shared by the list and the page.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -772,7 +786,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 133. The merchant sets when a checkout counts as lost (§6.2).
 - [x] 134. "Notify the customer" on status changes, one order or many (§4.6).
 - [x] 135. The order timeline shows the messages sent to the customer (§4.4).
-- [ ] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
+- [x] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
 - [ ] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
 - [ ] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
 - [ ] 139. Contact tags from purchase buttons on website pages too (§18.4).
