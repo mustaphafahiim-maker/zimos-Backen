@@ -15,6 +15,11 @@ const schemas = require('./platformAdminValidation');
 const router = Router();
 router.use(authenticate);
 
+// The couriers' areas map for every store.
+router.use(require('./carrierMapRoutes'));
+// The theme catalog (themes/themesCatalog.js).
+router.use(require('../themes/themesCatalog').admin);
+
 // --- Plans ---------------------------------------------------------------
 router.get('/plans', can(P.PLANS_VIEW), controller.listPlans);
 router.post('/plans', can(P.PLANS_MANAGE), validate(schemas.createPlan), controller.createPlan);

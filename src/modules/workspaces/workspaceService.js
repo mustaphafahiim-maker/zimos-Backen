@@ -183,6 +183,21 @@ const MERCHANT_SETTINGS_KEYS = [
   // Funnel upsells joined to the checkout order (funnels/funnelOfferMerge.js).
   'funnel_upsell_merge',
   'funnel_offer_window_minutes',
+  // Replaced whole: the browser ad-pixel IDs (public, no secrets).
+  'tracking_pixels',
+  // Replaced whole: the thank-you page (storefront/thankYouPage.js).
+  'thank_you_page',
+  // Replaced whole: store details + short policies, and the legal policies
+  // (storefront/storeInfo.js).
+  'store_info',
+  'legal',
+  // Replaced whole: storefront/generalSettings.js.
+  'general',
+  'social_links',
+  'floating_whatsapp',
+  'store_seo',
+  // Replaced whole: the store's extra languages (modules/translations).
+  'store_languages',
 ];
 
 // Nested settings objects, merged a level deeper so a form that toggles one
@@ -296,6 +311,12 @@ async function updateWorkspace({ workspaceId, patch }, req) {
         'themeSettings is too large'
       );
     }
+    // A paid or withdrawn theme can't be switched on this way either (themes/themesCatalog.js).
+    await require('../themes/themesCatalog').assertThemeAllowed(
+      workspaceId,
+      blob.storeTheme,
+      (workspace.themeSettings && workspace.themeSettings.storeTheme) || 'original'
+    );
     next.themeSettings = blob;
   }
   if (patch.settings !== undefined) {
