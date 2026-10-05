@@ -656,6 +656,21 @@ The store's subdomain can be changed from Settings (SPEC §17.3 account settings
   - The old host resolved with redirectTo, the storefront answered 307 to the new host, and the public lookup by the old slug worked.
   - Restored to demo-store with no history.
 - **Next free migration: 439.**
+New-order notifications now name the product and the governorate, and reach each teammate in their own language (SPEC §20.1: "its content (product + total + governorate)").
+
+- **Content.** The line is "<first product> × qty (+N more) · <total> · <governorate>".
+  - The governorate uses its Arabic or English name when the address names a known place (geo/geoRegions.resolve), else the text as typed.
+  - The customer's name is no longer in the push or email line; it is still in the notification's data.
+  - The values are also in `data` (`product`, `moreProducts`, `governorate: { ar, en }`), so the dashboard bell renders the line in the viewer's language. Older notifications still show "customer — total".
+- **The teammate's language.** New `users.locale` (`ar`/`en`, migration 439), which the dashboard sends through `PATCH /auth/me/profile { locale }`:
+  - once when it differs from the server's value, and again whenever the teammate switches language;
+  - this does not write an audit line.
+- **Delivery.** `merchantNotificationService.create` takes an optional `localized: { ar, en }`. Each teammate's bell row, push, email and WhatsApp use their language. Teammates whose language is unknown get Arabic, as before.
+- **Tested** on the scratch DB:
+  - Opening the dashboard in English stored `en` for the owner.
+  - A two-product order in Cairo notified "New order … · Demo T-Shirt × 2 +1 more · 706.80 EGP · Cairo".
+  - With Arabic it read "… و1 غيره · … · القاهرة", and the bell shows the same.
+- **Next free migration: 440.**
 
 ## P0 — correctness, compliance, launch gates
 
@@ -861,7 +876,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 139. Contact tags from purchase buttons on website pages too (§18.4).
 - [x] 140. Subscribers get their portal link (§18.1).
 - [x] 141. The store's subdomain can be changed in settings (§17.3).
-- [ ] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
+- [x] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
 - [ ] 143. AI store policies applied to the store's policies (§19.2).
 - [ ] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
 - [ ] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
