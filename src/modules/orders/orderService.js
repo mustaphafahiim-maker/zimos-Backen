@@ -8,6 +8,10 @@ const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
+const blockedEntries = require('../fraud/blockedEntries');
+const visitorGate = require('../risk/visitorGate');
+const riskService = require('../risk/riskService');
+const checkoutOtp = require('../risk/checkoutOtp');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
 const orderStock = require('../inventory/orderStock');
@@ -17,7 +21,7 @@ const { calculateShippingAmount } = require('../shipping/shippingPricing');
 const { calculateTax } = require('../tax/taxService');
 const { completeOrderInTransaction } = require('./orderCompletion');
 const { recordAudit } = require('../audit/auditService');
-const { setConfirmationState } = require('./orderStateService');
+const { setConfirmationState, trackStage, nextStages } = require('./orderStateService');
 const { STAGES, STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('./orderStage');
 const { orderSort, orderByClause, afterAnchorClause, anchorValue } = require('./orderSort');
 const gateways = require('../payments/gateways');
@@ -28,6 +32,12 @@ const { resolveCustomizations, attachUploads } = require('../catalog/customField
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { orderBumpUnavailable } = require('../checkout/orderBump');
 const wallet = require('../billing/walletService');
+const outbox = require('../../core/outbox/outbox');
+const orderMeta = require('./orderMetaService');
+const { applyOrderFilters } = require('./orderFilters');
+const { effectiveVariantPrice } = require('../catalog/productPage');
+const { applyBundleTiers } = require('../bundles/bundlePricing');
+const pixelMatching = require('../marketing/pixelMatching');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -40,7 +50,8 @@ function generateOrderNumber() {
 // `forSale: false` reads a line an order already holds — its variant, product
 // or offer may have been archived since — for what it weighs and how it ships
 // (recalculateOrder); the caller keeps the prices the order recorded.
-async function priceLine(workspaceId, { variantId, offerId, quantity }, transaction, { forSale = true } = {}) {
+async function priceLine(workspaceId, line, transaction, { forSale = true } = {}) {
+  const { variantId, offerId, quantity, customizations } = line;
   const active = forSale ? { status: 'active' } : {};
   const variant = await db.ProductVariant.findOne({
     where: { id: variantId, workspaceId, ...active },
@@ -49,6 +60,8 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     transaction,
   });
   if (!variant) throw new NotFoundError('ProductVariant');
+  // Priced custom fields the shopper filled in add to the unit price (catalog/customFieldPricing.js).
+  const fieldsDelta = require('../catalog/customFieldPricing').customFieldsDelta(variant.product.customFields, customizations);
 
   if (offerId) {
     const offer = await db.Offer.findOne({
@@ -71,8 +84,13 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     });
     if (!offer) throw new NotFoundError('Offer');
 
-    const consumedLines = offer.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity * quantity }));
-    const unitPrice = offer.priceAmount;
+    // A one-line offer taken in another variant of its product (the shopper's choice,
+    // offers/offerVariantChoice.js) holds that variant's stock; a bundle keeps its own lines.
+    const consumedLines =
+      offer.lines.length === 1 && offer.lines[0].variantId !== variant.id
+        ? [{ variantId: variant.id, quantity: offer.lines[0].quantity * quantity }]
+        : offer.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity * quantity }));
+    const unitPrice = fieldsDelta ? Number(offer.priceAmount) + fieldsDelta : offer.priceAmount;
     const lineTotal = unitPrice * quantity;
 
     return {
@@ -99,7 +117,12 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     };
   }
 
-  const lineTotal = variant.priceAmount * quantity;
+  // A countdown offer that has ended sells at the full price (catalog/productPage.js).
+  // A product A/B test's price for this shopper, pinned by the server (catalog/productTests.js).
+  const testPrice = require('../catalog/productTests').testPriceOf(line);
+  const listUnit = testPrice !== undefined ? testPrice : effectiveVariantPrice(variant, variant.product).priceAmount;
+  const unitPriceAmount = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
+  const lineTotal = unitPriceAmount * quantity;
   return {
     productId: variant.productId,
     productName: variant.product.name,
@@ -109,7 +132,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     offerId: null,
     offerName: null,
     quantity,
-    unitPriceAmount: variant.priceAmount,
+    unitPriceAmount,
     unitCostAmount: variant.costAmount,
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
@@ -124,7 +147,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
 // The product's shipping mode for shippingRules.productShipping: `units` is
 // how many units of it the line ships.
 function productShippingRule(product, units) {
-  return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units };
+  return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units, profileId: product.shippingProfileId || null };
 }
 
 // One component of a line's unit, for shippingWeight.summarizeWeight.
@@ -227,6 +250,7 @@ async function createOrder(
     confirmationAvailableAt = null,
     shippingOverride = null,
     chargeFee = true,
+    source = null,
   } = {}
 ) {
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
@@ -236,6 +260,10 @@ async function createOrder(
   }
 
   const evaluateFraudRules = !req.user && !skipFraudRules;
+  // SPEC §4.2: where the order came from, and whether it is the merchant
+  // trying their own store (kept out of sales figures and ad pixels).
+  const orderSource = source || orderMeta.sourceFor(req, { funnelId });
+  const isTest = orderMeta.isTestRequest(req, workspaceId);
 
   const run = async (transaction) => {
     // Chosen now so the reservations below can name the order they hold stock
@@ -256,20 +284,73 @@ async function createOrder(
     );
     if (platformBlock) throw platformBlocklist.rejection(customer.id, platformBlock);
 
+    // The shopper's own IP and browser: a staff order carries the staff member's.
+    const visitor = req && !req.user ? await visitorGate.describeVisitor(req) : { ip: null, ipCountry: null, isVpn: false };
+    const visitorIp = visitor.ip;
+    const deviceId = req && !req.user && req.deviceId ? req.deviceId : null;
+    visitor.deviceId = deviceId;
+    const visitorAgent = req && !req.user && req.headers ? req.headers['user-agent'] : null;
+
     const riskFlags = [];
     if (customer.isBlacklisted) riskFlags.push('blacklisted_customer');
+    // The store's blocked_entries (scope orders). The IP is the shopper's only
+    // on a storefront order; a staff order carries the staff member's.
+    const blockedEntry = await blockedEntries.findMatch(
+      workspaceId,
+      'orders',
+      {
+        phoneNormalized: customer.phoneNormalized,
+        email: contact.email,
+        ip: visitorIp,
+        deviceId,
+        fullName: contact.fullName,
+        addressLine: shippingAddress && shippingAddress.addressLine,
+      },
+      transaction
+    );
+    if (blockedEntry && !riskFlags.includes('blacklisted_customer')) riskFlags.push('blacklisted_customer');
+    // A phone blocked before it ever ordered: its customer row exists only now.
+    if (blockedEntry && blockedEntry.type === 'phone' && !customer.isBlacklisted) {
+      await customer.update(
+        { isBlacklisted: true, blacklistReason: blockedEntry.reason, blacklistedAt: blockedEntry.createdAt },
+        { transaction }
+      );
+    }
 
     // Before any inventory is touched, so a refusal has nothing to undo but
     // the customer lookup.
+    // Risk score and data quality of a storefront order (risk/riskService):
+    // a marker only, unless the store's high_risk rule acts on it.
+    const risk = evaluateFraudRules
+      ? await riskService.score(
+          { contact, shippingAddress },
+          {
+            workspaceId,
+            country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale', 'settings'], transaction })),
+            visitor,
+            secondsOnPage: req && typeof req.secondsOnPage === 'number' ? req.secondsOnPage : null,
+            transaction,
+          }
+        )
+      : null;
+
     if (evaluateFraudRules) {
-      const ruleFlags = await fraudRules.evaluateStorefrontOrder({
+      const { flags: ruleFlags, requireOtp } = await fraudRules.evaluateStorefrontOrder({
         workspaceId,
         customer,
         variantIds: [...new Set(items.map((item) => item.variantId).filter(Boolean))],
         transaction,
         onlinePayment: Boolean(awaitingPayment),
+        blockedEntry,
+        items,
+        paymentMethod,
+        phone: contact.phone,
+        visitor,
+        riskLevel: risk.level,
       });
       for (const flag of ruleFlags) if (!riskFlags.includes(flag)) riskFlags.push(flag);
+      // A rule (or the store's "verify risky orders") wants the phone verified first — risk/checkoutOtp.
+      if (checkoutOtp.needsOtp(req, { requireOtp, riskLevel: risk.level, flags: ruleFlags })) throw new checkoutOtp.NeedsOtp();
     }
 
     // Price every line and consume/reserve inventory for it. Consuming
@@ -326,6 +407,13 @@ async function createOrder(
       }
     }
 
+    // A funnel with a currency of its own takes orders in it only (funnels/funnelCurrency.js).
+    await require('../funnels/funnelCurrency').assertOrderCurrency(workspaceId, funnelId, pricedLines[0] && pricedLines[0].currency, transaction);
+
+    // Quantity bundles (modules/bundles): lowers the totals of the lines they
+    // cover, before anything else looks at the subtotal.
+    const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
+
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     const productIds = pricedLines.map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
@@ -342,11 +430,27 @@ async function createOrder(
         productIds,
         customerId: customer.id,
         funnelId,
+        transaction,
       });
       discountAmount = evaluation.amount;
       discountRecord = evaluation.discount;
       discountsSnapshot = [{ code: discountCode, type: evaluation.discount.type, amount: discountAmount }];
     }
+    const couponExtras = require('../discounts/couponExtras');
+    if (!discountCode) {
+      // No code typed: the store's best automatic discount, when one applies.
+      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
+      if (automatic) {
+        discountAmount = automatic.amount;
+        discountRecord = automatic.discount;
+        discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
+      }
+    }
+    // The store's minimum order amount binds shoppers, not staff typing an
+    // order in, and not an add-on order that follows another one.
+    if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
+    // Kept apart from the coupon: the bundle's saving is already in the line totals.
+    discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
     // Always priced, even without an address (amount 0 then): the weight
     // and tier are stored on the order either way.
@@ -358,15 +462,19 @@ async function createOrder(
       offerShippingOverride,
       weightLines: pricedLines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
       productLines: pricedLines.map((l) => l.shippingRule),
+      funnelId: payload.funnelId || null,
       transaction,
     });
-    const shippingAmount = shipping.amount;
+    // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
+    const chosenShipping = await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
+    const shippingAmount = chosenShipping ? chosenShipping.amount : shipping.amount;
 
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
       lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
       shippingAmount,
+      transaction,
     });
 
     const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount;
@@ -391,10 +499,25 @@ async function createOrder(
         discountsSnapshot,
         notes: notes || null,
         riskFlags,
+        ipAddress: visitorIp,
+        ipCountry: visitor.ipCountry,
+        deviceId,
+        adMatch: pixelMatching.fromCheckout(req),
+        riskScore: risk ? risk.score : null,
+        riskLevel: risk ? risk.level : null,
+        riskReasons: risk ? risk.reasons : [],
+        dataQuality: risk ? risk.dataQuality : null,
+        userAgent: visitorAgent ? String(visitorAgent).slice(0, 400) : null,
+        source: orderSource,
+        isTest,
+        // An order staff typed in themselves is not news to them.
+        isSeen: Boolean(req.user),
+        seenAt: req.user ? new Date() : null,
         totalWeightGrams: shipping.weightGrams,
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
-        shippingSnapshot: shippingSnapshot(shipping),
+        // With the option the shopper picked, when not the standard one.
+        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}) },
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,
@@ -427,6 +550,7 @@ async function createOrder(
             quantity: line.quantity,
             unitPriceAmount: line.unitPriceAmount,
             unitCostAmount: line.unitCostAmount,
+            lineDiscountAmount: line.lineDiscountAmount || 0,
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,
@@ -447,6 +571,9 @@ async function createOrder(
         { transaction }
       );
     }
+
+    // The first row of the order's status history: nothing → where it starts.
+    await trackStage(workspaceId, order.id, { req, transaction, fallbackActor: 'customer' });
 
     order.items = orderItems;
     // Invoice, discount redemption, customer.totalOrders — the order is a
@@ -476,6 +603,12 @@ async function createOrder(
       transaction,
     });
 
+    // Merchant automations (WhatsApp templates) and server-side ad-platform
+    // conversions run after commit and never fail the order. An order waiting
+    // for its online payment is not a purchase yet, so it sends no conversion.
+    // They hang off the order.created event in the outbox (see each module's jobs.js).
+    await outbox.record(transaction, 'order.created', { workspaceId, orderId: order.id, awaitingPayment: Boolean(awaitingPayment), isTest: Boolean(isTest) });
+
     return { order, items: orderItems };
   };
 
@@ -489,6 +622,8 @@ async function createOrder(
     return await (outerTransaction ? run(outerTransaction) : db.sequelize.transaction(run));
   } catch (err) {
     if (err instanceof fraudRules.OrderRejectedError) await recordRefusal(workspaceId, err.refusal, req);
+    // Nothing was saved; the shopper is sent a code and asked for it.
+    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone);
     throw err;
   }
 }
@@ -590,6 +725,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     offerShippingOverride,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
+    funnelId: order.funnelId || null,
     transaction,
   });
   const { taxAmount } = await calculateTax(workspaceId, {
@@ -597,6 +733,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
     shippingAmount: shipping.amount,
+    transaction,
   });
   const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
 
@@ -655,6 +792,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   }
 
   order.items = items;
+  // A product joined an order that was already placed (an upsell, a merged offer).
+  await outbox.record(transaction, 'order.item_added', { workspaceId, orderId: order.id, itemId: item.id, isUpsell });
   return { order, item, before };
 }
 
@@ -701,14 +840,24 @@ async function getOrder(workspaceId, orderId) {
   const linkedFrom = order.linkedFromOrderId
     ? await db.Order.findOne({ where: { workspaceId, id: order.linkedFromOrderId }, attributes: ['id', 'orderNumber'] })
     : null;
+  const stage = await stageForOrder(order.id);
   return {
     ...json,
     paymentProvider: providers.get(order.id) || null,
-    stage: await stageForOrder(order.id),
+    stage,
+    // The stages PATCH /orders/:id/status accepts from here (orderStageChange.js).
+    nextStages: nextStages(stage),
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
     linkedOrders: linkedOrders.map((o) => o.toJSON()),
     linkedFromOrder: linkedFrom ? linkedFrom.toJSON() : null,
   };
+}
+
+/** The order's id and number, or 404 — the check every per-order endpoint starts with. */
+async function getOrderRef(workspaceId, orderId) {
+  const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'orderNumber'] });
+  if (!order) throw new NotFoundError('Order');
+  return order;
 }
 
 // `%` and `_` are wildcards in LIKE, and a backslash escapes them: a merchant
@@ -761,6 +910,12 @@ function applySearchAndDates(conditions, bind, { q, from, to }) {
     bind.qText = `%${escapeLike(term)}%`;
     arms.push("zimos_normalize_search(o.contact_snapshot->>'fullName') LIKE zimos_normalize_search($qText)");
     arms.push("zimos_normalize_search(o.contact_snapshot->>'email') LIKE zimos_normalize_search($qText)");
+
+    // A courier's waybill number, exactly (any case): the store's shipments only.
+    bind.qWaybill = term;
+    arms.push(
+      'o.id IN (SELECT ws.order_id FROM shipments ws WHERE ws.workspace_id = $workspaceId AND lower(ws.waybill_number) = lower($qWaybill))'
+    );
 
     const digits = term.replace(/\D/g, '');
     if (digits.length >= 10) {
@@ -822,6 +977,7 @@ async function hydrateOrders(page) {
     include: [{ model: db.OrderItem, as: 'items' }],
   });
   const providers = await paymentProviders(rows);
+  const shipments = await latestShipments(rows.map((row) => row.id));
   const byId = new Map(rows.map((row) => [row.id, row]));
   return page
     .filter((row) => byId.has(row.id))
@@ -829,7 +985,22 @@ async function hydrateOrders(page) {
       ...byId.get(row.id).toJSON(),
       stage: row.stage,
       paymentProvider: providers.get(row.id) || null,
+      // The list's shipping column: the latest shipment that is not cancelled.
+      shipment: shipments.get(row.id) || null,
     }));
+}
+
+/** Each order's latest shipment that is not cancelled: courier, waybill and status. One query for the page. */
+async function latestShipments(orderIds) {
+  if (orderIds.length === 0) return new Map();
+  const rows = await db.sequelize.query(
+    `SELECT DISTINCT ON (order_id) order_id, carrier_code, waybill_number, status
+       FROM shipments
+      WHERE order_id IN (:ids) AND status <> 'cancelled'
+      ORDER BY order_id, created_at DESC, id DESC`,
+    { replacements: { ids: orderIds }, type: QueryTypes.SELECT }
+  );
+  return new Map(rows.map((r) => [r.order_id, { carrierCode: r.carrier_code, waybillNumber: r.waybill_number, status: r.status }]));
 }
 
 /**
@@ -838,7 +1009,7 @@ async function hydrateOrders(page) {
  * to COD) has none. One query for the page.
  */
 async function paymentProviders(orders) {
-  const online = orders.filter((o) => o.paymentMethod === 'card' || o.paymentMethod === 'wallet').map((o) => o.id);
+  const online = orders.filter((o) => require('../payments/methodNames').isOnline(o.paymentMethod)).map((o) => o.id);
   if (online.length === 0) return new Map();
   const rows = await db.sequelize.query(
     `SELECT DISTINCT ON (order_id) order_id, provider_code
@@ -872,10 +1043,11 @@ async function paymentProviders(orders) {
  */
 async function listOrders(
   workspaceId,
-  { limit = 50, cursor, sort: sortKey, confirmationState, financialState, fulfillmentState, stage, q, from, to } = {}
+  { limit = 50, cursor, sort: sortKey, confirmationState, financialState, fulfillmentState, stage, q, from, to, ...filters } = {}
 ) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId, limit: limit + 1 };
+  applyOrderFilters(conditions, bind, filters);
   const sort = orderSort(sortKey);
 
   if (confirmationState) {
@@ -933,9 +1105,10 @@ async function listOrders(
  * at zero, so the client renders a stable row of tabs instead of tabs that
  * appear and vanish as orders move.
  */
-async function orderPipeline(workspaceId, { q, from, to } = {}) {
+async function orderPipeline(workspaceId, { q, from, to, ...filters } = {}) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId };
+  applyOrderFilters(conditions, bind, filters);
   applySearchAndDates(conditions, bind, { q, from, to });
 
   const rows = await db.sequelize.query(
@@ -952,7 +1125,22 @@ async function orderPipeline(workspaceId, { q, from, to } = {}) {
     stages[row.stage] = row.count;
     total += row.count;
   }
-  return { stages, total };
+  return { stages, total, risk: await riskCounts(workspaceId, { q, from, to, ...filters }) };
+}
+
+/** The risk tabs' counts: every other filter applies, the risk tab itself does not. */
+async function riskCounts(workspaceId, { q, from, to, riskLevel, ...filters }) {
+  const conditions = ['o.workspace_id = $workspaceId'];
+  const bind = { workspaceId };
+  applyOrderFilters(conditions, bind, filters);
+  applySearchAndDates(conditions, bind, { q, from, to });
+  const rows = await db.sequelize.query(
+    `SELECT o.risk_level AS level, COUNT(*)::int AS count FROM orders o WHERE ${conditions.join(' AND ')} GROUP BY 1`,
+    { bind, type: QueryTypes.SELECT }
+  );
+  const risk = { high: 0, moderate: 0, low: 0 };
+  for (const row of rows) if (row.level in risk) risk[row.level] = row.count;
+  return risk;
 }
 
 /**
@@ -961,7 +1149,7 @@ async function orderPipeline(workspaceId, { q, from, to } = {}) {
  * uncollected shipment, closes open confirmation tasks and records the
  * reason. Refused once a parcel has shipped — use a return after that.
  */
-async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false }, req) {
+async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false, notifyCustomer }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({
       where: { id: orderId, workspaceId },
@@ -973,6 +1161,11 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       throw new AppError('ORDER_ALREADY_CANCELLED', 'This order is already cancelled', 409);
     }
     await assertNotShipped(order, transaction);
+    await outbox.record(transaction, 'order.cancelled', {
+      workspaceId,
+      orderId: order.id,
+      ...(notifyCustomer !== undefined ? { notifyCustomer } : {}),
+    });
 
     // Whatever the order still holds: nothing more if a rejection already gave it back.
     await orderStock.releaseOrderStock(
@@ -1003,6 +1196,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
 
     const before = { confirmationState: order.confirmationState, cancelledAt: order.cancelledAt };
     await order.update({ cancelledAt: new Date(), cancellationReason: reason }, { transaction });
+    await trackStage(workspaceId, order.id, { req, transaction, reason });
     if (order.confirmationState !== 'rejected') {
       await setConfirmationState(workspaceId, order.id, 'rejected', req, transaction);
     }
@@ -1027,7 +1221,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
 
 /**
  * The only fields a merchant may edit on an existing order: the shipping
- * address snapshot and the internal notes. Totals, line items and pricing are
+ * address snapshot, the customer's contact details and the internal notes. Totals, line items and pricing are
  * never touched here. Refused once the order has shipped.
  */
 async function updateOrderLimited(workspaceId, orderId, data, req) {
@@ -1037,9 +1231,10 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
     if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
     await assertNotShipped(order, transaction);
 
-    const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, notes: order.notes };
+    const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes };
     const updates = {};
     if (data.shippingAddress !== undefined) updates.shippingAddressSnapshot = data.shippingAddress;
+    if (data.contact !== undefined) updates.contactSnapshot = { ...(order.contactSnapshot || {}), ...data.contact };
     if (data.notes !== undefined) updates.notes = data.notes;
     await order.update(updates, { transaction });
 
@@ -1050,7 +1245,7 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
       entityType: 'Order',
       entityId: order.id,
       before,
-      after: { shippingAddressSnapshot: order.shippingAddressSnapshot, notes: order.notes },
+      after: { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes },
       req,
       transaction,
     });
@@ -1097,6 +1292,8 @@ async function createShipment(workspaceId, orderId, data, req) {
       },
       transaction
     );
+    // A new shipment for an order whose last parcel came back: ready to ship again.
+    await trackStage(workspaceId, order.id, { req, transaction });
 
     await recordAudit({
       workspaceId,
@@ -1129,7 +1326,8 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
       workspaceId,
       shipment,
       { status: data.status, waybillNumber: data.waybillNumber, trackingUrl: data.trackingUrl, ...extra },
-      { transaction, req, actorUserId: req.user.id }
+      // A status set by hand must be a move the order may make (409 otherwise).
+      { transaction, req, actorUserId: req.user.id, enforceStageGuard: true }
     );
   });
 }
@@ -1138,6 +1336,8 @@ module.exports = {
   createOrder,
   addLineToOpenOrder,
   getOrder,
+  getOrderRef,
+  applySearchAndDates,
   listOrders,
   orderPipeline,
   resolveCursor,
