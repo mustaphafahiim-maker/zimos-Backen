@@ -1,7 +1,6 @@
 'use strict';
 
 const Joi = require('joi');
-const { GOVERNORATE_CODES } = require('./governorates');
 
 const uuid = Joi.string().uuid();
 
@@ -79,14 +78,12 @@ const amount = Joi.number().integer().min(0).max(100000000);
 const settingsBody = Joi.object({
   defaultRateAmount: amount.allow(null),
   freeShippingThresholdAmount: amount.allow(null),
-  // The whole map; a governorate left out uses the default rate. An unknown
-  // code is refused, not stripped: a typo must not silently lose a price.
-  governorateRates: Joi.object()
-    .pattern(Joi.string().max(40), amount.required())
-    .custom((value, helpers) => {
-      const unknown = Object.keys(value).find((code) => !GOVERNORATE_CODES.includes(code));
-      return unknown ? helpers.message(`"${unknown}" is not a governorate code`) : value;
-    }),
+  // The whole map, keyed by places of the platform's list (shippingPlaces.js);
+  // a place left out uses the default rate. An unknown code is refused by the
+  // service, not stripped: a typo must not silently lose a price.
+  governorateRates: Joi.object().pattern(Joi.string().pattern(/^[a-z0-9-]{2,60}$/), amount.required()),
+  // The places the store does not deliver to (the whole list; [] = none).
+  hiddenPlaces: Joi.array().items(Joi.string().pattern(/^[a-z0-9-]{2,60}$/)).max(200).unique(),
   // 'manual' or a courier code, checked against the store's couriers by the service.
   defaultCarrierCode: Joi.string().max(50).allow(null),
 }).min(1);

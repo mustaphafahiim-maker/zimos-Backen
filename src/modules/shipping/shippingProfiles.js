@@ -11,7 +11,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { governorateCode, GOVERNORATE_CODES } = require('./governorates');
+
 
 /**
  * Shipping groups (SPEC §12.1): products with prices of their own — the
@@ -37,7 +37,8 @@ const body = Joi.object({
   name: Joi.string().trim().min(1).max(120),
   currency: Joi.string().trim().uppercase().pattern(/^[A-Z]{3}$/).allow(null),
   flatAmount: amount.allow(null),
-  governorateAmounts: Joi.object().pattern(Joi.string().valid(...GOVERNORATE_CODES), amount),
+  // Place codes of the platform's list (shippingPlaces.js): checked by the routes.
+  governorateAmounts: Joi.object().pattern(Joi.string().pattern(/^[a-z0-9-]{2,60}$/), amount),
 });
 
 function view(p, productCount = 0) {
@@ -51,9 +52,8 @@ function view(p, productCount = 0) {
   };
 }
 
-/** The group\'s price for a destination, or null when it has none there. */
-function priceOf(profile, region) {
-  const code = governorateCode(region);
+/** The group\'s price for a destination (its place code, shippingPlaces.placeCode), or null when it has none there. */
+function priceOf(profile, code) {
   const byGov = profile.governorateAmounts || {};
   if (code && byGov[code] !== undefined && byGov[code] !== null) return Number(byGov[code]);
   return profile.flatAmount === null || profile.flatAmount === undefined ? null : Number(profile.flatAmount);
@@ -63,14 +63,14 @@ function priceOf(profile, region) {
  * calculateShippingAmount\'s hook: the base after shipping groups. `base` is
  * the store\'s rate ({ rule, amount, governorate? }) for the cart.
  */
-async function applyProfiles(workspaceId, { base, productLines, region, transaction }) {
+async function applyProfiles(workspaceId, { base, productLines, place, transaction }) {
   const ids = [...new Set((productLines || []).map((l) => l && l.profileId).filter(Boolean))];
   if (ids.length === 0) return base;
   const profiles = await db.ShippingProfile.findAll({ where: { workspaceId, id: ids }, transaction });
-  const prices = profiles.map((p) => priceOf(p, region)).filter((v) => v !== null);
+  const prices = profiles.map((p) => priceOf(p, place)).filter((v) => v !== null);
   if (prices.length === 0) return base;
   // Products in no group (or in a group with no price here) still need the store\'s rate.
-  const known = new Set(profiles.filter((p) => priceOf(p, region) !== null).map((p) => p.id));
+  const known = new Set(profiles.filter((p) => priceOf(p, place) !== null).map((p) => p.id));
   const someOutside = productLines.some((l) => !l || !l.profileId || !known.has(l.profileId));
   const dearest = Math.max(...prices);
   if (someOutside && Number(base.amount) >= dearest) return base;
@@ -116,6 +116,7 @@ router.post(
   '/',
   validate({ params: Joi.object(ws), body: body.fork(['name'], (s) => s.required()) }),
   asyncHandler(async (req, res) => {
+    if (req.body.governorateAmounts) await require('./shippingPlaces').assertKnown(Object.keys(req.body.governorateAmounts), 'governorateAmounts');
     const profile = await db.ShippingProfile.create({ workspaceId: wid(req), governorateAmounts: {}, ...req.body });
     await recordAudit({ workspaceId: wid(req), actorUserId: req.user.id, action: 'shipping.profile_create', entityType: 'ShippingProfile', entityId: profile.id, after: view(profile), req });
     res.status(201).json({ profile: view(profile) });
@@ -137,6 +138,7 @@ router.patch(
   validate({ params: one, body: body.min(1) }),
   asyncHandler(async (req, res) => {
     const profile = await find(wid(req), req.params.profileId);
+    if (req.body.governorateAmounts) await require('./shippingPlaces').assertKnown(Object.keys(req.body.governorateAmounts), 'governorateAmounts');
     if (req.body.currency) await assertProductsFit(wid(req), req.body.currency, await db.Product.count({ where: { workspaceId: wid(req), shippingProfileId: profile.id } }));
     const before = view(profile);
     await profile.update(req.body);

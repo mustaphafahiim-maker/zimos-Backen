@@ -110,6 +110,8 @@ async function getStorefront(workspaceId) {
     // fully populated — an unconfigured store gets the defaults, which are
     // what the checkout already enforced before this existed.
     checkout: resolveCheckoutSettings(w),
+    // The places the store does not deliver to: left out of the checkout's list (shipping/shippingPlaces.js).
+    hiddenPlaces: require('../shipping/shippingPlaces').hiddenOf(w.settings),
     // What the thank-you page shows after an order (settings.thank_you_page).
     thankYou: resolveThankYouPage(w.settings),
     // Contact details and trust cards (null while switched off), which legal

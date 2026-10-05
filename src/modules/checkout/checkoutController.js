@@ -52,6 +52,8 @@ const checkout = asyncHandler(async (req, res) => {
   // Per-store required fields (settings.checkout_settings). Checked before any
   // cart work so a rejected checkout costs nothing.
   assertRequiredCheckoutFields(workspace, req.body);
+  // A place the store hid is not delivered to (shipping/shippingPlaces.js).
+  await require('../shipping/shippingPlaces').assertDeliverable(workspace, req.body.shippingAddress);
 
   // A manual transfer (the whole order, or a COD order's deposit) is checked
   // here, before any cart work; it is not an online (gateway) payment.

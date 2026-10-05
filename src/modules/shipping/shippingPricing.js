@@ -107,11 +107,13 @@ async function calculateShippingAmount(
 
   const decided = rules.ruleBeforeRates({ country, offerShippingOverride, products, progress: freeShipping });
   if (decided) return result(decided);
+  // The destination as a place of the platform's list (shippingPlaces.js): Egypt's governorates and North Coast, Saudi regions.
+  const place = await require('./shippingPlaces').placeCode(country, region, transaction);
 
   // A funnel selling in another currency than the store's: its own group is the only price.
   if (funnelPricing.ownCurrency) {
     const profiles = require('./shippingProfiles');
-    const price = funnelPricing.ownCurrency.profile ? profiles.priceOf(funnelPricing.ownCurrency.profile, region) : null;
+    const price = funnelPricing.ownCurrency.profile ? profiles.priceOf(funnelPricing.ownCurrency.profile, place) : null;
     const own = price === null ? { rule: rules.RULES.NO_RATE, amount: 0 } : { rule: profiles.RULE, amount: price };
     return result({ ...own, amount: own.amount + products.extraFeesAmount, baseAmount: own.amount, extraFeesAmount: products.extraFeesAmount });
   }
@@ -120,6 +122,7 @@ async function calculateShippingAmount(
     pricingMode,
     country,
     region,
+    place,
     subtotal,
     tier,
     knownGrams: weight.knownGrams,
@@ -127,7 +130,7 @@ async function calculateShippingAmount(
     transaction,
   });
   // Products in a shipping group carry their own price (shippingProfiles.js): the dearest applies.
-  const base = await require('./shippingProfiles').applyProfiles(workspaceId, { base: storeBase, productLines, region, transaction });
+  const base = await require('./shippingProfiles').applyProfiles(workspaceId, { base: storeBase, productLines, place, transaction });
   return result({
     ...base,
     amount: Number(base.amount) + products.extraFeesAmount,
@@ -143,12 +146,12 @@ async function calculateShippingAmount(
 async function resolveBase(
   workspaceId,
   settings,
-  { pricingMode, country, region, subtotal, tier, knownGrams, totalQuantity, transaction }
+  { pricingMode, country, region, place, subtotal, tier, knownGrams, totalQuantity, transaction }
 ) {
   const fallback = rules.fallbackRate(settings);
 
   if (pricingMode === 'rates') {
-    const byGovernorate = rules.governorateRate(settings, country, region);
+    const byGovernorate = require('./shippingPlaces').rateFor(settings, place);
     if (byGovernorate) return { rule: rules.RULES.GOVERNORATE_RATE, ...byGovernorate };
   }
 
