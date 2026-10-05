@@ -73,10 +73,37 @@ const STATUS_SQL = `CASE
 const SELECT = `
   SELECT cs.id, ${STATUS_SQL} AS status, cs.recovery_status, cs.review_status, cs.lost_reason, cs.contact_fields,
          cs.phone_normalized, cs.items, cs.subtotal_amount, cs.currency, cs.source, cs.last_activity_at, cs.contacted_at,
-         cs.created_at, cs.recovery_token, cs.ip_address, cs.ip_country, cs.checkout_payload,
+         cs.created_at, cs.recovery_token, cs.ip_address, cs.ip_country, cs.checkout_payload, cs.attribution,
          o.id AS order_id, o.order_number
     FROM checkout_sessions cs
     LEFT JOIN orders o ON o.id = cs.converted_order_id AND o.workspace_id = cs.workspace_id`;
+
+/**
+ * Where the shopper came from (SPEC §6.1 attribution): the last touch the
+ * storefront kept (lib/touches.ts), else the first — source, medium,
+ * campaign, the ad id and the referring site. Null for a direct visit, or a
+ * session saved before touches were sent.
+ */
+function trafficSourceOf(attribution) {
+  const a = attribution || {};
+  const touch = (a.last && Object.keys(a.last).length ? a.last : null) || (a.first && Object.keys(a.first).length ? a.first : null);
+  if (!touch) return null;
+  let referrerHost = null;
+  try {
+    referrerHost = touch.referrer ? new URL(touch.referrer).hostname : null;
+  } catch {
+    referrerHost = null;
+  }
+  const clickSource = touch.fbclid ? 'facebook' : touch.ttclid ? 'tiktok' : touch.gclid ? 'google' : touch.scCid ? 'snapchat' : null;
+  return {
+    source: touch.source || clickSource || referrerHost || null,
+    medium: touch.medium || (clickSource ? 'paid' : null),
+    campaign: touch.campaign || null,
+    adId: touch.adId || null,
+    referrer: referrerHost,
+    landingPage: touch.landingPage || null,
+  };
+}
 
 function serialize(row) {
   const contact = row.contact_fields || {};
@@ -99,6 +126,9 @@ function serialize(row) {
     source: row.source,
     ipAddress: row.ip_address,
     ipCountry: row.ip_country,
+    // How the shopper came (trafficSourceOf), and the touches as the storefront sent them.
+    trafficSource: trafficSourceOf(row.attribution),
+    attribution: row.attribution && Object.keys(row.attribution).length ? row.attribution : null,
     // The storefront path of the recovery link; the dashboard puts the store's address in front.
     recoveryPath: row.recovery_token ? `/r/${row.recovery_token}` : null,
     lastActivityAt: row.last_activity_at,
@@ -382,6 +412,10 @@ async function convert(workspaceId, sessionId, body, req) {
     await db.CheckoutSession.update({ status: previous }, { where: { id: sessionId, workspaceId, status: 'converted', convertedOrderId: null } });
     throw err;
   }
+  // The order keeps where the shopper came from, for the reports by source and campaign (analytics/orderTouch.js).
+  if (session.attribution && Object.keys(session.attribution).length && !(order.attribution && Object.keys(order.attribution).length)) {
+    await order.update({ attribution: session.attribution });
+  }
   // The checkout form's extra answers, as the checkout saves them.
   if (payload.formFields) {
     const workspace = await db.Workspace.findByPk(workspaceId);
@@ -456,7 +490,7 @@ async function exportCsv(workspaceId, filters = {}, opts = {}) {
       LIMIT $limit`,
     { bind, type: QueryTypes.SELECT }
   );
-  const header = ['Date', 'Status', 'Reason', 'Name', 'Phone', 'Email', 'City', 'Address', 'Products', 'Total', 'Currency', 'Recovery', 'Review', 'Source', 'Order'];
+  const header = ['Date', 'Status', 'Reason', 'Name', 'Phone', 'Email', 'City', 'Address', 'Products', 'Total', 'Currency', 'Recovery', 'Review', 'Source', 'Order', 'Traffic source', 'Campaign'];
   const lines = [header.join(',')];
   for (const row of rows) {
     const s = serialize(row);
@@ -478,6 +512,8 @@ async function exportCsv(workspaceId, filters = {}, opts = {}) {
         s.reviewStatus,
         s.source,
         s.convertedOrder ? s.convertedOrder.orderNumber : '',
+        s.trafficSource ? s.trafficSource.source : '',
+        s.trafficSource ? s.trafficSource.campaign : '',
       ]
         .map(csvCell)
         .join(',')
