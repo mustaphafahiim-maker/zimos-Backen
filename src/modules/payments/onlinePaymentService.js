@@ -232,6 +232,8 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
     // Rejected keys or a gateway that does not answer: the merchant is told (once a day).
     require('../notifications/integrationAlerts').gateway(order.workspaceId, provider, err);
     await attempt.update({ status: 'failed', failureReason: String(err.message || 'The payment could not be started').slice(0, 300) });
+    // The gateway refused to start it: a failed payment all the same (paymentFailure.js).
+    await require('./paymentFailure').markFailed(attempt);
   }
   return attempt;
 }
@@ -294,9 +296,9 @@ async function recordPaymentTransaction(account, tx) {
       },
       { where: { id: attempt.id, status: OPEN_ATTEMPT } }
     );
-    // Drives the "payment failed + try again" automation (the order stays
-    // open for a retry or a switch to cash on delivery).
-    if (n) await require('../../core/outbox/outbox').record(null, 'order.payment_failed', { workspaceId: attempt.workspaceId, orderId: attempt.orderId, paymentId: attempt.id });
+    // The order's payment failed, and the "payment failed + try again" automation
+    // starts (paymentFailure.js); the order stays open for a retry or a switch to cash on delivery.
+    if (n) await require('./paymentFailure').markFailed(attempt);
     return { outcome: n ? 'failed' : 'ignored_failed', ...ids };
   }
 
@@ -745,6 +747,8 @@ async function retry(workspaceId, orderId, token, body, req) {
     // one order can hold its stock this way.
     const expiresAt = new Date(Date.now() + ttlMinutesFor(method.method) * 60 * 1000);
     await locked.update({ paymentMethod: method.method, paymentExpiresAt: expiresAt }, { transaction });
+    // Waiting for a payment again (paymentFailure.js).
+    await require('./paymentFailure').reopen(locked, transaction);
     return locked;
   });
 
@@ -823,6 +827,8 @@ async function switchToCod(workspaceId, orderId, token, req) {
     const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
     const riskFlags = [...new Set([...(locked.riskFlags || []), ...codChecks.flags])];
     await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced, riskFlags }, { transaction });
+    // Cash on delivery: unpaid, not failed (paymentFailure.js).
+    await require('./paymentFailure').reopen(locked, transaction);
     await require('./codSwitchChecks').recordDeposit(locked, codChecks.deposit, transaction);
     await db.ConfirmationTask.create({ workspaceId, orderId: locked.id, status: 'queued' }, { transaction });
     await trackStage(workspaceId, locked.id, { transaction, actorType: 'customer', reason: 'switched_to_cod' });
