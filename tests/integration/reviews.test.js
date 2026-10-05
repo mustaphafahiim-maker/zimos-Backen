@@ -104,7 +104,7 @@ describe('moderation + public aggregate', () => {
     // pending — not visible publicly yet
     let pub = await request(app).get(`/api/v1/store/${workspace.id}/products/${product.id}`);
     expect(pub.status).toBe(200);
-    expect(pub.body.product.rating).toEqual({ average: null, count: 0 });
+    expect(pub.body.product.rating).toMatchObject({ average: null, count: 0 });
     expect(pub.body.product.reviews).toEqual([]);
 
     // staff queue

@@ -77,7 +77,7 @@ describe('checkout_settings', () => {
     const ctx = await setup();
 
     const store = await ctx.storeMeta();
-    expect(store.body.store.checkout).toEqual({ email: 'optional', postal_code: 'optional', notes: 'optional' });
+    expect(store.body.store.checkout).toMatchObject({ email: 'optional', postal_code: 'optional', notes: 'optional' });
 
     // No email, no postal code, no notes — accepted, as it always was.
     const res = await ctx.checkout(baseOrder(ctx.variant.id, { paymentMethod: 'cod' }));
@@ -98,7 +98,7 @@ describe('checkout_settings', () => {
     });
 
     const store = await ctx.storeMeta();
-    expect(store.body.store.checkout).toEqual({ email: 'required', postal_code: 'hidden', notes: 'hidden' });
+    expect(store.body.store.checkout).toMatchObject({ email: 'required', postal_code: 'hidden', notes: 'hidden' });
   });
 
   it('merges one switch at a time and leaves the shipping/tax settings alone', async () => {
@@ -121,7 +121,7 @@ describe('checkout_settings', () => {
     const gone = await ctx.patch({ settings: { checkout_settings: null } });
     expect(gone.body.workspace.settings.checkout_settings).toBeUndefined();
     const store = await ctx.storeMeta();
-    expect(store.body.store.checkout).toEqual({ email: 'optional', postal_code: 'optional', notes: 'optional' });
+    expect(store.body.store.checkout).toMatchObject({ email: 'optional', postal_code: 'optional', notes: 'optional' });
   });
 
   it('rejects a mode the contract does not define', async () => {

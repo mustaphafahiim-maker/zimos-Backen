@@ -182,14 +182,7 @@ async function getUser(userId) {
   const user = await db.User.findByPk(userId, { attributes: [...USER_ATTRIBUTES, 'phone', 'usernameChangedAt'] });
   if (!user) throw new NotFoundError('User');
   const stores = await storesFor([user.id], new Set());
-  // The second step, for support (auth/twoFactorRecovery.js resets it).
-  const twoFactor = await db.UserTwoFactor.findByPk(user.id, { attributes: ['mode', 'enabledAt'] });
-  return {
-    ...toRow(user, stores.get(user.id)),
-    phone: user.phone,
-    usernameChangedAt: user.usernameChangedAt,
-    twoFactor: { mode: twoFactor ? twoFactor.mode : 'off', enabledAt: twoFactor ? twoFactor.enabledAt : null },
-  };
+  return { ...toRow(user, stores.get(user.id)), phone: user.phone, usernameChangedAt: user.usernameChangedAt };
 }
 
 module.exports = { searchUsers, getUser, MAX_LIMIT };
