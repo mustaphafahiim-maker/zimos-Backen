@@ -50,6 +50,12 @@ const TEMPLATES = Object.freeze({
     subject: 'طلبك من {{store_name}} في انتظارك',
     body: 'مرحبًا {{customer_name}}،\n\nلاحظنا أنك لم تكمل طلبك من {{store_name}}. ما زال محفوظًا، ويمكنك إكماله من هنا:\n{{recovery_link}}',
   },
+  // Sent when the merchant rejects a transfer and leaves "Tell the customer" ticked (payments/transferResubmit.js).
+  transfer_rejected: {
+    event: 'order.transfer_rejected',
+    subject: 'لم نتمكن من تأكيد التحويل لطلبك {{order_number}}',
+    body: 'مرحبًا {{customer_name}}،\n\nلم نتمكن من تأكيد التحويل الخاص بطلبك رقم {{order_number}} من {{store_name}}.\n\nيمكنك رفع إيصال جديد من هنا:\n{{order_link}}',
+  },
   digital_delivery: {
     event: 'order.digital_delivered',
     subject: 'منتجك الرقمي من {{store_name}} جاهز',

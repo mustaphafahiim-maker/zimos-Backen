@@ -29,6 +29,8 @@ const ORDER_TRIGGERS = [
   'order.postponed',
   'order.returned',
   'order.payment_failed',
+  // The merchant rejected the shopper's transfer receipt (payments/manualTransferService.reject).
+  'order.transfer_rejected',
   // A paid order's digital products are ready (digital/digitalService.onOrderPaid).
   'order.digital_delivered',
 ];

@@ -110,6 +110,20 @@ const TEMPLATES = [
     whatsapp: { name: 'payment_failed', body: 'مرحبًا {{1}}، لم تكتمل عملية الدفع لطلبك رقم {{2}}. أعد المحاولة من هنا: {{3}}' },
   },
   {
+    key: 'transfer_rejected',
+    trigger: 'order.transfer_rejected',
+    name: { ar: 'رفض التحويل + رفع إيصال جديد', en: 'Transfer rejected + send a new receipt' },
+    description: {
+      ar: 'رسالة برابط الطلب عند رفض إيصال التحويل، ليرفع العميل إيصالًا جديدًا.',
+      en: 'A message with the order link when a transfer receipt is rejected, so the customer can send a new one.',
+    },
+    conditions: {},
+    steps: [
+      { type: 'whatsapp_template', template: 'transfer_rejected', language: 'ar', params: ['{{customer_name}}', '{{order_number}}', '{{order_link}}'] },
+    ],
+    whatsapp: { name: 'transfer_rejected', body: 'مرحبًا {{1}}، لم نتمكن من تأكيد التحويل لطلبك رقم {{2}}. ارفع إيصالًا جديدًا من هنا: {{3}}' },
+  },
+  {
     key: 'digital_delivery',
     trigger: 'order.digital_delivered',
     name: { ar: 'تسليم المنتج الرقمي', en: 'Digital product delivery' },

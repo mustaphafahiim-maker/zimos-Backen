@@ -270,8 +270,12 @@ async function confirm(workspaceId, orderId, paymentId, req) {
   });
 }
 
-/** The receipt is wrong or the money never arrived: the payment fails; the order stays unpaid for the merchant to cancel or chase. */
-async function reject(workspaceId, orderId, paymentId, { reason }, req) {
+/**
+ * The receipt is wrong or the money never arrived: the payment fails; the order stays unpaid for the merchant to
+ * cancel or chase. The shopper is told (order.transfer_rejected, unless notifyCustomer is false) and can send a
+ * new receipt from the tracking page (transferResubmit.js).
+ */
+async function reject(workspaceId, orderId, paymentId, { reason, notifyCustomer = true }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const payment = await loadPending(workspaceId, orderId, paymentId, transaction);
     await payment.update(
@@ -281,6 +285,9 @@ async function reject(workspaceId, orderId, paymentId, { reason }, req) {
     await recordAudit({
       workspaceId, actorUserId: req.user.id, action: 'manual_transfer.reject', entityType: 'Payment', entityId: payment.id,
       after: { orderId, reason: payment.failureReason }, req, transaction,
+    });
+    await require('../../core/outbox/outbox').record(transaction, 'order.transfer_rejected', {
+      workspaceId, orderId, paymentId: payment.id, reason: payment.failureReason, notifyCustomer: notifyCustomer !== false,
     });
     return present(payment);
   });

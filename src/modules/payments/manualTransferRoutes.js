@@ -79,7 +79,11 @@ router.post(
 router.post(
   '/orders/:orderId/payments/:paymentId/reject',
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
-  validate({ params: paymentParams, body: Joi.object({ reason: Joi.string().trim().max(300).allow('', null) }) }),
+  validate({
+    params: paymentParams,
+    // notifyCustomer: tell the shopper (the transfer_rejected order email, and the automation), on by default.
+    body: Joi.object({ reason: Joi.string().trim().max(300).allow('', null), notifyCustomer: Joi.boolean().default(true) }),
+  }),
   asyncHandler(async (req, res) =>
     res.json({ transfer: await service.reject(req.tenant.workspaceId, req.params.orderId, req.params.paymentId, req.body || {}, req) })
   )

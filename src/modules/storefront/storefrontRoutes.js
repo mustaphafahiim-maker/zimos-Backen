@@ -49,6 +49,8 @@ router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getPr
 router.use(require('../reviews/shopperReviews').router);
 // A product page's A/B test: which variant this visitor sees (catalog/productTests.js).
 router.use(require('../catalog/productTests').publicRouter);
+// A rejected transfer sent again from the tracking page (payments/transferResubmit.js).
+router.use(require('../payments/transferResubmit').router);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 // A shopper's photo for a product's image field (customerUploads). Limited
 // before multer reads a byte; multer refuses anything over 15 MB mid-stream.

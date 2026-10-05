@@ -325,6 +325,8 @@ async function presentTrackedOrder(workspaceId, order) {
     notes: await require('../orders/orderMetaService').publicNotes(order.id),
     // Download links of the digital products in a paid order (modules/digital).
     downloads: await require('../digital/digitalService').publicGrantsForOrder(workspaceId, order.id),
+    // A transfer under review, or rejected and ready to be sent again (payments/transferResubmit.js).
+    transfer: await require('../payments/transferResubmit').stateFor(order),
   };
 }
 
