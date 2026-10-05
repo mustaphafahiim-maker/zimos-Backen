@@ -12,11 +12,14 @@ module.exports = {
   capture: {
     params: Joi.object({ workspaceId: workspaceRef().required() }),
     body: Joi.object({
+      // Captured from a name alone, or a valid number (SPEC §6.2): one of the two.
       contact: Joi.object({
         fullName: Joi.string().max(200).allow(null, '').optional(),
-        phone: Joi.string().max(32).required(),
+        phone: Joi.string().max(32).allow(null, '').optional(),
         email: joiEmail().allow(null, '').optional(),
-      }).required(),
+      })
+        .or('phone', 'fullName')
+        .required(),
       items: Joi.array()
         .items(
           Joi.object({
@@ -30,6 +33,9 @@ module.exports = {
         .required(),
       source: Joi.string().valid('store', 'funnel').default('store'),
       visitorId: Joi.string().min(8).max(64).required(),
+      // The bot guard's fields (autosaveGuard.js), taken off before the save.
+      website: Joi.string().max(500).allow('').optional(),
+      botToken: Joi.string().max(500).optional(),
     }),
   },
   list: {

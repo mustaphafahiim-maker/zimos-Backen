@@ -8,7 +8,8 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./fraudController');
 const schemas = require('./fraudValidation');
 
-// Unblocking stays on PATCH /customers/:customerId/blacklist.
+// The blocklist is blocked_entries (./blockedEntries.js). PATCH /customers/:customerId/blacklist
+// still works and writes the same (phone, orders) entry.
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
 
@@ -19,7 +20,28 @@ router.post(
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
   controller.approve
 );
+// "Block and cancel": the order is cancelled and its phone and IP blocked.
+router.post(
+  '/flagged-orders/:orderId/block',
+  validate(schemas.blockAndCancel),
+  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  controller.blockAndCancel
+);
+router.get('/stats', validate(schemas.stats), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.stats);
 router.get('/blocklist', validate(schemas.listBlocklist), requirePermission(PERMISSIONS.CUSTOMERS_VIEW), controller.listBlocklist);
 router.post('/blocklist', validate(schemas.block), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), controller.block);
+router.post(
+  '/blocklist/import',
+  validate(schemas.importBlocklist),
+  requirePermission(PERMISSIONS.CUSTOMERS_MANAGE),
+  controller.importBlocklist
+);
+router.delete(
+  '/blocklist/:entryId',
+  validate(schemas.unblock),
+  requirePermission(PERMISSIONS.CUSTOMERS_MANAGE),
+  controller.unblock
+);
+
 
 module.exports = router;
