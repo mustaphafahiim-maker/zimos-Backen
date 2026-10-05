@@ -14,6 +14,10 @@ const router = Router({ mergeParams: true });
 
 router.use(authenticate, resolveTenant);
 
+// Bulk edit, duplicate and the variant table (catalogBulkRoutes.js) — ahead of
+// the /products/:productId routes below.
+router.use(require('./catalogBulkRoutes'));
+
 const canView = requirePermission(PERMISSIONS.PRODUCTS_VIEW);
 const canManage = requirePermission(PERMISSIONS.PRODUCTS_MANAGE);
 
