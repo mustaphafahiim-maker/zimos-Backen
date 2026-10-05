@@ -427,6 +427,24 @@ Collection follows the order's currency (SPEC §11.5). Prices are still never co
   - A group in a currency other than the funnel's is ignored at pricing time and refused at publish.
 - **A funnel selling in the store's currency:** its own threshold applies when set, else the store's.
 - Editing an order's items now reprices shipping with its funnel, the same way placing the order does.
+Shipping is priced by the platform's places (`geo_regions`; new `shipping/shippingPlaces.js`): Egypt's 27 governorates plus North Coast, and Saudi Arabia's 13 regions.
+
+- **Prices:** `shipping_governorate_rates` keeps its name. It now takes any place code (`north-coast`, `sa-riyadh`, …), and unknown codes are refused by the service.
+  - An address is read back to its place from its province: Egypt's 27 straight away, anything else through `geoRegions.resolve`. So "الرياض", "Riyadh Region" and the storefront's "<ar> (<en>)" all price the same.
+  - The rate is no longer limited to Egypt.
+  - Shipping groups price by the same place codes.
+- **North Coast** is its own place in the checkout's list, as EasyOrders has it. Before, a North Coast order was priced as Alexandria or Matrouh.
+- **Hiding a place** (`shipping_hidden_places`):
+  - The storefront leaves it out of the checkout's and the cart's list; the public store carries `hiddenPlaces`.
+  - A shopper's checkout to it is refused (`SHIPPING_PLACE_UNAVAILABLE`).
+  - Staff orders are not checked, since the merchant may still deliver there by hand.
+- **One price for all:** a dashboard action that fills every place's price. The merchant can still change any of them before saving; nothing new is stored.
+- **The dashboard table** lists the store's country's places (`GET /shipping/settings` adds `country`, and `governorates` comes from the platform's list). A Saudi store sees "Price per region".
+- **Storefront:**
+  - Egypt's list gains North Coast, and Saudi stores get a select of their regions instead of free text (`lib/places.ts`, the same codes and names as `geo_regions`).
+  - Other countries keep free text.
+  - The ship-to picker in the cart shows only for countries with a list; it showed Egypt's list to every store before.
+- Districts under a city (SPEC "areas", optional) are not priced separately yet: the cities exist in `geo_regions`, but the form takes the city as free text.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -613,7 +631,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 120. The tracking page accepts the store's own country's phones (§14.7).
 - [x] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
 - [x] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
-- [ ] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
+- [x] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
 - [ ] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
 - [ ] 125. Product feed items land on their own variant (§7.8).
 - [ ] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
