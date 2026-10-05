@@ -11,6 +11,7 @@ const { NotFoundError, ConflictError, AppError } = require('../../core/errors/Ap
 const { recordAudit } = require('../audit/auditService');
 const { getCertificateProvider, CertificateProviderError } = require('./certificates');
 const primaryHost = require('./primaryHost');
+const rootDomains = require('./rootDomains');
 
 /**
  * What the domains screen needs beyond add / verify / delete (domainsService):
@@ -26,8 +27,26 @@ const USABLE = ['verified', 'active'];
 /** Where a merchant points their domain: the store's own platform subdomain. */
 const cnameTargetFor = (workspace) => `${workspace.slug}.${env.platformRootDomain}`;
 
+/** The counterpart (www / root) as the dashboard shows it, or null when the domain has none. */
+function presentCounterpart(domain, target) {
+  const hostname = rootDomains.counterpartOf(domain.hostname);
+  if (!hostname) return null;
+  const c = domain.counterpart || null;
+  const routing = c && c.redirect ? rootDomains.routingFor(hostname, target, 'redirect') : { records: [], alternatives: [] };
+  return {
+    hostname,
+    redirect: Boolean(c && c.redirect),
+    sslStatus: c && SSL_STATUSES.includes(c.sslStatus) ? c.sslStatus : 'none',
+    records: routing.records,
+    alternatives: routing.alternatives,
+  };
+}
+
 function present(domain, workspace, funnel) {
   const target = cnameTargetFor(workspace);
+  // A root domain takes A records (or an ALIAS), a subdomain a CNAME (rootDomains.js).
+  const routing = rootDomains.routingFor(domain.hostname, target);
+  const counterpart = presentCounterpart(domain, target);
   return {
     id: domain.id,
     hostname: domain.hostname,
@@ -38,11 +57,17 @@ function present(domain, workspace, funnel) {
     sslProvider: domain.sslProvider || null,
     sslCheckedAt: domain.sslCheckedAt || null,
     homeFunnel: funnel ? { id: funnel.id, name: funnel.name, status: funnel.status } : null,
-    // The two records the merchant creates at their DNS provider.
+    isRoot: rootDomains.isRoot(domain.hostname),
+    // The records the merchant creates at their DNS provider: the TXT, the
+    // routing ones, and the counterpart's when it is sent here.
     records: [
       { type: 'TXT', name: domain.hostname, value: TXT_PREFIX + domain.verificationToken, ttl: 300, purpose: 'verification' },
-      { type: 'CNAME', name: domain.hostname, value: target, ttl: 300, purpose: 'routing' },
+      ...routing.records,
+      ...(counterpart ? counterpart.records : []),
     ],
+    // Instead of the routing records, where the DNS provider has it (a root's ALIAS / ANAME).
+    alternatives: [...routing.alternatives, ...(counterpart ? counterpart.alternatives : [])],
+    counterpart,
   };
 }
 
@@ -125,6 +150,7 @@ async function syncCertificate(workspaceId, domainId, req) {
     // A verified domain with a certificate is fully live.
     status: result.status === 'issued' ? 'active' : domain.status,
   });
+  const counterpartDetail = await syncCounterpartCertificate(domain, provider);
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -136,7 +162,47 @@ async function syncCertificate(workspaceId, domainId, req) {
     req,
   });
   canonicalChanged(workspaceId);
-  return { domain: await presentOne(workspaceId, domain), detail: result.detail || null };
+  return { domain: await presentOne(workspaceId, domain), detail: result.detail || counterpartDetail || null };
+}
+
+/**
+ * The counterpart's certificate, beside the domain's: a visitor reaches it
+ * over https before being sent on. A provider failure here leaves its state
+ * as it was; it never fails the domain's own check.
+ */
+async function syncCounterpartCertificate(domain, provider) {
+  const c = domain.counterpart;
+  const hostname = rootDomains.counterpartOf(domain.hostname);
+  if (!c || !c.redirect || !hostname) return null;
+  try {
+    const result =
+      c.sslStatus === 'none' || !c.sslProviderRef
+        ? await provider.requestCertificate({ hostname })
+        : await provider.getStatus({ hostname, providerRef: c.sslProviderRef });
+    await domain.update({
+      counterpart: {
+        ...c,
+        sslStatus: SSL_STATUSES.includes(result.status) ? result.status : 'pending',
+        sslProviderRef: result.providerRef || c.sslProviderRef || null,
+        sslCheckedAt: new Date().toISOString(),
+      },
+    });
+    return result.status === 'failed' ? result.detail || null : null;
+  } catch (err) {
+    if (err instanceof CertificateProviderError) return err.message;
+    throw err;
+  }
+}
+
+async function revokeCounterpart(domain) {
+  const c = domain && domain.counterpart;
+  const hostname = domain && rootDomains.counterpartOf(domain.hostname);
+  if (!c || !hostname || !c.sslProviderRef) return;
+  try {
+    await getCertificateProvider().revoke({ hostname, providerRef: c.sslProviderRef });
+  } catch {
+    /* nothing to keep either way */
+  }
 }
 
 /** Primary domain and home funnel. */
@@ -144,7 +210,7 @@ async function updateDomain(workspaceId, domainId, patch, req) {
   return db.sequelize.transaction(async (transaction) => {
     const domain = await db.Domain.findOne({ where: { id: domainId, workspaceId }, transaction });
     if (!domain) throw new NotFoundError('Domain');
-    const before = { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId };
+    const before = { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId, counterpart: domain.counterpart };
 
     if (patch.isPrimary === true) {
       if (!USABLE.includes(domain.status)) {
@@ -154,6 +220,19 @@ async function updateDomain(workspaceId, domainId, patch, req) {
       domain.isPrimary = true;
     } else if (patch.isPrimary === false) {
       domain.isPrimary = false;
+    }
+
+    if (patch.redirectCounterpart !== undefined) {
+      const other = rootDomains.counterpartOf(domain.hostname);
+      if (!other) throw new AppError('NO_COUNTERPART', 'Only a root domain or its www has a counterpart to send here', 422);
+      if (patch.redirectCounterpart) {
+        const taken = await db.Domain.count({ where: { hostname: other, status: USABLE }, transaction });
+        if (taken) throw new ConflictError(`${other} is connected as a domain of its own`, 'COUNTERPART_CONNECTED');
+        if (!(domain.counterpart && domain.counterpart.redirect)) domain.counterpart = { redirect: true, sslStatus: 'none' };
+      } else if (domain.counterpart) {
+        await revokeCounterpart(domain);
+        domain.counterpart = null;
+      }
     }
 
     if (patch.homeFunnelId !== undefined) {
@@ -181,7 +260,7 @@ async function updateDomain(workspaceId, domainId, patch, req) {
       entityType: 'Domain',
       entityId: domain.id,
       before,
-      after: { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId },
+      after: { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId, counterpart: domain.counterpart },
       req,
       transaction,
     });
@@ -207,17 +286,44 @@ async function checkDns(workspaceId, domainId) {
 
   const txt = await dns.promises.resolveTxt(domain.hostname).then(flatten, () => []);
   const cname = await dns.promises.resolveCname(domain.hostname).then((list) => list.map(bare), () => []);
+  const other = domain.counterpart && domain.counterpart.redirect ? rootDomains.counterpartOf(domain.hostname) : null;
 
   return {
     hostname: domain.hostname,
     txt: { expected: expectedTxt, found: txt.includes(expectedTxt), values: txt.slice(0, 10) },
     cname: { expected: expectedCname, found: cname.includes(bare(expectedCname)), values: cname.slice(0, 10) },
+    // The routing record, whichever kind this host takes (a root's A / ALIAS, a subdomain's CNAME).
+    routing: await routingCheck(domain.hostname, expectedCname),
+    counterpart: other ? { hostname: other, ...(await routingCheck(other, expectedCname)) } : null,
     checkedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Whether a host reaches the store: a subdomain by its CNAME; a root by its
+ * addresses — the platform's (PLATFORM_APEX_IPS) or the platform subdomain's
+ * own, which is what an ALIAS / flattened CNAME resolves to.
+ */
+async function routingCheck(hostname, target) {
+  if (!rootDomains.isRoot(hostname)) {
+    const values = await dns.promises.resolveCname(hostname).then((list) => list.map(bare), () => []);
+    return { kind: 'CNAME', expected: [target], found: values.includes(bare(target)), values: values.slice(0, 10) };
+  }
+  const values = await dns.promises.resolve4(hostname).then((list) => list, () => []);
+  const targetIps = await dns.promises.resolve4(target).then((list) => list, () => []);
+  const allowed = new Set([...rootDomains.apexIps(), ...targetIps]);
+  const ips = rootDomains.apexIps();
+  return {
+    kind: ips.length ? 'A' : 'ALIAS',
+    expected: ips.length ? ips : [target],
+    found: values.length > 0 && values.every((ip) => allowed.has(ip)),
+    values: values.slice(0, 10),
   };
 }
 
 /** Tells the provider a removed domain's certificate is no longer wanted. Never throws. */
 async function revokeCertificate(domain) {
+  await revokeCounterpart(domain);
   if (!domain || domain.sslStatus === 'none' || !domain.sslProviderRef) return;
   try {
     await getCertificateProvider().revoke({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
@@ -236,6 +342,9 @@ async function resolveHost(rawHost) {
   if (!host) throw new NotFoundError('Host');
   const domain = await db.Domain.findOne({ where: { hostname: host, status: USABLE } });
   if (!domain) {
+    // www / the root of a domain that has it sent there (rootDomains.js): the proxy redirects.
+    const sentTo = await counterpartTarget(host);
+    if (sentTo) return sentTo;
     // A store's platform subdomain: only its primary domain is asked for, so the
     // storefront's proxy can send the shopper on to it.
     const platformSlug = primaryHost.platformSlugOf(host);
@@ -271,6 +380,26 @@ async function resolveHost(rawHost) {
   };
 }
 
+/** resolve-host's answer for a domain's counterpart, or null when the host is none. */
+async function counterpartTarget(host) {
+  const of = rootDomains.counterpartOf(host);
+  if (!of) return null;
+  const domain = await db.Domain.findOne({ where: { hostname: of, status: USABLE } });
+  if (!domain || !domain.counterpart || !domain.counterpart.redirect) return null;
+  const workspace = await db.Workspace.findOne({ where: { id: domain.workspaceId, status: ['active', 'suspended'] }, attributes: ['id', 'slug'] });
+  if (!workspace) return null;
+  return {
+    host,
+    workspaceId: workspace.id,
+    slug: workspace.slug,
+    homeFunnel: null,
+    primaryHost: await primaryHost.primaryHostOf(workspace.id),
+    sslStatus: domain.counterpart.sslStatus || 'none',
+    // Where a visit to this host goes, same path.
+    redirectTo: domain.hostname,
+  };
+}
+
 // --- routes -----------------------------------------------------------------
 
 const uuid = Joi.string().uuid();
@@ -279,7 +408,12 @@ const schemas = {
   overview: { params: Joi.object({ workspaceId: uuid.required() }) },
   update: {
     params: domainParams,
-    body: Joi.object({ isPrimary: Joi.boolean().optional(), homeFunnelId: uuid.allow(null).optional() }).min(1),
+    body: Joi.object({
+      isPrimary: Joi.boolean().optional(),
+      homeFunnelId: uuid.allow(null).optional(),
+      // Send the www / root counterpart here (rootDomains.js).
+      redirectCounterpart: Joi.boolean().optional(),
+    }).min(1),
   },
   one: { params: domainParams },
   resolveHost: { query: Joi.object({ host: Joi.string().trim().max(255).required() }) },

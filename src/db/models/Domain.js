@@ -23,6 +23,8 @@ module.exports = (sequelize, DataTypes) => {
       sslProviderRef: { type: DataTypes.STRING(200), allowNull: true, field: 'ssl_provider_ref' },
       sslCheckedAt: { type: DataTypes.DATE, allowNull: true, field: 'ssl_checked_at' },
       homeFunnelId: { type: DataTypes.UUID, allowNull: true, field: 'home_funnel_id' },
+      // Its www / root counterpart sent to it (migration 435, domains/rootDomains.js).
+      counterpart: { type: DataTypes.JSONB, allowNull: true },
     },
     { tableName: 'domains', indexes: [{ unique: true, fields: ['hostname'] }, { fields: ['website_id'] }] }
   );
