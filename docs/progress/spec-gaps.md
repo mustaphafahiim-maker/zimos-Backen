@@ -513,6 +513,14 @@ A rejected transfer now reaches the shopper, who can send a new receipt (SPEC §
   - The receipt is checked like a checkout's: this visitor's upload, the method's required fields.
   - It becomes a new pending transfer of the same amount and purpose (a deposit stays a deposit), back in the merchant's review queue, audited as `manual_transfer.resubmit`. Rate limit: 6 per minute per IP.
   - A method the store has since removed can't be resent: the shopper is told to contact the store.
+The deposit rule's "risky customers only" now reads the platform-wide delivery rate (SPEC §11.3 → §5.4).
+
+- **Platform history first:** the customer's delivery rate across every store (`risk/networkStats.forPhone`: delivered out of the orders that finished) decides.
+  - Below the rule's threshold, or reported as spam: the customer pays the deposit.
+  - At or above it: they don't, whatever this store's own record says.
+- **No platform history** (new to ZIMOS, or the network score not switched on for the store — the `customer_network_score` flag): the store's own record decides as before — a reliability score below the threshold, or a rejected order.
+- **A first-time shopper nobody knows** is never asked.
+- The threshold keeps its stored name (`maxReliabilityScore`, 1–100). The dashboard now calls it "Delivery rate below (%)" and explains both sources.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -707,7 +715,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
 - [x] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
 - [x] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
-- [ ] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
+- [x] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
 - [ ] 132. Lost orders keep their traffic source (§6.1).
 - [ ] 133. The merchant sets when a checkout counts as lost (§6.2).
 - [ ] 134. "Notify the customer" on status changes, one order or many (§4.6).
