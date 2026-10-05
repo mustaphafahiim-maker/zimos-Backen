@@ -9,6 +9,13 @@
       <% if (error) { %><p style="color:#b91c1c"><%= error %></p><% } %>
       <form method="POST" action="<%= actionUrl %>">
         <% if (product.id) { %><input type="hidden" name="productId" value="<%= product.id %>" /><% } %>
+        <% if (typeof guard !== 'undefined' && guard) { %>
+          <input type="hidden" name="botToken" value="<%= guard.token %>" />
+          <div aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden">
+            <label for="hp-<%= guard.honeypotField %>">Leave this empty</label>
+            <input id="hp-<%= guard.honeypotField %>" name="<%= guard.honeypotField %>" tabindex="-1" autocomplete="off" value="" />
+          </div>
+        <% } %>
 
         <label for="fullName">Full name</label>
         <input id="fullName" name="fullName" required value="<%= (form.fullName || '') %>" />

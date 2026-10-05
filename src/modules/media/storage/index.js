@@ -63,8 +63,18 @@ function probeStorage() {
   return getStorage().probe();
 }
 
+/**
+ * The multipart-upload half of the active backend (MULTIPART.md): R2's real
+ * presigned uploads, or the sandbox's signed stand-ins on local disk.
+ */
+function getMultipart() {
+  // eslint-disable-next-line global-require
+  return env.storage.provider === 'r2' ? require('./r2Multipart') : require('./localMultipart');
+}
+
 module.exports = {
   getStorage,
+  getMultipart,
   describeStorage,
   r2ConfigError,
   probeStorage,

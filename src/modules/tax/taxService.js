@@ -14,13 +14,17 @@ const { applyBasisPoints } = require('../../core/utils/money');
  *
  * Tax is opt-in: unless workspace.settings.tax_enabled is true this returns
  * zero tax regardless of how many TaxRate rows exist.
+ *
+ * `transaction`: the caller's, when it prices inside one (order creation and
+ * edits). A read outside it would wait for a second pooled connection while
+ * the transaction holds the first, and a burst of checkouts starves the pool.
  */
-async function calculateTax(workspaceId, { country, region, lines, shippingAmount }) {
-  const workspace = await db.Workspace.findByPk(workspaceId);
+async function calculateTax(workspaceId, { country, region, lines, shippingAmount, transaction }) {
+  const workspace = await db.Workspace.findByPk(workspaceId, { transaction });
   const taxEnabled = Boolean(workspace && workspace.settings && workspace.settings.tax_enabled);
   if (!taxEnabled) return { taxAmount: 0, pricesIncludeTax: false };
 
-  const rates = await db.TaxRate.findAll({ where: { workspaceId } });
+  const rates = await db.TaxRate.findAll({ where: { workspaceId }, transaction });
   if (rates.length === 0) return { taxAmount: 0, pricesIncludeTax: false };
 
   const matchRate = (productId) => {

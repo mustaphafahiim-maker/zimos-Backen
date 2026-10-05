@@ -7,27 +7,48 @@ const { trackingLimiter, suggestLimiter, uploadLimiter } = require('../../core/m
 const customerUploadController = require('../customerUploads/customerUploadController');
 const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
-const cartController = require('../cart/cartController');
-const checkoutController = require('../checkout/checkoutController');
 const reviewController = require('../reviews/reviewController');
 const reviewSchemas = require('../reviews/reviewValidation');
+const cartController = require('../cart/cartController');
+const checkoutController = require('../checkout/checkoutController');
 const schemas = require('./storefrontValidation');
 const checkoutSchemas = require('../checkout/checkoutValidation');
 const checkoutSessionController = require('../checkoutSessions/checkoutSessionController');
 const checkoutSessionSchemas = require('../checkoutSessions/checkoutSessionValidation');
 const onlinePaymentController = require('../payments/onlinePaymentController');
 const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
+const botProtection = require('../risk/botProtection');
+const checkoutOtp = require('../risk/checkoutOtp');
+const lostOrders = require('../checkoutSessions/lostOrderService');
+const lostOrderController = require('../checkoutSessions/lostOrderController');
 
 const router = Router({ mergeParams: true });
 router.use(resolvePublicWorkspace);
 
+// Order bumps, cross-sell, the thank-you upsell and the exit popup (modules/offers).
+router.use(require('../offers/publicOfferRoutes'));
+
+// What the checkout form needs to pass the bot guard (a fresh time token).
+router.get('/checkout/guard', botProtection.guardConfig);
+// The unsubscribe link in a marketing email (notifications/marketingUnsubscribe.js).
+router.use(require('../notifications/marketingUnsubscribe').router);
+// The code-entry step of a checkout that answered 428 OTP_REQUIRED.
+router.post('/checkout/otp/verify', checkoutOtp.verify);
+router.post('/checkout/otp/resend', checkoutOtp.resend);
+// What a recovery link (/r/:token) rebuilds: the cart and the form.
+router.get('/recover/:token', lostOrderController.recover);
+
 router.get('/', validate(schemas.workspaceParam), controller.getStore);
+router.get('/policies/:key', validate(schemas.getPolicy), controller.getPolicy);
+router.get('/sitemap', validate(schemas.workspaceParam), controller.getSitemap);
 router.get('/products', collectOptionFilters, validate(schemas.listProducts), controller.listProducts);
 // Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
 router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
 router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getProduct);
 // Closed unless REVIEWS_PUBLIC_SUBMISSION_ENABLED (reviewController.submissionGate).
 router.post('/products/:productId/reviews', reviewController.submissionGate, validate(reviewSchemas.submit), reviewController.submit);
+// A product page's A/B test: which variant this visitor sees (catalog/productTests.js).
+router.use(require('../catalog/productTests').publicRouter);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 // A shopper's photo for a product's image field (customerUploads). Limited
 // before multer reads a byte; multer refuses anything over 15 MB mid-stream.
@@ -38,10 +59,12 @@ router.get('/collections/:collectionId', validate(schemas.getCollection), contro
 // can't pass validation never reaches the database; it keys on the phone and
 // order number, not the IP (see rateLimiters.js).
 router.get('/orders/track', trackingLimiter, validate(schemas.track), controller.trackOrder);
+// The signed link the store's messages carry; covered by the storefront limiter like every /store call.
+router.get('/orders/track-link', validate(schemas.trackLink), controller.trackOrderByToken);
 
 // Checkout-form autosave for abandoned-checkout recovery. An upsert keyed on
 // the visitor, so a replay is harmless and it takes no Idempotency-Key.
-router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), refuseDraftOrders, checkoutSessionController.capture);
+router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), refuseDraftOrders, require('../checkoutSessions/autosaveGuard').guardAutosave, checkoutSessionController.capture);
 
 // Read-only: prices the shipping line the checkout would get.
 router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shippingQuote);
@@ -57,7 +80,7 @@ router.post('/orders/:orderId/payment/return', validate(onlinePaymentSchemas.sho
 router.post('/orders/:orderId/payment/retry', validate(onlinePaymentSchemas.shopperRetry), onlinePaymentController.shopperRetry);
 router.post(
   '/orders/:orderId/payment/switch-to-cod',
-  validate(onlinePaymentSchemas.shopperAction),
+  validate(onlinePaymentSchemas.shopperSwitchToCod),
   onlinePaymentController.shopperSwitchToCod
 );
 
@@ -65,8 +88,14 @@ router.post(
 router.post(
   '/checkout',
   validate(checkoutSchemas.checkout),
+  // Honeypot, time token, optional challenge — modules/risk/botProtection.
+  botProtection.guardCheckout,
   refuseDraftOrders,
-  idempotent('storefront.checkout')(checkoutController.checkout)
+  // Phone verification, when the store asks for it — modules/risk/checkoutOtp.
+  checkoutOtp.guardCheckout,
+  idempotent('storefront.checkout')(checkoutController.checkout),
+  // A refused checkout is kept as a lost order (checkoutSessions/lostOrderService).
+  lostOrders.captureRefusal
 );
 
 module.exports = router;

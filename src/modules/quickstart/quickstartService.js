@@ -298,11 +298,16 @@ async function checkoutLocals(workspaceId, productId, ref = workspaceId) {
       priceLabel: formatMoney(productPriceMinor(product), productCurrency(product)),
     },
     actionUrl: `/shop/${ref}/checkout`,
+    // The bot guard's honeypot and time token (legacyCheckoutGuard.js); null when the store has it off.
+    guard: require('./legacyCheckoutGuard').guardFields(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'] })),
   };
 }
 
 async function placeSimpleOrder(workspaceId, form, req) {
   const { variantId } = await resolveCheckoutVariant(workspaceId, form.productId);
+  // The storefront checkout's protection: bot guard, phone verification, lost orders.
+  const guard = require('./legacyCheckoutGuard');
+  await guard.guardLegacyCheckout(req, null, variantId);
   const { order } = await orderService.createOrder(
     workspaceId,
     {
@@ -312,7 +317,10 @@ async function placeSimpleOrder(workspaceId, form, req) {
       paymentMethod: 'cod',
     },
     req
-  );
+  ).catch(async (err) => {
+    await guard.fileOrderRefusal(req, err);
+    throw err;
+  });
   // This form has no autosave of its own, but the shopper may have started a
   // checkout on the storefront API with the same phone. Never throws.
   await afterOrderCompleted(workspaceId, order);
