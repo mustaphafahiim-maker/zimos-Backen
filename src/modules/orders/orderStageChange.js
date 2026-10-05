@@ -201,12 +201,16 @@ async function changeStage(workspaceId, orderId, data, req) {
   const reason = data.reason ? data.reason.trim() : null;
   // Read by orderStateService.trackStage: the history row carries the reason.
   req.stageChangeReason = reason;
+  // "Notify the customer" (SPEC §4.6): rides on the event the move fires — order.confirmed,
+  // order.shipped / out_for_delivery / delivered / returned, order.cancelled — and the
+  // customer-facing consumers honour it (orderEmailService, orderPush, automations/jobs).
+  req.notifyCustomer = typeof data.notifyCustomer === 'boolean' ? data.notifyCustomer : undefined;
 
   if (to === 'cancelled') {
     await orderService.cancelOrder(
       workspaceId,
       orderId,
-      { reason: reason || 'Cancelled', acknowledgeManualCancel: Boolean(data.acknowledgeManualCancel) },
+      { reason: reason || 'Cancelled', acknowledgeManualCancel: Boolean(data.acknowledgeManualCancel), notifyCustomer: req.notifyCustomer },
       req
     );
   } else if (from === 'cancelled') {

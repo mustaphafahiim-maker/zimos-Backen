@@ -156,6 +156,9 @@ module.exports = {
       carrierCode: Joi.string().trim().min(1).max(100).optional(),
       waybillNumber: Joi.string().trim().max(100).allow('', null).optional(),
       trackingUrl: Joi.string().uri().max(500).allow('', null).optional(),
+      // Tell the customer (SPEC §4.6): false sends nothing (email, push, automations); true sends the
+      // stage's email even while its template is off; unset: as the store's settings say.
+      notifyCustomer: Joi.boolean().optional(),
     }),
   },
   // PATCH /:orderId/meta — tags (replace, or add/remove), test, seen, archive.
@@ -251,6 +254,8 @@ module.exports = {
         tags: tagList.optional(),
         carrierCode: Joi.string().trim().min(1).max(100).optional(),
         notes: Joi.string().max(500).allow('', null).optional(),
+        // set_status: tell the customers, as PATCH /:orderId/status.
+        notifyCustomer: Joi.boolean().optional(),
       }).default({}),
     }).xor('orderIds', 'filter'),
   },

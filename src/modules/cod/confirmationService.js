@@ -371,7 +371,12 @@ async function applyOutcome(task, order, { outcome, notes, rejectionReason, sour
   await setConfirmationState(workspaceId, order.id, outcome, req, transaction);
   // order.confirmed / order.rejected / order.unreachable / order.postponed — the
   // last two drive the "we tried to reach you" automations.
-  await require('../../core/outbox/outbox').record(transaction, `order.${outcome}`, { workspaceId, orderId: order.id });
+  await require('../../core/outbox/outbox').record(transaction, `order.${outcome}`, {
+    workspaceId,
+    orderId: order.id,
+    // The merchant's "notify the customer" when the move came from the order page (orderStageChange.js).
+    ...(req && typeof req.notifyCustomer === 'boolean' ? { notifyCustomer: req.notifyCustomer } : {}),
+  });
 
   if (outcome === 'rejected') {
     // Release (not commit) the reservation — stock returns to available,

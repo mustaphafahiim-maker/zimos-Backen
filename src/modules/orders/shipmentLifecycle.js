@@ -130,6 +130,8 @@ async function transitionShipment(
       workspaceId,
       orderId: shipment.orderId,
       shipmentId: shipment.id,
+      // The merchant's "notify the customer" on a status change (orderStageChange.js).
+      ...(req && typeof req.notifyCustomer === 'boolean' ? { notifyCustomer: req.notifyCustomer } : {}),
     });
   }
 
