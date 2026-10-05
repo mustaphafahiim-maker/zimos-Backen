@@ -104,6 +104,12 @@ module.exports = {
       adIds: Joi.object().pattern(/^[A-Za-z]{2,12}$/, Joi.string().max(500).allow('', null)).max(10).optional(),
       botToken: Joi.string().max(500).allow('', null).optional(),
       captchaToken: Joi.string().max(4000).allow('', null).optional(),
+      // The website page buttons / order forms the shopper used: their tags go on the customer,
+      // read from the published page (contacts/pageTags.js).
+      pageTags: Joi.array()
+        .items(Joi.object({ pageId: Joi.string().uuid().required(), elementId: Joi.string().trim().min(1).max(100).required() }))
+        .max(10)
+        .optional(),
       // Proof that the phone was verified (POST /checkout/otp/verify) — risk/checkoutOtp.
       otpToken: Joi.string().max(500).allow('', null).optional(),
       // Answers to the purchase-form fields with no column of their own

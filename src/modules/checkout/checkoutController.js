@@ -45,7 +45,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -157,6 +157,8 @@ const checkout = asyncHandler(async (req, res) => {
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
+    // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
+    await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
     await afterOrderCompleted(workspaceId, order, context);
     const transferPayment = await manualCheckout.record(order, manualTransfer);
     return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}) });
@@ -178,6 +180,7 @@ const checkout = asyncHandler(async (req, res) => {
 
   await saveCheckoutAnswers(order, workspace, formFields);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
+  await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 
   const attempt = await online.startAttempt(order, {
     provider: prepared.method.provider,
