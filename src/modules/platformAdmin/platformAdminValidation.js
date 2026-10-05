@@ -225,6 +225,11 @@ const manualSubscriptionSchemas = {
       duration: manualDuration.optional(),
       endsAt: Joi.date().iso().optional(),
       billingCycle: Joi.string().valid('monthly', 'yearly').optional(),
+      // billing/manualPricing: paid (default), free (a gift) or discounted by a
+      // percent or to a price per period (minor units). Checked against the plan there.
+      pricingKind: Joi.string().valid('paid', 'free', 'discounted').default('paid'),
+      discountPercent: Joi.number().integer().min(1).max(99).allow(null).optional(),
+      priceOverrideAmount: Joi.number().integer().min(1).allow(null).optional(),
       note: manualNote,
     }).xor('duration', 'endsAt'),
   },

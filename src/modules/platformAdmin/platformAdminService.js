@@ -5,6 +5,7 @@ const db = require('../../db/models');
 const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { planPrice, yearlyPriceFor } = require('../billing/planPricing');
+const { effectivePrice } = require('../billing/manualPricing');
 const publicPlans = require('../billing/publicPlansService');
 const { catalogForAdmin, featureDefinition, isAvailableFeature } = require('../billing/featureCatalog');
 
@@ -121,6 +122,13 @@ function serializeSubscription(s) {
     graceUntil: s.graceUntil,
     cancelAtPeriodEnd: s.cancelAtPeriodEnd,
     externalProvider: s.externalProvider,
+    // billing/manualPricing: paid, free (a gift) or discounted; effectivePrice
+    // is one billing period as the merchant pays it, minor units.
+    pricingKind: s.pricingKind || 'paid',
+    discountPercent: s.discountPercent ?? null,
+    priceOverrideAmount: s.priceOverrideAmount == null ? null : Number(s.priceOverrideAmount),
+    effectivePrice: effectivePrice(s, s.plan),
+    pricingExpiredAt: s.pricingExpiredAt || null,
     // Minor units, normalised to a month so a yearly and a monthly plan can be
     // compared. Only a paying subscription contributes.
     mrr,
@@ -143,7 +151,11 @@ function serializeSubscription(s) {
 function monthlyRunRate(s) {
   if (!s.plan) return 0;
   if (s.status !== 'active' && s.status !== 'past_due') return 0;
-  return s.billingCycle === 'yearly' ? Math.round(planPrice(s.plan, 'yearly') / 12) : planPrice(s.plan, 'monthly');
+  // A free one never counts; a discounted one counts at its own price, until
+  // its period ran out (billing/manualPricing).
+  if (s.pricingKind && s.pricingKind !== 'paid' && s.pricingExpiredAt) return 0;
+  const price = effectivePrice(s, s.plan);
+  return s.billingCycle === 'yearly' ? Math.round(price / 12) : price;
 }
 
 /**
@@ -317,8 +329,10 @@ async function listSubscriptions({ status } = {}) {
   const subscriptions = subs.map(serializeSubscription);
   // Totalled here rather than left to the client: every consumer that adds the
   // mrr column up needs the same currency check, and one that forgets it gets a
-  // number that is silently wrong rather than visibly absent.
-  return { subscriptions, ...aggregateMrr(subscriptions) };
+  // number that is silently wrong rather than visibly absent. `paidOnly` is
+  // the same total over the subscriptions at the plan's price.
+  const paid = aggregateMrr(subscriptions.filter((row) => row.pricingKind === 'paid'));
+  return { subscriptions, ...aggregateMrr(subscriptions), paidOnly: { mrr: paid.mrr, mrrCurrency: paid.mrrCurrency, mrrByCurrency: paid.mrrByCurrency } };
 }
 
 // -------------------------------------------------------------- feature flags
