@@ -605,6 +605,13 @@ Dropshipping: send an order to the supplier from the order page, forward automat
   - With "Move the order when the supplier's status changes" on, the mapped stage is applied through the normal status change (owner as actor, reason "<supplier>: <status>"), and only when the order can make that move by hand.
   - The sandbox moves with time: confirmed at 1 minute, shipped at 3, delivered at 6. A number ending in 0 comes back cancelled.
 - **Migration 437:** `dropship_order_refs.checked_at`, `last_error`, `forwarded_by`. **Next free migration: 438.**
+The `order.status_changed` webhook carries `old_status` and `new_status` (SPEC §16.1, "like EO").
+
+- **What they are:** the order's stage before and after, the status the orders screen shows. They sit in `data` next to `previous` / `current` / `changed`, which stay as they were.
+- **When they are equal:** when only a state behind the stage moved (a payment), with `changed` saying what did.
+- **An order placed before the endpoint existed** gets `old_status: null`, as `previous` is null.
+- **Docs:** the event's description in the catalogue (`GET /webhooks` → events, shown in the dashboard) and `docs/public-api.md` (sample payload and an explanation) say so.
+- **Backend only:** the dashboard reads the event catalogue from the server.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -806,7 +813,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 135. The order timeline shows the messages sent to the customer (§4.4).
 - [x] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
 - [x] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
-- [ ] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
+- [x] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
 - [ ] 139. Contact tags from purchase buttons on website pages too (§18.4).
 - [ ] 140. Subscribers get their portal link (§18.1).
 - [ ] 141. The store's subdomain can be changed in settings (§17.3).
