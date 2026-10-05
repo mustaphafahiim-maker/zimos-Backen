@@ -407,6 +407,26 @@ The server now reads the store's country (`core/utils/storeCountry.js`): `settin
 - **Risk score, phone rule and allowed countries:** `fraudRules.storeCountry` now reads the same setting. It used the language only, so an Arabic store set to Saudi Arabia was treated as Egyptian. The order's risk score now loads the setting too.
 - The country codes moved from `fraudRules` into the new module.
 - Existing customers in a non-Egyptian store whose local numbers were stored with +20 are not migrated: pre-launch, there are no live stores.
+Collection follows the order's currency (SPEC §11.5). Prices are still never converted.
+
+- **Payment methods:** a gateway shows only when its adapter takes the checkout's currency (`payments/methodCurrency.js`).
+  - The currency comes from the storefront (the cart's), else the funnel's, else the store's.
+  - Cash on delivery and manual transfers take any currency.
+  - An online checkout whose gateway cannot take the order's currency is refused (`PAYMENT_CURRENCY_UNSUPPORTED`) before the order is created. Before this, the order was created and its payment then failed.
+  - The pay page and retry list only the methods that take the order's currency.
+- **Payment fees:** a percentage applies in every currency. A fixed amount is money in one currency (the store's when unset) and applies only to orders in it.
+  - Each method can have one percentage and one fixed amount per currency. An order takes the fixed amount in its own currency, else the percentage.
+  - The storefront note now shows a fixed fee in its own currency; it always printed EGP before.
+- **Shipping groups:** each group has a currency (migration 434; null = the store's).
+  - A group in another currency is for funnels that sell in that currency, and it holds no products (`SHIPPING_GROUP_CURRENCY`).
+- **A funnel selling in a currency other than the store's:**
+  - Only its own group prices its shipping. The store's rates, default rate and threshold are in the store's currency and do not apply to it.
+  - The extra shipping options (express, pickup) are in the store's currency, so they are not offered.
+  - Its free-shipping threshold is its own setting (`freeShippingThresholdAmount`, in its currency); blank means no free shipping.
+  - It publishes only with a group in its currency that has a price for everywhere.
+  - A group in a currency other than the funnel's is ignored at pricing time and refused at publish.
+- **A funnel selling in the store's currency:** its own threshold applies when set, else the store's.
+- Editing an order's items now reprices shipping with its funnel, the same way placing the order does.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -592,7 +612,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 119. Recovery automations mark the lost order contacted; the ready-made recovery timing as the spec says (§6.4).
 - [x] 120. The tracking page accepts the store's own country's phones (§14.7).
 - [x] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
-- [ ] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
+- [x] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
 - [ ] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
 - [ ] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
 - [ ] 125. Product feed items land on their own variant (§7.8).
