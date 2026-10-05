@@ -476,6 +476,13 @@ A funnel's sales page with an order form (a `cod_form` element) now has order bu
   - They join the order as `orderBumps`, alongside the step's bump.
   - A refusal unticks them; the autosave and the purchase event count them.
 - **Currency:** an add-on priced in another currency than the order's is not offered. The storefront filters them by currency, and the server refuses one with `ORDER_BUMP_UNAVAILABLE` (`offerRules.resolveBumpItems`), so a funnel selling in dollars never gets a line priced in pounds.
+The courier's settlement statement is read from the file the courier sends (SPEC §15.5): an Excel workbook (.xlsx, its first sheet) or CSV. Before, the merchant had to re-save it as CSV.
+
+- **Upload:** the dashboard sends the file as it came (`fileBase64` + `fileName`, at most 1 MB). The server reads it with the product import's dependency-free sheet reader (`catalog/importExport/sheetReader.js`). CSV text (`csv`) is still accepted; a request carries one or the other.
+- **Header row:** couriers put a title, the account and the period above the table. The header is the first of the top 20 rows that names a waybill column and an amount column, and line numbers in the report are the file's own.
+- **More header names** are recognised, e.g. "AWB No.", "Waybill No", "COD Value", "Delivery fees", "رقم التتبع", "قيمة التحصيل", "مصاريف الشحن". Punctuation and spacing in headers are ignored. Waybills are still compared exactly as before.
+- **Skipped lines:** blank lines, and the totals line under the table (a "Total"/"الإجمالي" label), are not shipments. Any other line without a waybill is still reported as unreadable.
+- **Errors:** a file that is not an .xlsx or CSV is refused with a clear message (422).
 
 ## P0 — correctness, compliance, launch gates
 
@@ -666,7 +673,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
 - [x] 125. Product feed items land on their own variant (§7.8).
 - [x] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
-- [ ] 127. COD settlement statements read from the courier's Excel file (§15.5).
+- [x] 127. COD settlement statements read from the courier's Excel file (§15.5).
 - [ ] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
 - [ ] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
 - [ ] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
