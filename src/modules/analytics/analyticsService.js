@@ -162,7 +162,6 @@ async function getSummary(workspaceId, query = {}) {
     attributes: [
       'id', 'createdAt', 'currency', 'confirmationState', 'fulfillmentState', 'financialState', 'cancelledAt',
       'subtotalAmount', 'discountAmount', 'shippingAmount', 'totalAmount', 'amountPaid', 'amountRefunded',
-      'totalAmountBase', 'fxRateToBase',
     ],
     include: [
       {

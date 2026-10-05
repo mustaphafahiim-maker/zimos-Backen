@@ -255,6 +255,9 @@ function assertCheckoutForm(workspace, body) {
   for (const f of form.fields) {
     if (!f.enabled) continue;
     const { field, name, value } = readBodyValue(f.key, body);
+    // An order with no address at all is taken as before (the checkout never
+    // required one); the form's address rules apply once an address is sent.
+    if (!body.shippingAddress && String(field).startsWith('shippingAddress.')) continue;
     if (f.required && isBlank(value)) {
       problems.push({ field, message: `"${name}" is required` });
     } else if (f.custom && f.type === 'choice' && !isBlank(value) && !f.options.includes(String(value).trim())) {

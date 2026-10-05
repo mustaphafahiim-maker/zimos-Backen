@@ -509,6 +509,12 @@ const env = {
   // COD confirmation queue. A claim locks a task to one agent for this long;
   // an expired lock returns the task to Pending the next time the queue is
   // read or a task claimed (see modules/cod/confirmationService.js).
+  // ORDER_STATUS_GUARDS=true refuses an order status move the stage table
+  // (orders/orderStateService.js) does not allow, with 409, on the existing
+  // paths too (shipments, cancellation, payments). Off: they move as before;
+  // the history is still recorded.
+  orderStatusGuards: process.env.ORDER_STATUS_GUARDS === 'true',
+
   confirmation: {
     lockTtlMinutes: Math.max(1, parseInt(process.env.CONFIRMATION_LOCK_TTL_MINUTES || '15', 10) || 15),
   },

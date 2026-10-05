@@ -90,7 +90,7 @@ async function liveBlock(workspaceId, funnelId) {
       replacements
     ),
     select(
-      `SELECT count(*) AS orders, coalesce(sum(coalesce(o.total_amount_base, o.total_amount)) FILTER (WHERE o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'), 0) AS sales
+      `SELECT count(*) AS orders, coalesce(sum(o.total_amount) FILTER (WHERE o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'), 0) AS sales
          FROM orders o
         WHERE o.workspace_id = :workspaceId AND o.created_at >= (:today::date AT TIME ZONE :tz) AND ${countsAsSaleSql('o')} ${orderFunnel}`,
       replacements

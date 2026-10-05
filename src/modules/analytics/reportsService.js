@@ -104,10 +104,11 @@ function windowSql(workspaceId, { start, end }, tz) {
   const replacements = { workspaceId, start, end, tz };
   const run = (sql, extra) =>
     db.sequelize.query(sql, { replacements: { ...replacements, ...extra }, type: db.Sequelize.QueryTypes.SELECT });
-  const fx = 'coalesce(o.fx_rate_to_base, 1)';
+  // Orders are in the store's currency: no rate is recorded (currencies/baseAmounts.js).
+  const fx = '1';
   const ORDERS = `
     SELECT o.id, o.customer_id, o.created_at, o.confirmed_at, o.payment_method, o.confirmation_state,
-           coalesce(o.total_amount_base, o.total_amount) AS total,
+           o.total_amount AS total,
            round(o.subtotal_amount * ${fx}) AS subtotal,
            round(o.discount_amount * ${fx}) AS discount,
            round(o.shipping_amount * ${fx}) AS shipping,
@@ -542,7 +543,7 @@ async function getCustomersReport(workspaceId, query = {}) {
   const sale = countsAsSaleSql('o');
   // Every live order the store ever took, per customer — the lifetime view.
   const ALL = `
-    SELECT o.customer_id, o.created_at, coalesce(o.total_amount_base, o.total_amount) AS total
+    SELECT o.customer_id, o.created_at, o.total_amount AS total
       FROM orders o
      WHERE o.workspace_id = :workspaceId AND o.customer_id IS NOT NULL AND ${sale}
        AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'`;

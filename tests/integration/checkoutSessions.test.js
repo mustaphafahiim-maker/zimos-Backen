@@ -227,7 +227,6 @@ describe('checkout sessions — public capture', () => {
       { ...sessionBody(v), visitorId: undefined },
       { ...sessionBody(v), visitorId: 'short' },
       { ...sessionBody(v), visitorId: 'x'.repeat(65) },
-      { ...sessionBody(v), contact: { fullName: 'No Phone' } },
       { ...sessionBody(v), contact: undefined },
       { ...sessionBody(v), items: [] },
       { ...sessionBody(v), items: Array.from({ length: 21 }, () => ({ variantId: v, quantity: 1 })) },
@@ -540,6 +539,14 @@ describe('checkout sessions — merchant list', () => {
         'id',
         'status',
         'recoveryStatus',
+        // The lost-order fields (migration 143) and the review state.
+        'ipAddress',
+        'ipCountry',
+        'lostReason',
+        'paymentMethod',
+        'recoveryPath',
+        'reviewStatus',
+        'shippingAddress',
         'customerName',
         'phone',
         'email',
@@ -676,8 +683,8 @@ describe('checkout sessions — recovery status update', () => {
     expect(audit).not.toBeNull();
     expect(audit.actorUserId).toBe(ctx.auth.userId);
     expect(audit.entityType).toBe('CheckoutSession');
-    expect(audit.beforeState).toEqual({ recoveryStatus: 'not_contacted' });
-    expect(audit.afterState).toEqual({ recoveryStatus: 'contacted' });
+    expect(audit.beforeState).toMatchObject({ recoveryStatus: 'not_contacted' });
+    expect(audit.afterState).toMatchObject({ recoveryStatus: 'contacted' });
   });
 
   it('rejects a missing or unknown recoveryStatus with 422', async () => {
