@@ -530,6 +530,15 @@ Lost orders now keep where the shopper came from (SPEC §6.1 attribution).
   - Also medium, campaign, ad id and landing page.
 - **The dashboard row reads "Came from facebook · autumn-sale".** Hovering shows the medium, ad and landing page. The CSV export gains "Traffic source" and "Campaign" columns, at the end so existing columns keep their places.
 - **Converting a lost order copies its touches onto the order** when the order has none. The reports by source and campaign (`analytics/orderTouch.js`) then count it like any other order.
+The merchant now sets when a checkout counts as lost (SPEC §6.2 `abandoned_after_minutes`), from the Lost orders page.
+
+- **Where:** the line under the list ("A checkout counts as left after N minutes") gets a "Change" link. The link only shows for roles holding workspace.manage (owner, manager), because fraud_rules needs that permission. A 403 hides it.
+- **The dialog:**
+  - takes 5–1440 minutes, with 15 / 30 / 60 / 180 presets;
+  - "Use the default" sends null, which puts back 15.
+  - It is the Base UI Dialog that UI_SYSTEM.md asks for in new dialogs, so it has a focus trap and opens in a portal, centred wherever the page is scrolled.
+- **Backend unchanged:** it already stores the value under `settings.fraud_rules.abandoned_after_minutes`. The lost-order list and stats read it, and the `checkout.detect_abandoned` job applies it per store, which starts the recovery automations.
+- **After saving,** the list and the monthly figures reload, so rows that just crossed or uncrossed the line move.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -726,7 +735,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
 - [x] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
 - [x] 132. Lost orders keep their traffic source (§6.1).
-- [ ] 133. The merchant sets when a checkout counts as lost (§6.2).
+- [x] 133. The merchant sets when a checkout counts as lost (§6.2).
 - [ ] 134. "Notify the customer" on status changes, one order or many (§4.6).
 - [ ] 135. The order timeline shows the messages sent to the customer (§4.4).
 - [ ] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
