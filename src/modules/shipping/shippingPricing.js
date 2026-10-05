@@ -62,10 +62,13 @@ async function calculateShippingAmount(
     totalQuantity,
     offerShippingOverride,
     weightLines,
-    productLines,
+    productLines: rawProductLines,
+    // An order in a funnel: the funnel's shipping group prices every line (funnels/funnelShipping.js).
+    funnelId = null,
     transaction,
   }
 ) {
+  const productLines = await require('../funnels/funnelShipping').productLinesFor(workspaceId, funnelId, rawProductLines, transaction);
   const workspace = await db.Workspace.findByPk(workspaceId, { transaction });
   const settings = (workspace && workspace.settings) || {};
   const pricingMode = settings.shipping_pricing_mode === 'weight_tiers' ? 'weight_tiers' : 'rates';
@@ -101,7 +104,7 @@ async function calculateShippingAmount(
   const decided = rules.ruleBeforeRates({ country, offerShippingOverride, products, progress: freeShipping });
   if (decided) return result(decided);
 
-  const base = await resolveBase(workspaceId, settings, {
+  const storeBase = await resolveBase(workspaceId, settings, {
     pricingMode,
     country,
     region,
@@ -111,6 +114,8 @@ async function calculateShippingAmount(
     totalQuantity,
     transaction,
   });
+  // Products in a shipping group carry their own price (shippingProfiles.js): the dearest applies.
+  const base = await require('./shippingProfiles').applyProfiles(workspaceId, { base: storeBase, productLines, region, transaction });
   return result({
     ...base,
     amount: Number(base.amount) + products.extraFeesAmount,

@@ -132,6 +132,8 @@ async function computeWaybillModel(workspaceId, orderId) {
     amountToCollect: isCod ? String(codAmountFor(order)) : null,
     shipTo: order.contactSnapshot || {},
     address: order.shippingAddressSnapshot || {},
+    // The shopper's custom-field answers (waybill/customData.js).
+    customData: await require('./customData').customDataLines(order.id),
   };
   model.qrPayload = buildQrPayload(model);
   return model;
@@ -248,6 +250,12 @@ async function renderWaybillPdf(model) {
     doc.fillColor('#000');
   }
   y += 10;
+
+  // --- What the customer asked for (custom fields) ---------------------
+  if (model.customData && model.customData.length) {
+    y = label(doc, 'CUSTOMER DETAILS', left, y);
+    y = require('./customData').drawCustomData(doc, model.customData, { x: left, y, width, size: 9 }) + 8;
+  }
 
   // --- Payment -------------------------------------------------------
   if (isCod) {

@@ -156,6 +156,12 @@ function describeConnection(account, adapter, credentials) {
     connectedAt: account.createdAt,
     updatedAt: account.updatedAt,
     webhookUrl: webhookUrlFor(account),
+    booking: {
+      isDefault: Boolean(account.isDefault),
+      autoCreateOn: account.autoCreateOn || 'never',
+      allowInspection: Boolean(account.allowInspection),
+      courierNotes: account.courierNotes || null,
+    },
   };
   if (adapter && typeof adapter.isSandbox === 'function' && credentials) {
     connection.environment = adapter.isSandbox(credentials) ? 'sandbox' : 'production';
@@ -184,6 +190,8 @@ function describeAdapter(adapter) {
     name: adapter.name,
     webhookSetup: adapter.webhookSetup,
     supportsLabel: Boolean(adapter.supportsLabel),
+    // Where it delivers (ISO codes); the couriers so far are Egyptian.
+    countries: adapter.countries || ['EG'],
     credentialFields: adapter.credentialFields,
     settingFields: adapter.settingFields,
     capabilities: {
@@ -236,6 +244,8 @@ async function withAuthHandling(account, fn) {
   try {
     return await fn();
   } catch (err) {
+    // Rejected credentials or a missing permission: the merchant is told (once a day).
+    if (account) require('../notifications/integrationAlerts').carrier(account.workspaceId, account.carrierCode, err);
     if (err instanceof CarrierAuthError && account && account.id) {
       await db.CarrierAccount.update({ status: 'invalid' }, { where: { id: account.id } }).catch((updateErr) =>
         logger.error('Could not mark carrier account invalid', { accountId: account.id, message: updateErr.message })
