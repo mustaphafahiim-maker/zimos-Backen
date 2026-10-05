@@ -265,6 +265,8 @@ router.put(
   validate(schemas.save),
   asyncHandler(async (req, res) => res.json({ item: await saveItem(req.tenant.workspaceId, req.body, req) }))
 );
+// "Translate what's missing with AI": POST /ai and /ai/apply (aiFill.js), there only while AI_ENABLED is "true".
+router.use(require('../ai/aiGate').whenAiEnabled(require('./aiFill').router));
 
 module.exports = {
   router,
