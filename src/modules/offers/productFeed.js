@@ -16,7 +16,8 @@ const { resolveStoreInfo, publicLegalIndex } = require('../storefront/storeInfo'
  *   GET /api/v1/feeds/:workspaceSlug/:channel.xml   (or .csv)
  *   channel: meta | google | tiktok | snapchat
  *
- * One item per sellable variant, grouped by product (`item_group_id`), in the
+ * One item per sellable variant, grouped by product (`item_group_id`) and
+ * linking to that variant (`?variant=<id>`, preselected by the storefront), in the
  * Google Merchant RSS 2.0 shape, which all four platforms read. Hidden,
  * draft and archived products never appear; sold-out ones are left out unless
  * the merchant keeps them. The feed is built on request and kept for
@@ -115,7 +116,9 @@ async function buildItems(workspace) {
         item_group_id: product.productCode || product.id,
         title: [product.name, ...options].join(' - ').slice(0, 150),
         description,
-        link: `${base}/products/${product.slug}`,
+        // Each item lands on its own variant (the storefront reads ?variant=): the price,
+        // picture and availability the ad showed are the ones the shopper sees.
+        link: product.variants.length > 1 ? `${base}/products/${product.slug}?variant=${variant.id}` : `${base}/products/${product.slug}`,
         // A variant's own picture leads (SPEC §7.2); the product's follow.
         image_link: variant.imageUrl || images[0],
         additional_image_link: (variant.imageUrl ? images : images.slice(1)).slice(0, 10),
