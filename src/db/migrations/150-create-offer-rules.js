@@ -3,7 +3,7 @@
 const { guarded } = require('../migrationGuards');
 
 /**
- * Offer rules of SPEC §10.2–10.4 (lane 3):
+ * Offer rules of SPEC §10.2–10.4:
  *   order_bumps        up to three "add to your order" tick boxes per product
  *                      (product_id null = on every product);
  *   cross_sell_rules   "customers also bought": trigger products/collections

@@ -3,7 +3,7 @@
 const { guarded } = require('../migrationGuards');
 
 /**
- * Product fields of SPEC §7.1–7.4 (lane 3): display priority, the "special
+ * Product fields of SPEC §7.1–7.4: display priority, the "special
  * offer" line above the buy button, references to the same product on outside
  * platforms, the product page's settings and its structured content (features,
  * testimonials, FAQs). Option display types live inside the existing
