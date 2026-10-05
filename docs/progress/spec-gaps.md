@@ -445,6 +445,20 @@ Shipping is priced by the platform's places (`geo_regions`; new `shipping/shippi
   - Other countries keep free text.
   - The ship-to picker in the cart shows only for countries with a list; it showed Egypt's list to every store before.
 - Districts under a city (SPEC "areas", optional) are not priced separately yet: the cities exist in `geo_regions`, but the form takes the city as free text.
+Root domains and www (SPEC §8.11, new `domains/rootDomains.js`).
+
+- **A root domain** (example.com, example.com.eg — the second-level suffixes such as com.eg and co.uk are recognised) cannot take a CNAME.
+  - It is given A records to the platform's edge addresses (`PLATFORM_APEX_IPS`, comma-separated, set per deployment and documented in `.env.example`). An ALIAS / ANAME / flattened CNAME to the store's platform subdomain is offered as the alternative.
+  - Without `PLATFORM_APEX_IPS` only the ALIAS is offered. No addresses are written in code.
+  - A subdomain keeps its CNAME.
+- **www and the root are one address.** A root domain or its www can have the other one (its "counterpart") sent to it: `domains.counterpart`, migration 435.
+  - It is on by default when the domain is added, unless the counterpart is connected itself.
+  - `resolve-host` answers the counterpart with `redirectTo`, and the storefront proxy sends the visitor there (straight to the primary domain when there is one), same path and query, with a 307 like the existing primary-domain redirect.
+  - A counterpart verified as a domain of its own is served as itself. A pending one (someone else's) does not block the redirect.
+- **Certificates:** the counterpart has its own request through the certificate provider, beside the domain's own check. A provider failure for it never fails the domain's check. Turning the redirect off, or deleting the domain, revokes it (`certificates/README.md` step 4).
+- **The DNS check** reports the routing record whichever kind it is. A root counts as reaching the store when its addresses are the platform's or those of the platform subdomain, which covers an ALIAS. The counterpart is checked too.
+- **The dashboard** lists the A records and the ALIAS alternative, explains why a root takes no CNAME, and has a switch "Send www.<domain> here too" with that certificate's status.
+- `NO_COUNTERPART` (422) for a subdomain that is not www; `COUNTERPART_CONNECTED` (409) when the counterpart is verified as a domain of its own.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -632,7 +646,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 121. The store's country on the server: phones, OTP, the risk score and allowed countries (§5.2, §5.5).
 - [x] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
 - [x] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
-- [ ] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
+- [x] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
 - [ ] 125. Product feed items land on their own variant (§7.8).
 - [ ] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
 - [ ] 127. COD settlement statements read from the courier's Excel file (§15.5).
