@@ -539,6 +539,23 @@ The merchant now sets when a checkout counts as lost (SPEC §6.2 `abandoned_afte
   - It is the Base UI Dialog that UI_SYSTEM.md asks for in new dialogs, so it has a focus trap and opens in a portal, centred wherever the page is scrolled.
 - **Backend unchanged:** it already stores the value under `settings.fraud_rules.abandoned_after_minutes`. The lost-order list and stats read it, and the `checkout.detect_abandoned` job applies it per store, which starts the recovery automations.
 - **After saving,** the list and the monthly figures reload, so rows that just crossed or uncrossed the line move.
+"Notify the customer" on status changes, for one order or many (SPEC §4.6 `PATCH /:id/status {notifyCustomer?}` and bulk `set_status`).
+
+- **Backend:**
+  - PATCH /orders/:id/status and the bulk `set_status` payload accept `notifyCustomer`.
+  - The move puts the choice on the event it fires:
+    - order.confirmed, unreachable, postponed (confirmationService);
+    - order.shipped, out_for_delivery, delivered, returned (shipmentLifecycle);
+    - order.cancelled (cancelOrder, as the cancel button already did).
+  - The customer-facing consumers already honour it:
+    - **false:** no email, no push and no automation run;
+    - **true:** the stage's order email goes out even while its template is off, as for cancellations and refunds;
+    - **unset:** the store's settings decide.
+  - Webhooks, pixels, affiliates and courier booking ignore it, since they don't speak to the customer.
+- **Dashboard:**
+  - The order page's "Change status" dialog shows the same "Notify the customer" toggle as cancel and refund (ticked by default). So does the orders bulk bar's "Change status".
+  - The toggle only appears for moves the customer hears about: confirmed, follow-up, shipped, out for delivery, delivered, returned, cancelled.
+  - It does not appear for reopening or sending an order back to the queue, which send the customer nothing. The list of those moves is `ORDER_STAGES_THAT_NOTIFY` in the api-client.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -736,7 +753,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
 - [x] 132. Lost orders keep their traffic source (§6.1).
 - [x] 133. The merchant sets when a checkout counts as lost (§6.2).
-- [ ] 134. "Notify the customer" on status changes, one order or many (§4.6).
+- [x] 134. "Notify the customer" on status changes, one order or many (§4.6).
 - [ ] 135. The order timeline shows the messages sent to the customer (§4.4).
 - [ ] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
 - [ ] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
