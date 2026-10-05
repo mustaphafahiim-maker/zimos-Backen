@@ -840,6 +840,8 @@ async function getOrder(workspaceId, orderId) {
   const json = order.toJSON();
   // Shoppers' photos are shown through short-lived signed links, made per read.
   await presentOrderItems(workspaceId, json.items);
+  // Each line's product picture and the funnel's name (orderListDecor.js).
+  await require('./orderListDecor').decorateOne(workspaceId, json);
   // A funnel offer the shopper took after this order had left its offer
   // window is an order of its own: both ends name the other.
   const linkedOrders = await db.Order.findAll({
@@ -989,7 +991,7 @@ async function hydrateOrders(page) {
   const providers = await paymentProviders(rows);
   const shipments = await latestShipments(rows.map((row) => row.id));
   const byId = new Map(rows.map((row) => [row.id, row]));
-  return page
+  const orders = page
     .filter((row) => byId.has(row.id))
     .map((row) => ({
       ...byId.get(row.id).toJSON(),
@@ -998,6 +1000,8 @@ async function hydrateOrders(page) {
       // The list's shipping column: the latest shipment that is not cancelled.
       shipment: shipments.get(row.id) || null,
     }));
+  // Line pictures, the funnel's name and "New customer" (orderListDecor.js).
+  return orders.length ? require('./orderListDecor').decorateList(orders[0].workspaceId, orders) : orders;
 }
 
 /** Each order's latest shipment that is not cancelled: courier, waybill and status. One query for the page. */
