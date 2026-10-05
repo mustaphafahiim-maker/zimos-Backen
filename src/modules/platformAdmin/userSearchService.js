@@ -143,7 +143,7 @@ async function storesFor(userIds, matchedWorkspaces) {
   return byUser;
 }
 
-const USER_ATTRIBUTES = ['id', 'username', 'fullName', 'email', 'status', 'platformRole', 'createdAt', 'lastLoginAt', 'emailVerifiedAt'];
+const USER_ATTRIBUTES = ['id', 'username', 'fullName', 'email', 'status', 'platformRole', 'createdAt', 'lastLoginAt', 'emailVerifiedAt', 'deletedAt'];
 
 function toRow(user, stores) {
   return {
@@ -156,6 +156,7 @@ function toRow(user, stores) {
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
     emailVerified: Boolean(user.emailVerifiedAt),
+    deleted: Boolean(user.deletedAt),
     workspaces: stores || [],
   };
 }
@@ -179,10 +180,17 @@ async function searchUsers({ q = '', page = 1, limit = 25 } = {}) {
 
 /** GET /admin/users/:userId */
 async function getUser(userId) {
-  const user = await db.User.findByPk(userId, { attributes: [...USER_ATTRIBUTES, 'phone', 'usernameChangedAt'] });
+  const user = await db.User.findByPk(userId, { attributes: [...USER_ATTRIBUTES, 'phone', 'usernameChangedAt', 'suspendedAt', 'suspendedReason'] });
   if (!user) throw new NotFoundError('User');
   const stores = await storesFor([user.id], new Set());
-  return { ...toRow(user, stores.get(user.id)), phone: user.phone, usernameChangedAt: user.usernameChangedAt };
+  return {
+    ...toRow(user, stores.get(user.id)),
+    phone: user.phone,
+    usernameChangedAt: user.usernameChangedAt,
+    suspendedAt: user.suspendedAt,
+    suspendedReason: user.suspendedReason,
+    deletedAt: user.deletedAt,
+  };
 }
 
 module.exports = { searchUsers, getUser, MAX_LIMIT };

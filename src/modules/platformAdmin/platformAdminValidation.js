@@ -270,6 +270,24 @@ module.exports = {
     }),
   },
   userParams: { params: Joi.object({ userId: uuid.required() }) },
+  // The console asks before each of these; the API wants the same yes.
+  suspendUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({ reason: Joi.string().trim().min(2).max(500).required(), confirm: Joi.boolean().valid(true).required() }),
+  },
+  unsuspendUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({ reason: Joi.string().trim().max(500).allow('', null).optional(), confirm: Joi.boolean().valid(true).required() }),
+  },
+  deleteUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({
+      reason: Joi.string().trim().max(500).allow('', null).optional(),
+      // Required (as 'suspend') when the account owns stores.
+      stores: Joi.string().valid('suspend').optional(),
+      confirm: Joi.boolean().valid(true).required(),
+    }),
+  },
 
   createPlan: { body: planBody },
   updatePlan: { params: Joi.object({ planId: uuid.required() }), body: planBody },
