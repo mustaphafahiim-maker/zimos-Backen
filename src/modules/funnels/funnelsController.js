@@ -133,13 +133,22 @@ const resume = asyncHandler(async (req, res) => {
 });
 
 // --- public runtime ---
+// In the shopper's language.
+const localizeStep = async (req, funnelId, payload) => {
+  await require('../translations/contentTranslations').localizeFunnelStep(req, funnelId, payload);
+  return payload;
+};
+
 const startSession = asyncHandler(async (req, res) => {
-  const result = await service.startSession(req.tenant.workspaceId, req.params.funnelRef, req.body);
-  res.status(201).json(result);
+  // The visitor's country, for geo redirects (funnels/geoRedirects.js); null when unknown.
+  const country = await require('./geoRedirects').countryOf(req);
+  const result = await service.startSession(req.tenant.workspaceId, req.params.funnelRef, { ...req.body, country });
+  // In the shopper's language when the funnel is translated (translations/contentTranslations.js).
+  res.status(201).json(await localizeStep(req, result.funnel && result.funnel.id, result));
 });
 
 const getSessionStep = asyncHandler(async (req, res) => {
-  res.json(await service.getSessionStep(req.tenant.workspaceId, req.params.funnelId, req.params.sessionId));
+  res.json(await localizeStep(req, req.params.funnelId, await service.getSessionStep(req.tenant.workspaceId, req.params.funnelId, req.params.sessionId)));
 });
 
 const advance = asyncHandler(async (req, res) => {
@@ -176,5 +185,6 @@ module.exports = {
   resume,
   startSession,
   getSessionStep,
+  localizeStep,
   advance,
 };

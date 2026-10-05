@@ -23,5 +23,8 @@ router.post('/', validate(schemas.add), requireLive, customDomain, controller.ad
 router.get('/', validate(schemas.list), controller.list);
 router.post('/:domainId/verify', validate(schemas.verify), requireLive, customDomain, controller.verify);
 router.delete('/:domainId', validate(schemas.remove), controller.remove);
+// The domains screen: full list with DNS records, primary domain, home
+// funnel, certificate state, DNS propagation check (domainSettings.js).
+require('./domainSettings').mountStaffRoutes(router);
 
 module.exports = router;

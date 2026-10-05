@@ -1,6 +1,9 @@
 'use strict';
 
 const { ValidationError } = require('../../core/errors/AppError');
+const { validateElementStyle, namedStyleProblems } = require('./elementStyle');
+const showcase = require('./showcaseElements');
+const builderExtras = require('./builderExtras');
 
 /**
  * Pages are stored as a structured JSON tree, never raw HTML. Shape:
@@ -33,6 +36,8 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'map',
   'social_icons',
   'product_card',
+  // A picture with product hotspots (modules/shoppableImages).
+  'shoppable_image',
   'product_list',
   'collection_list',
   'cart',
@@ -45,9 +50,60 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'scroll_story',
   'marquee',
   'comparison',
+  // Builder elements of SPEC §9.3. Structured props like the rest,
+  // each with a contract in ELEMENT_PROP_RULES.
+  'text_link',
+  'tabs',
+  'toggle',
+  'carousel',
+  'stars_display',
+  'currency_converter',
+  'price',
+  'reviews_list',
+  'cod_form',
+  'checkout_summary',
+  'order_summary',
+  'upsell_accept_button',
+  'upsell_decline_link',
+  // SPEC §9.4: one block per item of a product's list (features, FAQs, …).
+  'repeater',
+  // SPEC §8.2 "HTML code" / §8.4: a placeholder that only names its block. The
+  // merchant's HTML is kept OUTSIDE the tree (customCode/htmlBlocks.js) and
+  // served to the live store's own host only — the tree itself never holds markup.
+  'html_block',
+  // Full-width storefront bands (slider, tiles, product rails…): showcaseElements.js.
+  ...showcase.TYPES,
+  // Gallery with thumbnails, variant and bundle pickers, review form: builderExtras.js.
+  ...builderExtras.TYPES,
 ]);
 
 const MAX_NODES = 10000;
+
+// --- data binding (SPEC §9.4) --------------------------------------------
+// `props.bindings = { <propKey>: '<source>' }`: the storefront fills that prop
+// from live data instead of the text typed in the editor, so one page works
+// for any product. Sources are a closed list — a binding is a name, never an
+// expression.
+const BINDING_SOURCE =
+  /^(?:product\.(?:title|description|price|compare_at|special_offer_text|images\[[0-9]\])|store\.(?:name|phone|email|address)|legal\.(?:refund_policy|privacy_policy|terms_of_service))$/;
+const REPEATER_SOURCES = ['product.cms.features', 'product.cms.testimonials', 'product.cms.faqs', 'product.reviews'];
+
+function validateBindings(bindings, field, errors) {
+  if (!isPlainObject(bindings)) {
+    errors.push({ field, message: '"bindings" must be an object of prop name → data source' });
+    return;
+  }
+  const entries = Object.entries(bindings);
+  if (entries.length > 20) errors.push({ field, message: 'At most 20 bindings per element' });
+  for (const [key, source] of entries) {
+    if (source === null || source === '') continue; // unbound
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) {
+      errors.push({ field: `${field}.${key}`, message: 'A binding is keyed by a prop name' });
+    } else if (typeof source !== 'string' || !BINDING_SOURCE.test(source)) {
+      errors.push({ field: `${field}.${key}`, message: `Unknown data source "${String(source).slice(0, 60)}"` });
+    }
+  }
+}
 const MAX_COLUMN_SPAN = 12;
 
 function isPlainObject(v) {
@@ -103,6 +159,7 @@ const check = {
     (typeof v === 'string' && v.length <= 20) || (Number.isFinite(v) && v > 0)
       ? null
       : 'must be a size keyword or a positive number',
+  bool: (v) => (typeof v === 'boolean' ? null : 'must be true or false'),
   boolOrString: (max) => (v) =>
     typeof v === 'boolean' || (typeof v === 'string' && v.length <= max)
       ? null
@@ -135,6 +192,44 @@ function validateProps(props, rules, field, errors) {
 }
 
 const ELEMENT_PROP_RULES = {
+  shoppable_image: { imageId: check.uuid, title: check.string(300) },
+  html_block: { blockId: (v) => (typeof v === 'string' && /^[a-z0-9]{8,24}$/.test(v) ? null : 'must be 8–24 lowercase letters or digits') },
+  repeater: {
+    title: check.string(300),
+    source: check.oneOf(...REPEATER_SOURCES),
+    layout: check.oneOf('list', 'grid'),
+    limit: check.intRange(1, 24),
+    productId: check.uuid,
+  },
+  // --- SPEC §9.3 builder elements ---------------------------------------
+  text_link: { text: check.string(300), href: check.url, newTab: check.bool },
+  tabs: {
+    title: check.string(300),
+    items: check.listOf(10, check.shape({ q: check.string(200), a: check.string(4000) })),
+  },
+  toggle: { title: check.string(300), body: check.string(4000), open: check.bool },
+  carousel: {
+    title: check.string(300),
+    images: check.listOf(20, check.url),
+    autoplay: check.bool,
+  },
+  stars_display: { rating: check.intRange(1, 5), label: check.string(200) },
+  // productId "" means "the page's product": the funnel step's product, or the
+  // store's newest one on a plain page.
+  price: { productId: check.uuid, showCompareAt: check.bool, size: check.oneOf('small', 'medium', 'large') },
+  reviews_list: { title: check.string(300), productId: check.uuid, limit: check.intRange(1, 50) },
+  cod_form: { title: check.string(300), productId: check.uuid },
+  checkout_summary: { title: check.string(300), buttonLabel: check.string(100) },
+  order_summary: { title: check.string(300) },
+  upsell_accept_button: { label: check.string(100) },
+  upsell_decline_link: { label: check.string(100) },
+  // The form's extra inputs (the original props stay free-form, as before).
+  form: {
+    extraFields: check.listOf(8, check.string(100)),
+    choiceLabel: check.string(100),
+    choices: check.listOf(20, check.string(80)),
+    checkboxLabel: check.string(200),
+  },
   shader_hero: {
     title: check.string(300),
     subtitle: check.string(600),
@@ -175,6 +270,12 @@ const ELEMENT_PROP_RULES = {
   },
 };
 
+Object.assign(ELEMENT_PROP_RULES, showcase.propRules(check));
+Object.assign(ELEMENT_PROP_RULES, builderExtras.propRules(check));
+for (const [type, rules] of Object.entries(builderExtras.extraRules(check))) ELEMENT_PROP_RULES[type] = { ...(ELEMENT_PROP_RULES[type] || {}), ...rules };
+// A countdown's fixed end (countdownDeadline.js).
+ELEMENT_PROP_RULES.countdown = { ...(ELEMENT_PROP_RULES.countdown || {}), endsAt: require('./countdownDeadline').endsAtRule };
+
 function pushIdCheck(node, field, errors) {
   if (typeof node.id !== 'string' || node.id.trim() === '') {
     errors.push({ field: `${field}.id`, message: 'Every node needs a non-empty string "id"' });
@@ -205,8 +306,14 @@ function validateElement(el, field, errors, counter) {
   } else if (isPlainObject(el.props) && ELEMENT_PROP_RULES[el.type]) {
     validateProps(el.props, ELEMENT_PROP_RULES[el.type], `${field}.props`, errors);
   }
+  if (isPlainObject(el.props) && el.props.bindings !== undefined && el.props.bindings !== null) {
+    validateBindings(el.props.bindings, `${field}.props.bindings`, errors);
+  }
   if (el.settings !== undefined && !isPlainObject(el.settings)) {
     errors.push({ field: `${field}.settings`, message: '"settings" must be an object when present' });
+  } else if (isPlainObject(el.settings)) {
+    // The element's own look, per device, and its named style (elementStyle.js).
+    validateElementStyle(el.settings, `${field}.settings`, errors);
   }
 }
 
@@ -307,6 +414,14 @@ function validatePageTree(data, { requireContent = false, label = 'page' } = {})
   }
   if (data.globalStyles !== undefined && !isPlainObject(data.globalStyles)) {
     errors.push({ field: 'data.globalStyles', message: '"globalStyles" must be an object when present' });
+  } else if (data.globalStyles !== undefined) {
+    errors.push(...namedStyleProblems(data.globalStyles, 'data.globalStyles'));
+  }
+
+  // The page's product: what product bindings and product elements with no
+  // product of their own read from (SPEC §9.4). "" means not chosen.
+  if (data.productId !== undefined && data.productId !== null && check.uuid(data.productId)) {
+    errors.push({ field: 'data.productId', message: '"productId" must be a UUID' });
   }
 
   const sections = data.sections;
