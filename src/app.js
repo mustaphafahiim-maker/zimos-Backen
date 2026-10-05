@@ -61,6 +61,7 @@ const onlinePaymentRoutes = require('./modules/payments/onlinePaymentRoutes');
 const paymentWebhookRoutes = require('./modules/payments/paymentWebhookRoutes');
 const analyticsRoutes = require('./modules/analytics/analyticsRoutes');
 const eventsPublicRoutes = require('./modules/analytics/eventsPublicRoutes');
+const siteEventsRoutes = require('./modules/siteAnalytics/siteEventsRoutes');
 const auditRoutes = require('./modules/audit/auditRoutes');
 const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
 const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
@@ -95,6 +96,9 @@ app.use(corsPolicy);
 // Storefront analytics beacons get their own, much smaller, body limit. Mounted
 // before the API-wide parser below, which then skips the already-read body.
 app.use(`/api/${env.apiVersion}/store/:workspaceId/events`, eventsPublicRoutes.eventsBodyParser);
+// The marketing site's anonymous beacon reads its own 2kb body and has its own
+// per-IP limit; off, the path answers 404 (siteAnalytics/).
+app.use(siteEventsRoutes.PATH, siteEventsRoutes);
 // `verify` keeps the exact bytes Express parsed so webhook signatures can be
 // checked against what the gateway actually signed — a re-serialised req.body
 // would differ by key order or whitespace and never match. See

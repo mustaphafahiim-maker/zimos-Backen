@@ -22,6 +22,7 @@ const { normalizePhone } = require('../../core/utils/phone');
 const usernameService = require('../users/usernameService');
 const { isUsernameConflict } = require('../users/username');
 const signupPolicy = require('./signupPolicy');
+const siteTraffic = require('../siteAnalytics/siteTrafficService');
 const verificationCodes = require('../otp/verificationCodeService');
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -107,7 +108,7 @@ async function sendSignupCode(user, { locale, req }) {
  * email not confirmed yet: a code to confirm it is emailed, and until it is,
  * starting a trial and publishing are refused (core/middleware/confirmedAccount).
  */
-async function register({ email, password, fullName, phone, username, planId, billingCycle, acceptTerms, locale }, req) {
+async function register({ email, password, fullName, phone, username, planId, billingCycle, acceptTerms, locale, siteSessionId }, req) {
   const existing = await db.User.findOne({ where: { email } });
   if (existing) {
     throw new ConflictError('An account with this email already exists', 'EMAIL_TAKEN');
@@ -135,6 +136,8 @@ async function register({ email, password, fullName, phone, username, planId, bi
     extra: verifying ? extra : { ...extra, status: 'active' },
   });
   await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
+  // Never throws: analytics cannot fail a sign-up.
+  await siteTraffic.linkSignup(user.id, siteSessionId);
 
   if (verifying) {
     const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
