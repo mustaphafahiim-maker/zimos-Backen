@@ -43,7 +43,7 @@ const form = (overrides = {}) => ({
   fullName: 'New Merchant',
   ...overrides,
 });
-const register = (body) => request(app).post('/api/v1/auth/register').send(body);
+const register = (body) => request(app).post('/api/v1/auth/register').send({ phone: '01012345678', ...body });
 const activate = (email) => db.User.update({ status: 'active', emailVerifiedAt: new Date() }, { where: { email } });
 // An account made the way they were before the flag was turned on.
 async function existingAccount() {

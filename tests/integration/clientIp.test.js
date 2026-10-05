@@ -111,7 +111,7 @@ describe('through the app: sessions, sign-up codes and the audit log', () => {
     const res = await request(app)
       .post('/api/v1/auth/register')
       .set({ 'X-Forwarded-For': `192.0.2.50, ${PROXY_IP}`, ...headers })
-      .send({ email, password: 'Passw0rd!123', fullName: 'Ip Probe' });
+      .send({ phone: '01012345678', email, password: 'Passw0rd!123', fullName: 'Ip Probe' });
     expect(res.status).toBe(201);
     const userId = res.body.user.id;
     const session = await db.Session.findOne({ where: { userId } });

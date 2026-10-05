@@ -47,7 +47,7 @@ const PASSWORD = 'Passw0rd!123';
 const register = (overrides = {}) =>
   request(app)
     .post('/api/v1/auth/register')
-    .send({ email: uniqueEmail('code'), password: PASSWORD, fullName: 'Code Person', ...overrides });
+    .send({ phone: '01012345678', email: uniqueEmail('code'), password: PASSWORD, fullName: 'Code Person', ...overrides });
 const bearer = (token) => ({ Authorization: `Bearer ${token}` });
 const send = (token, body = {}) => request(app).post('/api/v1/auth/verify/send').set(bearer(token)).send(body);
 const confirm = (token, code) => request(app).post('/api/v1/auth/verify/confirm').set(bearer(token)).send({ code });
@@ -97,8 +97,9 @@ describe('sign-up with a code', () => {
     expect(res.status).toBe(201);
     expect(res.body).not.toHaveProperty('accessToken');
     expect(res.body).not.toHaveProperty('refreshToken');
-    expect(res.body).toMatchObject({ verificationRequired: true, channels: ['email'], codeSent: true, channel: 'email' });
-    expect(res.body.targets).toEqual({ email: `${email[0]}***@example.com` });
+    // Every sign-up has a phone now, so SMS is offered beside email; the code goes by email.
+    expect(res.body).toMatchObject({ verificationRequired: true, channels: ['email', 'sms'], codeSent: true, channel: 'email' });
+    expect(res.body.targets).toMatchObject({ email: `${email[0]}***@example.com` });
     expect(res.body.verificationToken).toBeTruthy();
     expect(outbox).toHaveLength(1);
     expect(outbox[0]).toMatchObject({ channel: 'email', recipient: email, template: 'signup_code' });

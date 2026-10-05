@@ -20,6 +20,7 @@ const charges = require('../billing/subscriptionChargeService');
 const billingService = require('../billing/billingService');
 const specialTerms = require('../billing/specialTermsService');
 const suspension = require('./workspaceSuspensionService');
+const moderation = require('./userModerationService');
 
 // Every handler here sits behind `authenticate` and the platform permission
 // its route names (platformAdminRoutes).
@@ -321,6 +322,18 @@ const getUser = asyncHandler(async (req, res) => {
   res.json({ user: await userSearch.getUser(req.params.userId) });
 });
 
+const suspendUser = asyncHandler(async (req, res) => {
+  res.json({ user: await moderation.suspend(req.params.userId, req.body, req) });
+});
+
+const unsuspendUser = asyncHandler(async (req, res) => {
+  res.json({ user: await moderation.unsuspend(req.params.userId, req.body, req) });
+});
+
+const deleteUser = asyncHandler(async (req, res) => {
+  res.json({ user: await moderation.remove(req.params.userId, req.body, req) });
+});
+
 // 201 when the role was granted; 200 when the account already had that role.
 const grantAdmin = asyncHandler(async (req, res) => {
   const { admin, granted } = await adminUsers.grantAdmin(req.body, req);
@@ -404,6 +417,9 @@ module.exports = {
   grantSpecialTerms,
   getStoreAccess,
   suspendWorkspace,
+  suspendUser,
+  unsuspendUser,
+  deleteUser,
   reactivateWorkspace,
   getOverview,
   listAuditLog,

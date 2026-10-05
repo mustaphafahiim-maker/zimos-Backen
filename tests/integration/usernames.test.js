@@ -24,7 +24,7 @@ const email = (prefix = 'u') => `${prefix}${Date.now()}${(seq += 1)}@example.com
 const register = (body) =>
   request(app)
     .post('/api/v1/auth/register')
-    .send({ email: email(), password: 'Passw0rd!123', fullName: 'Name Here', ...body });
+    .send({ phone: '01012345678', email: email(), password: 'Passw0rd!123', fullName: 'Name Here', ...body });
 
 async function signedIn(body = {}) {
   const res = await register(body);
@@ -70,7 +70,7 @@ describe('usernames at sign-up', () => {
   it('gives one from the email to a sign-up that sends none (an older client)', async () => {
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email: `hana.k+shop${Date.now()}@example.com`, password: 'Passw0rd!123', fullName: 'Hana' });
+      .send({ phone: '01012345678', email: `hana.k+shop${Date.now()}@example.com`, password: 'Passw0rd!123', fullName: 'Hana' });
     expect(res.status).toBe(201);
     expect(res.body.user.username).toMatch(/^hana\.kshop\d+$/);
   });

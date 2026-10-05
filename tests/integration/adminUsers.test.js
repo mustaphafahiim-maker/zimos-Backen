@@ -235,7 +235,7 @@ describe('platform users: roles and permissions', () => {
     expect(unknown.body.error.code).toBe('USER_NOT_FOUND');
 
     const pendingEmail = `pending${Date.now()}@example.com`;
-    await request(app).post('/api/v1/auth/register').send({ email: pendingEmail, password: 'Passw0rd!123', fullName: 'Pending' });
+    await request(app).post('/api/v1/auth/register').send({ phone: '01012345678', email: pendingEmail, password: 'Passw0rd!123', fullName: 'Pending' });
     const pending = await grant(creator, { email: pendingEmail, role: 'admin' });
     expect(pending.status).toBe(409);
     expect(pending.body.error.code).toBe('USER_NOT_ACTIVE');

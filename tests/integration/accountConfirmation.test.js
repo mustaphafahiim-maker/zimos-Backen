@@ -47,7 +47,7 @@ async function softAccount(overrides = {}) {
   const email = overrides.email || uniqueEmail('soft');
   const res = await request(app)
     .post('/api/v1/auth/register')
-    .send({ email, password: PASSWORD, fullName: 'Soft Person', locale: 'en', ...overrides });
+    .send({ phone: '01012345678', email, password: PASSWORD, fullName: 'Soft Person', locale: 'en', ...overrides });
   expect(res.status).toBe(201);
   return { email, userId: res.body.user.id, accessToken: res.body.accessToken, H: bearer(res.body.accessToken), body: res.body };
 }
@@ -138,7 +138,7 @@ describe('a new account (sign-up codes off)', () => {
   it('is signed in at once and still signs up when no code can be sent', async () => {
     env.isProduction = true;
     env.notifications.emailProvider = 'console';
-    const res = await request(app).post('/api/v1/auth/register').send({ email: uniqueEmail('noemail'), password: PASSWORD, fullName: 'No Mail' });
+    const res = await request(app).post('/api/v1/auth/register').send({ phone: '01012345678', email: uniqueEmail('noemail'), password: PASSWORD, fullName: 'No Mail' });
     expect(res.status).toBe(201);
     expect(res.body.accessToken).toBeTruthy();
     expect(res.body.emailCode).toEqual({ sent: false });

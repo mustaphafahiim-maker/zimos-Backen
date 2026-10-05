@@ -26,6 +26,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: 'pending_verification',
       },
+      // Suspended or deleted from the console (migration 204,
+      // platformAdmin/userModerationService). Both set status 'suspended'.
+      suspendedAt: { type: DataTypes.DATE, allowNull: true, field: 'suspended_at' },
+      suspendedReason: { type: DataTypes.STRING(500), allowNull: true, field: 'suspended_reason' },
+      deletedAt: { type: DataTypes.DATE, allowNull: true, field: 'deleted_at' },
       emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
       phoneVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'phone_verified_at' },
       lastLoginAt: { type: DataTypes.DATE, allowNull: true, field: 'last_login_at' },

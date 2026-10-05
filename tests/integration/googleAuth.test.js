@@ -86,7 +86,7 @@ describe('Google OAuth login', () => {
   it('Google login with an email matching an existing confirmed password account links instead of duplicating', async () => {
     const reg = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email: 'existing@example.com', password: 'Passw0rd!123', fullName: 'Existing User' });
+      .send({ phone: '01012345678', email: 'existing@example.com', password: 'Passw0rd!123', fullName: 'Existing User' });
     expect(reg.status).toBe(201);
     // Its owner confirmed the email: the password is theirs and stays.
     await db.User.update({ emailVerifiedAt: new Date() }, { where: { email: 'existing@example.com' } });
@@ -117,7 +117,7 @@ describe('Google OAuth login', () => {
     // Anyone can sign up with an address they don't own; it stays unconfirmed.
     const reg = await request(app)
       .post('/api/v1/auth/register')
-      .send({ email: 'squatted@example.com', password: 'Passw0rd!123', fullName: 'Not The Owner' });
+      .send({ phone: '01012345678', email: 'squatted@example.com', password: 'Passw0rd!123', fullName: 'Not The Owner' });
     expect(reg.status).toBe(201);
     const before = await db.User.findOne({ where: { email: 'squatted@example.com' } });
     expect(before.emailVerifiedAt).toBeNull();

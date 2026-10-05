@@ -233,6 +233,7 @@ async function login({ identifier, email, password, locale }, req) {
   if (!passwordOk) {
     throw new AuthenticationError('Invalid sign-in details', 'INVALID_CREDENTIALS');
   }
+  if (user.deletedAt) throw new AuthenticationError('This account was deleted', 'ACCOUNT_DELETED');
   if (user.status === 'suspended') {
     throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
   }
@@ -272,6 +273,7 @@ async function login({ identifier, email, password, locale }, req) {
  * refuse it.
  */
 function assertMaySignIn(user) {
+  if (user.deletedAt) throw new AuthenticationError('This account was deleted', 'ACCOUNT_DELETED');
   if (user.status === 'active' || user.status === 'pending_verification') return;
   if (user.status === 'suspended') throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
   throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');
