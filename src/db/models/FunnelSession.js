@@ -12,6 +12,8 @@ module.exports = (sequelize, DataTypes) => {
       path: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
       orderId: { type: DataTypes.UUID, allowNull: true, field: 'order_id' },
       attribution: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // Sign-ups on its opt-in steps: { [stepKey]: { submissionId, customerId, at } } (migration 202, funnels/funnelOptIn.js).
+      optIns: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'opt_ins' },
       status: {
         type: DataTypes.ENUM('active', 'completed', 'abandoned'),
         allowNull: false,

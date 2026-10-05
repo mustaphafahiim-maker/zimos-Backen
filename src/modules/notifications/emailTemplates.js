@@ -199,6 +199,167 @@ ${codeHtml}
       ),
     };
   },
+
+  // The second step of a sign-in (modules/auth/twoFactorService.js).
+  login_code(data = {}) {
+    const code = String(data.code || '');
+    const minutes = Number(data.minutes) || 10;
+    const codeHtml = `<p dir="ltr" style="font-size:30px;font-weight:700;letter-spacing:8px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</p>`;
+    if (data.locale === 'en') {
+      return {
+        subject: 'Your Zimos sign-in code',
+        ...wrap(
+          `<p>Someone is signing in to your Zimos account from a new device. Enter this code to finish:</p>
+${codeHtml}
+<p>It is valid for ${minutes} minutes and works once.</p>
+<p style="color:#6b7280">If this was not you, change your password now: someone knows it.</p>`,
+          `Your Zimos sign-in code: ${code}\n\nIt is valid for ${minutes} minutes and works once.\n\nIf this was not you, change your password now.`
+        ),
+      };
+    }
+    return {
+      subject: 'رمز تسجيل الدخول إلى Zimos',
+      ...wrap(
+        `<p>في محاولة تسجيل دخول لحسابك على Zimos من جهاز جديد. اكتب الرمز ده عشان تكمل:</p>
+${codeHtml}
+<p>الرمز صالح لمدة ${minutes} دقائق ويُستخدم مرة واحدة.</p>
+<p style="color:#6b7280">لو مش إنت، غيّر كلمة السر حالًا: في حد عارفها.</p>`,
+        `رمز تسجيل الدخول إلى Zimos: ${code}\n\nصالح لمدة ${minutes} دقائق ويُستخدم مرة واحدة.\n\nلو مش إنت، غيّر كلمة السر حالًا.`
+      ),
+    };
+  },
+
+  // Something changed in how the person signs in (auth/twoFactorRecovery.js,
+  // auth/newDeviceSignIn.js). `kind` picks the text; no link, nothing to click.
+  security_notice(data = {}) {
+    const left = Number(data.left) || 0;
+    const en = data.locale === 'en';
+    const texts = {
+      backup_code_used: en
+        ? ['A backup code was used on your Zimos account', `Someone signed in to your Zimos account with one of your backup codes. You have ${left} left.`]
+        : ['تم استخدام رمز احتياطي في حسابك على Zimos', `حد سجّل دخول لحسابك على Zimos بواحد من الرموز الاحتياطية. فاضل معاك ${left}.`],
+      two_factor_reset: en
+        ? ['Two-step sign-in was turned off on your Zimos account', 'At your request, the Zimos team turned off two-step sign-in on your account and signed you out everywhere. Sign in and turn it back on from Settings → Security.']
+        : ['تم إيقاف التحقق بخطوتين في حسابك على Zimos', 'بناءً على طلبك، فريق Zimos وقّف التحقق بخطوتين في حسابك وسجّل خروجك من كل الأجهزة. سجّل دخول وشغّله تاني من الإعدادات ← الأمان.'],
+    };
+    // A sign-in from a browser new to the account (newDeviceSignIn.js).
+    const where = [data.device, data.ip].filter(Boolean).map(String).join(' · ');
+    const when = data.at ? new Date(data.at).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : '';
+    texts.new_sign_in = en
+      ? ['New sign-in to your Zimos account', `Your Zimos account was just signed in to from a new browser: ${where || 'unknown browser'}${when ? `, ${when}` : ''}. If this was you, there is nothing to do. If not, change your password now and end that session from Settings → Security.`]
+      : ['تسجيل دخول جديد لحسابك على Zimos', `حسابك على Zimos اتسجّل دخوله دلوقتي من متصفح جديد: ${where || 'متصفح غير معروف'}${when ? `، ${when}` : ''}. لو ده إنت، مفيش حاجة تعملها. لو مش إنت، غيّر كلمة السر حالًا وأنهِ الجلسة دي من الإعدادات ← الأمان.`];
+    const [subject, line] = texts[data.kind] || texts.two_factor_reset;
+    const warn = en ? 'If this was not you, change your password now and contact support.' : 'لو مش إنت، غيّر كلمة السر حالًا وكلّم الدعم.';
+    return {
+      subject,
+      ...wrap(`<p>${escapeHtml(line)}</p>\n<p style="color:#6b7280">${escapeHtml(warn)}</p>`, `${line}\n\n${warn}`, { dir: en ? 'ltr' : 'rtl' }),
+    };
+  },
+
+  // A store's email to its customer about an order (orderEmailService.js):
+  // the merchant's subject and text under the store's logo and colour.
+  order_email(data = {}) {
+    const subject = String(data.subject || data.storeName || '');
+    const color = /^#[0-9a-f]{6}$/i.test(data.color || '') ? data.color : '#2563EB';
+    const store = escapeHtml(data.storeName || '');
+    // Plain text in, safe HTML out: escaped, links made clickable, blank lines as paragraphs.
+    const linkify = (text) => text.replace(/(https?:\/\/[^\s<]+)/g, (url) => `<a href="${url}" style="color:${color}">${url}</a>`);
+    const paragraphs = String(data.body || '')
+      .split(/\n{2,}/)
+      .map((p) => `<p style="margin:0 0 14px">${linkify(escapeHtml(p)).replace(/\n/g, '<br />')}</p>`)
+      .join('\n');
+    const logo = data.logoUrl && /^https?:\/\//.test(data.logoUrl) ? `<img src="${escapeHtml(data.logoUrl)}" alt="${store}" style="max-height:48px;max-width:180px" />` : `<strong style="font-size:18px">${store}</strong>`;
+    // A marketing email (the abandoned cart) ends with its unsubscribe link (marketingUnsubscribe.js).
+    const unsubscribe = data.unsubscribeUrl && /^https?:\/\//.test(data.unsubscribeUrl) ? String(data.unsubscribeUrl) : null;
+    const unsubscribeHtml = unsubscribe
+      ? `\n<p style="font-size:13px;color:#6b7280;margin:14px 0 0">لا تريد رسائل تسويقية من ${store}؟ <a href="${escapeHtml(unsubscribe)}" style="color:#6b7280">إلغاء الاشتراك</a></p>`
+      : '';
+    return {
+      subject,
+      ...wrap(
+        `<div style="border-top:4px solid ${color};padding-top:18px;margin-bottom:18px">${logo}</div>
+${paragraphs}
+<p style="color:#6b7280;margin:18px 0 0">${store}</p>${unsubscribeHtml}`,
+        [data.body, data.storeName, unsubscribe && `إلغاء الاشتراك من الرسائل التسويقية: ${unsubscribe}`].filter(Boolean).join('\n\n'),
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  // An automation's email step (modules/automations): the merchant's own
+  // subject and text, to their customer, signed with the store's name.
+  automation_message(data = {}) {
+    const subject = String(data.subject || data.storeName || '');
+    const paragraphs = String(data.body || '')
+      .split(/\n{2,}/)
+      .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br />')}</p>`)
+      .join('\n');
+    const signature = data.storeName ? `<p style="color:#6b7280">${escapeHtml(data.storeName)}</p>` : '';
+    return {
+      subject,
+      ...wrap(`${paragraphs}\n${signature}`, [data.body, data.storeName].filter(Boolean).join('\n\n'), { dir: 'rtl', arabicFooter: true }),
+    };
+  },
+
+  // A merchant notification sent by email (merchantNotificationService): the
+  // same title and body the dashboard bell shows, with a link to the page.
+  // Changing the sign-in email (auth/emailChange.js): the link to the new
+  // address, and the two notices to the old one. Arabic first, then English.
+  email_change_confirm(data = {}) {
+    const url = link('/account/email-change', data.token || '');
+    const to = escapeHtml(data.newEmail || '');
+    return {
+      subject: 'أكّد بريدك الجديد في Zimos — Confirm your new Zimos email',
+      ...wrap(
+        `<p dir="rtl">طلبت تغيير بريد الدخول لحسابك في Zimos إلى <strong>${to}</strong>. افتح الرابط خلال ٢٤ ساعة لتأكيده:</p>
+<p><a href="${url}">تأكيد البريد الجديد — Confirm my new email</a></p>
+<p dir="ltr">You asked to change the email you sign in to Zimos with to <strong>${to}</strong>. Open the link within 24 hours to confirm it. If you didn't ask for this, ignore this email.</p>
+<p dir="ltr" style="color:#6b7280">${url}</p>`,
+        `طلبت تغيير بريد الدخول لحسابك في Zimos إلى ${data.newEmail}. افتح الرابط خلال ٢٤ ساعة لتأكيده:\n${url}\n\nYou asked to change your Zimos sign-in email to ${data.newEmail}. Confirm within 24 hours:\n${url}`,
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  email_change_requested(data = {}) {
+    const to = escapeHtml(data.newEmail || '');
+    return {
+      subject: 'طلب تغيير بريد حسابك في Zimos — Zimos email change requested',
+      ...wrap(
+        `<p dir="rtl">طُلب تغيير بريد الدخول لحسابك إلى <strong>${to}</strong>. لن يتغيّر شيء حتى يُفتح رابط التأكيد المرسل إلى العنوان الجديد. إذا لم تطلب ذلك فغيّر كلمة مرورك.</p>
+<p dir="ltr">Someone asked to change your Zimos sign-in email to <strong>${to}</strong>. Nothing changes until the link sent to that address is opened. If this wasn't you, change your password.</p>`,
+        `طُلب تغيير بريد الدخول لحسابك إلى ${data.newEmail}. إذا لم تطلب ذلك فغيّر كلمة مرورك.\n\nSomeone asked to change your Zimos sign-in email to ${data.newEmail}. If this wasn't you, change your password.`,
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  email_changed(data = {}) {
+    const to = escapeHtml(data.newEmail || '');
+    return {
+      subject: 'تم تغيير بريد حسابك في Zimos — Your Zimos email was changed',
+      ...wrap(
+        `<p dir="rtl">أصبح بريد الدخول لحسابك في Zimos <strong>${to}</strong>. إذا لم تقم بذلك فتواصل مع الدعم فورًا.</p>
+<p dir="ltr">Your Zimos sign-in email is now <strong>${to}</strong>. If you didn't do this, contact support right away.</p>`,
+        `أصبح بريد الدخول لحسابك في Zimos ${data.newEmail}.\n\nYour Zimos sign-in email is now ${data.newEmail}. If you didn't do this, contact support right away.`,
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  merchant_notification(data = {}) {
+    const title = String(data.title || '');
+    const body = data.body ? String(data.body) : '';
+    const url = data.link ? `${env.frontendUrl.replace(/\/$/, '')}${data.link}` : null;
+    return {
+      subject: title,
+      ...wrap(
+        `<p><strong>${escapeHtml(title)}</strong></p>${body ? `<p>${escapeHtml(body)}</p>` : ''}${url ? `<p><a href="${url}">فتح في لوحة التحكم</a></p>` : ''}`,
+        [title, body, url].filter(Boolean).join('\n\n'),
+        { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
 };
 
 function render(template, data) {

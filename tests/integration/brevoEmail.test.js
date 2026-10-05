@@ -70,7 +70,7 @@ describe('Brevo email adapter', () => {
 
   it('every registered template carries the shared spam-folder footer in html and text', () => {
     for (const name of emailTemplates.TEMPLATE_NAMES) {
-      const out = emailTemplates.render(name, { token: 'tok', fullName: 'X', workspaceName: 'WS', roleName: 'Owner' });
+      const out = emailTemplates.render(name, { token: 'tok', fullName: 'X', workspaceName: 'WS', roleName: 'Owner', subject: 'Subject', storeName: 'Store', title: 'Title' });
       expect(out.subject).toBeTruthy();
       expect(out.html).toContain(emailTemplates.SPAM_FOOTER);
       expect(out.text).toContain(emailTemplates.SPAM_FOOTER);

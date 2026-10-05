@@ -10,8 +10,20 @@ module.exports = (sequelize, DataTypes) => {
       subdomain: { type: DataTypes.STRING(100), allowNull: true, unique: true },
       status: { type: DataTypes.ENUM('draft', 'published', 'paused'), allowNull: false, defaultValue: 'draft' },
       publishedRevisionId: { type: DataTypes.UUID, allowNull: true, field: 'published_revision_id' },
+      // Share code, and the map editor's auto-saved draft (funnels/funnelExtras.js).
+      shareCode: { type: DataTypes.STRING(20), allowNull: true, unique: true, field: 'share_code' },
+      draftData: { type: DataTypes.JSONB, allowNull: true, field: 'draft_data' },
+      draftUpdatedAt: { type: DataTypes.DATE, allowNull: true, field: 'draft_updated_at' },
+      // { currency, faviconUrl, title, description } — funnels/geoRedirects.js.
+      settings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
     },
-    { tableName: 'funnels', indexes: [{ fields: ['workspace_id'] }] }
+    {
+      tableName: 'funnels',
+      indexes: [{ fields: ['workspace_id'] }],
+      // The auto-saved draft can be large: it is read only by the draft
+      // endpoints (Funnel.unscoped()), never with a funnel list or detail.
+      defaultScope: { attributes: { exclude: ['draftData'] } },
+    }
   );
   Funnel.associate = (models) => {
     Funnel.belongsTo(models.Workspace, { foreignKey: 'workspaceId', as: 'workspace' });

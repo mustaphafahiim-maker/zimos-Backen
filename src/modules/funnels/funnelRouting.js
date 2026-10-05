@@ -11,13 +11,16 @@
  *   { type: 'completed_checkout' }
  *   { type: 'accepted_offer' }      // an upsell/downsell was accepted
  *   { type: 'declined_offer' }      // an upsell/downsell was declined / skipped
+ *   { type: 'clicked_through', sourceElementId? }
+ *                                   // a button was pressed; with sourceElementId,
+ *                                   // only that button of the page
  *
  * Outcome shape from the client:
  *   { type: 'completed_checkout', orderId } | { type: 'accepted_offer' }
  *   | { type: 'declined_offer' } | { type: 'clicked_through' }
  */
 
-const CONDITION_TYPES = new Set(['always', 'completed_checkout', 'accepted_offer', 'declined_offer']);
+const CONDITION_TYPES = new Set(['always', 'completed_checkout', 'accepted_offer', 'declined_offer', 'clicked_through']);
 const OUTCOME_TYPES = new Set(['completed_checkout', 'accepted_offer', 'declined_offer', 'clicked_through']);
 
 /** @returns {string|null} an error message, or null when the condition is valid */
@@ -35,7 +38,12 @@ function conditionProblem(condition) {
 function matches(condition, outcome) {
   const type = condition && condition.type ? condition.type : 'always';
   if (type === 'always') return true;
-  return outcome && outcome.type === type;
+  if (!outcome || outcome.type !== type) return false;
+  // An edge drawn from one button only follows that button's click.
+  if (type === 'clicked_through' && condition.sourceElementId) {
+    return outcome.sourceElementId === condition.sourceElementId;
+  }
+  return true;
 }
 
 /**

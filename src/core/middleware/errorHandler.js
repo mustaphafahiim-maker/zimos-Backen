@@ -4,6 +4,13 @@ const { AppError } = require('../errors/AppError');
 const logger = require('../utils/logger');
 const env = require('../../config/env');
 
+const BODY_ERROR_CODES = {
+  'entity.parse.failed': 'INVALID_JSON',
+  'entity.too.large': 'PAYLOAD_TOO_LARGE',
+  'charset.unsupported': 'UNSUPPORTED_MEDIA_TYPE',
+  'encoding.unsupported': 'UNSUPPORTED_MEDIA_TYPE',
+};
+
 function notFoundHandler(req, res, next) {
   next(new AppError('ROUTE_NOT_FOUND', `Cannot ${req.method} ${req.originalUrl}`, 404));
 }
@@ -31,6 +38,16 @@ function errorHandler(err, req, res, next) {
         details: err.details,
         requestId,
       },
+    });
+  }
+
+  // The body parser's own refusals (malformed JSON, a body over the limit, an
+  // unsupported charset) are the client's fault: their 4xx, not a 500.
+  if (err.type && err.expose && err.status >= 400 && err.status < 500) {
+    const code = BODY_ERROR_CODES[err.type] || 'BAD_REQUEST';
+    logger.warn(err.message, { code, requestId });
+    return res.status(err.status).json({
+      error: { code, message: code === 'INVALID_JSON' ? 'Request body is not valid JSON' : err.message, requestId },
     });
   }
 

@@ -29,24 +29,52 @@ const SIGNATURES = [
   },
 ];
 
+// Binary glTF — the 3D product model a shopper can rotate on the storefront
+// (the product_3d page element). The header is 'glTF' + version 2 + total
+// length, so a truncated upload is refused here rather than failing in the
+// browser. A model is legitimately larger than an image, so it has its own
+// ceiling, and it is stored as uploaded (there is no image to re-encode).
+const MODEL_SIGNATURE = {
+  mime: 'model/gltf-binary',
+  ext: 'glb',
+  match: (b) => b.length >= 12 && b.toString('latin1', 0, 4) === 'glTF' && b.readUInt32LE(4) === 2,
+};
+const MAX_MODEL_BYTES = 15 * 1024 * 1024;
+// A product video (SPEC §7.1): MP4 (an ISO "ftyp" box at byte 4) or WebM
+// (the EBML magic). Stored as uploaded — there is no transcoder here — under
+// its own ceiling; the product page plays it beside the pictures.
+const VIDEO_SIGNATURES = [
+  { mime: 'video/mp4', ext: 'mp4', match: (b) => b.length >= 12 && b.toString('latin1', 4, 8) === 'ftyp' && !/^qt/.test(b.toString('latin1', 8, 12)) },
+  { mime: 'video/webm', ext: 'webm', match: (b) => b.length >= 4 && b.readUInt32BE(0) === 0x1a45dfa3 },
+];
+const MAX_VIDEO_BYTES = 30 * 1024 * 1024;
+// The widest limit any accepted type allows — what multer lets through before
+// storeImage applies the per-type ceiling.
+const MAX_UPLOAD_BYTES = Math.max(MAX_BYTES, MAX_MODEL_BYTES, MAX_VIDEO_BYTES);
+
 function detectImage(buffer) {
   return SIGNATURES.find((s) => s.match(buffer)) || null;
 }
 
 async function storeImage(workspaceId, file, req) {
   if (!file) throw new AppError('NO_FILE', 'No file was uploaded (field name must be "file")', 422);
-  if (file.size > MAX_BYTES) throw new AppError('FILE_TOO_LARGE', 'The file exceeds the 5MB limit', 413);
 
-  const sig = detectImage(file.buffer);
+  const isModel = MODEL_SIGNATURE.match(file.buffer);
+  const video = isModel ? null : VIDEO_SIGNATURES.find((v) => v.match(file.buffer)) || null;
+  const sig = isModel ? MODEL_SIGNATURE : video || detectImage(file.buffer);
   if (!sig) {
-    throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Only PNG, JPEG, GIF or WEBP images are accepted', 415);
+    throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Only PNG, JPEG, GIF or WEBP images, MP4 or WebM videos, or GLB 3D models, are accepted', 415);
+  }
+  const limit = isModel ? MAX_MODEL_BYTES : video ? MAX_VIDEO_BYTES : MAX_BYTES;
+  if (file.size > limit) {
+    throw new AppError('FILE_TOO_LARGE', `The file exceeds the ${Math.round(limit / (1024 * 1024))}MB limit`, 413);
   }
 
   // Upright, re-encoded in its own format, and stripped of EXIF / XMP / IPTC
   // (a phone photo's GPS position among them) before anything is stored. A
   // GIF keeps its frames and only loses its comment and XMP blocks. An image
   // that cannot be decoded is refused here (422 IMAGE_UNREADABLE).
-  const processed = await processMerchantImage(file.buffer, sig);
+  const processed = isModel || video ? file.buffer : await processMerchantImage(file.buffer, sig);
 
   const filename = `${crypto.randomUUID()}.${sig.ext}`;
   const { url, path } = await getStorage().put({
@@ -162,4 +190,4 @@ async function deleteMedia(workspaceId, mediaId, req) {
   return { deleted: true };
 }
 
-module.exports = { storeImage, listMedia, deleteMedia, detectImage, UPLOAD_ROOT, MAX_BYTES };
+module.exports = { storeImage, listMedia, deleteMedia, detectImage, UPLOAD_ROOT, MAX_BYTES, MAX_MODEL_BYTES, MAX_UPLOAD_BYTES };

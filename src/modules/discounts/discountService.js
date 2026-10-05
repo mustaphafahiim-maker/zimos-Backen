@@ -9,12 +9,13 @@ const { AppError } = require('../../core/errors/AppError');
  * amount (in minor units) to apply, WITHOUT redeeming it yet. Redemption
  * (which enforces usage limits atomically) happens in redeem(), called
  * inside the same order-creation transaction so a usage-limit check and the
- * increment that enforces it can never race.
+ * increment that enforces it can never race. `transaction` is that order
+ * transaction, so these reads do not need a second pooled connection.
  */
-async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds, customerId, funnelId }) {
+async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds, customerId, funnelId, transaction }) {
   if (!code) return { discount: null, amount: 0 };
 
-  const discount = await db.Discount.findOne({ where: { workspaceId, code, status: 'active' } });
+  const discount = await db.Discount.findOne({ where: { workspaceId, code, status: 'active' }, transaction });
   if (!discount) throw new AppError('INVALID_DISCOUNT_CODE', 'Discount code is invalid', 422);
 
   const now = new Date();
@@ -33,7 +34,7 @@ async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds
     throw new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'Discount code has reached its usage limit', 422);
   }
   if (discount.perCustomerLimit !== null && customerId) {
-    const used = await db.DiscountRedemption.count({ where: { discountId: discount.id, customerId } });
+    const used = await db.DiscountRedemption.count({ where: { discountId: discount.id, customerId }, transaction });
     if (used >= discount.perCustomerLimit) {
       throw new AppError('DISCOUNT_PER_CUSTOMER_LIMIT_REACHED', 'You have already used this discount code', 422);
     }

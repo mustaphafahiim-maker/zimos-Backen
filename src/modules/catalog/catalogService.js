@@ -94,7 +94,12 @@ async function createProduct(workspaceId, data, req) {
 
     const { stockOnHand, ...variantFields } = variantData;
     const variant = await db.ProductVariant.create(
-      { ...variantFields, workspaceId, productId: product.id, stockOnHand: 0 },
+      {
+        ...variantFields,
+        workspaceId,
+        productId: product.id,
+        stockOnHand: 0,
+      },
       { transaction: t }
     );
     await recordAudit({
@@ -132,8 +137,9 @@ function statusFilter(status) {
   return list.length === 1 ? list[0] : { [Op.in]: list };
 }
 
-async function listProducts(workspaceId, { status, collectionId, limit = 50, cursor } = {}) {
-  const where = { workspaceId };
+async function listProducts(workspaceId, { status, collectionId, limit = 50, cursor, ...filters } = {}) {
+  // Name, SKU, type and stock filters live in catalogBulk.listConditions.
+  const where = { workspaceId, [Op.and]: require('./catalogBulk').listConditions(filters) };
   if (status) where.status = statusFilter(status);
   if (cursor) where.id = { [db.Sequelize.Op.gt]: cursor };
 
@@ -913,6 +919,7 @@ async function createOffer(workspaceId, productId, data, req) {
         badge: data.badge,
         isDefault: data.isDefault,
         shippingOverride: data.shippingOverride,
+        countdownMinutes: data.countdownMinutes ?? null,
       },
       { transaction: t }
     );
@@ -998,6 +1005,7 @@ async function addProductToCollection(workspaceId, productId, collectionId, req)
 }
 
 module.exports = {
+  slugFor,
   generateProductCode,
   createProduct,
   listProducts,

@@ -26,9 +26,11 @@ const { DESTINATION_INDEPENDENT, RULES, settingsPriceShipping } = require('./shi
  *                        order is charged 0 and the storefront keeps its
  *                        "confirmed on the call" line, as it always has.
  */
-async function quote(workspaceId, { country, region, items }) {
+async function quote(workspaceId, { country, region, items, funnelId = null }) {
   const lines = [];
   for (const item of items) lines.push(await priceLine(workspaceId, item));
+  // The same bundle pricing the order will get, so the quote's subtotal is the real one.
+  const bundles = await require('../bundles/bundlePricing').applyBundleTiers(workspaceId, lines);
 
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const shipping = await calculateShippingAmount(workspaceId, {
@@ -39,13 +41,23 @@ async function quote(workspaceId, { country, region, items }) {
     offerShippingOverride: lines.find((l) => l.shippingOverride)?.shippingOverride || null,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
+    // A funnel's checkout: its shipping group (funnels/funnelShipping.js).
+    funnelId,
   });
 
   return {
     pricingMode: shipping.pricingMode,
+    // The choices the shopper has (standard first), with their amounts; [] = none (shippingOptions.js).
+    options: await require('./shippingOptions').quoteOptions(workspaceId, shipping),
     amount: Number(shipping.amount),
     currency: lines[0].currency,
     subtotal,
+    // What quantity bundles took off (already out of `subtotal`), and which.
+    bundleDiscountAmount: bundles.reduce((sum, b) => sum + b.amount, 0),
+    bundles,
+    // automaticDiscount (what a no-code discount will take off) and
+    // minimumOrder (the store's minimum and how far these items are from it).
+    ...(await require('../discounts/couponExtras').quoteExtras(workspaceId, { subtotal, productIds: lines.map((l) => l.productId) })),
     weightGrams: shipping.weightGrams,
     weightEstimated: shipping.weightEstimated,
     tier: shipping.tier,

@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const db = require('../../db/models');
 const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { setFulfillmentState } = require('./orderStateService');
+const { setFulfillmentState, trackStage } = require('./orderStateService');
 
 // A shipment past this point means the parcel has left the merchant's hands.
 const SHIPMENT_IN_MOTION = ['picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'returned'];
@@ -19,6 +19,16 @@ const SHIPMENT_FULFILLMENT = {
   returned: 'returned',
 };
 
+/** The automation trigger a shipment status change fires, if any. */
+function automationTrigger(fromStatus, toStatus) {
+  if (!toStatus || toStatus === fromStatus) return null;
+  if (toStatus === 'delivered') return 'order.delivered';
+  if (toStatus === 'out_for_delivery') return 'order.out_for_delivery';
+  if (toStatus === 'returned') return 'order.returned';
+  if (SHIPMENT_IN_MOTION.includes(toStatus) && !SHIPMENT_IN_MOTION.includes(fromStatus)) return 'order.shipped';
+  return null;
+}
+
 // Human-facing shipment reference: `zg` + 9 random digits.
 function generateTrackingCode() {
   return `zg${String(crypto.randomInt(0, 1_000_000_000)).padStart(9, '0')}`;
@@ -32,9 +42,12 @@ function generateTrackingCode() {
 async function insertShipment(values, transaction) {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      return await db.sequelize.transaction({ transaction }, (sp) =>
+      const shipment = await db.sequelize.transaction({ transaction }, (sp) =>
         db.Shipment.create({ ...values, trackingCode: generateTrackingCode() }, { transaction: sp })
       );
+      // The order's saved shipment draft (shipmentDraft.js) has served its purpose.
+      await db.Order.update({ shipmentDraft: null }, { where: { id: shipment.orderId }, transaction, silent: true });
+      return shipment;
     } catch (err) {
       if (err.name === 'SequelizeUniqueConstraintError' && attempt < 5) continue;
       throw err;
@@ -56,9 +69,19 @@ async function insertShipment(values, transaction) {
  *                          and the carrier bookkeeping of migration 102
  *                          (cancelMode, cancelAcknowledgedBy/At, nextPollAt,
  *                          pollFailures)
- * @param {object} ctx      { transaction, req, actorUserId, metadata }
+ * @param {object} ctx      { transaction, req, actorUserId, metadata,
+ *                          enforceStageGuard } — the last one refuses a
+ *                          status that would move the order to a stage it
+ *                          may not reach (orderStateService.STAGE_TRANSITIONS);
+ *                          set for a status a person typed in, never for a
+ *                          courier's report
  */
-async function transitionShipment(workspaceId, shipment, updates, { transaction, req = null, actorUserId = null, metadata = null }) {
+async function transitionShipment(
+  workspaceId,
+  shipment,
+  updates,
+  { transaction, req = null, actorUserId = null, metadata = null, enforceStageGuard = false }
+) {
   const before = shipment.toJSON();
 
   const changes = {};
@@ -81,9 +104,33 @@ async function transitionShipment(workspaceId, shipment, updates, { transaction,
   if (updates.status === 'delivered' && !shipment.deliveredAt) changes.deliveredAt = new Date();
   await shipment.update(changes, { transaction });
 
+  // The order's stage follows its latest shipment (orderStage.js): record the
+  // move, as the courier's when the status came from one.
+  await trackStage(workspaceId, shipment.orderId, {
+    req,
+    transaction,
+    ...(actorUserId
+      ? { actorType: 'user', actorId: actorUserId }
+      : metadata && metadata.source === 'carrier'
+        ? { actorType: 'carrier' }
+        : {}),
+    enforce: enforceStageGuard,
+  });
+
   const nextFulfillment = updates.status ? SHIPMENT_FULFILLMENT[updates.status] : null;
   if (nextFulfillment) {
     await setFulfillmentState(workspaceId, shipment.orderId, nextFulfillment, req, transaction);
+  }
+
+  // Customer notifications for shipment milestones (automations), only when
+  // the status actually changes.
+  const trigger = automationTrigger(before.status, updates.status);
+  if (trigger) {
+    await require('../../core/outbox/outbox').record(transaction || null, trigger, {
+      workspaceId,
+      orderId: shipment.orderId,
+      shipmentId: shipment.id,
+    });
   }
 
   await recordAudit({

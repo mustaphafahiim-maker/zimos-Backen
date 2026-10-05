@@ -1,6 +1,7 @@
 'use strict';
 
 const env = require('../../config/env');
+const requestContext = require('./requestContext');
 
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
 
@@ -66,10 +67,13 @@ function redact(meta) {
 
 function log(level, message, meta) {
   if (LEVELS[level] > currentLevel) return;
+  // The request or job this line belongs to (core/utils/requestContext).
+  const context = requestContext.current();
   const entry = {
     timestamp: new Date().toISOString(),
     level,
     message,
+    ...(context ? context : {}),
     ...(meta ? { meta: redact(meta) } : {}),
   };
   const line = JSON.stringify(entry);

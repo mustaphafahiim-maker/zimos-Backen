@@ -16,6 +16,13 @@ module.exports = (sequelize, DataTypes) => {
       },
       isPrimary: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_primary' },
       verifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'verified_at' },
+      // Certificate state through a provider, and the funnel on the domain's root
+      // (modules/domains/domainSettings.js).
+      sslStatus: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'none', field: 'ssl_status' },
+      sslProvider: { type: DataTypes.STRING(40), allowNull: true, field: 'ssl_provider' },
+      sslProviderRef: { type: DataTypes.STRING(200), allowNull: true, field: 'ssl_provider_ref' },
+      sslCheckedAt: { type: DataTypes.DATE, allowNull: true, field: 'ssl_checked_at' },
+      homeFunnelId: { type: DataTypes.UUID, allowNull: true, field: 'home_funnel_id' },
     },
     { tableName: 'domains', indexes: [{ unique: true, fields: ['hostname'] }, { fields: ['website_id'] }] }
   );

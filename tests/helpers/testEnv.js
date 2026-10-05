@@ -18,3 +18,4 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 process.env.JWT_ACCESS_SECRET = 'test-only-jwt-access-secret-never-used-outside-the-suite';
+process.env.INTEGRATIONS_ENCRYPTION_KEY = 'test-only-integrations-key-never-used-outside-the-suite';

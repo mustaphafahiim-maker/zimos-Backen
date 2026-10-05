@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../../db/models');
+const { resolvePageSettings, resolveCms, effectiveVariantPrice } = require('../catalog/productPage');
 
 /**
  * The shopper-facing shape of a product: only status='active' rows and only
@@ -8,15 +9,19 @@ const db = require('../../db/models');
  * Shared by the storefront listing, product page and search.
  */
 
-function toPublicVariant(variant) {
+function toPublicVariant(variant, product) {
+  // After a countdown offer ends the shopper sees (and pays) the full price.
+  const price = effectiveVariantPrice(variant, product || variant.product);
   return {
     id: variant.id,
     sku: variant.sku,
     optionValues: variant.optionValues,
-    priceAmount: variant.priceAmount,
-    compareAtAmount: variant.compareAtAmount,
+    priceAmount: price.priceAmount,
+    compareAtAmount: price.compareAtAmount,
     currency: variant.currency,
     weightGrams: variant.weightGrams,
+    // Its own picture, when the merchant gave it one (SPEC §7.2).
+    imageUrl: variant.imageUrl || null,
     // Availability is exposed as a boolean, not exact counts, so shoppers
     // (and competitors) never see precise stock levels via the public API.
     inStock: variant.allowOverselling || variant.stockOnHand - variant.reservedStock > 0,
@@ -46,10 +51,18 @@ function toPublicProduct(product) {
     media: product.media,
     tags: product.tags,
     seo: product.seo,
-    variants: (product.variants || []).map(toPublicVariant),
+    variants: (product.variants || []).map((variant) => toPublicVariant(variant, product)),
+    // How each option is drawn (buttons, dropdown, colour swatches, images).
+    options: Array.isArray(product.options) ? product.options : [],
+    priority: product.priority || 0,
+    specialOfferText: product.specialOfferText || null,
+    shippingMode: product.shippingMode,
+    pageSettings: resolvePageSettings(product.pageSettings),
+    cms: resolveCms(product.cms),
     offers: (product.offers || []).map(toPublicOffer),
     // The fields the shopper fills in when ordering; [] for most products.
     customFields: Array.isArray(product.customFields) ? product.customFields : [],
+    // Paid every period or in installments (SPEC §18.1); null when sold once.
   };
 }
 

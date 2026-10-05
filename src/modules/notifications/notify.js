@@ -6,11 +6,14 @@ const db = require('../../db/models');
 const emailTemplates = require('./emailTemplates');
 const brevoEmailProvider = require('./brevoEmailProvider');
 const twilioSmsProvider = require('./twilioSmsProvider');
+const platformWhatsapp = require('./platformWhatsapp');
 
 // Minimal SMS bodies. OTP flows pass { code } (and, for the sign-up code,
 // { minutes, locale }); anything else falls back to a terse template-name +
 // data dump so nothing sends blank.
 function smsBody(template, data = {}) {
+  // A ready text (automations' SMS step): sent as written.
+  if (typeof data.body === 'string' && data.body.trim()) return data.body;
   if (data.code) {
     const minutes = Number(data.minutes) || 5;
     if (data.locale === 'ar') return `رمز التحقق في Zimos: ${data.code}. صالح لمدة ${minutes} دقائق.`;
@@ -54,7 +57,7 @@ async function sendEmail({ recipient, template, data, workspaceId = null }) {
     if (provider === 'console') {
       logger.info(`[notification:email] ${template} -> ${recipient} :: ${subject}`, { data: loggable(data) });
     } else if (provider === 'brevo') {
-      const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text });
+      const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text, fromName: data && data.fromName ? String(data.fromName).slice(0, 100) : undefined, replyTo: data && data.replyTo ? String(data.replyTo) : undefined });
       attempts = sent.attempts || attempts;
     } else {
       throw new Error(`Email provider "${provider}" is not configured`);
@@ -76,8 +79,11 @@ async function sendChannel(channel, provider, { recipient, template, data, works
   let attempts = 1;
   try {
     if (provider === 'console') {
-      // WhatsApp is logged exactly as before.
-      logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: channel === 'whatsapp' ? data : loggable(data) });
+      // Nothing leaves the server: logged, as before.
+      logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: loggable(data) });
+    } else if (channel === 'whatsapp' && provider === 'cloud') {
+      // ZIMOS's own number (PLATFORM_WHATSAPP.md).
+      await platformWhatsapp.send({ to: recipient, template, data });
     } else if (channel === 'sms' && provider === 'twilio') {
       const sent = await twilioSmsProvider.sendSms({ to: recipient, body: smsBody(template, data) });
       attempts = sent.attempts || attempts;

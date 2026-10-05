@@ -3,6 +3,7 @@
 const Joi = require('joi');
 const { PRODUCT_SHIPPING_MODES } = require('../shipping/shippingRules');
 const { customFieldsSchema } = require('./customFields');
+const { optionSchema, productPageFields } = require('./productPage');
 
 const uuid = Joi.string().uuid();
 
@@ -27,10 +28,17 @@ const productFields = {
   description: Joi.string().allow('').max(20000),
   productType: Joi.string().valid('physical', 'digital', 'service'),
   status: productStatus,
-  options: Joi.array().items(Joi.object({ name: Joi.string().required(), values: Joi.array().items(Joi.string()) })),
+  options: Joi.array().items(optionSchema),
   media: Joi.array().items(Joi.object()),
   tags: Joi.array().items(Joi.string()),
-  seo: Joi.object(),
+  // The product page's search and sharing details (the storefront's metadata and sitemap read them).
+  // Other keys are kept as they were sent, as before.
+  seo: Joi.object({
+    title: Joi.string().trim().max(120).allow('', null),
+    description: Joi.string().trim().max(320).allow('', null),
+    imageUrl: Joi.string().trim().max(1000).uri({ scheme: ['http', 'https'] }).allow('', null),
+    noindex: Joi.boolean(),
+  }).unknown(true),
   websiteId: uuid,
   // How the product ships (shipping/shippingRules.js). The extra fee is per
   // unit, minor units, and goes with shippingMode 'extra_fee' only — the
@@ -40,6 +48,8 @@ const productFields = {
   // What the shopper fills in when ordering: at most five text / textarea /
   // image fields (catalog/customFields.js). Sent whole; [] removes them all.
   customFields: customFieldsSchema,
+  // Priority, special offer line, external refs, page settings and content.
+  ...productPageFields,
 };
 
 const product = {
@@ -66,6 +76,8 @@ const product = {
     }).optional(),
   }),
 };
+
+const variantImage = Joi.string().trim().uri({ scheme: ['http', 'https'] }).max(1000).allow('', null);
 
 // No `variant` here: variants are edited through their own endpoints.
 const productUpdate = {
@@ -95,6 +107,11 @@ const productList = {
       )
       .optional(),
     collectionId: uuid.optional(),
+    // Name contains / a variant's SKU contains / type / can still be sold or not.
+    q: Joi.string().trim().max(100).allow('').optional(),
+    sku: Joi.string().trim().max(100).allow('').optional(),
+    productType: Joi.string().valid('physical', 'digital', 'service').optional(),
+    stock: Joi.string().valid('in', 'out').optional(),
     limit: Joi.number().integer().min(1).max(200).default(50),
     cursor: uuid.optional(),
   }),
@@ -109,10 +126,14 @@ const variant = {
     priceAmount: Joi.number().integer().min(0).required(),
     compareAtAmount: Joi.number().integer().min(0).allow(null).optional(),
     costAmount: Joi.number().integer().min(0).allow(null).optional(),
-    currency: Joi.string().length(3).default('EGP'),
+    lowStockThreshold: Joi.number().integer().min(0).max(1000000).allow(null).optional(),
+    // Unset: the store's own currency (currencies/baseCurrency.js).
+    currency: Joi.string().length(3).uppercase().optional(),
     allowOverselling: Joi.boolean().default(false),
     weightGrams: weightGrams.optional(),
     dimensions: dimensions.optional(),
+    // The variant's own picture (http/https), shown when it is chosen.
+    imageUrl: variantImage.optional(),
     // Initial stock is set here at creation only; all later mutations go through /inventory endpoints.
     stockOnHand: Joi.number().integer().min(0).default(0),
   }),
@@ -130,9 +151,11 @@ const variantUpdate = {
     priceAmount: Joi.number().integer().min(0).optional(),
     compareAtAmount: Joi.number().integer().min(0).allow(null).optional(),
     costAmount: Joi.number().integer().min(0).allow(null).optional(),
+    lowStockThreshold: Joi.number().integer().min(0).max(1000000).allow(null).optional(),
     allowOverselling: Joi.boolean().optional(),
     weightGrams: weightGrams.optional(),
     dimensions: dimensions.optional(),
+    imageUrl: variantImage.optional(),
     status: Joi.string().valid('active', 'archived').optional(),
   }),
 };
@@ -145,10 +168,13 @@ const offer = {
     name: Joi.string().min(1).max(200).required(),
     pricingMode: Joi.string().valid('fixed', 'computed').default('fixed'),
     priceAmount: Joi.number().integer().min(0).when('pricingMode', { is: 'fixed', then: Joi.required() }),
-    currency: Joi.string().length(3).default('EGP'),
+    // Unset: the store's own currency (currencies/baseCurrency.js).
+    currency: Joi.string().length(3).uppercase().optional(),
     badge: Joi.string().max(100).allow(null, '').optional(),
     isDefault: Joi.boolean().default(false),
     shippingOverride: Joi.object().allow(null).optional(),
+    // Minutes a shopper has to take it as a one-click offer (offers/offerCountdown.js); null = none.
+    countdownMinutes: Joi.number().integer().min(1).max(1440).allow(null).optional(),
     lines: Joi.array()
       .items(Joi.object({ variantId: uuid.required(), quantity: Joi.number().integer().min(1).required() }))
       .min(1)
@@ -184,6 +210,8 @@ const offerUpdate = {
     badge: Joi.string().max(100).allow(null, '').optional(),
     isDefault: Joi.boolean().optional(),
     shippingOverride: Joi.object().allow(null).optional(),
+    // Minutes a shopper has to take it as a one-click offer (offers/offerCountdown.js); null = none.
+    countdownMinutes: Joi.number().integer().min(1).max(1440).allow(null).optional(),
     status: Joi.string().valid('active', 'archived').optional(),
     lines: Joi.array()
       .items(Joi.object({ variantId: uuid.required(), quantity: Joi.number().integer().min(1).required() }))
@@ -206,12 +234,15 @@ const collection = {
     slug: Joi.string().max(200).optional(),
     description: Joi.string().allow('').optional(),
     rules: Joi.object().allow(null).optional(),
-    seo: Joi.object().default({}),
+    // Same keys as a product's (title, description, imageUrl, noindex): the store's category page reads them.
+    seo: productFields.seo.default({}),
     // Null (or absent) is a top-level collection.
     parentId: uuid.allow(null).optional(),
     // Absent puts it after its siblings.
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
+    showInHeader: Joi.boolean().optional(),
+    hidden: Joi.boolean().optional(),
   }),
 };
 
@@ -228,10 +259,12 @@ const collectionUpdate = {
     slug: Joi.string().max(200).optional(),
     description: Joi.string().allow('').optional(),
     rules: Joi.object().allow(null).optional(),
-    seo: Joi.object().optional(),
+    seo: productFields.seo.optional(),
     parentId: uuid.allow(null).optional(),
     position: collectionPosition.optional(),
     imageUrl: collectionImage.optional(),
+    showInHeader: Joi.boolean().optional(),
+    hidden: Joi.boolean().optional(),
   }).min(1),
 };
 

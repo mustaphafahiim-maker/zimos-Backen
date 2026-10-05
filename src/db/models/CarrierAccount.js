@@ -16,6 +16,11 @@ module.exports = (sequelize, DataTypes) => {
       webhookToken: { type: DataTypes.STRING(100), allowNull: false, field: 'webhook_token' },
       settings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
       lastVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'last_verified_at' },
+      // How it books (migration 180, shipping/carrierBooking.js).
+      isDefault: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_default' },
+      autoCreateOn: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'never', field: 'auto_create_on' },
+      allowInspection: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'allow_inspection' },
+      courierNotes: { type: DataTypes.STRING(500), allowNull: true, field: 'courier_notes' },
     },
     {
       tableName: 'carrier_accounts',

@@ -1,6 +1,7 @@
 'use strict';
 
 const { ValidationError } = require('../../core/errors/AppError');
+const { resolveCheckoutForm, assertCheckoutForm } = require('./checkoutForm');
 
 /**
  * Which optional checkout fields a store asks for, and how hard it asks.
@@ -38,12 +39,9 @@ const DEFAULTS = Object.freeze({
 
 /** The effective settings for a workspace: stored values over the defaults. */
 function resolveCheckoutSettings(workspace) {
-  const stored = (workspace && workspace.settings && workspace.settings.checkout_settings) || {};
-  return {
-    email: MODES.includes(stored.email) ? stored.email : DEFAULTS.email,
-    postal_code: MODES.includes(stored.postal_code) ? stored.postal_code : DEFAULTS.postal_code,
-    notes: NOTES_MODES.includes(stored.notes) ? stored.notes : DEFAULTS.notes,
-  };
+  // The form builder (checkoutForm.js) owns the answer now: the three switches
+  // come back as before, with the full field list and form options beside them.
+  return resolveCheckoutForm(workspace);
 }
 
 const isBlank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
@@ -71,6 +69,9 @@ function assertRequiredCheckoutFields(workspace, body) {
   }
 
   if (problems.length) throw new ValidationError(problems, 'Invalid body');
+
+  // Every other field of the purchase form, and the discount-code switch.
+  assertCheckoutForm(workspace, body);
 }
 
 module.exports = {

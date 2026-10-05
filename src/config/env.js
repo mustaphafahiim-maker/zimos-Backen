@@ -13,6 +13,12 @@ function required(name, fallback) {
   return value;
 }
 
+// Production must not start on a secret anyone can read in this repository
+// (SPEC §3.4): the three keys below have to be set, at least 32 characters
+// long, and not one of the placeholders from .env.example / docker-compose.
+// Uploads must go to R2 — the local disk of a container is lost on redeploy —
+// unless ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true says the disk is a real volume.
+
 // A single DATABASE_URL (Railway / Heroku) wins over the separate DB_* vars,
 // except under NODE_ENV=test — tests always use the dedicated test database
 // so a deploy's DATABASE_URL can never point them at a live one.
@@ -159,6 +165,7 @@ const env = {
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },
+
 
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID || '',
@@ -502,12 +509,46 @@ const env = {
   // COD confirmation queue. A claim locks a task to one agent for this long;
   // an expired lock returns the task to Pending the next time the queue is
   // read or a task claimed (see modules/cod/confirmationService.js).
+  // ORDER_STATUS_GUARDS=true refuses an order status move the stage table
+  // (orders/orderStateService.js) does not allow, with 409, on the existing
+  // paths too (shipments, cancellation, payments). Off: they move as before;
+  // the history is still recorded.
+  orderStatusGuards: process.env.ORDER_STATUS_GUARDS === 'true',
+
   confirmation: {
     lockTtlMinutes: Math.max(1, parseInt(process.env.CONFIRMATION_LOCK_TTL_MINUTES || '15', 10) || 15),
   },
 
+  // Background work (core/queue, core/outbox, src/worker.js), on PostgreSQL.
+  // Off by default: the API runs no worker until WORKER_IN_PROCESS=true, or a
+  // separate `node src/worker.js` service runs it. Off, events wait in the
+  // outbox and jobs in queue_jobs until a worker starts. Never on under
+  // NODE_ENV=test: jobs and events run inline there.
+  queue: {
+    inProcess: process.env.NODE_ENV !== 'test' && process.env.WORKER_IN_PROCESS === 'true',
+    pollMs: Math.max(250, parseInt(process.env.QUEUE_POLL_MS || '1000', 10) || 1000),
+    concurrency: Math.max(1, parseInt(process.env.QUEUE_CONCURRENCY || '10', 10) || 10),
+  },
+
+  // Outbound webhooks to merchants' own systems (modules/webhooks).
   webhooks: {
     signingAlgo: process.env.WEBHOOK_SIGNING_ALGO || 'sha256',
+    // WEBHOOKS_IN_PROCESS=true: the API process runs the observer + dispatcher
+    // loop itself every intervalMs. Off by default; scripts/dispatch-webhooks.js
+    // from a cron service does the same work. Running both is safe, only
+    // slower to no purpose. Never on under NODE_ENV=test — the suite drives it by hand.
+    inProcess: process.env.NODE_ENV !== 'test' && process.env.WEBHOOKS_IN_PROCESS === 'true',
+    intervalMs: Math.max(1000, parseInt(process.env.WEBHOOKS_INTERVAL_MS || '5000', 10) || 5000),
+    // A merchant types the URL, and this server then POSTs to it: an address
+    // inside our own network (localhost, 10/8, the cloud metadata service…)
+    // must never be reachable that way. Allowed outside production only, so a
+    // developer can point a webhook at a receiver on their own machine.
+    allowPrivateUrls:
+      process.env.WEBHOOKS_ALLOW_PRIVATE_URLS !== undefined
+        ? process.env.WEBHOOKS_ALLOW_PRIVATE_URLS === 'true'
+        : process.env.NODE_ENV !== 'production',
+    timeoutMs: Math.max(1000, parseInt(process.env.WEBHOOKS_TIMEOUT_MS || '10000', 10) || 10000),
+    batchSize: Math.max(1, parseInt(process.env.WEBHOOKS_BATCH_SIZE || '50', 10) || 50),
   },
 
   // Merchant courier accounts (modules/shipping/carriers). The key encrypts

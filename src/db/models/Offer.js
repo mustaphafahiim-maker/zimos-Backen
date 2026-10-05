@@ -23,6 +23,8 @@ module.exports = (sequelize, DataTypes) => {
       badge: { type: DataTypes.STRING(100), allowNull: true },
       isDefault: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_default' },
       shippingOverride: { type: DataTypes.JSONB, allowNull: true, field: 'shipping_override' },
+      // Minutes a shopper has to take it as a one-click offer (migration 196, offers/offerCountdown.js).
+      countdownMinutes: { type: DataTypes.INTEGER, allowNull: true, field: 'countdown_minutes' },
       status: { type: DataTypes.ENUM('active', 'archived'), allowNull: false, defaultValue: 'active' },
       // True only when archived by its product's archive cascade (see catalogService).
       archivedWithProduct: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'archived_with_product' },

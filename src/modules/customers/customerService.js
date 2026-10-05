@@ -16,11 +16,14 @@ async function findOrCreateByPhone(workspaceId, { phone, alternatePhone, email, 
   const phoneNormalized = normalizePhone(phone);
   if (!phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
 
-  const [customer] = await db.Customer.findOrCreate({
+  const [customer, created] = await db.Customer.findOrCreate({
     where: { workspaceId, phoneNormalized },
-    defaults: { workspaceId, phoneNormalized, phoneRaw: phone, alternatePhone, email, fullName },
+    defaults: { workspaceId, phoneNormalized, phoneRaw: phone, alternatePhone, email, fullName, source: 'checkout' },
     transaction,
   });
+  if (created) {
+    await require('../../core/outbox/outbox').record(transaction || null, 'customer.created', { workspaceId, customerId: customer.id });
+  }
 
   // Keep contact details fresh on repeat orders without clobbering an
   // existing name/email with blanks.
@@ -67,6 +70,8 @@ async function applyBlacklist(customer, { isBlacklisted, reason }, req, transact
   if (!isBlacklisted) updates.blacklistedAt = null;
   else if (!customer.isBlacklisted || !customer.blacklistedAt) updates.blacklistedAt = new Date();
   await customer.update(updates, transaction ? { transaction } : undefined);
+  // The store blocklist (blocked_entries) carries the same fact as a phone entry.
+  await require('../fraud/blockedEntries').syncFromCustomer(customer, { isBlacklisted, reason }, req, transaction);
 
   await recordAudit({
     workspaceId: customer.workspaceId,

@@ -141,4 +141,4 @@ async function probe() {
   return { detail: `r2 bucket "${env.storage.r2.bucketName}"` };
 }
 
-module.exports = { put, get, remove, probe, putPrivate, getPrivate, removePrivate, _resetClient };
+module.exports = { put, get, remove, probe, putPrivate, getPrivate, removePrivate, _resetClient, getClient, privateBucket };

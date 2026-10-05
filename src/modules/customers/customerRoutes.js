@@ -18,4 +18,5 @@ router.patch('/:customerId/blacklist', validate(schemas.blacklist), requirePermi
 router.post('/:customerId/addresses', validate(schemas.addAddress), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), controller.addAddress);
 router.patch('/:customerId/addresses/:addressId', validate(schemas.updateAddress), requirePermission(PERMISSIONS.CUSTOMERS_MANAGE), controller.updateAddress);
 
+
 module.exports = router;

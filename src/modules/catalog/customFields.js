@@ -54,6 +54,8 @@ const fieldSchema = Joi.object({
     ],
     otherwise: Joi.forbidden(),
   }),
+  // Added to the unit price when the shopper fills it in (minor units) — catalog/customFieldPricing.js.
+  priceDeltaAmount: Joi.number().integer().min(0).max(100000000).optional(),
 });
 
 /** The product field: a list of definitions, unique by id. */
@@ -67,6 +69,9 @@ const customizationsInputSchema = Joi.object()
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Control characters other than tab and line breaks.
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+
+// What the answer added to the price, kept with it so the order shows it.
+const priced = (field) => (Number(field.priceDeltaAmount) > 0 ? { priceDeltaAmount: Number(field.priceDeltaAmount) } : {});
 
 function limitFor(field) {
   const limits = TEXT_LIMITS[field.type];
@@ -137,7 +142,7 @@ async function resolveCustomizations(product, input, { workspaceId, visitorId, c
         });
         continue;
       }
-      snapshot.push({ fieldId: field.id, type: 'image', label, uploadId: upload.id });
+      snapshot.push({ fieldId: field.id, type: 'image', label, uploadId: upload.id, ...priced(field) });
       continue;
     }
 
@@ -158,7 +163,7 @@ async function resolveCustomizations(product, input, { workspaceId, visitorId, c
       });
       continue;
     }
-    snapshot.push({ fieldId: field.id, type: field.type, label, value: text });
+    snapshot.push({ fieldId: field.id, type: field.type, label, value: text, ...priced(field) });
   }
 
   if (problems.length > 0) {

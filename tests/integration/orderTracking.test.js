@@ -64,12 +64,20 @@ describe('public order tracking', () => {
     expect(Object.keys(res.body.result).sort()).toEqual([
       'currency',
       'discountAmount',
+      // The tracking page's extras: digital downloads, the merchant's public notes,
+      // the shipment, the order's state and steps, and the signed link token.
+      'downloads',
       'items',
+      'notes',
       'orderNumber',
+      'shipment',
       'shippingAmount',
       'stage',
+      'state',
+      'steps',
       'subtotalAmount',
       'totalAmount',
+      'trackingToken',
       'updatedAt',
     ]);
   });

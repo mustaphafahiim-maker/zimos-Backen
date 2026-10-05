@@ -1,10 +1,14 @@
 'use strict';
 
+const { effectiveVariantPrice } = require('../catalog/productPage');
+
 const crypto = require('crypto');
 const db = require('../../db/models');
 const { NotFoundError, AppError } = require('../../core/errors/AppError');
 const { toPublicVariant } = require('../storefront/storefrontService');
 const { resolveCustomizations, sameCustomizations, snapshotToInput, bindUploadsToCart } = require('../catalog/customFields');
+const { customFieldsDelta } = require('../catalog/customFieldPricing');
+const productTests = require('../catalog/productTests');
 
 function generateGuestToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -28,10 +32,23 @@ async function getOrCreateCart(workspaceId, guestToken) {
 async function getCart(workspaceId, cartId) {
   const cart = await db.Cart.findOne({
     where: { id: cartId, workspaceId },
-    include: [{ model: db.CartItem, as: 'items', include: [{ model: db.ProductVariant, as: 'variant' }, { model: db.Offer, as: 'offer' }] }],
+    include: [
+      {
+        model: db.CartItem,
+        as: 'items',
+        include: [
+          // The product rides along for its countdown offer (catalog/productPage.js).
+          { model: db.ProductVariant, as: 'variant', include: [{ model: db.Product, as: 'product', attributes: ['id', 'pageSettings', 'customFields'] }] },
+          { model: db.Offer, as: 'offer' },
+        ],
+      },
+    ],
   });
   if (!cart) throw new NotFoundError('Cart');
-  return withComputedTotals(cart);
+  // A product A/B test prices plain lines for whoever filled the cart (catalog/productTests.js).
+  const testPrices = await productTests.visitorPrices(workspaceId, (cart.items || []).filter((i) => !i.offerId).map((i) => i.variantId), cart.visitorId);
+  // Quantity bundles lower the lines they cover, as they will on the order.
+  return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart, testPrices));
 }
 
 /**
@@ -41,9 +58,16 @@ async function getCart(workspaceId, cartId) {
  * The authoritative price is always resolved again at checkout time inside
  * orderService, exactly like every other entry point into order creation.
  */
-function withComputedTotals(cart) {
+function withComputedTotals(cart, testPrices = new Map()) {
   const items = (cart.items || []).map((item) => {
-    const currentUnitPrice = item.offer ? item.offer.priceAmount : item.variant.priceAmount;
+    const listUnit = item.offer
+      ? item.offer.priceAmount
+      : testPrices.has(item.variantId)
+        ? testPrices.get(item.variantId)
+        : effectiveVariantPrice(item.variant, item.variant.product).priceAmount;
+    // Priced custom fields (catalog/customFieldPricing.js), as the order will charge them.
+    const fieldsDelta = customFieldsDelta(item.variant && item.variant.product && item.variant.product.customFields, item.customizations);
+    const currentUnitPrice = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
     return {
       id: item.id,
       variantId: item.variantId,
@@ -87,12 +111,17 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
     enforceRequired: true,
   });
 
-  let unitPrice = variant.priceAmount;
+  // The cart is priced for whoever last added to it (catalog/productTests.js).
+  if (visitorId) await db.Cart.update({ visitorId }, { where: { id: cartId, workspaceId } });
+  const testPrice = offerId ? undefined : (await productTests.visitorPrices(workspaceId, [variantId], visitorId)).get(variantId);
+  let unitPrice = testPrice !== undefined ? testPrice : variant.priceAmount;
   if (offerId) {
     const offer = await db.Offer.findOne({ where: { id: offerId, workspaceId, productId: variant.productId, status: 'active' } });
     if (!offer) throw new NotFoundError('Offer');
     unitPrice = offer.priceAmount;
   }
+  const fieldsDelta = customFieldsDelta(variant.product.customFields, snapshot);
+  if (fieldsDelta) unitPrice = Number(unitPrice) + fieldsDelta;
 
   // The same product with different answers ("Ahmed" / "Sara" engraved) is a
   // line of its own; only identical ones add up.
