@@ -27,6 +27,15 @@ module.exports = (sequelize, DataTypes) => {
       // attached, so it prices every charge: the first and each renewal.
       referralCodeId: { type: DataTypes.UUID, allowNull: true, field: 'referral_code_id' },
       referralCodeAttachedAt: { type: DataTypes.DATE, allowNull: true, field: 'referral_code_attached_at' },
+      // What a manual subscription costs (migration 205, billing/manualPricing):
+      // 'paid' = the plan's price, 'free' = a gift, 'discounted' = a percent off
+      // or a price per period (minor units). pricingExpiredAt: when a free or
+      // discounted period ran out and the sweep moved it to past_due.
+      pricingKind: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'paid', field: 'pricing_kind' },
+      discountPercent: { type: DataTypes.INTEGER, allowNull: true, field: 'discount_percent' },
+      priceOverrideAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'price_override_amount' },
+      grantedByUserId: { type: DataTypes.UUID, allowNull: true, field: 'granted_by_user_id' },
+      pricingExpiredAt: { type: DataTypes.DATE, allowNull: true, field: 'pricing_expired_at' },
     },
     { tableName: 'subscriptions', indexes: [{ unique: true, fields: ['workspace_id'] }] }
   );

@@ -8,6 +8,7 @@ const referralCodes = require('../referrals/referralCodeService');
 const commissions = require('../referrals/commissionService');
 const { planPrice, addBillingPeriod } = require('./planPricing');
 const specialTerms = require('./specialTermsService');
+const manualPricing = require('./manualPricing');
 
 /**
  * Subscription charges: one billing_invoices row per charge, the first and
@@ -170,6 +171,12 @@ async function createChargeInTransaction(workspaceId, { now = new Date(), req = 
     transaction,
   });
   if (pending) return { invoice: pending, created: false };
+  // A free or discounted manual subscription (billing/manualPricing) is never
+  // charged at the plan's price, also after its period ran out: the console
+  // sets it to paid again first.
+  if (manualPricing.isManuallyPriced(subscription)) {
+    throw new ConflictError('This subscription is free or discounted by the platform, so it is not charged here.', 'MANUAL_PRICING');
+  }
 
   const { pricing, override, periodStart, periodEnd } = await nextChargeTerms(subscription, transaction, { now, lock: true });
   if (pricing.specialTermsId) await override.increment('chargesUsed', { by: 1, transaction });
@@ -648,7 +655,7 @@ async function listCharges(workspaceId) {
   const plan = subscription.plan;
   const hasPending = invoices.some((i) => i.status === 'pending');
   let nextCharge = null;
-  if (plan && !hasPending && planPrice(plan, subscription.billingCycle) > 0) {
+  if (plan && !hasPending && !manualPricing.isManuallyPriced(subscription) && planPrice(plan, subscription.billingCycle) > 0) {
     const { referralCodeId, specialTermsId, ...pricing } = await priceCharge(subscription, plan);
     nextCharge = pricing;
   }
