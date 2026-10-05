@@ -483,6 +483,15 @@ The courier's settlement statement is read from the file the courier sends (SPEC
 - **More header names** are recognised, e.g. "AWB No.", "Waybill No", "COD Value", "Delivery fees", "رقم التتبع", "قيمة التحصيل", "مصاريف الشحن". Punctuation and spacing in headers are ignored. Waybills are still compared exactly as before.
 - **Skipped lines:** blank lines, and the totals line under the table (a "Total"/"الإجمالي" label), are not shipments. Any other line without a waybill is still reported as unreadable.
 - **Errors:** a file that is not an .xlsx or CSV is refused with a clear message (422).
+The builder's product list now honours its source (SPEC §8.2). Before, all three sources showed the same order.
+
+- **newest:** display priority, then newest (as the shop's default).
+- **featured:** the merchant's picks first — a display priority above 0, or the tag "featured" / "مميز" — then the rest newest first.
+  - Featured products are not filtered out of the list, only ordered first, so a store that has picked none still shows its products rather than an empty block.
+- **best_selling:** units sold in the last 90 days, cancelled orders left out, then display priority and newest.
+- Both are sorts of the public listing (`storefront/productSearch.js`, `?sort=featured|best_selling`) and allowed as a shop's default sort.
+- The storefront asks for them through `api-client/endpoints/productListSources.ts`.
+- The single-product block without a product picked now takes the newest product, as its comment always said; it took the first by id before.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -674,7 +683,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 125. Product feed items land on their own variant (§7.8).
 - [x] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
 - [x] 127. COD settlement statements read from the courier's Excel file (§15.5).
-- [ ] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
+- [x] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
 - [ ] 129. A failed payment marks the order and fires the event, also when the gateway refuses to start it (§11.4).
 - [ ] 130. A rejected transfer: the shopper is told and can upload a new receipt (§11.3).
 - [ ] 131. The deposit rule reads the platform-wide delivery rate (§11.3).
