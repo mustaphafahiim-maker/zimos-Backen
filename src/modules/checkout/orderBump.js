@@ -16,8 +16,10 @@ const { AppError, ValidationError } = require('../../core/errors/AppError');
  *     workspaces.settings.order_bump = { enabled, offer_id, title, description }
  *     (snake_case like every other settings key), written whole through
  *     PATCH /workspaces/:id;
- *   - a funnel's checkout step: funnel_steps.bump_offer_id, frozen into the
- *     published snapshot as `bumpOfferId` like the step's other fields.
+ *   - a funnel step with an order form — its checkout step, or a sales page
+ *     whose cod_form takes the order there (SPEC §9.5, §10.3):
+ *     funnel_steps.bump_offer_id, frozen into the published snapshot as
+ *     `bumpOfferId` like the step's other fields.
  *
  * The browser only says which offer the shopper ticked (`orderBump.offerId`
  * on POST /store/:id/checkout). The server accepts it only when it is the
@@ -30,6 +32,8 @@ const { AppError, ValidationError } = require('../../core/errors/AppError');
  */
 
 const SETTINGS_KEY = 'order_bump';
+// The funnel steps that can hold an order form, and so a bump on it.
+const BUMP_STEP_TYPES = Object.freeze(['checkout', 'sales']);
 const TITLE_MAX = 80;
 const DESCRIPTION_MAX = 240;
 
@@ -193,7 +197,7 @@ async function allowedBumpOfferIds(workspace, funnelId) {
     attributes: ['snapshot'],
   });
   const steps = (revision && revision.snapshot && revision.snapshot.steps) || [];
-  return steps.filter((s) => s.stepType === 'checkout' && s.bumpOfferId).map((s) => s.bumpOfferId);
+  return steps.filter((s) => BUMP_STEP_TYPES.includes(s.stepType) && s.bumpOfferId).map((s) => s.bumpOfferId);
 }
 
 /**
@@ -223,6 +227,7 @@ function orderBumpUnavailable() {
 
 module.exports = {
   SETTINGS_KEY,
+  BUMP_STEP_TYPES,
   orderBumpSettingsSchema,
   readStoreBump,
   bumpProblem,

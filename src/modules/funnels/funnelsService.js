@@ -17,7 +17,7 @@ const {
   EMPTY_TREE,
 } = require('./funnelGraph');
 const { conditionProblem, pickNextEdge } = require('./funnelRouting');
-const { assertBumpOfferUsable, bumpProblem, presentBump } = require('../checkout/orderBump');
+const { assertBumpOfferUsable, bumpProblem, presentBump, BUMP_STEP_TYPES } = require('../checkout/orderBump');
 const funnelOfferMerge = require('./funnelOfferMerge');
 const entitlements = require('../billing/entitlementsService');
 
@@ -97,16 +97,16 @@ function toSnapshotSteps(stepRows) {
     name: s.name,
     builderData: s.builderData,
     offerId: s.offerId,
-    // Only a checkout step has a form to offer a bump on.
-    bumpOfferId: s.stepType === 'checkout' ? s.bumpOfferId || null : null,
+    // Only a step with an order form (checkout, a sales page's cod_form) offers a bump.
+    bumpOfferId: BUMP_STEP_TYPES.includes(s.stepType) ? s.bumpOfferId || null : null,
     seo: s.seo || {},
   }));
 }
 
-/** A bump offer belongs on a checkout step only (422 elsewhere). */
+/** A bump offer belongs on a step with an order form: checkout or sales (422 elsewhere). */
 function assertBumpStepType(stepType) {
-  if (stepType !== 'checkout') {
-    throw new ValidationError([{ field: 'bumpOfferId', message: 'Only a checkout step can offer an order bump' }]);
+  if (!BUMP_STEP_TYPES.includes(stepType)) {
+    throw new ValidationError([{ field: 'bumpOfferId', message: 'Only a checkout or sales step can offer an order bump' }]);
   }
 }
 
@@ -379,8 +379,8 @@ async function updateStep(workspaceId, funnelId, stepId, data, req) {
     assertBumpStepType(stepType);
     await assertBumpOfferUsable(workspaceId, data.bumpOfferId, 'bumpOfferId');
     patch.bumpOfferId = data.bumpOfferId;
-  } else if (data.bumpOfferId === null || (stepType !== 'checkout' && step.bumpOfferId)) {
-    // Cleared, or the step stopped being a checkout: no form, no bump.
+  } else if (data.bumpOfferId === null || (!BUMP_STEP_TYPES.includes(stepType) && step.bumpOfferId)) {
+    // Cleared, or the step stopped being one with an order form: no form, no bump.
     patch.bumpOfferId = null;
   }
 
@@ -745,8 +745,8 @@ async function resolveStepPayload(workspaceId, snapshot, stepKey, session = null
   const step = (snapshot.steps || []).find((s) => s.key === stepKey);
   if (!step) throw stepNotFound();
   const payload = { step: renderStepData(snapshot, stepKey) };
-  // The checkout step's order bump, when it has one that can still be sold.
-  if (step.stepType === 'checkout' && step.bumpOfferId) {
+  // The step's order bump (checkout, or a sales page's cod_form), when it can still be sold.
+  if (BUMP_STEP_TYPES.includes(step.stepType) && step.bumpOfferId) {
     payload.bump = await presentBump(workspaceId, step.bumpOfferId);
   }
   if (OFFER_STEP_TYPES.has(step.stepType) && step.offerId) {

@@ -217,6 +217,9 @@ async function resolveBumpItems(workspace, offerIds, items) {
   });
   const productIds = [...new Set(variants.map((v) => v.productId))];
   const allowed = new Set((await bumpRulesFor(workspace.id, productIds)).map((r) => r.offerId));
+  // An add-on joins the order in its own money only: one priced in another currency (a
+  // funnel selling in dollars, a bump in pounds) is not offered there (SPEC §11.5).
+  const currency = await require('../payments/methodCurrency').itemsCurrency(workspace.id, items);
   const lines = [];
   for (const offerId of wanted) {
     if (!allowed.has(offerId)) {
@@ -225,7 +228,7 @@ async function resolveBumpItems(workspace, offerIds, items) {
       ]);
     }
     const card = await presentBump(workspace.id, offerId);
-    if (!card) throw orderBumpUnavailable();
+    if (!card || (currency && card.currency && card.currency !== currency)) throw orderBumpUnavailable();
     lines.push({ variantId: card.variantId, offerId, quantity: 1, isOrderBump: true });
   }
   return lines;
