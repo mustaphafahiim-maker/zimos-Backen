@@ -327,6 +327,8 @@ async function presentTrackedOrder(workspaceId, order) {
     downloads: await require('../digital/digitalService').publicGrantsForOrder(workspaceId, order.id),
     // A transfer under review, or rejected and ready to be sent again (payments/transferResubmit.js).
     transfer: await require('../payments/transferResubmit').stateFor(order),
+    // The subscriptions this order started, with the link to manage them (subscriptions/subscriptionLinks.js).
+    subscriptions: await require('../subscriptions/subscriptionLinks').forTrackedOrder(workspaceId, order.id),
   };
 }
 

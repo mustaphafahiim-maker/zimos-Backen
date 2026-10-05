@@ -163,6 +163,19 @@ const TEMPLATES = [
     ],
     whatsapp: { name: 'subscription_renewal_failed', body: 'مرحبًا {{1}}، تعذّر سحب قيمة تجديد اشتراكك في {{2}}. حدّث بطاقتك من هنا ليستمر الاشتراك: {{3}}' },
   },
+  {
+    // SPEC §18.1: the subscriber gets their portal link. The email goes out as the "Subscription started" order email.
+    key: 'subscription_started',
+    trigger: 'subscription.created',
+    name: { ar: 'بداية الاشتراك + رابط إدارته', en: 'Subscription started + its link' },
+    description: {
+      ar: 'عند بدء اشتراك أو تقسيط: رسالة واتساب برابط صفحة الاشتراك، حيث يغيّر العميل بطاقته أو يلغي. (البريد يُرسل من رسائل الطلبات.)',
+      en: 'When a subscription or installment plan starts: a WhatsApp message with the subscription page, where the customer changes their card or cancels. (The email goes out from Order emails.)',
+    },
+    conditions: {},
+    steps: [{ type: 'whatsapp_template', template: 'subscription_started', language: 'ar', params: ['{{customer_name}}', '{{product_name}}', '{{subscription_link}}'] }],
+    whatsapp: { name: 'subscription_started', body: 'مرحبًا {{1}}، تم تفعيل اشتراكك في {{2}}. تقدر تتابعه وتغيّر بطاقتك أو تلغيه من هنا: {{3}}' },
+  },
 ];
 
 const byKey = (key) => TEMPLATES.find((t) => t.key === key) || null;

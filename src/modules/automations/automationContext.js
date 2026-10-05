@@ -27,6 +27,8 @@ const TOKENS = [
   'coupon_code',
   'review_link',
   'payment_link',
+  // A subscription's page (cancel, change the card): subscription triggers only.
+  'subscription_link',
 ];
 
 function formatAmount(amountMinor, currency) {
@@ -196,6 +198,7 @@ async function loadSubscriptionSubject(workspaceId, subscriptionId) {
       product_name: sub.productName,
       order_total: formatAmount(sub.amount, sub.currency),
       payment_link: base && sub.portalToken ? `${base}/subscriptions/${sub.portalToken}` : '',
+      subscription_link: base && sub.portalToken ? `${base}/subscriptions/${sub.portalToken}` : '',
     },
     // The sequence stops once the subscription is paid again or cancelled.
     signature: sub.status,

@@ -35,7 +35,7 @@ const ORDER_TRIGGERS = [
   'order.digital_delivered',
 ];
 const CHECKOUT_TRIGGERS = ['checkout.abandoned', 'lost_order.created'];
-const OTHER_TRIGGERS = ['review.request', 'lead.created', 'subscription.renewal_failed'];
+const OTHER_TRIGGERS = ['review.request', 'lead.created', 'subscription.renewal_failed', 'subscription.created'];
 const TRIGGERS = [...ORDER_TRIGGERS, ...CHECKOUT_TRIGGERS, ...OTHER_TRIGGERS];
 
 // The outbox events the automations consumer listens to (review.request is derived).
@@ -47,6 +47,8 @@ const { TOKENS, render } = context;
 function targetOf(payloadOrOrderId) {
   if (typeof payloadOrOrderId === 'string') return { orderId: payloadOrOrderId };
   const p = payloadOrOrderId || {};
+  // A subscription event is about the subscription, even when it names the order that started it.
+  if (p.subscriptionId) return { subscriptionId: p.subscriptionId };
   if (p.orderId) return { orderId: p.orderId };
   if (p.checkoutSessionId) return { checkoutSessionId: p.checkoutSessionId };
   // subscription.renewal_failed carries the subscription; lead.created the customer.

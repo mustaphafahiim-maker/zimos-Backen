@@ -56,6 +56,14 @@ const TEMPLATES = Object.freeze({
     subject: 'لم نتمكن من تأكيد التحويل لطلبك {{order_number}}',
     body: 'مرحبًا {{customer_name}}،\n\nلم نتمكن من تأكيد التحويل الخاص بطلبك رقم {{order_number}} من {{store_name}}.\n\nيمكنك رفع إيصال جديد من هنا:\n{{order_link}}',
   },
+  // SPEC §18.1: the subscriber gets their portal link. On unless the store turns it off
+  // (`defaultOn`): it is the customer's only way to change the card or cancel (subscriptions/subscriptionLinks.js).
+  subscription_started: {
+    event: 'subscription.created',
+    defaultOn: true,
+    subject: 'تم تفعيل اشتراكك في {{product_name}}',
+    body: 'مرحبًا {{customer_name}}،\n\nشكرًا لاشتراكك في {{product_name}} من {{store_name}} ({{order_total}}).\n\nمن صفحة اشتراكك تقدر تتابعه، تغيّر البطاقة اللي بيتسحب منها، أو تلغيه في أي وقت:\n{{subscription_link}}',
+  },
   digital_delivery: {
     event: 'order.digital_delivered',
     subject: 'منتجك الرقمي من {{store_name}} جاهز',
@@ -85,6 +93,7 @@ const SAMPLE_VARS = Object.freeze({
   coupon_code: '',
   review_link: 'https://example.com/products/linen-shirt#reviews',
   payment_link: 'https://example.com/pay/ORD-1042',
+  subscription_link: 'https://example.com/subscriptions/3f9a…',
 });
 
 function view(key, row) {
@@ -92,7 +101,8 @@ function view(key, row) {
   return {
     key,
     event: base.event,
-    isEnabled: Boolean(row && row.isEnabled),
+    // A template the store never touched is on only when it is on by default (defaultOn).
+    isEnabled: row && row.isEnabled !== undefined ? Boolean(row.isEnabled) : Boolean(base.defaultOn),
     subject: (row && row.subject) || base.subject,
     body: (row && row.body) || base.body,
     isCustomised: Boolean(row && (row.subject || row.body)),
@@ -116,7 +126,7 @@ async function update(workspaceId, key, patch, req) {
   assertKey(key);
   const base = TEMPLATES[key];
   return db.sequelize.transaction(async (transaction) => {
-    const [row] = await db.OrderEmailTemplate.findOrCreate({ where: { workspaceId, key }, defaults: { workspaceId, key }, transaction });
+    const [row] = await db.OrderEmailTemplate.findOrCreate({ where: { workspaceId, key }, defaults: { workspaceId, key, isEnabled: Boolean(base.defaultOn) }, transaction });
     const before = { isEnabled: row.isEnabled, customised: Boolean(row.subject || row.body) };
     const next = {};
     if (patch.isEnabled !== undefined) next.isEnabled = patch.isEnabled;
@@ -205,10 +215,21 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
     const keys = KEYS.filter((k) => TEMPLATES[k].event === eventType);
     if (keys.length === 0 || payload.notifyCustomer === false) return [];
     const forced = payload.notifyCustomer === true;
-    const stored = await db.OrderEmailTemplate.findAll({ where: { workspaceId, key: keys, ...(forced ? {} : { isEnabled: true }) } });
-    const rows = forced ? keys.map((key) => stored.find((r) => r.key === key) || { key }) : stored;
+    const stored = await db.OrderEmailTemplate.findAll({ where: { workspaceId, key: keys } });
+    // Forced: every template of the event. Otherwise the ones switched on — or never touched and on by default.
+    const rows = keys
+      .map((key) => {
+        const row = stored.find((r) => r.key === key);
+        if (forced) return row || { key };
+        if (row) return row.isEnabled ? row : null;
+        return TEMPLATES[key].defaultOn ? { key } : null;
+      })
+      .filter(Boolean);
     if (rows.length === 0) return [];
-    const subject = payload.orderId
+    // A subscription event speaks about the subscription (its product, amount and page), not the order that started it.
+    const subject = payload.subscriptionId
+      ? await context().loadSubscriptionSubject(workspaceId, payload.subscriptionId)
+      : payload.orderId
       ? await context().loadOrderSubject(workspaceId, payload.orderId)
       : payload.checkoutSessionId
         ? await context().loadCheckoutSubject(workspaceId, payload.checkoutSessionId)
