@@ -28,7 +28,10 @@ module.exports = (sequelize, DataTypes) => {
       stockOnHand: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'stock_on_hand' },
       reservedStock: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'reserved_stock' },
       allowOverselling: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'allow_overselling' },
+      lowStockThreshold: { type: DataTypes.INTEGER, allowNull: true, field: 'low_stock_threshold' },
       weightGrams: { type: DataTypes.INTEGER, allowNull: true, field: 'weight_grams' },
+      // The variant's own picture (migration 195); null = the product's.
+      imageUrl: { type: DataTypes.STRING(1000), allowNull: true, field: 'image_url' },
       dimensions: { type: DataTypes.JSONB, allowNull: true },
       status: {
         type: DataTypes.ENUM('active', 'archived'),

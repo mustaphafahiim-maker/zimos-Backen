@@ -9,7 +9,7 @@ module.exports = (sequelize, DataTypes) => {
       funnelId: { type: DataTypes.UUID, allowNull: false, field: 'funnel_id' },
       key: { type: DataTypes.STRING(100), allowNull: false }, // stable key referenced by edges
       stepType: {
-        type: DataTypes.ENUM('landing', 'sales', 'opt_in', 'checkout', 'upsell', 'downsell', 'thank_you', 'custom'),
+        type: DataTypes.ENUM('landing', 'sales', 'opt_in', 'checkout', 'upsell', 'downsell', 'thank_you', 'custom', 'article'),
         allowNull: false,
         field: 'step_type',
       },
