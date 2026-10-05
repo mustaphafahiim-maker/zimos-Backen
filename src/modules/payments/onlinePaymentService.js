@@ -609,7 +609,7 @@ async function describeForShopper(order, workspace, preview) {
   const attempts = await db.Payment.findAll({ where: { orderId: order.id }, order: [['createdAt', 'DESC']] });
   const latest = attempts[0] || null;
   const status = shopperStatusOf(order);
-  const offered = await methodsService.storefrontMethods(workspace, { preview });
+  const offered = await methodsService.storefrontMethods(workspace, { preview, currency: order.currency });
   const online = offered.filter((m) => m.id !== methodsService.COD);
   const awaiting = status === 'awaiting_payment';
   const retriesLeft = Math.max(0, env.payments.maxAttemptsPerOrder - attempts.length);
@@ -722,7 +722,7 @@ async function retry(workspaceId, orderId, token, body, req) {
   const method = await methodsService.resolveStorefrontMethod(
     workspace,
     { paymentMethod: body.paymentMethod || order.paymentMethod, paymentProvider: body.paymentProvider },
-    { preview }
+    { preview, currency: order.currency }
   );
   if (method.id === methodsService.COD) {
     throw new AppError('PAYMENT_METHOD_UNAVAILABLE', 'Use switch-to-cod for cash on delivery', 422);

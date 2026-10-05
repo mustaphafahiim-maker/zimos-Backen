@@ -121,6 +121,12 @@ const checkout = asyncHandler(async (req, res) => {
   // A free trial prices its product at nothing on the first order (subscriptions/trialCheckout.js).
   items = await require('../subscriptions/trialCheckout').pinTrialLines(workspaceId, items, orderBody.contact);
 
+  // The gateway takes the order's currency, or the order is not created (payments/methodCurrency.js).
+  if (isOnline) {
+    const methodCurrency = require('../payments/methodCurrency');
+    methodCurrency.assertTakes(prepared.method, await methodCurrency.itemsCurrency(workspaceId, items));
+  }
+
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
 

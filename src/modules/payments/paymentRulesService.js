@@ -12,8 +12,15 @@ const { recordAudit } = require('../audit/auditService');
  *    [{ method, type: 'fee'|'discount', valueType: 'fixed'|'percent', value, label }]
  *    `value` is minor units for `fixed` and basis points for `percent`. The
  *    percentage is taken from the goods after the discount code plus shipping
- *    (tax is left out). One rule per method; the result is its own line of the
- *    order (orders.payment_adjustment_amount, signed) and part of the total.
+ *    (tax is left out). The result is its own line of the order
+ *    (orders.payment_adjustment_amount, signed) and part of the total.
+ *
+ *    Currencies (SPEC §11.5): a percentage fits an order in any currency; a
+ *    fixed amount is money in one currency (`currency`, the store's when
+ *    unset) and applies only to orders in it — 20 EGP is never charged as 20
+ *    USD on a funnel that sells in dollars. So a method has at most one
+ *    percentage rule and one fixed rule per currency; an order takes the
+ *    fixed rule in its own currency, else the percentage.
  *
  * 2. **Methods per funnel** — `settings.payment_methods_by_funnel`:
  *    { [funnelId]: [method id, …] } — the payment method ids (as the
@@ -35,12 +42,23 @@ function funnelMap(settings) {
 }
 
 /**
+ * The method's rule for an order in `currency` (the store's `storeCurrency`
+ * when unknown): its fixed rule in that currency, else its percentage.
+ */
+function ruleFor(settings, paymentMethod, currency, storeCurrency) {
+  const store = storeCurrency || 'EGP';
+  const wanted = currency || store;
+  const live = adjustments(settings).filter((r) => r.method === paymentMethod && r.enabled !== false && Number(r.value) > 0);
+  return live.find((r) => r.valueType !== 'percent' && (r.currency || store) === wanted) || live.find((r) => r.valueType === 'percent') || null;
+}
+
+/**
  * The adjustment for one order. `base` = subtotal − discount + shipping.
  * A discount never takes the order below zero.
  * @returns {{ amount: number, label: string|null }}
  */
-function adjustmentFor(settings, paymentMethod, base) {
-  const rule = adjustments(settings).find((r) => r.method === paymentMethod && r.enabled !== false);
+function adjustmentFor(settings, paymentMethod, base, { currency = null, storeCurrency = null } = {}) {
+  const rule = ruleFor(settings, paymentMethod, currency, storeCurrency);
   if (!rule || !Number.isInteger(Number(rule.value)) || Number(rule.value) <= 0) return { amount: 0, label: null };
   const raw = rule.valueType === 'percent' ? applyBasisPoints(Math.max(0, base), Number(rule.value)) : Number(rule.value);
   const amount = rule.type === 'discount' ? -Math.min(raw, Math.max(0, base)) : raw;
@@ -48,9 +66,9 @@ function adjustmentFor(settings, paymentMethod, base) {
 }
 
 /** Same, loading the store's settings (inside the caller's transaction, if any). */
-async function adjustmentForWorkspace(workspaceId, paymentMethod, base, transaction) {
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'], transaction });
-  return adjustmentFor(workspace ? workspace.settings : null, paymentMethod, base);
+async function adjustmentForWorkspace(workspaceId, paymentMethod, base, transaction, currency = null) {
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings', 'defaultCurrency'], transaction });
+  return adjustmentFor(workspace ? workspace.settings : null, paymentMethod, base, { currency, storeCurrency: workspace && workspace.defaultCurrency });
 }
 
 /**
@@ -60,7 +78,7 @@ async function adjustmentForWorkspace(workspaceId, paymentMethod, base, transact
  */
 async function repriceForMethod(order, paymentMethod, transaction) {
   const goods = Number(order.subtotalAmount) - Number(order.discountAmount) + Number(order.shippingAmount);
-  const next = await adjustmentForWorkspace(order.workspaceId, paymentMethod, goods, transaction);
+  const next = await adjustmentForWorkspace(order.workspaceId, paymentMethod, goods, transaction, order.currency);
   const withoutOld = Number(order.totalAmount) - Number(order.paymentAdjustmentAmount || 0);
   const totalAmount = withoutOld + next.amount;
   const base = await require('../currencies/fxService').baseFieldsFor(order.workspaceId, { currency: order.currency, totalAmount }, transaction);
@@ -72,22 +90,28 @@ async function repriceForMethod(order, paymentMethod, transaction) {
   };
 }
 
-/** What the storefront shows next to a method: the rule itself, never a computed price. */
-function describeFor(settings, method) {
-  const rule = adjustments(settings).find((r) => r.method === method && r.enabled !== false);
-  if (!rule || Number(rule.value) <= 0) return null;
-  return { type: rule.type, valueType: rule.valueType, value: Number(rule.value), label: rule.label || null };
+/** What the storefront shows next to a method: the rule for the checkout's currency, never a computed price. */
+function describeFor(settings, method, currency, storeCurrency) {
+  const rule = ruleFor(settings, method, currency, storeCurrency);
+  if (!rule) return null;
+  return {
+    type: rule.type,
+    valueType: rule.valueType,
+    value: Number(rule.value),
+    label: rule.label || null,
+    ...(rule.valueType === 'percent' ? {} : { currency: rule.currency || storeCurrency || 'EGP' }),
+  };
 }
 
-/** Narrows the store's methods to a funnel's, and attaches each method's adjustment. */
-function forStorefront(workspace, methods, funnelId) {
+/** Narrows the store's methods to a funnel's, and attaches each method's adjustment for the checkout's currency. */
+function forStorefront(workspace, methods, funnelId, currency = null) {
   const settings = workspace.settings || {};
   const allowed = funnelId ? funnelMap(settings)[funnelId] : null;
   const narrowed = Array.isArray(allowed) && allowed.length ? methods.filter((m) => allowed.includes(m.id)) : methods;
   // A funnel list that no longer matches anything the store offers must not leave the checkout with no way to pay.
   const list = narrowed.length ? narrowed : methods;
   return list.map((m) => {
-    const adjustment = describeFor(settings, m.method);
+    const adjustment = describeFor(settings, m.method, currency, workspace.defaultCurrency);
     return adjustment ? { ...m, adjustment } : m;
   });
 }
@@ -109,6 +133,7 @@ function getSettings(workspace) {
     adjustments: adjustments(workspace.settings),
     methodsByFunnel: funnelMap(workspace.settings),
     methods: METHODS,
+    storeCurrency: workspace.defaultCurrency || 'EGP',
   };
 }
 
@@ -124,6 +149,8 @@ async function saveSettings(workspaceId, body, req) {
         type: r.type,
         valueType: r.valueType,
         value: r.value,
+        // A fixed amount is money in one currency: the store's unless told.
+        currency: r.valueType === 'percent' ? null : r.currency || workspace.defaultCurrency || 'EGP',
         label: r.label ? r.label.trim() : null,
         enabled: r.enabled !== false,
       }));

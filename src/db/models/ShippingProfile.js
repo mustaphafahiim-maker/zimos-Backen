@@ -10,6 +10,8 @@ module.exports = (sequelize, DataTypes) => {
       name: { type: DataTypes.STRING(120), allowNull: false },
       flatAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'flat_amount' },
       governorateAmounts: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'governorate_amounts' },
+      // The currency its prices are in; null = the store's (migration 434).
+      currency: { type: DataTypes.STRING(3), allowNull: true },
     },
     { tableName: 'shipping_profiles' }
   );

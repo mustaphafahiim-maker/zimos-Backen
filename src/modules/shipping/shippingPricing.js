@@ -68,9 +68,11 @@ async function calculateShippingAmount(
     transaction,
   }
 ) {
-  const productLines = await require('../funnels/funnelShipping').productLinesFor(workspaceId, funnelId, rawProductLines, transaction);
   const workspace = await db.Workspace.findByPk(workspaceId, { transaction });
   const settings = (workspace && workspace.settings) || {};
+  // An order in a funnel: its group, its threshold, and its currency's rules (funnels/funnelShipping.js).
+  const funnelPricing = await require('../funnels/funnelShipping').pricingFor(workspaceId, funnelId, workspace, rawProductLines, transaction);
+  const { productLines } = funnelPricing;
   const pricingMode = settings.shipping_pricing_mode === 'weight_tiers' ? 'weight_tiers' : 'rates';
 
   const weight = weightLines
@@ -85,7 +87,7 @@ async function calculateShippingAmount(
   const tier = resolveTier(tiers, weight.grams);
 
   const products = rules.productShipping(productLines);
-  const freeShipping = rules.freeShippingProgress(subtotal, settings.free_shipping_threshold_amount);
+  const freeShipping = rules.freeShippingProgress(subtotal, funnelPricing.thresholdAmount);
 
   const result = ({ rule, amount, baseAmount = amount, extraFeesAmount = 0, governorate = null }) => ({
     amount,
@@ -99,10 +101,20 @@ async function calculateShippingAmount(
     extraFeesAmount,
     governorate,
     freeShipping,
+    // A funnel selling in another currency than the store's: that currency (its group priced it).
+    ownCurrency: funnelPricing.ownCurrency ? funnelPricing.ownCurrency.currency : null,
   });
 
   const decided = rules.ruleBeforeRates({ country, offerShippingOverride, products, progress: freeShipping });
   if (decided) return result(decided);
+
+  // A funnel selling in another currency than the store's: its own group is the only price.
+  if (funnelPricing.ownCurrency) {
+    const profiles = require('./shippingProfiles');
+    const price = funnelPricing.ownCurrency.profile ? profiles.priceOf(funnelPricing.ownCurrency.profile, region) : null;
+    const own = price === null ? { rule: rules.RULES.NO_RATE, amount: 0 } : { rule: profiles.RULE, amount: price };
+    return result({ ...own, amount: own.amount + products.extraFeesAmount, baseAmount: own.amount, extraFeesAmount: products.extraFeesAmount });
+  }
 
   const storeBase = await resolveBase(workspaceId, settings, {
     pricingMode,

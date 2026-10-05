@@ -96,13 +96,16 @@ async function allMethods(workspace, accounts = null) {
 /**
  * The methods a shopper sees at checkout.
  * @param {boolean} preview  a valid staff preview token came with the request
+ * @param {string} [currency]  the checkout's currency: a gateway that cannot
+ *   take it is left out (methodCurrency.js)
  */
-async function storefrontMethods(workspace, { preview = false } = {}) {
+async function storefrontMethods(workspace, { preview = false, currency = null } = {}) {
   const codOnly = [{ id: COD, provider: null, method: COD, mode: 'live' }];
   if (!env.payments.onlineEnabled) return codOnly;
   const list = [];
   for (const m of await allMethods(workspace)) {
     if (!m.enabled || !m.available) continue;
+    if (!require('./methodCurrency').takes(m.provider, currency)) continue;
     // The merchant's chosen gateway for this method; a test-mode one is not
     // replaced by another gateway for real shoppers.
     if (list.some((x) => x.method === m.method)) continue;
@@ -125,8 +128,8 @@ async function codOffered(workspace, { preview = false } = {}) {
  * The storefront method for `paymentMethod` (+ optional provider), or a 422
  * PAYMENT_METHOD_UNAVAILABLE.
  */
-async function resolveStorefrontMethod(workspace, { paymentMethod, paymentProvider }, { preview = false } = {}) {
-  const offered = await storefrontMethods(workspace, { preview });
+async function resolveStorefrontMethod(workspace, { paymentMethod, paymentProvider }, { preview = false, currency = null } = {}) {
+  const offered = await storefrontMethods(workspace, { preview, currency });
   const match = offered.find(
     (m) => m.method === paymentMethod && (!paymentProvider || m.provider === paymentProvider || m.id === COD)
   );

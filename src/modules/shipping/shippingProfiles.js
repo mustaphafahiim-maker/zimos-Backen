@@ -9,7 +9,7 @@ const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
-const { NotFoundError } = require('../../core/errors/AppError');
+const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { governorateCode, GOVERNORATE_CODES } = require('./governorates');
 
@@ -24,6 +24,10 @@ const { governorateCode, GOVERNORATE_CODES } = require('./governorates');
  * overrides and the free threshold (shippingRules) still come first, and
  * "extra fee" products still add their fee on top.
  *
+ * Its prices are in its `currency` (null: the store's). A group in another
+ * currency is for a funnel that sells in it (funnels/funnelShipping.js): it
+ * holds no products, since the store's own orders are in the store's money.
+ *
  * Mounted at /api/v1/workspaces/:workspaceId/shipping/profiles.
  */
 
@@ -31,6 +35,7 @@ const RULE = 'profile_rate';
 const amount = Joi.number().integer().min(0);
 const body = Joi.object({
   name: Joi.string().trim().min(1).max(120),
+  currency: Joi.string().trim().uppercase().pattern(/^[A-Z]{3}$/).allow(null),
   flatAmount: amount.allow(null),
   governorateAmounts: Joi.object().pattern(Joi.string().valid(...GOVERNORATE_CODES), amount),
 });
@@ -39,6 +44,7 @@ function view(p, productCount = 0) {
   return {
     id: p.id,
     name: p.name,
+    currency: p.currency || null,
     flatAmount: p.flatAmount === null ? null : Number(p.flatAmount),
     governorateAmounts: Object.fromEntries(Object.entries(p.governorateAmounts || {}).map(([k, v]) => [k, Number(v)])),
     productCount,
@@ -78,6 +84,16 @@ router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.SHIPPING_M
 const ws = { workspaceId: Joi.string().uuid().required() };
 const one = Joi.object({ ...ws, profileId: Joi.string().uuid().required() });
 const wid = (req) => req.tenant.workspaceId;
+
+/** 422 when products would sit in a group priced in another currency than the store's. */
+async function assertProductsFit(workspaceId, currency, productCount) {
+  if (!currency || productCount === 0) return;
+  const store = await require('../currencies/baseCurrency').storeCurrency(workspaceId);
+  if (currency === store) return;
+  throw new AppError('SHIPPING_GROUP_CURRENCY', `A group priced in ${currency} is for a funnel that sells in ${currency}; the store's products ship in ${store}`, 422, [
+    { field: 'currency', message: `Products in this group are sold in ${store}: keep the group in ${store}, or take them out first` },
+  ]);
+}
 
 async function find(workspaceId, id) {
   const profile = await db.ShippingProfile.findOne({ where: { id, workspaceId } });
@@ -121,6 +137,7 @@ router.patch(
   validate({ params: one, body: body.min(1) }),
   asyncHandler(async (req, res) => {
     const profile = await find(wid(req), req.params.profileId);
+    if (req.body.currency) await assertProductsFit(wid(req), req.body.currency, await db.Product.count({ where: { workspaceId: wid(req), shippingProfileId: profile.id } }));
     const before = view(profile);
     await profile.update(req.body);
     await recordAudit({ workspaceId: wid(req), actorUserId: req.user.id, action: 'shipping.profile_update', entityType: 'ShippingProfile', entityId: profile.id, before, after: view(profile), req });
@@ -134,6 +151,7 @@ router.put(
   validate({ params: one, body: Joi.object({ productIds: Joi.array().items(Joi.string().uuid()).max(1000).required() }) }),
   asyncHandler(async (req, res) => {
     const profile = await find(wid(req), req.params.profileId);
+    await assertProductsFit(wid(req), profile.currency, req.body.productIds.length);
     const { Op } = db.Sequelize;
     await db.sequelize.transaction(async (transaction) => {
       await db.Product.update(

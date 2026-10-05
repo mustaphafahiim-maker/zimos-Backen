@@ -31,7 +31,8 @@ module.exports = {
   },
   storeMethods: {
     params: Joi.object({ workspaceId: workspaceRef().required() }),
-    query: Joi.object({ funnelId: Joi.string().uuid().optional() }),
+    // currency: what the checkout sells in, when the storefront knows (else the funnel's or the store's).
+    query: Joi.object({ funnelId: Joi.string().uuid().optional(), currency: Joi.string().trim().uppercase().pattern(/^[A-Z]{3}$/).optional() }),
   },
   shopperStatus: {
     params: storeOrderParam,

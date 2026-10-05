@@ -16,13 +16,20 @@ const { resolveSettings } = require('./geoRedirects');
  * currency (a page edited after publishing) is refused.
  *
  * No currency set: nothing is checked, as before.
+ *
+ * Shipping (funnelShipping.pricingFor): a funnel that sells in another
+ * currency than the store's is priced by its own shipping group only, so it
+ * publishes once it has one in its currency with a price for everywhere (the
+ * group's flat price). A group in another currency than the funnel's is
+ * refused either way.
  */
 
 const currencyOf = (funnel) => (resolveSettings(funnel).currency || '').toUpperCase() || null;
 
 async function publishProblems(workspaceId, funnel, steps, transaction) {
   const currency = currencyOf(funnel);
-  if (!currency) return [];
+  // A funnel with no currency of its own sells in the store's: its group must be in it too.
+  if (!currency) return shippingProblems(workspaceId, funnel, null, transaction);
   const problems = [];
   const mismatch = (step, field, what, found) =>
     problems.push({
@@ -51,7 +58,29 @@ async function publishProblems(workspaceId, funnel, steps, transaction) {
       if (other) mismatch(step, 'builderData.productId', 'The page\'s product', other);
     }
   }
+  problems.push(...(await shippingProblems(workspaceId, funnel, currency, transaction)));
   return problems;
+}
+
+async function shippingProblems(workspaceId, funnel, ownCurrency, transaction) {
+  const settings = resolveSettings(funnel);
+  const store = await require('../currencies/baseCurrency').storeCurrency(workspaceId, transaction);
+  const currency = ownCurrency || store;
+  const profile = settings.shippingProfileId
+    ? await db.ShippingProfile.findOne({ where: { id: settings.shippingProfileId, workspaceId }, transaction })
+    : null;
+  const field = 'settings.shippingProfileId';
+  if (profile && (profile.currency || store) !== currency) {
+    return [{ field, message: `The funnel's shipping group "${profile.name}" is priced in ${profile.currency || store}, but this funnel sells in ${currency}. Choose a group priced in ${currency}.` }];
+  }
+  if (currency === store) return [];
+  if (!profile) {
+    return [{ field, message: `This funnel sells in ${currency}, and the store's shipping prices are in ${store}. Choose a shipping group priced in ${currency} in the funnel's settings.` }];
+  }
+  if (profile.flatAmount === null || profile.flatAmount === undefined) {
+    return [{ field, message: `The shipping group "${profile.name}" has no price for everywhere. Give it one, so every address of this funnel is priced in ${currency}.` }];
+  }
+  return [];
 }
 
 /** createOrder: an order placed on a funnel is in the funnel's currency (422 otherwise). */

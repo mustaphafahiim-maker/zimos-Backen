@@ -151,9 +151,20 @@ async function countryOf(req) {
 // --- funnel settings --------------------------------------------------------
 
 // headCode / bodyCode: the funnel's own scripts on every step (SPEC §9.7, storefront FunnelCode);
-// shippingProfileId: its shipping group (funnelShipping.js).
-const DEFAULT_SETTINGS = Object.freeze({ currency: null, faviconUrl: null, title: null, description: null, headCode: null, bodyCode: null, shippingProfileId: null });
+// shippingProfileId: its shipping group, freeShippingThresholdAmount: its own
+// free-shipping threshold, in its currency (funnelShipping.js).
+const DEFAULT_SETTINGS = Object.freeze({
+  currency: null,
+  faviconUrl: null,
+  title: null,
+  description: null,
+  headCode: null,
+  bodyCode: null,
+  shippingProfileId: null,
+  freeShippingThresholdAmount: null,
+});
 const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+const amount = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 
 function resolveSettings(funnel) {
   const s = (funnel && funnel.settings) || {};
@@ -165,6 +176,7 @@ function resolveSettings(funnel) {
     headCode: text(s.headCode),
     bodyCode: text(s.bodyCode),
     shippingProfileId: text(s.shippingProfileId),
+    freeShippingThresholdAmount: amount(s.freeShippingThresholdAmount),
   };
 }
 
@@ -184,7 +196,7 @@ async function saveSettings(workspaceId, funnelId, body, req) {
   }
   const next = { ...DEFAULT_SETTINGS, ...before };
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
-    if (body[key] !== undefined) next[key] = text(body[key]);
+    if (body[key] !== undefined) next[key] = key === 'freeShippingThresholdAmount' ? amount(body[key]) : text(body[key]);
   }
   await funnel.update({ settings: { ...(funnel.settings || {}), ...next } });
   await recordAudit({
@@ -227,6 +239,7 @@ const schemas = {
       headCode: Joi.string().max(20000).allow(null, '').optional(),
       bodyCode: Joi.string().max(20000).allow(null, '').optional(),
       shippingProfileId: uuid.allow(null, '').optional(),
+      freeShippingThresholdAmount: Joi.number().integer().min(0).max(100000000).allow(null).optional(),
     }).min(1),
   },
 };

@@ -482,7 +482,7 @@ async function createOrder(
     });
 
     // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
-    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction);
+    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction, pricedLines[0].currency);
     const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
 
     // (after the row exists, below) a moderate order may get the AI text check — risk/aiOrderCheck.
@@ -741,7 +741,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     shippingAmount: shipping.amount,
     transaction,
   });
-  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction);
+  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction, order.currency);
   const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;
 
   const item = await db.OrderItem.create(

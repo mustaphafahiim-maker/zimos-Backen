@@ -76,8 +76,10 @@ function stored(settings) {
 function optionsFor(settings, shipping) {
   const { standard, extra } = stored(settings);
   const live = extra.filter((o) => o.active);
-  // No destination yet, or no extra option: nothing to choose.
-  if (live.length === 0 || !shipping || shipping.rule === 'no_destination') return [];
+  // No destination yet, or no extra option: nothing to choose. The extra
+  // options' amounts are in the store's currency: a funnel selling in another
+  // one (shipping.ownCurrency, funnels/funnelShipping.js) has none.
+  if (live.length === 0 || !shipping || shipping.rule === 'no_destination' || shipping.ownCurrency) return [];
   const base = Number(shipping.amount) || 0;
   return [
     { key: STANDARD, nameAr: standard.nameAr, nameEn: standard.nameEn, amount: base, daysMin: standard.daysMin, daysMax: standard.daysMax },

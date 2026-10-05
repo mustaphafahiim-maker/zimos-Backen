@@ -151,6 +151,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     offerShippingOverride: manualShipping ? { amount: Number(order.shippingAmount) } : offerShippingOverride,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
+    // A funnel's order keeps the funnel's shipping group and currency rules (funnels/funnelShipping.js).
+    funnelId: order.funnelId || null,
     transaction,
   });
   const { taxAmount } = await calculateTax(workspaceId, {
