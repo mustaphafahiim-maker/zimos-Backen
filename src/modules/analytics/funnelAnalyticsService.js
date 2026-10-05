@@ -4,9 +4,10 @@ const { Op } = require('sequelize');
 const db = require('../../db/models');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { resolveRange, dayKey, rate, toNumber, DAY_MS } = require('./analyticsService');
+const base = require('../currencies/baseAmounts');
 
-const SESSION_ATTRIBUTES = ['id', 'funnelId', 'currentStepKey', 'path', 'orderId', 'attribution', 'status', 'createdAt'];
-const ORDER_ATTRIBUTES = ['id', 'funnelId', 'linkedFromOrderId', 'totalAmount', 'cancelledAt', 'confirmationState', 'createdAt'];
+const SESSION_ATTRIBUTES = ['id', 'funnelId', 'currentStepKey', 'path', 'orderId', 'attribution', 'status', 'createdAt', 'optIns'];
+const ORDER_ATTRIBUTES = ['id', 'funnelId', 'linkedFromOrderId', ...base.ATTRIBUTES, 'cancelledAt', 'confirmationState', 'createdAt'];
 const FUNNEL_ATTRIBUTES = ['id', 'name', 'subdomain', 'status', 'publishedRevisionId'];
 
 /** Same "active" rule getSummary uses for gross revenue. */
@@ -32,7 +33,8 @@ function addSession(m, s) {
 /** Only active orders are counted; cancelled/rejected orders are ignored entirely. */
 function addOrder(m, o) {
   if (!isActiveOrder(o)) return;
-  const total = toNumber(o.totalAmount);
+  // In the store's base currency: funnels may sell in other currencies.
+  const total = base.total(o);
   m.orders += 1;
   m.revenue += total;
   if (o.linkedFromOrderId) {
@@ -61,7 +63,10 @@ async function withMergedUpsells(orders) {
     entry.amount += toNumber(line.lineTotalAmount);
     byOrder.set(line.orderId, entry);
   }
-  for (const o of orders) o.mergedUpsells = byOrder.get(o.id) || null;
+  for (const o of orders) {
+    const entry = byOrder.get(o.id);
+    o.mergedUpsells = entry ? { count: entry.count, amount: base.amount(o, entry.amount) } : null;
+  }
   return orders;
 }
 
@@ -236,15 +241,18 @@ async function getFunnelDetail(workspaceId, funnelId, query = {}) {
     if (!isActiveOrder(o)) continue;
     const day = dayOf(o.createdAt);
     day.orders += 1;
-    day.revenue += toNumber(o.totalAmount);
+    day.revenue += base.total(o);
     const g = orderToSource.get(o.id) || (o.linkedFromOrderId && orderToSource.get(o.linkedFromOrderId));
     if (g) {
       g.orders += 1;
-      g.revenue += toNumber(o.totalAmount);
+      g.revenue += base.total(o);
     }
   }
 
-  const steps = orderSteps(graph.steps, graph.edges, graph.entryKey).map((step) => {
+  // Page performance per step (funnelStepMetrics.js).
+  const ordered = orderSteps(graph.steps, graph.edges, graph.entryKey);
+  const perStep = await require('./funnelStepMetrics').stepMetrics(workspaceId, funnel.id, ordered, sessions, { start, end });
+  const steps = ordered.map((step) => {
     let reached = 0;
     let dropped = 0;
     for (const s of sessions) {
@@ -252,7 +260,7 @@ async function getFunnelDetail(workspaceId, funnelId, query = {}) {
       if (onStep || (s.path || []).includes(step.key)) reached += 1;
       if (onStep && s.status !== 'completed') dropped += 1;
     }
-    return { key: step.key, name: step.name, stepType: step.stepType, reached, dropped, reachRate: rate(reached, totals.sessions) };
+    return { key: step.key, name: step.name, stepType: step.stepType, reached, dropped, reachRate: rate(reached, totals.sessions), ...perStep.get(step.key) };
   });
 
   return {
@@ -260,6 +268,8 @@ async function getFunnelDetail(workspaceId, funnelId, query = {}) {
     currency,
     funnel: { id: funnel.id, name: funnel.name, subdomain: funnel.subdomain, status: funnel.status },
     ...withRate(totals),
+    // Earnings per click: revenue ÷ visitors (sessions), minor units of the base currency.
+    epc: totals.sessions > 0 ? Math.round(totals.revenue / totals.sessions) : null,
     steps,
     sources: Array.from(sources.values()).sort((a, b) => b.sessions - a.sessions || b.revenue - a.revenue).slice(0, 10),
     series: Array.from(series.values()),

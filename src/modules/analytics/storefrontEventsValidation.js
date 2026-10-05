@@ -7,7 +7,7 @@ const uuid = Joi.string().uuid();
 // Commerce events the storefront tracker emits; any other name is a custom
 // event (Umami event_type 2). Names that start with a spreadsheet formula
 // trigger are rejected so analytics exports can't carry CSV injection.
-const EVENT_NAMES = ['page_view', 'view_content', 'add_to_cart', 'begin_checkout', 'purchase'];
+const EVENT_NAMES = ['page_view', 'view_content', 'add_to_cart', 'begin_checkout', 'add_payment_info', 'purchase', 'lead'];
 const FORMULA_TRIGGER_RE = /^[=+\-@\t\r]/;
 const safeString = (max) => Joi.string().max(max).pattern(FORMULA_TRIGGER_RE, { invert: true });
 // `metadata` / `data` are opaque; the service drops them when they serialise past 2KB.
@@ -27,6 +27,9 @@ const event = Joi.object({
   orderId: uuid.optional(),
   revenueAmount: Joi.number().integer().min(0).optional(),
   dedupeId: Joi.string().max(100).optional(),
+  // The id the browser pixel sent with this same event, so the server-side
+  // copy (marketing/browserEventRelay.js) dedupes against it.
+  eventId: Joi.string().max(64).pattern(/^[A-Za-z0-9_.:-]+$/).optional(),
   occurredAt: Joi.date().iso().optional(),
   metadata: metadata.optional(),
 });
@@ -44,6 +47,24 @@ const attribution = Joi.object({
   }).optional(),
 });
 
+const touchField = Joi.string().max(500).allow('');
+const touch = Joi.object({
+  source: touchField,
+  medium: touchField,
+  campaign: touchField,
+  content: touchField,
+  term: touchField,
+  adId: touchField,
+  fbclid: touchField,
+  ttclid: touchField,
+  gclid: touchField,
+  scCid: touchField,
+  ref: touchField,
+  referrer: touchField,
+  landingPage: touchField,
+  at: touchField,
+});
+
 module.exports = {
   EVENT_NAMES,
   ingest: {
@@ -55,6 +76,20 @@ module.exports = {
       language: Joi.string().max(35).optional(),
       hostname: Joi.string().max(100).optional(),
       attribution: attribution.optional(),
+      // The 30-day first/last touch cookie (SPEC §13.4), copied onto an order
+      // by marketing/orderAttribution.js when its purchase event arrives.
+      touches: Joi.object({ first: touch, last: touch }).optional(),
+      // Browser ids the ad platforms match server events on (their own
+      // cookies / click ids) and the products viewed this visit, for
+      // product-scoped pixels. Used only by marketing/browserEventRelay.js.
+      pixel: Joi.object({
+        fbp: Joi.string().max(200),
+        fbc: Joi.string().max(500),
+        ttp: Joi.string().max(200),
+        ttclid: Joi.string().max(500),
+        scCid: Joi.string().max(500),
+        productIds: Joi.array().items(uuid).max(50),
+      }).optional(),
       events: Joi.array().items(event).min(1).max(20).required(),
     }),
   },

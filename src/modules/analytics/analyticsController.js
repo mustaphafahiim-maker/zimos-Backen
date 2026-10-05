@@ -38,3 +38,36 @@ const webRealtime = asyncHandler(async (req, res) => {
 });
 
 Object.assign(module.exports, { webStats, webSeries, webMetrics, webWeekly, webRealtime });
+
+// --- Dashboard home (SPEC §15.1) ---------------------------------------------
+const overviewService = require('./overviewService');
+
+const overview = asyncHandler(async (req, res) => {
+  res.json({ overview: await overviewService.getOverview(req.tenant.workspaceId, req.query) });
+});
+
+Object.assign(module.exports, { overview });
+
+// --- Sales attribution (SPEC §15.3) ------------------------------------------
+const attributionService = require('./attributionService');
+
+const attribution = asyncHandler(async (req, res) => {
+  res.json({ attribution: await attributionService.getAttribution(req.tenant.workspaceId, req.query) });
+});
+
+Object.assign(module.exports, { attribution });
+
+// --- Live view over SSE (SPEC §15.2) -----------------------------------------
+const realtimeStream = require('./realtimeStream');
+
+const live = asyncHandler(async (req, res) => {
+  res.json(await realtimeStream.snapshot(req.tenant.workspaceId, { funnelId: req.query.funnelId }));
+});
+const liveTicket = asyncHandler(async (req, res) => {
+  res.status(201).json({
+    ticket: realtimeStream.issueTicket(req.tenant.workspaceId, req.user.id, req.authTokenPayload && req.authTokenPayload.sid),
+    expiresInSeconds: realtimeStream.TICKET_TTL_MS / 1000,
+  });
+});
+
+Object.assign(module.exports, { live, liveTicket });

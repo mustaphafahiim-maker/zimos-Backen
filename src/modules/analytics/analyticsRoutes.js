@@ -14,6 +14,10 @@ const schemas = require('./analyticsValidation');
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.ANALYTICS_VIEW));
 
+router.get('/overview', validate(schemas.overview), controller.overview);
+router.get('/attribution', validate(schemas.attribution), controller.attribution);
+// SPEC §15.4 names the profit report /analytics/pnl; it lives in modules/profit.
+router.get('/pnl', (req, res) => res.redirect(307, req.originalUrl.replace('/analytics/pnl', '/profit/pnl')));
 router.get('/summary', validate(schemas.summary), controller.summary);
 router.get('/funnels', validate(schemas.funnels), controller.funnels);
 router.get('/funnels/:funnelId', validate(schemas.funnelDetail), controller.funnelDetail);
@@ -28,5 +32,11 @@ router.get('/web/series', validate(schemas.webSeries), advanced, controller.webS
 router.get('/web/metrics', validate(schemas.webMetrics), advanced, controller.webMetrics);
 router.get('/web/weekly', validate(schemas.webWeekly), advanced, controller.webWeekly);
 router.get('/web/realtime', validate(schemas.webRealtime), advanced, controller.webRealtime);
+// Live view (SPEC §15.2): the snapshot the stream pushes, and the one-minute
+// ticket that opens the stream at /api/v1/analytics-stream/:workspaceId (realtimeStream.js).
+router.get('/live', validate(schemas.live), controller.live);
+router.post('/live/stream-ticket', validate(schemas.liveTicket), controller.liveTicket);
+// Sales, products, delivery and customers reports, insights and CSV export.
+router.use('/reports', require('./reportsRoutes'));
 
 module.exports = router;
