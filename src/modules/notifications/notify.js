@@ -79,10 +79,7 @@ async function sendChannel(channel, provider, { recipient, template, data, works
   let attempts = 1;
   try {
     if (provider === 'console') {
-      // Nothing leaves the server. Fine while developing; in production it is
-      // "not configured", so callers fall back (WhatsApp → SMS → email) instead
-      // of believing a code was delivered.
-      if (env.isProduction) throw new Error(`No ${channel} provider is configured (${channel.toUpperCase()}_PROVIDER=console)`);
+      // Nothing leaves the server: logged, as before.
       logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: loggable(data) });
     } else if (channel === 'whatsapp' && provider === 'cloud') {
       // ZIMOS's own number (PLATFORM_WHATSAPP.md).

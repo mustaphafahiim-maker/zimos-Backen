@@ -17,12 +17,14 @@ const logger = require('../../core/utils/logger');
  * hit the cache); stock shown is at most 60 s old, and checkout always
  * checks the real stock.
  *
- * With REDIS_URL the entries and generations live in Redis, shared by every
- * API instance; otherwise in this process's memory. A cache failure is
- * never the request's: it falls back to reading the database.
+ * The entries and generations live in this process's memory, so with several
+ * API instances a change shows on the others within the TTL. A cache failure
+ * is never the request's: it falls back to reading the database.
+ *
+ * Off unless STOREFRONT_CACHE_TTL_SECONDS is set above 0.
  */
 
-const TTL_SECONDS = Number(process.env.STOREFRONT_CACHE_TTL_SECONDS || 60);
+const TTL_SECONDS = Number(process.env.STOREFRONT_CACHE_TTL_SECONDS || 0);
 const MAX_MEMORY_ENTRIES = 5000;
 const enabled = !env.isTest && TTL_SECONDS > 0;
 
@@ -76,45 +78,7 @@ const memoryBackend = {
   },
 };
 
-// --- redis backend -----------------------------------------------------------
-let redis = null;
-function redisClient() {
-  if (redis !== null) return redis || null;
-  const url = (process.env.REDIS_URL || '').trim();
-  if (!url || env.isTest) {
-    redis = false;
-    return null;
-  }
-  try {
-    // eslint-disable-next-line global-require
-    const Redis = require('ioredis');
-    redis = new Redis(url, { enableOfflineQueue: false, maxRetriesPerRequest: 1 });
-    redis.on('error', (err) => logger.warn(`[storefront-cache] Redis error: ${err.message}`));
-  } catch (err) {
-    redis = false;
-  }
-  return redis || null;
-}
-
-const redisBackend = {
-  async generation(workspaceId) {
-    return Number(await redisClient().get(`sfgen:${workspaceId}`)) || 0;
-  },
-  async bump(workspaceId) {
-    await redisClient().incr(`sfgen:${workspaceId}`);
-  },
-  async get(key) {
-    return redisClient().get(key);
-  },
-  async set(key, json) {
-    await redisClient().set(key, json, 'EX', TTL_SECONDS);
-  },
-};
-
-// One backend for the life of the process: with Redis configured but down,
-// reads and writes fail and fall back to the database rather than splitting
-// the cache between two places.
-const backend = () => (redisClient() ? redisBackend : memoryBackend);
+const backend = () => memoryBackend;
 
 /**
  * `compute()`'s result for this store and key, at most TTL old. Always a
