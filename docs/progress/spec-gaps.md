@@ -612,6 +612,21 @@ The `order.status_changed` webhook carries `old_status` and `new_status` (SPEC �
 - **An order placed before the endpoint existed** gets `old_status: null`, as `previous` is null.
 - **Docs:** the event's description in the catalogue (`GET /webhooks` → events, shown in the dashboard) and `docs/public-api.md` (sample payload and an explanation) say so.
 - **Backend only:** the dashboard reads the event catalogue from the server.
+Contact tags from purchase buttons and order forms on website pages too (SPEC §18.4), not only in funnels.
+
+- **The shopper's side.** On a published store page, a `button` or `cod_form` that has "Tags added to the customer" is wrapped in `PageTagScope`.
+  - Pressing the button, or starting to fill in the form, remembers `{ pageId, elementId }` on the device (`lib/pageTags.ts`, for 24 hours, at most 10).
+  - The next order sends them as `pageTags`, from any checkout (`placeCodOrder`), and the list is cleared once the order is placed.
+  - Funnel steps and the editor preview are not wrapped: funnels tag through their own outcomes.
+- **The server's side.** The checkout accepts `pageTags` (at most 10).
+  - After the order is created, `contacts/pageTags.js` finds each element in the store's **published** website snapshot, takes its `contactTags` (only for button / cod_form) and adds them to the order's customer, cleaned as contact tags.
+  - The browser sends only where the element is, never the tags. A page or element that no longer exists, or one that does not tag, adds nothing.
+  - It never fails the order.
+- **Builder:** the hints for button and order-form tags now say they work on store pages and in funnels.
+- **Tested** on the scratch DB with tags temporarily added to the published `/cap-landing` order form:
+  - Ordering through the page gave the customer `cap-lover` and `summer 2026`.
+  - Forged references (a heading, an unknown page) added nothing.
+  - The snapshot was restored exactly.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -814,7 +829,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 136. Orders list and order page: product images, the funnel's name as the source, "New customer" (§4.3, §4.4).
 - [x] 137. Dropship: send an order to the supplier from the order page, forward automatically, follow its status (§16.5).
 - [x] 138. The order.status_changed webhook carries old_status and new_status (§16.1).
-- [ ] 139. Contact tags from purchase buttons on website pages too (§18.4).
+- [x] 139. Contact tags from purchase buttons on website pages too (§18.4).
 - [ ] 140. Subscribers get their portal link (§18.1).
 - [ ] 141. The store's subdomain can be changed in settings (§17.3).
 - [ ] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
