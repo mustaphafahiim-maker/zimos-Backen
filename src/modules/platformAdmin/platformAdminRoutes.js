@@ -17,6 +17,8 @@ router.use(authenticate);
 
 // The couriers' areas map for every store.
 router.use(require('./carrierMapRoutes'));
+// The console's notifications and each admin's notification settings.
+router.use(require('./platformNotificationRoutes'));
 // The theme catalog (themes/themesCatalog.js).
 router.use(require('../themes/themesCatalog').admin);
 

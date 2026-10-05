@@ -518,6 +518,8 @@ async function markChargeFailed(invoiceId, { reason } = {}) {
     await invoice.update({ status: 'failed', failureReason: reason ? String(reason).slice(0, 300) : null }, { transaction });
     const subscription = await db.Subscription.findByPk(invoice.subscriptionId, { transaction });
     if (subscription.status !== 'cancelled') await subscription.update({ status: 'past_due' }, { transaction });
+    // eslint-disable-next-line global-require
+    await require('../platformAdmin/platformNotificationService').paymentFailed(invoice, transaction);
     return { invoice, changed: true };
   });
 }
