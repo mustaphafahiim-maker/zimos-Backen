@@ -459,6 +459,14 @@ Root domains and www (SPEC §8.11, new `domains/rootDomains.js`).
 - **The DNS check** reports the routing record whichever kind it is. A root counts as reaching the store when its addresses are the platform's or those of the platform subdomain, which covers an ALIAS. The counterpart is checked too.
 - **The dashboard** lists the A records and the ALIAS alternative, explains why a root takes no CNAME, and has a switch "Send www.<domain> here too" with that certificate's status.
 - `NO_COUNTERPART` (422) for a subdomain that is not www; `COUNTERPART_CONNECTED` (409) when the counterpart is verified as a domain of its own.
+Each product feed item now links to its own variant (SPEC §7.8: the item `id` is the variant).
+
+- **The feed** (`offers/productFeed.js`): for a product with more than one active variant, the link is `/products/<slug>?variant=<variant id>`. A product with a single variant keeps its plain link.
+- **The product page** (`ProductLanding`) opens on the variant the link names. The price, picture and availability the shopper sees are the ones the ad showed: Google Merchant refuses items whose landing page shows another variant's price.
+  - The link wins over the page's own remembered pick.
+  - Without the parameter, the first variant in stock as before.
+- **ViewContent** is reported with that variant's id (its SKU, else its id — the same id the feed item has), so catalog ads match the visit to the item.
+- The canonical link stays the product's plain URL, so search engines still see one page per product.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -647,7 +655,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 122. Payment methods offered only when they take the order's currency; payment fees, shipping and the free-shipping threshold in the funnel's currency (§11.5).
 - [x] 123. Shipping prices by region from the platform's places: North Coast, Saudi regions, hiding a region, one price for all (§12.1).
 - [x] 124. Root domains and www: an A/ALIAS record option and the www redirect (§8.11).
-- [ ] 125. Product feed items land on their own variant (§7.8).
+- [x] 125. Product feed items land on their own variant (§7.8).
 - [ ] 126. An order bump on a funnel product page's COD form, and the product's own bumps there (§9.5, §10.3).
 - [ ] 127. COD settlement statements read from the courier's Excel file (§15.5).
 - [ ] 128. The builder product list's "Featured" and "Best selling" sources honoured (§8.2).
