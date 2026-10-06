@@ -84,7 +84,8 @@ const PAID_STATES_SQL = "('paid', 'partially_paid', 'refunded', 'partially_refun
 /** A prepaid order that has not been paid. `alias` is the orders alias (or '' for none). */
 function unpaidPrepaidSql(alias) {
   const p = alias ? `${alias}.` : '';
-  return `(${p}payment_method <> 'cod' AND ${p}financial_state NOT IN ${PAID_STATES_SQL})`;
+  // An on-account order ships before it is paid, like cash on delivery (accountCredit/, item 229).
+  return `(${p}payment_method NOT IN ('cod', 'on_account') AND ${p}financial_state NOT IN ${PAID_STATES_SQL})`;
 }
 
 /**

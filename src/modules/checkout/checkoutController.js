@@ -67,7 +67,9 @@ const checkout = asyncHandler(async (req, res) => {
   // A manual transfer (the whole order, or a COD order's deposit) is checked
   // here, before any cart work; it is not an online (gateway) payment.
   const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
-  const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
+  const isOnline = !['cod', 'bank_transfer', 'on_account'].includes(orderBody.paymentMethod);
+  // Pay later on account (accountCredit/, item 229): the signed-in shopper is who the store approved.
+  if (orderBody.paymentMethod === 'on_account') await require('../accountCredit').markCheckout(workspaceId, req.headers['x-shopper-token'], orderBody);
   if (orderBody.paymentMethod === 'cod') paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: 'cod' });
   // A gift card lowers what the courier collects (COD, item 189) or what the gateway charges (online, item 201).
   if (giftCardCode) {

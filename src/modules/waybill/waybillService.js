@@ -266,7 +266,8 @@ async function renderWaybillPdf(model) {
     y += 56;
   } else {
     doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a7f37')
-      .text(`PREPAID — ${order.paymentMethod.toUpperCase()}`, left, y, { lineBreak: false });
+      // An on-account order is paid later by invoice (accountCredit/, item 229): nothing to collect, but not paid either.
+      .text(order.paymentMethod === 'on_account' ? 'ON ACCOUNT — DO NOT COLLECT' : `PREPAID — ${order.paymentMethod.toUpperCase()}`, left, y, { lineBreak: false });
     doc.fillColor('#000');
     y += 16;
   }

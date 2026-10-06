@@ -493,12 +493,15 @@ async function createOrder(
     // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
     const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction, pricedLines[0].currency);
     const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
+    // Pay later on account: only an approved signed-in business customer, within their limit (accountCredit/, item 229).
+    const onAccount = await require('../accountCredit').checkOrder(customer, paymentMethod, totalAmount, payload, req, transaction);
 
     // (after the row exists, below) a moderate order may get the AI text check — risk/aiOrderCheck.
     const order = await db.Order.create(
       {
         id: orderId,
         workspaceId,
+        ...(onAccount ? { paymentDueAt: onAccount.paymentDueAt } : {}),
         websiteId: websiteId || null,
         funnelId: funnelId || null,
         customerId: customer.id,

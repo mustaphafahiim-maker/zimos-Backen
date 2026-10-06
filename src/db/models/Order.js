@@ -38,7 +38,7 @@ module.exports = (sequelize, DataTypes) => {
       },
 
       paymentMethod: {
-        type: DataTypes.ENUM('cod', 'card', 'wallet', 'valu', 'kiosk', 'paypal', 'bank_transfer'),
+        type: DataTypes.ENUM('cod', 'card', 'wallet', 'valu', 'kiosk', 'paypal', 'bank_transfer', 'on_account'),
         allowNull: false,
         field: 'payment_method',
       },
@@ -84,6 +84,8 @@ module.exports = (sequelize, DataTypes) => {
       // Set when a merchant cancels the order directly (distinct from a COD
       // confirmation rejection, though both land on confirmationState 'rejected').
       cancelledAt: { type: DataTypes.DATE, allowNull: true, field: 'cancelled_at' },
+      // An on-account order's payment due date (accountCredit/, item 229).
+      paymentDueAt: { type: DataTypes.DATE, allowNull: true, field: 'payment_due_at' },
       cancellationReason: { type: DataTypes.STRING(500), allowNull: true, field: 'cancellation_reason' },
       // Links an appended-order (e.g. COD upsell that couldn't be merged
       // because the waybill was already created) back to the original order.

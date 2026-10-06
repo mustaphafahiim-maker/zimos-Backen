@@ -17,6 +17,10 @@ module.exports = (sequelize, DataTypes) => {
       taxId: { type: DataTypes.STRING(40), allowNull: true, field: 'tax_id' },
       taxExempt: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'tax_exempt' },
       taxExemptNote: { type: DataTypes.STRING(300), allowNull: true, field: 'tax_exempt_note' },
+      // Pay later on account (migration 492, modules/accountCredit).
+      onAccountEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'on_account_enabled' },
+      creditLimit: { type: DataTypes.BIGINT, allowNull: true, field: 'credit_limit' },
+      paymentTermsDays: { type: DataTypes.INTEGER, allowNull: true, field: 'payment_terms_days' },
       phoneRaw: { type: DataTypes.STRING(32), allowNull: true, field: 'phone_raw' },
       alternatePhone: { type: DataTypes.STRING(32), allowNull: true, field: 'alternate_phone' },
       email: { type: DataTypes.STRING(255), allowNull: true },

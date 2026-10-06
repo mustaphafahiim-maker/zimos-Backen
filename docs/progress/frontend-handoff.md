@@ -2653,3 +2653,27 @@ Body for create / edit / preview:
 - Customer page → «بيانات الشركة» / "Business details": company, tax ID, toggle «معفى من الضريبة» / "Tax exempt" with a note («شوفت شهادة الإعفاء رقم …» / "Exemption certificate seen").
 - Storefront account → «بيانات الشركة» / "Company details": company name «اسم الشركة», tax ID «الرقم الضريبي», and a badge «معفى من الضريبة» / "Tax exempt" when set.
 - Checkout (signed in, exempt): the tax line shows «معفى» / "Exempt"; order page / invoice: company and tax ID under the customer.
+
+## 229. Pay later on account (net terms) — UI: pending
+
+### Dashboard — `/api/v1/workspaces/:ws/account-credit`
+- `GET /customers/:customerId` (`customers.view`) → statement:
+  ```json
+  { "enabled": true, "creditLimit": "60000", "paymentTermsDays": 30, "owed": "25000", "overdue": "0", "available": "35000",
+    "orders": [{ "id": "…", "orderNumber": "ORD-…", "totalAmount": "25000", "amountPaid": "0", "due": "25000", "currency": "EGP",
+                 "financialState": "pending", "paymentDueAt": "2026-11-05T…", "overdue": false, "createdAt": "…" }] }
+  ```
+- `PUT /customers/:customerId` (`customers.manage`) `{ enabled, creditLimit: minor units | null (no limit), paymentTermsDays: 0–365 (30) }` → statement.
+- `GET ?overdue=true` (`customers.view`) → `{ customers: [{ id, fullName, companyName, creditLimit, paymentTermsDays, owed, overdue, nextDueAt }] }` (approved customers, or anyone with on-account orders; most overdue first).
+- `POST /orders/:orderId/payments` (`orders.manage`) `{ amount, reference?, paidAt? }` → 201 `{ paymentId, amountPaid, due }`. More than is due → 422 `amount`; not an on-account order → 409 `NOT_ON_ACCOUNT`; cancelled → 409. The order turns `partially_paid` / `paid`.
+
+### Checkout
+- New payment method **`on_account`**: only for a signed-in shopper (X-Shopper-Token) the store approved, ordering under their own phone. Errors: 401 `SHOPPER_NOT_SIGNED_IN` «سجّل دخول عشان تدفع آجل» / "Sign in to pay later on account"; 422 `paymentMethod` «الدفع الآجل مش متاح للحساب ده» / "Paying later isn't open for this account"; 422 `CREDIT_LIMIT_EXCEEDED` `{ creditLimit, owed, available }` «الطلب أكبر من الرصيد المتاح (متاح: 350 ج)» / "This order is more than your available credit (available: EGP 350)".
+- The order: `paymentMethod: "on_account"`, `paymentDueAt` (terms days later), ships like cash on delivery (ready to ship, courier booking allowed) but the courier collects nothing; the waybill says «ON ACCOUNT — DO NOT COLLECT». Staff can create manual orders with `on_account` for an approved customer.
+- `GET /api/v1/store/:ws/account/on-account` (X-Shopper-Token) → `{ enabled: false }` or the statement above.
+
+### Screens
+- Customer page → «الدفع الآجل» / "Pay on account": toggle, credit limit «حد الائتمان», terms «يدفع خلال … يوم» / "Pays within … days", owed / overdue / available, the orders with due dates (overdue in red «متأخر» / "Overdue"), and «سجّل دفعة» / "Record payment" (amount, reference) per order.
+- Customers → «حسابات الآجل» / "On-account balances": the list with owed / overdue / next due date, filter «المتأخرين بس» / "Overdue only".
+- Checkout (signed-in approved shopper): a method «ادفع آجل (خلال 30 يوم)» / "Pay later on account (30 days)" with «المتاح: …» / "Available: …".
+- Storefront account → «حسابي الآجل» / "My account balance": owed, available, orders with due dates.
