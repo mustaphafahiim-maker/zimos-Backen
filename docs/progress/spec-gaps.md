@@ -1615,3 +1615,18 @@ social proof, no fake reviews, no call centre, no unofficial WhatsApp. A store m
   - modules/quotes + migration 485 (quote_requests, Q-0001 numbering). The shopper holds a private token (hash stored). Staff quote only requested products; accepting creates a COD order through orderService.createOrder with the quoted unit prices pinned server-side, so stock, shipping, fraud rules and the blocklist all apply. The order is tagged quote, and online payment goes through the existing payment link.
   - Expiry is checked on read and on accept (no job). New merchant notification quote.request. The shopper hears once when the quote is ready (merchant_notification template, bilingual title).
   - Verified: request, wrong token, accept before quote, foreign line refused, answer, shopper view (quoted vs list price), accept → order 5 × 20000 tagged quote, double accept refused, expired refused; stock limit enforced (30 > 11 free refused).
+
+## Eighth pass (2026-10-06) — gap pass after the seventh list
+
+How the list was made: each candidate was searched under several spellings (after item 213 was found already built under
+another name). Not listed because already built: review photos (reviews/shopperReviews), store minimum order, branch
+pickup as a fixed shipping option, confirmation-task assignment. Not listed because of SPEC §21: browse-abandonment
+messages (a marketing send) and order assignment to agents (call-centre territory). Migrations 486–499; no prices in
+code.
+
+- [ ] 220. Shopper self-service on orders: cancel an order, or change its delivery address, from the account or tracking page, before it is confirmed or shipped, within a window the merchant sets.
+- [ ] 221. Delivery date and time slots at checkout: merchant-defined slots per weekday, capacity per slot, a cutoff, and closed days; the chosen slot on the order and the waybill.
+- [ ] 222. Customer referral program: a shopper's referral link; the friend gets the merchant's welcome reward on a first order, the referrer gets store credit or points once that order is delivered; no self-referral (same phone/email).
+- [ ] 223. Frequently bought together: product pairs computed from real orders (nightly), served on the product page and the cart, with merchant pins and exclusions.
+- [ ] 224. Stock forecast: sales speed per variant, days of stock left, a suggested reorder quantity, and "make a purchase order" from the suggestions (item 207).
+- [ ] 225. Click and collect: pickup at a stock location (item 206) as a shipping option, with no delivery address, a "ready for pickup" step, and a pickup code checked when the customer collects.
