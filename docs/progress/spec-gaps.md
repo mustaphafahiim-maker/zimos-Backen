@@ -1574,3 +1574,19 @@ centre, no unofficial WhatsApp. Outside services are an interface + `sandbox` ad
   - Synonyms are a fallback, not query expansion: they are tried only when the words themselves find nothing, so existing results never change. The served term is reported (servedAs) and kept on the log. Saving synonyms clears the store cache.
   - Clicks: the first per search, within an hour, only for a product of that store.
   - Verified: search id on page 1 only (also on cache hits), zero results, synonym fallback, duplicate-term refusal, click counted once, report totals/top/no-results/clicked.
+
+## Seventh pass (2026-10-06) — gap pass after the sixth list
+
+How the list was made: the code was searched for further features merchants expect (Lightfunnels and the stores they
+compare it with) that are not there. Each was checked against SPEC §21: no campaigns or bulk sends, no fake urgency or
+social proof, no fake reviews, no call centre, no unofficial WhatsApp. A store minimum order amount already exists
+(discounts/couponExtras.js) and is not listed. Migrations 482–499; no prices in code (every amount is the merchant's).
+
+- [ ] 212. Product questions and answers: shoppers ask on the product page, the merchant answers, answered questions are published (moderated), and the team is told about new questions.
+- [ ] 213. License keys for digital products: a product sells codes from a pool the merchant uploads; a paid order gets its codes (email and order page); stock = codes left; low-pool alert.
+- [ ] 214. Gift wrap and gift message at checkout: an optional wrap with the merchant's price and a message from the shopper, on the order and the packing slip, with the prices hidden on a gift slip.
+- [ ] 215. Mix-and-match box: "any 3 from this collection for a set price" built by the shopper, priced by the server at checkout.
+- [ ] 216. Holiday mode: the store keeps showing but stops taking orders between dates (or takes them with a "ships after" notice), with a message.
+- [ ] 217. Sign in with Google for shopper accounts: an interface + sandbox adapter + README, linked to the shopper account by email.
+- [ ] 218. VIP tiers: customers move up automatically by what they spent (tiers the merchant defines), with perks applied at checkout (a percent off, free shipping, a points multiplier) for signed-in shoppers.
+- [ ] 219. Quote requests (B2B): a shopper asks for a quote for quantities; staff answer with prices and a validity date; the shopper accepts and it becomes an order (payment link reused).
