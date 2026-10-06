@@ -19,6 +19,7 @@ const { recordAudit } = require('../audit/auditService');
  *   google     gtag (GA4 "G-", Ads "AW-") GA4 Measurement Protocol (G- only)
  *   gtm        Tag Manager container      —
  *   clarity    Microsoft Clarity project  —
+ *   pinterest  Pinterest Tag              — (its Conversions API is per ad account; P2)
  *
  * The public half (platform, pixelId, scope) is served to the storefront by
  * publicPixels(); the token never leaves the server.
@@ -31,6 +32,8 @@ const PLATFORMS = Object.freeze({
   google: { idPattern: /^(G|AW|GT)-[A-Z0-9]{4,20}$/, capi: true, testEventCode: false },
   gtm: { idPattern: /^GTM-[A-Z0-9]{4,12}$/, capi: false, testEventCode: false },
   clarity: { idPattern: /^[a-z0-9]{6,20}$/, capi: false, testEventCode: false },
+  // The Pinterest Tag id: digits, about 13 of them.
+  pinterest: { idPattern: /^\d{10,16}$/, capi: false, testEventCode: false },
 });
 const PLATFORM_NAMES = Object.keys(PLATFORMS);
 const SCOPE_TYPES = ['all', 'funnels', 'products'];
