@@ -65,6 +65,20 @@ ${codeHtml}
     };
   },
 
+  // A gift card sent to its holder (giftCards, item 189): the code, the value, the store's name.
+  gift_card(data = {}) {
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const code = escapeHtml(String(data.code || ''));
+    const value = `${escapeHtml(String(data.amount || ''))} ${escapeHtml(String(data.currency || ''))}`;
+    const note = data.message ? `<p style="padding:12px;background:#f6f6f6;border-radius:8px">${escapeHtml(String(data.message).slice(0, 500))}</p>` : '';
+    const codeHtml = `<p dir="ltr" style="font-size:24px;font-weight:700;letter-spacing:3px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${code}</p>`;
+    const until = data.expiresAt ? new Date(data.expiresAt).toISOString().slice(0, 10) : null;
+    if (data.locale === 'en') {
+      return { subject: `Your ${data.storeName || ''} gift card`, ...wrap(`<p>${data.recipientName ? `Hi ${escapeHtml(data.recipientName)},` : 'Hi,'}</p><p>Here is your gift card for ${store}, worth <b>${value}</b>.</p>${note}${codeHtml}<p>Type this code at checkout.${until ? ` Valid until ${until}.` : ''}</p>`, `Your gift card for ${data.storeName}: ${data.code} (${value}).${until ? ` Valid until ${until}.` : ''}`) };
+    }
+    return { subject: `كارت هدية من ${data.storeName || ''}`, ...wrap(`<p>${data.recipientName ? `أهلًا ${escapeHtml(data.recipientName)}،` : 'أهلًا،'}</p><p>ده كارت هدية من ${store} بقيمة <b>${value}</b>.</p>${note}${codeHtml}<p>اكتب الكود ده في صفحة الدفع.${until ? ` صالح لحد ${until}.` : ''}</p>`, `كارت هدية من ${data.storeName}: ${data.code} (${value}).${until ? ` صالح لحد ${until}.` : ''}`, { dir: 'rtl', arabicFooter: true }) };
+  },
+
   // A shopper's sign-in code to a store (shopperAccounts, item 185): the store's name, not Zimos.
   shopper_login_code(data = {}) {
     const code = String(data.code || '');

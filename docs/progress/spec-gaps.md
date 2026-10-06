@@ -1425,7 +1425,12 @@ What the platform still lacks (the owner's "كل حاجه ناقصه"):
   - Guests keep hearts in the browser and merge them after sign-in (only products still for sale). Archived/out-of-stock items stay listed as unavailable; deleted products go by cascade.
   - Merchant `/wishlists/top` (products.view): most wished products by distinct shoppers.
   - Verified: off 404, no token 401, add, add twice no-op, variant entry, bad product 404, merge, top, remove, remove twice 404.
-- [ ] 189. Gift cards: issue, sell as a product, redeem at checkout, check the balance.
+- [x] 189. Gift cards: issue, sell as a product, redeem at checkout, check the balance. (backend done, UI in frontend-handoff.md)
+  - New `giftCards/` (README) + migration 464 (`gift_cards`, `gift_card_transactions`). Codes: HMAC for lookup, sealed for reveal/resend, last 4 shown.
+  - Redeemed at checkout with cash on delivery only (online gateways charge the full total today; noted as a follow-up). The card is a captured `gift_card` payment, so COD collects total − card and the order is paid/partially paid.
+  - Refunds: a Refund model hook credits the card in the refund's own transaction (merchant refunds and the automatic one on order.cancelled) — first built in a separate transaction, which deadlocked on the order row and double-credited on retries; fixed before commit. Locks are order first, then card.
+  - Sold as a product: `settings.gift_cards.productIds` → one card per unit at the line's unit price on order.paid/order.delivered, idempotent per unit (unique index), emailed to the buyer; optional validity days.
+  - Verified: issue + email, check (spacing/case) and 404, full and partial redemption, empty card refused, online refused, cancel returns the balance once, merchant refund credits, reveal, adjust, disable, list by last 4, sold cards issued once.
 - [ ] 190. A blog: a posts index, categories, and the latest posts on the home page.
 - [ ] 191. Element display rules: show between dates, and by device, country or UTM source.
 - [ ] 192. A template marketplace: merchants submit funnel templates (built on the share code), the platform reviews them, and others use them (no prices in code).

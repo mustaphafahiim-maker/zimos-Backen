@@ -1549,3 +1549,57 @@ The place-name matching (`placePricing.placesOf`, used by the quote and checkout
 storefront's "القاهرة (Cairo)" spelling (either half matches), the plain Arabic or English name, and the region/city's
 platform code (`geoCode`, e.g. "cairo"). Verified: a Cairo region price of 65.00 applies to "القاهرة (Cairo)", "القاهرة",
 "Cairo" and "cairo".
+
+## 189. Gift cards: issue, sell as a product, redeem at checkout, check the balance — UI: pending
+
+### Dashboard — Marketing → Gift cards (permission `discounts.manage`), `/workspaces/:ws/gift-cards`
+- **GET `/?state=active|empty|expired|disabled&q=…&before=…&limit=50`** → `{ "giftCards": [ view ], "nextBefore": null }`;
+  `q` = a full code, its last 4, or part of the recipient's email. A view:
+```json
+{ "id": "fe86…", "last4": "T6FK", "initialAmount": "50000", "balanceAmount": "25000", "currency": "EGP", "state": "active",
+  "status": "active", "expiresAt": null, "source": "manual", "orderId": null, "customerId": null,
+  "recipientName": "Hala", "recipientEmail": "hala@example.com", "message": "Happy birthday", "note": null, "createdAt": "…" }
+```
+  `state`: active | empty | expired | disabled. `source`: manual | order.
+- **POST `/`** `{ "amount": 50000 (minor units, ≥1), "currency": "EGP", "expiresAt"?: future ISO|null, "recipientName"?, "recipientEmail"?, "message"? (≤500), "note"? (≤500, staff only), "sendEmail"?: true }`
+  → 201 `{ "giftCard": view, "code": "9KVF-TKVD-7GWL-T6FK" }` — **show the code once** with a copy button ("Save it now").
+- **GET `/:id`** → `{ giftCard, transactions: [ { id, kind: issue|redeem|refund|adjust, amount: "-25000", balanceAfter, orderId, note, createdAt } ] }`.
+- **PATCH `/:id`** `{ status?: active|disabled, expiresAt?, note?, recipientName?, recipientEmail?, adjustBy?: ±minor (not 0), adjustNote? }` → same as GET.
+  422 if an adjustment would go below zero.
+- **POST `/:id/code`** `{ "resend": false }` → `{ "code", "sent": false }` (reveal); `resend: true` emails it to the recipient
+  (422 `GIFT_CARD_NO_EMAIL`).
+- **GET/PUT `/settings`** `{ "productIds": [uuid ≤50], "validityDays": 1–3650 | null }` — products sold as gift cards.
+
+Screens: list with state chips and search; "Issue gift card" dialog; detail drawer with balance, history, disable,
+adjust balance, reveal/resend; Settings card "Products sold as gift cards" (product picker) + "Valid for {n} days".
+
+### Storefront
+- **POST `/store/:ws/gift-cards/check`** `{ "code" }` (any spacing/case) → `{ "giftCard": { "last4", "balanceAmount": "25000", "currency": "EGP", "state": "active", "expiresAt": null } }`;
+  404 `GIFT_CARD_NOT_FOUND`. Rate-limited like order tracking. A "Check your gift card balance" page/modal.
+- **Checkout** (`POST /store/:ws/checkout`): new optional **`giftCardCode`**, **with `paymentMethod: "cod"` only** (other methods:
+  422 `giftCardCode` "A gift card can be used with cash on delivery"). Checked before the order: 422 `GIFT_CARD_NOT_FOUND` /
+  `GIFT_CARD_UNUSABLE` ("has expired", "no balance left", "is no longer valid", "is in USD") on field `giftCardCode`.
+  The 201 answer adds `giftCard: { "applied": true, "amount": "25000", "last4", "balanceAmount": "0", "currency" }` and the
+  order's `amountPaid` / `financialState` (`paid` when the card covered everything, else `partially_paid`).
+  UI: a "Gift card" field under the totals with "Apply" (calls `/check` to preview: "−{min(balance, total)}"), then
+  "Pay on delivery: {total − card}". Thank-you page: "Paid with gift card ••••{last4}: {amount}".
+- Order page (dashboard): the card shows as a payment "Gift card •••• T6FK". Refunding it (existing refund action) returns
+  the amount to the card; cancelling the order returns it by itself.
+- Bought gift cards are emailed to the buyer (email template `gift_card`, the store's name and the value).
+
+Wording:
+| en | ar |
+|---|---|
+| Gift cards | كروت الهدايا |
+| Issue gift card | اعمل كارت هدية |
+| Save this code now — it won't be shown in full again | احفظ الكود ده دلوقتي — مش هيظهر كامل تاني |
+| Balance | الرصيد |
+| Gift card code | كود كارت الهدية |
+| Apply | طبّق |
+| Check your gift card balance | اعرف رصيد كارت الهدية |
+| Paid with gift card | اتدفع بكارت هدية |
+| Pay on delivery | تدفع عند الاستلام |
+| A gift card can be used with cash on delivery | كارت الهدية بيتستخدم مع الدفع عند الاستلام |
+| Products sold as gift cards | منتجات بتتباع ككروت هدايا |
+| Adjust balance | عدّل الرصيد |
+| Resend to recipient | ابعته تاني للمستلم |

@@ -46,7 +46,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -65,6 +65,11 @@ const checkout = asyncHandler(async (req, res) => {
   const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
   const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
   if (orderBody.paymentMethod === 'cod') paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: 'cod' });
+  // A gift card goes with cash on delivery: it lowers what the courier collects (giftCards, item 189).
+  if (giftCardCode) {
+    if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery' }], 'Invalid body');
+    await require('../giftCards/giftCardService').assertUsable(workspaceId, giftCardCode, null);
+  }
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -167,7 +172,9 @@ const checkout = asyncHandler(async (req, res) => {
     await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
     await afterOrderCompleted(workspaceId, order, context);
     const transferPayment = await manualCheckout.record(order, manualTransfer);
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}) });
+    const giftCard = giftCardCode ? await require('../giftCards/giftCardService').redeemOnOrder(order, giftCardCode, req) : null;
+    if (giftCard && giftCard.applied) await order.reload();
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(

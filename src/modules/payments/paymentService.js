@@ -17,6 +17,8 @@ const { GatewayRejectedError, GatewayAuthError } = require('./gateways/gatewayEr
 const PROVIDERS = {
   mock: require('./providers/mockProvider'),
   cod: require('./providers/codProvider'),
+  // A gift card's part of an order (giftCards/, item 189): refunds credit the card.
+  gift_card: require('../giftCards/giftCardProvider'),
 };
 
 // env.payments.defaultProvider (PAYMENTS_DEFAULT_PROVIDER) is not read on this
