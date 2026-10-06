@@ -1,7 +1,7 @@
 'use strict';
 
 const https = require('https');
-const { ValidationError, AppError } = require('../../../../core/errors/AppError');
+const { AppError } = require('../../../../core/errors/AppError');
 const { guardedLookup } = require('../../../webhooks/webhookUrlGuard');
 const { readStructuredProduct } = require('./structuredData');
 
@@ -28,16 +28,27 @@ const SOURCES = [
   { name: 'youcan', hosts: /(^|\.)youcan\.(shop|store)$/i },
 ];
 
+/*
+ * Link refusals each have their own code (422), so the dashboard can say
+ * which one without reading the English text:
+ *   LINK_INVALID         not a full link
+ *   LINK_NOT_HTTPS       not https://
+ *   LINK_HAS_CREDENTIALS a user name or password in the link
+ *   LINK_NOT_PRODUCT     not a product link of a supported source
+ *   LINK_NO_PRODUCT_DATA the page publishes no product data
+ *   IMPORT_SOURCE_UNREACHABLE  the page could not be read
+ */
+const linkError = (code, message, detail = message) => new AppError(code, message, 422, [{ field: 'url', message: detail }]);
+
 function parseLink(link) {
-  const invalid = (message) => new ValidationError([{ field: 'url', message }]);
   let url;
   try {
     url = new URL(String(link).trim());
   } catch {
-    throw invalid('Paste the full product link, starting with https://');
+    throw linkError('LINK_INVALID', 'Paste the full product link, starting with https://');
   }
-  if (url.protocol !== 'https:') throw invalid('The link must start with https://');
-  if (url.username || url.password) throw invalid('The link must not contain a username or password');
+  if (url.protocol !== 'https:') throw linkError('LINK_NOT_HTTPS', 'The link must start with https://');
+  if (url.username || url.password) throw linkError('LINK_HAS_CREDENTIALS', 'The link must not contain a username or password');
   return url;
 }
 
@@ -102,7 +113,7 @@ function sandboxProduct(source, url) {
 async function fromLink(link) {
   const url = parseLink(link);
   const source = detect(url.href);
-  if (!source) throw new ValidationError([{ field: 'url', message: 'Links from AliExpress, Etsy, CJ, YouCan or a Shopify store can be imported' }]);
+  if (!source) throw linkError('LINK_NOT_PRODUCT', 'Links from AliExpress, Etsy, CJ, YouCan or a Shopify store can be imported');
   if (process.env.PRODUCT_IMPORT_MODE === 'sandbox') return { source, products: [sandboxProduct(source, url)] };
   let html;
   try {
@@ -112,9 +123,9 @@ async function fromLink(link) {
   }
   const product = readStructuredProduct(html, { source, url: url.href });
   if (!product) {
-    throw new AppError('IMPORT_SOURCE_UNREACHABLE', 'That page does not publish its product details; download them as a sheet and import the file instead', 422, [{ field: 'url', message: 'No product data on the page' }]);
+    throw linkError('LINK_NO_PRODUCT_DATA', 'That page does not publish its product details; download them as a sheet and import the file instead', 'No product data on the page');
   }
   return { source, products: [product] };
 }
 
-module.exports = { fromLink, detect, SOURCES: SOURCES.map((s) => s.name) };
+module.exports = { linkError, parseLink, fromLink, detect, SOURCES: SOURCES.map((s) => s.name) };

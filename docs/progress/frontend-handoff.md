@@ -1959,3 +1959,39 @@ Wording:
 | Delivery times | مواعيد التوصيل |
 | Orders after {hour} ship the next day | الطلبات بعد الساعة {hour} بتتشحن تاني يوم |
 | Days we don't deliver | أيام مفيش فيها توصيل |
+
+## Frontend requests (2026-10-06, second batch, docs/ux/backend-requests.md) — done
+
+### CORS: `X-Shopper-Token` — done
+The store API (`/api/v1/store/...`) preflight now allows **`X-Shopper-Token`** (signed-in shopper, 185/186) and
+**`X-Store-Gate`** (password-unlocked store, 197). Nothing to change in the UI.
+
+### App store: Shopify and WooCommerce — done
+`GET /workspaces/:ws/apps`: `shopify` and `woocommerce` are now `availability: "available"` with
+**`openPath: "/apps/dropshipping"`** (they open the dropship page's «متجرك التاني» section, 181).
+
+### Product link import report (180) — done
+`GET /workspaces/:ws/catalog/imports/:importId` (and the list) now also return, once the import has run:
+```json
+{ "import": { "id": "…", "kind": "etsy_link", "status": "done", "total": 1, "createdCount": 1, "failedCount": 0, "errors": [],
+  "productIds": ["aec481c7-…"],
+  "results": [{ "row": 1, "productId": "aec481c7-…", "name": "Wooden lamp", "sourceCurrency": "USD", "reviewsImported": 12 }],
+  "reviewsImported": 12 } }
+```
+`sourceCurrency` is the page's price currency (null when the page gives none, or for files and Shopify links); `reviewsImported`
+counts the imported reviews held as `pending`. Imports from before this change have empty `results`/`productIds`. UI: open the
+new draft by `productIds[0]` and show «السعر بعملة الصفحة: USD — راجعه قبل النشر» / "Price is in USD — check it before
+publishing" and «اتنقل 12 تقييم مستنيين موافقتك» / "12 reviews imported, waiting for your approval".
+
+### Own error codes for link refusals (180) — done
+`POST /workspaces/:ws/catalog/products/import` with `{ url }` answers 422 with its own `code` for each refusal (store and
+Shopify links alike; `details[0].field` stays `url`):
+
+| code | when | en | ar |
+|---|---|---|---|
+| `LINK_INVALID` | not a full link | Paste the full product link, starting with https:// | الصق لينك المنتج كامل، بيبدأ بـ https:// |
+| `LINK_NOT_HTTPS` | http, ftp… | The link must start with https:// | اللينك لازم يبدأ بـ https:// |
+| `LINK_HAS_CREDENTIALS` | user:pass@ in the link | The link must not contain a username or password | اللينك ميكونش فيه اسم مستخدم أو باسورد |
+| `LINK_NOT_PRODUCT` | not a product link of AliExpress, Etsy, CJ, YouCan or a Shopify store (/products/…) | This is not a product link we can import | ده مش لينك منتج نقدر نستورده |
+| `LINK_NO_PRODUCT_DATA` | the page publishes no product data / the Shopify link returned no product | That page does not show its product details — import a sheet instead | الصفحة دي مش بتنشر بيانات المنتج — استورده من شيت |
+| `IMPORT_SOURCE_UNREACHABLE` | the page could not be read (timeout, 404…) | We could not reach that page — try again later | مقدرناش نوصل للصفحة — جرب تاني بعدين |
