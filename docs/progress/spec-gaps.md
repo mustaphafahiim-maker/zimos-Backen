@@ -738,6 +738,27 @@ Funnel split tests can now have more than two versions (SPEC §9.6: "2 or more v
   - In Arabic and in English, on two published funnels: created a three-version test with a named C, added a fourth version to the running test (25% each, only D removable), and saved C's page.
   - On the funnel itself, 50 new visitors were spread over A 14, B 10, C 19 and D 7.
   - The tests, their assignments and the test sessions were deleted afterwards.
+Each coupon in the dashboard's discounts list has a "Share link" (SPEC §10.5: "a share link that applies the coupon automatically: ?coupon=CODE"). The storefront already remembered a `?coupon=` link on any page of the store or a funnel and applied it at checkout; there was no way to get the link.
+
+- **The dialog** (`discounts/CouponLinkDialog.tsx`, a Base UI dialog):
+  - Pick where the link opens, see the link, and copy it.
+  - **Decision: the choices follow the coupon's own limits.** Places where the coupon would not apply are not offered:
+    - A coupon limited to some funnels opens one of those funnels.
+    - A coupon limited to some products opens one of those products.
+    - Any other coupon can open the store's home page, an active product, or a published funnel.
+- **Links** are built on the store's address, like the dashboard's other store links (`storeUrl(slug)`):
+  - a product: `/products/<slug>?coupon=CODE`;
+  - a funnel: `/f/<subdomain>?coupon=CODE`, or `VITE_FUNNEL_PUBLIC_BASE_URL` when it is set.
+- **Warnings in the dialog:**
+  - when the coupon isn't running now (disabled, scheduled or expired);
+  - when the store's own coupons switch (`allow_discount_codes`) is off.
+  - Archived coupons and automatic discounts (no code) have no link.
+- **Tested** on the scratch DB, in Arabic and in English:
+  - An open coupon offered home, products and funnels.
+  - A product-limited coupon offered only Demo Cap, and a funnel-limited one only its funnel. The copied links matched.
+  - A disabled coupon showed the warning.
+  - On the storefront, the product link remembered the code and showed "كوبون SHARECAP" on the order form. The funnel link remembered its code and opened the funnel. Both paths also answer 200 through the store's own host.
+  - The test coupons and the session were removed.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -948,7 +969,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
 - [x] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
 - [x] 146. Split tests with more than two versions (§9.6).
-- [ ] 147. Copy a coupon's share link (§10.5).
+- [x] 147. Copy a coupon's share link (§10.5).
 - [ ] 148. Page settings Details tab: a generic page's address and its title (§9.3).
 - [ ] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
 - [ ] 150. Formatted product descriptions, sanitized (§7.1).
