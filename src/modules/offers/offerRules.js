@@ -23,7 +23,8 @@ const { loadPublicProducts } = require('../storefront/publicProduct');
 
 const { Op } = db.Sequelize;
 const MAX_BUMPS = 3;
-const PLACEMENTS = ['cart', 'checkout', 'thank_you'];
+// 'product': the product page (boughtTogether/, item 223).
+const PLACEMENTS = ['cart', 'checkout', 'thank_you', 'product'];
 const UPSELL_WINDOW_MINUTES = 30;
 const EXIT_KEY = 'exit_downsell';
 
@@ -258,20 +259,9 @@ async function saveCrossSell(workspaceId, ruleId, data, req) {
   return row;
 }
 
-/** Products most often bought in the same order as `productIds` (real orders only). */
+/** Products most often bought in the same order as `productIds`: the nightly pairs, with the store's exclusions (boughtTogether/, item 223). */
 async function boughtTogether(workspaceId, productIds, limit) {
-  const rows = await db.sequelize.query(
-    `SELECT other.product_id AS id, COUNT(DISTINCT other.order_id)::int AS n
-       FROM order_items mine
-       JOIN orders o ON o.id = mine.order_id AND o.workspace_id = :workspaceId AND o.cancelled_at IS NULL
-       JOIN order_items other ON other.order_id = mine.order_id AND other.product_id IS NOT NULL
-      WHERE mine.product_id IN (:productIds) AND other.product_id NOT IN (:productIds)
-      GROUP BY other.product_id
-      ORDER BY n DESC, other.product_id
-      LIMIT :limit`,
-    { replacements: { workspaceId, productIds, limit }, type: db.Sequelize.QueryTypes.SELECT }
-  );
-  return rows.map((row) => row.id);
+  return require('../boughtTogether').suggest(workspaceId, productIds, limit);
 }
 
 /**

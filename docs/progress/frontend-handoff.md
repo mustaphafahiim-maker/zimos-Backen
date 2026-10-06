@@ -2525,3 +2525,21 @@ Proof of ownership: `X-Shopper-Token` of the order's customer, **or** the order'
 - Storefront account → «ادعي صحابك» / "Invite friends": the link to copy/share (WhatsApp share link by the shopper themself), «صاحبك ياخد خصم 10% على أول طلب، وانت تاخد 50 جنيه رصيد لما يوصله» / "Your friend gets 10% off their first order; you get EGP 50 credit once it's delivered", counts and list.
 - Landing banner on `?ref=`: «معاك دعوة! خصم 10% على أول طلب» / "You've been invited! 10% off your first order".
 - Checkout: show the invite as applied, with its error messages.
+
+## 223. Frequently bought together — UI: pending
+
+The storefront strip already exists: `GET /api/v1/store/:ws/cross-sell?productIds=a,b&placement=` → `{ source: "rule" | "bought_together" | null, ruleId, products: [public products] }`. New in this item:
+- **`placement=product`** for the product page (send the page's product id). Merchant rules (Offers → Cross-sell, `POST/PATCH /workspaces/:ws/offers/cross-sell`) accept `placement: "product"` too — those are the merchant's **pins**: a matching rule wins over the computed list.
+- The computed list now comes from pairs worked out **nightly** (and right after a settings save), with a minimum number of shared orders and the merchant's **exclusions**.
+
+### Settings — `/api/v1/workspaces/:ws/bought-together` (read `products.view`, change `products.manage`)
+- `GET` → `{ enabled, windowDays, minOrders, excludedProductIds, pairs, computedAt }`.
+- `PUT` `{ enabled, windowDays: 30–1095 (365), minOrders: 1–100 (1), excludedProductIds: [uuid] (≤ 500, this store's; else 422) }` → settings + `pairs` (recomputed at once). `enabled: false` = the computed list is off (merchant rules still show).
+- `POST /recompute` → `{ pairs }`.
+- `GET /products/:productId` → `{ products: [{ productId, name, orders, excluded }] }` — what this product is bought with and in how many orders.
+
+### Screens
+- Product page (storefront): «بيتشروا مع بعض» / "Frequently bought together" strip from `placement=product`, add-to-cart per product (or all), hidden when `products` is empty.
+- Cart: the existing strip (placement `cart`) now honours the exclusions.
+- Dashboard product page → «بيتشري مع» / "Bought with": the list with order counts («في 12 طلب» / "in 12 orders"), a toggle «متقترحوش» / "Don't suggest" (adds to `excludedProductIds`), and a link «ثبّت منتجات» / "Pin products" to a cross-sell rule with placement "product".
+- Settings → Offers → «بيتشروا مع بعض» / "Bought together": on/off, «آخر كام يوم» / "Look back (days)", «أقل عدد طلبات مشتركة» / "Minimum shared orders", excluded products, «آخر تحديث» / "Last updated" (`computedAt`) and «حدّث دلوقتي» / "Update now".

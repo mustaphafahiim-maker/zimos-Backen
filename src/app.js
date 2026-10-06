@@ -297,6 +297,7 @@ v1.use('/workspaces/:workspaceId/gift-options', require('./modules/giftOptions')
 // Holiday mode (spec-gaps item 216).
 v1.use('/workspaces/:workspaceId/delivery-slots', require('./modules/deliverySlots').staff);
 v1.use('/workspaces/:workspaceId/customer-referrals', require('./modules/customerReferrals').staff);
+v1.use('/workspaces/:workspaceId/bought-together', require('./modules/boughtTogether').staff);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
