@@ -2458,3 +2458,19 @@ Perks apply to **signed-in** shoppers (`X-Shopper-Token`) at checkout.
 - Product page / cart: «اطلب عرض سعر» / "Request a quote" (quantities per variant, company, message). After sending: «وصلنا طلبك، هنرد عليك بعرض سعر» / "We got it — we'll send you a quote".
 - Storefront `/quotes/:id`: status, the store's prices vs list prices, total, validity «صالح لحد …» / "Valid until …", buttons «موافق — اطلب» / "Accept and order" (address form) and «رفض» / "Decline".
 - Dashboard → Orders → «عروض الأسعار» / "Quotes": inbox with the new count, editor to set the unit price/quantity per line, note and validity, «ابعت العرض» / "Send quote"; link to the order once accepted.
+
+## 220. Shopper self-service on orders — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/order-self-service` (`orders.manage`)
+- `GET` / `PUT` `{ cancel: { enabled, minutes: 5–10080 | null }, address: { enabled, minutes | null } }` — minutes after placing the order (null = until it ships).
+
+### Storefront — `/api/v1/store/:ws/orders/:orderId/self-service`
+Proof of ownership: `X-Shopper-Token` of the order's customer, **or** the order's tracking token (`?token=` on GET, `token` in the body on POST — the same token as the tracking link).
+- `GET` → `{ canCancel, canChangeAddress, cancelUntil, addressUntil }`.
+- `POST /cancel` `{ token?, reason? }` → `{ cancelled: true }` — goes through the store's normal cancellation (stock released, courier booking cancelled). Allowed while not shipped, not cancelled, not paid online, and not yet confirmed by the store; else 409 `CANCEL_NOT_ALLOWED` «مينفعش تلغي الطلب من هنا دلوقتي — كلّم المتجر» / "This order can no longer be cancelled here — contact the store".
+- `POST /address` `{ token?, address: { province, city, area?, addressLine, placeId?, country? } }` → `{ shippingAddress, note }` — while not shipped or cancelled; places the store doesn't deliver to are refused as at checkout. 409 `ADDRESS_CHANGE_NOT_ALLOWED`. The shipping price is not recalculated (the store confirms any difference).
+- The team gets a notification for each (type `order.new`, `data.by: "customer"`).
+
+### Screens
+- Settings → Orders: «العميل يقدر يلغي الطلب» / "Customers can cancel" + minutes; «العميل يقدر يغيّر العنوان» / "Customers can change the address" + minutes.
+- Tracking page / account order page: buttons «إلغاء الطلب» / "Cancel order" (reason, confirm) and «تغيير العنوان» / "Change address" (address form), shown from `canCancel` / `canChangeAddress`, with «متاح لحد 3:15 م» / "Available until 3:15 PM" from the `…Until` fields.

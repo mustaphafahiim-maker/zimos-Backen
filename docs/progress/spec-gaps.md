@@ -1624,7 +1624,10 @@ pickup as a fixed shipping option, confirmation-task assignment. Not listed beca
 messages (a marketing send) and order assignment to agents (call-centre territory). Migrations 486–499; no prices in
 code.
 
-- [ ] 220. Shopper self-service on orders: cancel an order, or change its delivery address, from the account or tracking page, before it is confirmed or shipped, within a window the merchant sets.
+- [x] 220. Shopper self-service on orders: cancel an order, or change its delivery address, from the account or tracking page, before it is confirmed or shipped, within a window the merchant sets. (backend done, UI in frontend-handoff.md)
+  - shopperAccounts/orderSelfService.js; settings.order_self_service (no migration). Ownership by shopper token (order's customer) or the signed tracking token. Cancel reuses orderService.cancelOrder with a shopper request (user id null). confirmationService.closeTasksForCancelledOrder now skips the agent attempt row when no staff member acted.
+  - Cancel refused once confirmed, shipped, cancelled, or paid online (a refund is the merchant's decision). Address change allowed until shipped; deliverability checked like checkout, shipping not repriced. Both notify the team and are audited.
+  - Verified: off by default, wrong token 404, window shown, address changed, cancel releases the reserved unit, double cancel refused, confirmed order → address only.
 - [ ] 221. Delivery date and time slots at checkout: merchant-defined slots per weekday, capacity per slot, a cutoff, and closed days; the chosen slot on the order and the waybill.
 - [ ] 222. Customer referral program: a shopper's referral link; the friend gets the merchant's welcome reward on a first order, the referrer gets store credit or points once that order is delivered; no self-referral (same phone/email).
 - [ ] 223. Frequently bought together: product pairs computed from real orders (nightly), served on the product page and the cart, with merchant pins and exclusions.

@@ -479,10 +479,13 @@ async function closeTasksForCancelledOrder(workspaceId, orderId, reason, req, tr
     lock: transaction.LOCK.UPDATE,
   });
   for (const task of tasks) {
-    await db.ConfirmationAttempt.create(
-      { taskId: task.id, agentUserId: req.user.id, outcome: 'rejected', notes: reason, source: 'order_page' },
-      { transaction }
-    );
+    // A shopper who cancels their own order (shopperAccounts/orderSelfService.js) is no agent: no attempt row.
+    if (req && req.user && req.user.id) {
+      await db.ConfirmationAttempt.create(
+        { taskId: task.id, agentUserId: req.user.id, outcome: 'rejected', notes: reason, source: 'order_page' },
+        { transaction }
+      );
+    }
     await task.update(
       {
         status: 'done',
