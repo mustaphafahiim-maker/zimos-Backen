@@ -2588,3 +2588,8 @@ The storefront strip already exists: `GET /api/v1/store/:ws/cross-sell?productId
 - Checkout: a choice «توصيل» / "Delivery" vs «استلام من الفرع» / "Pick up in store"; for pickup a list of places (address, hours, unavailable ones disabled «مش متوفر هنا» / "Not available here") and no address form; shipping shows «مجانًا» / "Free".
 - Thank-you / tracking page: «كود الاستلام: 713997» / "Pickup code: 713997" big, the place, hours and instructions, status «بنجهّز طلبك» / "Preparing" → «جاهز للاستلام» / "Ready for pickup" → «اتسلّم» / "Collected".
 - Dashboard → Orders → «طلبات الاستلام» / "Pickups": tabs by status and a location filter; «جاهز» / "Mark ready"; «تسليم» / "Hand over" opens a code field (6 digits) and confirms. The order page shows the pickup block instead of the address.
+
+## Frontend request (2026-10-07): `lockFunnels` in the public gate view — done
+
+- `GET /api/v1/store/:ws` → `store.gate` now carries `lockFunnels: boolean`: `{ mode, message, opensAt, lockFunnels, ageCheck }`. The 423 `STORE_LOCKED` error's `details.gate` has it too (same view).
+- Storefront: on funnel pages, show the gate only when `gate.mode !== 'off' && gate.lockFunnels`; no extra funnel request needed.

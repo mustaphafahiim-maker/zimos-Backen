@@ -93,7 +93,7 @@ function enforce(req, workspace) {
 
 function publicView(workspace) {
   const s = settingsOf(workspace);
-  return { mode: s.mode, message: s.message, opensAt: s.opensAt, ageCheck: s.ageCheck };
+  return { mode: s.mode, message: s.message, opensAt: s.opensAt, lockFunnels: s.lockFunnels, ageCheck: s.ageCheck };
 }
 
 // ----------------------------------------------------------------- routes --
