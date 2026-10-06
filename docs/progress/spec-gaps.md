@@ -1363,7 +1363,11 @@ Domains and developers:
   - `domains.redirect_to_primary` (migration 458), true by default so today's behaviour (every domain moves to the primary one) stays until a merchant turns it off.
   - Off: resolve-host answers no primary host for that domain, so the storefront proxy serves the store there with no proxy change; canonical links still name the primary domain.
   - The platform subdomain keeps moving to the primary domain; the www/root counterpart switch is unchanged.
-- [ ] 178. Webhooks: custom headers per endpoint, plus the topics `funnel.created/updated/deleted`, `payment.paid` and `contact.updated`.
+- [x] 178. Webhooks: custom headers per endpoint, plus the topics `funnel.created/updated/deleted`, `payment.paid` and `contact.updated`. (backend done, UI in frontend-handoff.md)
+  - Headers: `webhook_endpoints.custom_headers` (migration 459), values sealed with secretBox and only shown masked; a PATCH can keep a stored value by name. Zimos' own and transport headers cannot be set, and ours are applied last.
+  - The new topics come from model hooks (`webhooks/modelEvents.js`) that record outbox events inside the change's transaction: funnel create/update/destroy, a payment saved as captured (once), and a customer's own fields (name, phone, email, tags, consent) — counters do not fire it.
+  - `contact.updated` is the customers table read as contacts (SPEC §18.4); the older `customer.updated` topic is kept as listed.
+  - Fixed: the funnel payload asked for a `slug` column funnels do not have, so `funnel.published` never delivered; it now reads `subdomain`.
 - [ ] 179. An MCP server for the store, used by Claude, ChatGPT or any MCP client with an API key: list products and orders, check pages for problems, create a draft funnel.
 
 Integrations (interface + sandbox + README):

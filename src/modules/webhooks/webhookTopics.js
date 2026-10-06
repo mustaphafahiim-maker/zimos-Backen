@@ -32,6 +32,12 @@ const TOPICS = Object.freeze({
   'product.low_stock': "A variant's available stock fell to its low-stock threshold (variantId, available and threshold are in the payload).",
   'review.created': 'A product review was submitted by a customer or added by the team.',
   'funnel.published': 'A funnel was published.',
+  // Item 178 (webhooks/modelEvents.js).
+  'funnel.created': 'A funnel was created.',
+  'funnel.updated': 'A funnel was edited (its settings, steps map, status or name).',
+  'funnel.deleted': 'A funnel was deleted (its id and name are in the payload).',
+  'payment.paid': 'A payment was received for an order (online, a transfer that was accepted, or cash collected).',
+  'contact.updated': "A contact's details, tags or marketing consent were changed.",
 });
 
 const DOMAIN_TO_TOPIC = Object.freeze({
@@ -58,6 +64,14 @@ const DOMAIN_TO_TOPIC = Object.freeze({
   'product.low_stock': 'product.low_stock',
   'review.created': 'review.created',
   'funnel.published': 'funnel.published',
+  'funnel.created': 'funnel.created',
+  'funnel.updated': 'funnel.updated',
+  'funnel.deleted': 'funnel.deleted',
+  'payment.paid': 'payment.paid',
+  'contact.updated': 'contact.updated',
 });
+
+// The model hooks that record the funnel, payment and contact events (item 178).
+require('./modelEvents');
 
 module.exports = { TOPICS, DOMAIN_TO_TOPIC };

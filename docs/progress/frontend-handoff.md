@@ -998,3 +998,46 @@ Wording:
 |---|---|
 | Redirect visitors to the primary domain | حوّل الزوار للدومين الأساسي |
 | Off: the store opens on this domain too | لو مقفول: المتجر بيفتح على الدومين ده كمان |
+
+---
+
+## 178. Webhooks: custom headers per endpoint, and new topics — UI: pending
+
+### Custom headers (permission as today for webhooks)
+**POST `/workspaces/:ws/webhooks`** and **PATCH `/workspaces/:ws/webhooks/:endpointId`** take
+```json
+{ "customHeaders": [ { "name": "Authorization", "value": "Bearer abc" }, { "name": "X-Api-Key", "keep": true } ] }
+```
+- Up to 10; `name` is an HTTP header token (≤64), `value` ≤1000 chars, no line breaks; names unique (case-insensitive).
+- PATCH replaces the whole list; `{ "name": …, "keep": true }` keeps the value already stored under that name (so the UI
+  never needs to know it). 422 for `keep` without a stored value.
+- Not allowed (422 "… is set by Zimos and cannot be changed"): `X-Zimos-*`, `Content-Type`, `Content-Length`, `User-Agent`,
+  `Host`, `Connection`, `Transfer-Encoding`, `Proxy-*` and other transport headers.
+- Values are sealed and never returned: endpoints show `"customHeaders": [{ "name": "Authorization", "valueMask": "••••-123" }]`.
+- Sent with every delivery and with "Send test"; Zimos' own headers always win.
+
+### New topics (subscribe like the others; `GET /webhooks/events` lists them)
+| topic | when | `data` |
+|---|---|---|
+| `funnel.created` | a funnel is created (also by duplicate/import) | `{ funnel: { id, name, subdomain, status } }` |
+| `funnel.updated` | a funnel is saved (name, settings, status, map) | same |
+| `funnel.deleted` | a funnel is deleted | `{ funnel: { id, name, subdomain, deleted: true } }` |
+| `payment.paid` | a payment reaches "captured" (online, accepted transfer, COD collected) | `{ payment: { id, orderId, method, provider, status, amount, currency, paidAt }, order: {…} }` |
+| `contact.updated` | a contact's name, phone, email, tags or marketing consent change | `{ contact: {…} }` |
+Funnel and payment topics respect the endpoint's funnel/product filter like order topics.
+Fixed on the way: `funnel.published` (and so the new funnel topics) failed to build its payload; it delivers now.
+
+### Dashboard — Settings → Developers → Webhooks (endpoint form)
+- "Custom headers" repeater: name + value (password field) rows, add/remove, max 10. Existing rows show the mask and
+  "Change" (send a new value) or keep (send `keep: true`).
+- Topics checklist gains the five new topics (group "Funnels", "Payments", "Contacts").
+
+Wording:
+| en | ar |
+|---|---|
+| Custom headers | Headers إضافية |
+| Header name / Value | اسم الـ header / القيمة |
+| Sent with every delivery to this endpoint | بتتبعت مع كل إرسال للعنوان ده |
+| Funnel created / updated / deleted | فانل اتعمل / اتعدل / اتمسح |
+| Payment received | دفعة وصلت |
+| Contact updated | جهة اتصال اتعدلت |

@@ -11,6 +11,8 @@ module.exports = (sequelize, DataTypes) => {
       signingSecret: { type: DataTypes.STRING(100), allowNull: false, field: 'signing_secret' },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
       // { funnelIds, productIds } — only events about these (webhookFilter.js). Null = all.
+      // [{ name, value: <sealed> }] sent with every delivery (migration 459, webhooks/customHeaders.js).
+      customHeaders: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'custom_headers' },
       filter: { type: DataTypes.JSONB, allowNull: true },
       // Start of the current unbroken run of failed deliveries (webhookHealth.js).
       failingSince: { type: DataTypes.DATE, allowNull: true, field: 'failing_since' },

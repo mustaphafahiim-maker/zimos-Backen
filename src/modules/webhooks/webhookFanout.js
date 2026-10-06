@@ -71,8 +71,13 @@ async function build(topic, event) {
     return { subject: { productIds: [payload.productId] }, data };
   }
 
+  // A deleted funnel is gone: the event carries what is left of it.
+  if (topic === 'funnel.deleted') {
+    return { subject: { funnelId: payload.funnelId }, data: { funnel: { id: payload.funnelId, name: payload.name || null, subdomain: payload.subdomain || null, deleted: true } } };
+  }
+
   if (aggregate === 'funnel') {
-    const funnel = await db.Funnel.findOne({ where: { id: payload.funnelId, workspaceId }, attributes: ['id', 'name', 'slug', 'status'] });
+    const funnel = await db.Funnel.findOne({ where: { id: payload.funnelId, workspaceId }, attributes: ['id', 'name', 'subdomain', 'status'] });
     if (!funnel) return null;
     return { subject: { funnelId: funnel.id }, data: { funnel: funnel.toJSON() } };
   }
@@ -81,6 +86,21 @@ async function build(topic, event) {
     const customer = await db.Customer.findOne({ where: { id: payload.customerId, workspaceId } });
     if (!customer) return null;
     return { subject: {}, data: { customer: customer.toJSON() } };
+  }
+
+  // Item 178: a captured payment, with its order.
+  if (aggregate === 'payment' && payload.paymentId) {
+    const payment = await db.Payment.findOne({ where: { id: payload.paymentId, workspaceId } });
+    if (!payment) return null;
+    const subject = (await orderSubject(workspaceId, payment.orderId)) || {};
+    const { id, orderId, method, provider, status, amount, currency, paidAt, createdAt } = payment.toJSON();
+    return { subject, data: { payment: { id, orderId, method, provider, status, amount: amount === null ? null : String(amount), currency, paidAt: paidAt || createdAt }, order: await orderData(workspaceId, payment.orderId) } };
+  }
+
+  if (aggregate === 'contact' && payload.customerId) {
+    const customer = await db.Customer.findOne({ where: { id: payload.customerId, workspaceId } });
+    if (!customer) return null;
+    return { subject: {}, data: { contact: customer.toJSON() } };
   }
 
   if (aggregate === 'review' && payload.reviewId) {
