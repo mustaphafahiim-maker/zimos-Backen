@@ -1348,7 +1348,10 @@ Email:
   - Blocks are JSON on the existing template row (`order_email_templates.blocks`, migration 455); null keeps the plain body, so nothing changes for stores that do not use it.
   - Rendered only on the server (`notifications/emailBlocks.js`): every text escaped after the {{variables}} are filled, links limited to http(s) or a variable, so no merchant HTML reaches a customer.
   - The order table reads the order's own lines (or the cart's, for recovery), with shipping and total; previews and tests use sample lines. The branded header, footer and unsubscribe line wrap blocks as they wrap text.
-- [ ] 175. Order emails chosen per funnel or store, instead of one set per store.
+- [x] 175. Order emails chosen per funnel or store, instead of one set per store. (backend done, UI in frontend-handoff.md)
+  - A `scope` on the existing template rows (migration 456: '' = the store's set, `funnel:<id>`, `website:<id>`), unique per workspace, key and scope. "Store" here is a website of the workspace, as in item 172.
+  - An override keeps its own on/off; its empty subject, body or blocks come from the store's version, so a merchant can change only the subject for one funnel.
+  - An order picks its funnel's override, then its website's, then the store's; cart recovery reads them from the checkout's attribution. Every endpoint takes `?funnelId=` / `?websiteId=`, and DELETE removes an override.
 
 Domains and developers:
 - [ ] 176. Buy a domain in the dashboard: search, buy, automatic DNS, renewal (registrar interface + sandbox).

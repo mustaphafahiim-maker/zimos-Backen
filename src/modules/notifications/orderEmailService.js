@@ -126,18 +126,76 @@ const assertKey = (key) => {
   if (!TEMPLATES[key]) throw new NotFoundError('OrderEmailTemplate');
 };
 
-async function list(workspaceId) {
-  const rows = await db.OrderEmailTemplate.findAll({ where: { workspaceId } });
-  const byKey = new Map(rows.map((r) => [r.key, r]));
-  return { templates: KEYS.map((key) => view(key, byKey.get(key))), tokens: context().TOKENS };
+/*
+ * Per funnel or website (item 175): a template row may belong to the store
+ * (scope '') or override it for one funnel ('funnel:<id>') or website
+ * ('website:<id>'). An override's empty subject, body or blocks come from the
+ * store's version; its on/off is its own. An order uses its funnel's
+ * override, else its website's, else the store's.
+ */
+const scopeKey = (s = {}) => (s && s.funnelId ? `funnel:${s.funnelId}` : s && s.websiteId ? `website:${s.websiteId}` : '');
+
+function merged(storeRow, scopedRow) {
+  if (!scopedRow) return storeRow || null;
+  const s = storeRow || {};
+  return {
+    key: scopedRow.key,
+    isEnabled: scopedRow.isEnabled,
+    subject: scopedRow.subject || s.subject || null,
+    body: scopedRow.body || s.body || null,
+    blocks: scopedRow.blocks || s.blocks || null,
+    updatedAt: scopedRow.updatedAt,
+  };
+}
+
+async function assertScope(workspaceId, scope = {}) {
+  if (scope.funnelId && !(await db.Funnel.findOne({ where: { id: scope.funnelId, workspaceId }, attributes: ['id'] }))) throw new NotFoundError('Funnel');
+  if (scope.websiteId && !(await db.Website.findOne({ where: { id: scope.websiteId, workspaceId }, attributes: ['id'] }))) throw new NotFoundError('Website');
+}
+
+/** One template in a scope: { current (merged view input), store row, scoped row }. */
+async function templateIn(workspaceId, key, scope) {
+  const sk = scopeKey(scope);
+  const rows = await db.OrderEmailTemplate.findAll({ where: { workspaceId, key, scope: [...new Set(['', sk])] } });
+  const storeRow = rows.find((r) => r.scope === '') || null;
+  const scopedRow = sk ? rows.find((r) => r.scope === sk) || null : null;
+  return { current: view(key, merged(storeRow, scopedRow)), storeRow, scopedRow };
+}
+
+async function list(workspaceId, scope = {}) {
+  await assertScope(workspaceId, scope);
+  const sk = scopeKey(scope);
+  const rows = await db.OrderEmailTemplate.findAll({ where: { workspaceId, scope: [...new Set(['', sk])] } });
+  const pick = (key, sc) => rows.find((r) => r.key === key && r.scope === sc) || null;
+  return {
+    scope: sk || null,
+    templates: KEYS.map((key) => ({ ...view(key, merged(pick(key, ''), sk ? pick(key, sk) : null)), overridden: Boolean(sk && pick(key, sk)) })),
+    tokens: context().TOKENS,
+  };
+}
+
+/** Removes a funnel's or website's override: that funnel or website uses the store's email again. */
+async function removeOverride(workspaceId, key, scope, req) {
+  assertKey(key);
+  const sk = scopeKey(scope);
+  if (!sk) throw new ValidationError([{ field: 'funnelId', message: 'Name the funnel or website whose override to remove' }], 'Invalid query');
+  const row = await db.OrderEmailTemplate.findOne({ where: { workspaceId, key, scope: sk } });
+  if (!row) throw new NotFoundError('OrderEmailTemplate');
+  await row.destroy();
+  await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'order_email.override_remove', entityType: 'OrderEmailTemplate', entityId: row.id, req, after: { key, scope: sk } });
+  return (await templateIn(workspaceId, key, {})).current;
 }
 
 /** `subject` / `body` null (or equal to the built-in text) go back to the built-in text. */
-async function update(workspaceId, key, patch, req) {
+async function update(workspaceId, key, patch, req, scope = {}) {
   assertKey(key);
+  await assertScope(workspaceId, scope);
   const base = TEMPLATES[key];
+  const sk = scopeKey(scope);
+  // A new override starts from the store's on/off.
+  const startOn = sk ? (await templateIn(workspaceId, key, {})).current.isEnabled : Boolean(base.defaultOn);
   return db.sequelize.transaction(async (transaction) => {
-    const [row] = await db.OrderEmailTemplate.findOrCreate({ where: { workspaceId, key }, defaults: { workspaceId, key, isEnabled: Boolean(base.defaultOn) }, transaction });
+    const [row] = await db.OrderEmailTemplate.findOrCreate({ where: { workspaceId, key, scope: sk }, defaults: { workspaceId, key, scope: sk, isEnabled: startOn }, transaction });
     const before = { isEnabled: row.isEnabled, customised: Boolean(row.subject || row.body) };
     const next = {};
     if (patch.isEnabled !== undefined) next.isEnabled = patch.isEnabled;
@@ -153,10 +211,12 @@ async function update(workspaceId, key, patch, req) {
       entityId: row.id,
       req,
       before,
-      after: { key, isEnabled: row.isEnabled, customised: Boolean(row.subject || row.body) },
+      after: { key, scope: sk, isEnabled: row.isEnabled, customised: Boolean(row.subject || row.body) },
       transaction,
     });
-    return view(key, row);
+    if (!sk) return view(key, row);
+    const storeRow = await db.OrderEmailTemplate.findOne({ where: { workspaceId, key, scope: '' }, transaction });
+    return { ...view(key, merged(storeRow, row)), overridden: true };
   });
 }
 
@@ -167,10 +227,9 @@ async function brandOf(workspaceId) {
 }
 
 /** What the email will look like, with sample values. `draft` previews unsaved text. */
-async function preview(workspaceId, key, draft = {}) {
+async function preview(workspaceId, key, draft = {}, scope = {}) {
   assertKey(key);
-  const row = await db.OrderEmailTemplate.findOne({ where: { workspaceId, key } });
-  const current = view(key, row);
+  const { current } = await templateIn(workspaceId, key, scope);
   const brand = await brandOf(workspaceId);
   const blocks = draft.blocks !== undefined ? draft.blocks : current.blocks;
   const data = composeData({ subject: draft.subject || current.subject, body: draft.body || current.body, blocks }, { ...SAMPLE_VARS, store_name: brand.storeName }, brand, SAMPLE_LINES);
@@ -179,12 +238,12 @@ async function preview(workspaceId, key, draft = {}) {
 }
 
 /** Sends the template with sample values to one address (the teammate's own by default). */
-async function sendTest(workspaceId, key, { to, subject, body, blocks } = {}, req) {
+async function sendTest(workspaceId, key, { to, subject, body, blocks } = {}, req, scope = {}) {
   assertKey(key);
   const recipient = to || (await db.User.findByPk(req.user.id, { attributes: ['email'] })).email;
   if (!recipient) throw new ValidationError([{ field: 'to', message: 'An email address is required' }], 'Invalid body');
-  const row = await db.OrderEmailTemplate.findOne({ where: { workspaceId, key } });
-  const current = view(key, row);
+  const { current, scopedRow, storeRow } = await templateIn(workspaceId, key, scope);
+  const row = scopedRow || storeRow;
   const brand = await brandOf(workspaceId);
   const result = await notify.email({
     recipient,
@@ -240,16 +299,8 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
     if (keys.length === 0 || payload.notifyCustomer === false) return [];
     const forced = payload.notifyCustomer === true;
     const stored = await db.OrderEmailTemplate.findAll({ where: { workspaceId, key: keys } });
-    // Forced: every template of the event. Otherwise the ones switched on — or never touched and on by default.
-    const rows = keys
-      .map((key) => {
-        const row = stored.find((r) => r.key === key);
-        if (forced) return row || { key };
-        if (row) return row.isEnabled ? row : null;
-        return TEMPLATES[key].defaultOn ? { key } : null;
-      })
-      .filter(Boolean);
-    if (rows.length === 0) return [];
+    // Nothing can be on anywhere (no row on, none on by default): nothing to load.
+    if (!forced && !stored.some((r) => r.isEnabled) && !keys.some((k) => TEMPLATES[k].defaultOn)) return [];
     // A subscription event speaks about the subscription (its product, amount and page), not the order that started it.
     const subject = payload.subscriptionId
       ? await context().loadSubscriptionSubject(workspaceId, payload.subscriptionId)
@@ -259,6 +310,25 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
         ? await context().loadCheckoutSubject(workspaceId, payload.checkoutSessionId)
         : null;
     if (!subject || !subject.email) return [];
+    // The funnel's override, else the website's, else the store's (item 175).
+    const origin = subject.order
+      ? { funnelId: subject.order.funnelId, websiteId: subject.order.websiteId }
+      : subject.session
+        ? { funnelId: (subject.session.attribution || {}).funnelId, websiteId: (subject.session.attribution || {}).websiteId }
+        : {};
+    const scopes = [origin.funnelId && `funnel:${origin.funnelId}`, origin.websiteId && `website:${origin.websiteId}`].filter(Boolean);
+    // Forced: every template of the event. Otherwise the ones switched on — or never touched and on by default.
+    const rows = keys
+      .map((key) => {
+        const storeRow = stored.find((r) => r.key === key && r.scope === '') || null;
+        const scopedRow = scopes.map((sc) => stored.find((r) => r.key === key && r.scope === sc)).find(Boolean) || null;
+        const row = merged(storeRow, scopedRow);
+        if (forced) return row || { key };
+        if (row) return row.isEnabled ? row : null;
+        return TEMPLATES[key].defaultOn ? { key } : null;
+      })
+      .filter(Boolean);
+    if (rows.length === 0) return [];
     // The abandoned-cart email is marketing: never to a STOP, an unsubscribe or a blocked phone or address,
     // and it ends with an unsubscribe link (marketingUnsubscribe.js).
     let unsubscribeUrl = null;
@@ -292,4 +362,4 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
   }
 }
 
-module.exports = { TEMPLATES, KEYS, EVENTS, list, update, preview, sendTest, handleEvent };
+module.exports = { TEMPLATES, KEYS, EVENTS, list, update, removeOverride, preview, sendTest, handleEvent, scopeKey };

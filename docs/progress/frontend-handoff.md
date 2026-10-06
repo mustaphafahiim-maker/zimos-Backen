@@ -890,3 +890,36 @@ Wording:
 | Heading / Text / Button / Image / Order table / Divider | عنوان / نص / زرار / صورة / جدول الطلب / فاصل |
 | Button link | لينك الزرار |
 | Send test | ابعت تجربة |
+
+---
+
+## 175. Order emails per funnel or website — UI: pending
+
+Every order-email endpoint (permission `workspace.manage`) now takes an optional **`?funnelId=`** or **`?websiteId=`**
+(not both: 422). Without it you edit the store's set, exactly as before.
+
+- **GET `/workspaces/:ws/order-emails?funnelId=…`** → `{ "scope": "funnel:<id>", "templates": [ { …template, "overridden": true|false } ], "tokens": [...] }`
+  — each template as it applies to that funnel: its own version where `overridden`, else the store's.
+- **PUT `/workspaces/:ws/order-emails/:key?funnelId=…`** `{ isEnabled?, subject?, body?, blocks? }` — creates/updates the funnel's
+  override. A new override starts with the store's on/off; empty subject/body/blocks fall back to the store's version.
+  Answer: the merged template with `"overridden": true`.
+- **DELETE `/workspaces/:ws/order-emails/:key?funnelId=…`** — removes the override (the funnel uses the store's email again);
+  404 when there is none; 422 without a scope.
+- **POST `…/:key/preview?funnelId=…`** and **`…/:key/test?funnelId=…`** — preview / test that funnel's version.
+- Unknown funnel or website → 404.
+
+Sending: an order uses its **funnel's** override, else its **website's**, else the store's. An override switched off sends
+nothing for that funnel even when the store's is on. Cart recovery reads the funnel/website from the checkout's attribution.
+
+### Dashboard
+- **Funnel → Settings → Emails** tab: the same templates list as Settings → Emails, loaded with `?funnelId=`, each row showing
+  "Store default" or "Custom for this funnel"; editing saves an override; "Use store email" (DELETE) on custom rows.
+- Same for a website (Website → Settings → Emails) with `?websiteId=` when the store has more than one website.
+
+Wording:
+| en | ar |
+|---|---|
+| Store default | زي إيميلات المتجر |
+| Custom for this funnel | مخصص للفانل ده |
+| Use store email | استخدم إيميل المتجر |
+| Off for this funnel | مقفول للفانل ده |
