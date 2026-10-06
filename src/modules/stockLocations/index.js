@@ -304,4 +304,4 @@ router.put(
   })
 );
 
-module.exports = { router, assignOrder, stockMatrix, byVariant };
+module.exports = { router, assignOrder, stockMatrix, byVariant, bumpRow };

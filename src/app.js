@@ -278,6 +278,8 @@ v1.use('/workspaces/:workspaceId/store-credit', require('./modules/storeCredit')
 v1.use('/workspaces/:workspaceId/price-lists', require('./modules/priceLists').staff);
 // Multiple stock locations (spec-gaps item 206).
 v1.use('/workspaces/:workspaceId/stock-locations', require('./modules/stockLocations').router);
+// Suppliers, purchase orders and stock counts (spec-gaps item 207).
+v1.use('/workspaces/:workspaceId/purchasing', require('./modules/purchasing').router);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);

@@ -2197,3 +2197,31 @@ Orders: `order.stockLocationId` (null = the default). A new order is assigned au
 - Product page (dashboard): stock per location under each variant.
 - Order page: «بيتشحن من» / "Ships from" select (PUT /orders/:id); print it on the packing slip.
 - Negative `available` at a location = more reserved there than on hand: show a warning «محتاج نقل مخزون» / "Needs a transfer".
+
+## 207. Suppliers, purchase orders and stock counts — UI: pending
+
+All under `/api/v1/workspaces/:ws/purchasing` — read `inventory.view`, change `inventory.manage`. Money in minor units.
+
+### Suppliers
+- `GET /suppliers` → `{ suppliers: [{ id, name, contactName, phone, email, address, notes, createdAt }] }`
+- `POST /suppliers` `{ name (1–160), contactName?, phone?, email?, address?, notes? }` → 201; `PATCH /suppliers/:id`; `DELETE /suppliers/:id` → 204 (409 `SUPPLIER_IN_USE` when it has purchase orders).
+
+### Purchase orders
+- `GET /purchase-orders?status=&supplierId=` → `{ purchaseOrders: [{ id, number: "PO-0001", status, supplier: { id, name }, locationId, currency, expectedAt, totalAmount, unitsOrdered, unitsReceived, lineCount, … }] }`
+- `POST /purchase-orders` / `PUT /purchase-orders/:id` (draft only, else 409 `PO_LOCKED`):
+  `{ supplierId, locationId? (stock location, item 206), expectedAt?, note?, lines: [{ variantId, quantity, unitCost }] (1–500, one per variant) }`
+- `GET /purchase-orders/:id` → `{ …, lines: [{ id, variantId, sku, productName, optionValues, quantity, receivedQuantity, unitCost, lineTotal }], totalAmount, unitsOrdered, unitsReceived }`
+- `POST /:id/order` (draft → ordered), `POST /:id/cancel` (draft/ordered with nothing received) — else 409 `PO_STATUS`.
+- `POST /:id/receive` `{ lines: [{ lineId, quantity }], updateCost?: true }` → the order with status `partially_received` / `received`.
+  Adds the units to stock (at the order's location) and sets the variant cost to the weighted average of the stock it had and the units received (unless `updateCost: false`). 422 `PO_OVER_RECEIVED` with `details[0].left`; 409 `PO_STATUS` before it is ordered.
+
+### Stock counts
+- `POST /stock-counts` `{ locationId?, productId? | variantIds? (≤2000), note? }` → 201 count. No ids = every variant (2000 max). `expected` = on hand now, at the location or the whole store.
+- `GET /stock-counts` (list), `GET /stock-counts/:id` → `{ id, locationId, status: open|applied|cancelled, note, lines: [{ variantId, sku, productName, expected, counted, difference, appliedDelta }], counted, total }`
+- `PATCH /stock-counts/:id` `{ lines: [{ variantId, counted (≥0 or null) }] }` — save as you go.
+- `POST /stock-counts/:id/apply` → each counted line is adjusted by counted − on hand **at that moment** (`appliedDelta`); `POST /:id/cancel`. 409 `COUNT_CLOSED` after.
+
+### Screens
+- Inventory → «الموردين» / "Suppliers" (list + form).
+- Inventory → «أوامر الشراء» / "Purchase orders": list with status chips (مسودة Draft · اتطلب Ordered · استلام جزئي Partly received · اتسلّم Received · ملغي Cancelled); editor (supplier, location, expected date, lines with variant picker, quantity, unit cost, total); «اطلب» / "Mark as ordered"; «استلام» / "Receive" with quantity per line (default = what's left) and «حدّث التكلفة» / "Update cost" checkbox.
+- Inventory → «الجرد» / "Stock counts": start (location, product or all), a counting table (expected, counted input, difference coloured), «اعتمد الجرد» / "Apply count" with a confirm «هيعدّل المخزون بالفرق» / "Stock will be adjusted by the differences".
