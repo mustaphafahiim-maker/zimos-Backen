@@ -1456,3 +1456,21 @@ Not built, and why:
 - **LightSchool:** excluded by the owner.
 - **Square, Checkout.com, Razorpay, MercadoPago and CinetPay gateways:** these are new payment gateways, the integrations team's work per SPEC §22. The payment interface already takes them.
 - **ShineOn and other print-on-demand services:** they would be new providers on the existing DropshipProvider interface.
+
+## Fifth pass (2026-10-06) — what is still missing after the Lightfunnels list
+
+How the list was made: after 160–192, the code was searched for the remaining features of Lightfunnels and of the stores
+merchants compare it with (Zapier/Make app, stock alerts, pre-orders, consent, store gates, purchase limits, delivery
+estimates, campaigns, reports). Only what is not in the code is listed. SPEC §21 still holds; outside services are an
+interface + `sandbox` adapter + README; migrations stay in 450–499; no prices in code.
+
+- [ ] 193. Zapier / Make: REST-hook subscribe/unsubscribe on the public API (order created/paid/shipped, lead created, contact updated), sample-data endpoints for setting up a Zap, API-key auth and scopes.
+- [ ] 194. Back-in-stock alerts: a shopper leaves an email/phone on a sold-out variant; they are told once when stock returns; the merchant sees the demand.
+- [ ] 195. Pre-orders: a sold-out variant can be sold as a pre-order with an expected ship date and an optional limit; the order and the shopper see it.
+- [ ] 196. Cookie consent: the store's consent banner settings, and pixels (browser and server events) sent only with the shopper's consent where the store asks for it.
+- [ ] 197. Store gates: a password-protected or "coming soon" store with an email sign-up, and an optional age check.
+- [ ] 198. Purchase limits per product: minimum and maximum quantity per order (and per customer), enforced at checkout and in the cart quote.
+- [ ] 199. Estimated delivery dates: min/max days per governorate/place and shipping option, shown on the product page, cart and checkout, and stored on the order.
+- [ ] 200. Email campaigns: a broadcast to a contact segment (consented contacts only), with the block designer, a test send, scheduling, an unsubscribe link and sent/opened counts.
+- [ ] 201. Gift cards with online payments: the gateway attempt charges the total minus the card (follow-up of 189).
+- [ ] 202. Scheduled reports: a daily or weekly summary email (sales, orders, confirmation and delivery rates, top products) to chosen team members.
