@@ -262,6 +262,8 @@ v1.use('/workspaces/:workspaceId/marketplace', require('./modules/marketplace').
 v1.use('/workspaces/:workspaceId/stock-alerts', require('./modules/stockAlerts').staff);
 // Pre-orders (item 195).
 v1.use('/workspaces/:workspaceId/preorders', require('./modules/preorders').router);
+// Cookie consent (item 196).
+v1.use('/workspaces/:workspaceId/cookie-consent', require('./modules/marketing/cookieConsent').router);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);

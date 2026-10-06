@@ -26,7 +26,9 @@ const getStore = asyncHandler(async (req, res) => {
   const customFonts = await cache.cached(ws, 'fonts', () => require('../fonts/storeFonts').publicList(ws));
   // The merchant's rewording of the storefront's labels, per language (storefront/storefrontTexts.js).
   const storefrontTexts = await cache.cached(ws, 'texts', () => require('./storefrontTexts').get(ws));
-  res.json({ store: { ...store, customFonts, storefrontTexts } });
+  // The cookie banner and whether tracking waits for the shopper (marketing/cookieConsent.js).
+  const cookieConsent = require('../marketing/cookieConsent').publicView(await require('../../db/models').Workspace.findByPk(ws, { attributes: ['id', 'settings'] }));
+  res.json({ store: { ...store, customFonts, storefrontTexts, cookieConsent } });
 });
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.

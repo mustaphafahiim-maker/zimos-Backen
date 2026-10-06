@@ -1831,3 +1831,36 @@ Wording:
 | Expected ship date | معاد الشحن المتوقع |
 | Limit per variant | الحد لكل نوع |
 | Pre-ordered | اتطلب مسبقًا |
+
+## 196. Cookie consent — UI: pending
+
+### Dashboard — Store settings → Privacy (permission `website.edit`)
+- **GET `/workspaces/:ws/cookie-consent`** → `{ "mode": "off", "countries": null, "policyUrl": null, "texts": {} }`
+- **PUT** same `{ "mode": "off" | "notice" | "opt_in", "countries"?: ["DE","FR"] | null, "policyUrl"?: "https://…" | "/pages/privacy" | null, "texts"?: { "ar": { "message", "accept", "reject" }, "en": {…}, "fr": {…} } }`
+  (message ≤500, buttons ≤40). Off (default) = no banner, as today. Notice = a banner that informs; tracking runs.
+  **Ask first (opt_in)** = nothing tracks until the shopper accepts; `countries` limits who is asked (empty = everyone; an
+  unknown country is asked).
+- Card: radio Off / Notice only / Ask first, countries multi-select ("Ask only visitors from…"), policy link, texts per language.
+
+### Storefront
+- `GET /store/:ws` → `store.cookieConsent`: `{ "mode": "off" }` or `{ mode, countries, policyUrl, texts }`.
+- Banner (bottom, both buttons equal): show for `notice` (one "OK" button) and for `opt_in` ("Accept" / "Reject"; when
+  `countries` is set, only for visitors whose `GET /store/:ws/visitor-context` country is listed or unknown). Remember the
+  choice (localStorage, 6 months) and offer "Cookie settings" in the footer to change it.
+- With `opt_in` and no "Accept": **don't load the browser pixels / GTM / Clarity**, and send the choice to the backend:
+  - event batches (`POST /store/:ws/events`): add `"consent": { "marketing": true | false }` — without `true` the server
+    sends nothing to the ad platforms for that batch;
+  - checkout (`POST /store/:ws/checkout`): add `"trackingConsent": true | false` — kept on the order; without `true` the
+    order's server-side purchase event is not sent.
+  Analytics inside Zimos (visits, funnels) are first-party and keep working.
+
+Wording:
+| en | ar |
+|---|---|
+| We use cookies to improve your visit and measure our ads. | بنستخدم الكوكيز عشان نحسّن زيارتك ونقيس إعلاناتنا. |
+| Accept | موافق |
+| Reject | لا شكرًا |
+| Cookie settings | إعدادات الكوكيز |
+| Privacy policy | سياسة الخصوصية |
+| Off / Notice only / Ask first | مقفول / إشعار بس / اسأل الأول |
+| Ask only visitors from | اسأل بس الزوار من |

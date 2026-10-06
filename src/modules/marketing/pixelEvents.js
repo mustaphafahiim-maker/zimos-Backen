@@ -73,6 +73,8 @@ async function run(workspaceId, trigger, orderId) {
   // The merchant chooses the moment an order counts as a Purchase (SPEC
   // §13.3, purchaseTiming.js); a test order never does. It is reported once.
   if (order.isTest || !purchaseTiming.isDue(purchaseTiming.timingOf(workspace && workspace.settings), trigger, order)) return [];
+  // The shopper did not accept ad tracking where the store asks first (cookieConsent.js).
+  if (!require('./cookieConsent').orderAllowed(workspace, order)) return [];
   if (!(await purchaseTiming.claim(order.id))) return [];
   // Since migration 211 the pixels are rows of tracking_pixels, each with its
   // own token and scope (trackingPixelService.js): the order goes to every
