@@ -1,6 +1,5 @@
 'use strict';
 
-const dns = require('dns');
 const { Router } = require('express');
 const Joi = require('joi');
 const asyncHandler = require('express-async-handler');
@@ -11,6 +10,9 @@ const { NotFoundError, ConflictError, AppError } = require('../../core/errors/Ap
 const { recordAudit } = require('../audit/auditService');
 const { getCertificateProvider, CertificateProviderError } = require('./certificates');
 const primaryHost = require('./primaryHost');
+const { domainDnsCheckLimiter } = require('../../core/middleware/rateLimiters');
+const rules = require('./domainRules');
+const { lookupTxt, lookupCname } = require('./dnsVerifier');
 
 /**
  * What the domains screen needs beyond add / verify / delete (domainsService):
@@ -20,14 +22,10 @@ const primaryHost = require('./primaryHost');
  */
 
 const SSL_STATUSES = ['none', 'pending', 'issued', 'failed'];
-const TXT_PREFIX = 'zimos-verify=';
 const USABLE = ['verified', 'active'];
 
-/** Where a merchant points their domain: the store's own platform subdomain. */
-const cnameTargetFor = (workspace) => `${workspace.slug}.${env.platformRootDomain}`;
-
-function present(domain, workspace, funnel) {
-  const target = cnameTargetFor(workspace);
+function present(domain, funnel) {
+  const target = rules.cnameTarget();
   return {
     id: domain.id,
     hostname: domain.hostname,
@@ -38,9 +36,16 @@ function present(domain, workspace, funnel) {
     sslProvider: domain.sslProvider || null,
     sslCheckedAt: domain.sslCheckedAt || null,
     homeFunnel: funnel ? { id: funnel.id, name: funnel.name, status: funnel.status } : null,
-    // The two records the merchant creates at their DNS provider.
+    // The two records the merchant creates at their DNS provider: the TXT on
+    // its own name, since nothing else may sit beside a CNAME.
     records: [
-      { type: 'TXT', name: domain.hostname, value: TXT_PREFIX + domain.verificationToken, ttl: 300, purpose: 'verification' },
+      {
+        type: 'TXT',
+        name: rules.verificationName(domain.hostname),
+        value: rules.verificationValue(domain),
+        ttl: 300,
+        purpose: 'verification',
+      },
       { type: 'CNAME', name: domain.hostname, value: target, ttl: 300, purpose: 'routing' },
     ],
   };
@@ -60,12 +65,12 @@ async function funnelsById(workspaceId, ids) {
 }
 
 async function listDomains(workspaceId) {
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug'] });
   const domains = await db.Domain.findAll({ where: { workspaceId }, order: [['createdAt', 'ASC']] });
   const funnels = await funnelsById(workspaceId, domains.map((d) => d.homeFunnelId));
   return {
-    domains: domains.map((d) => present(d, workspace, funnels.get(d.homeFunnelId))),
-    cnameTarget: cnameTargetFor(workspace),
+    domains: domains.map((d) => present(d, funnels.get(d.homeFunnelId))),
+    cnameTarget: rules.cnameTarget(),
+    maxPerStore: env.customDomains.maxPerStore,
     certificateProvider: (() => {
       try {
         return getCertificateProvider().code;
@@ -77,9 +82,8 @@ async function listDomains(workspaceId) {
 }
 
 async function presentOne(workspaceId, domain) {
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug'] });
   const funnels = await funnelsById(workspaceId, [domain.homeFunnelId]);
-  return present(domain, workspace, funnels.get(domain.homeFunnelId));
+  return present(domain, funnels.get(domain.homeFunnelId));
 }
 
 function providerFailure(err) {
@@ -201,16 +205,17 @@ const bare = (host) => String(host || '').toLowerCase().replace(/\.$/, '');
  */
 async function checkDns(workspaceId, domainId) {
   const domain = await loadDomain(workspaceId, domainId);
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug'] });
-  const expectedTxt = TXT_PREFIX + domain.verificationToken;
-  const expectedCname = cnameTargetFor(workspace);
+  const txtName = rules.verificationName(domain.hostname);
+  const expectedTxt = rules.verificationValue(domain);
+  const expectedCname = rules.cnameTarget();
 
-  const txt = await dns.promises.resolveTxt(domain.hostname).then(flatten, () => []);
-  const cname = await dns.promises.resolveCname(domain.hostname).then((list) => list.map(bare), () => []);
+  // Public resolvers (dnsVerifier.js), so an internal name never answers.
+  const txt = await lookupTxt(txtName).then(flatten, () => []);
+  const cname = await lookupCname(domain.hostname).then((list) => list.map(bare), () => []);
 
   return {
     hostname: domain.hostname,
-    txt: { expected: expectedTxt, found: txt.includes(expectedTxt), values: txt.slice(0, 10) },
+    txt: { name: txtName, expected: expectedTxt, found: txt.includes(expectedTxt), values: txt.slice(0, 10) },
     cname: { expected: expectedCname, found: cname.includes(bare(expectedCname)), values: cname.slice(0, 10) },
     checkedAt: new Date().toISOString(),
   };
@@ -306,6 +311,7 @@ function mountStaffRoutes(router) {
   );
   router.get(
     '/:domainId/dns-check',
+    domainDnsCheckLimiter,
     validate(schemas.one),
     asyncHandler(async (req, res) => res.json({ dns: await checkDns(req.tenant.workspaceId, req.params.domainId) }))
   );

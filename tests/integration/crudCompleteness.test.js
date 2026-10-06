@@ -167,7 +167,7 @@ describe('domains DELETE', () => {
       .type('form')
       .send({ productName: 'Widget', price: '10.00' });
 
-    const add = await request(app).post(`/api/v1/workspaces/${workspace.id}/domains`).set(H).send({ hostname: 'delme.com' });
+    const add = await request(app).post(`/api/v1/workspaces/${workspace.id}/domains`).set(H).send({ hostname: 'www.delme.com' });
     expect(add.status).toBe(201);
     const domainId = add.body.domain.id;
 

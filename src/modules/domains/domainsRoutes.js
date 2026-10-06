@@ -8,6 +8,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const { requirePlanFeature } = require('../billing/planFeatureGate');
+const { domainAddLimiter, domainVerifyLimiter } = require('../../core/middleware/rateLimiters');
 const { requireCustomDomains } = require('./domainsGate');
 const controller = require('./domainsController');
 const schemas = require('./domainsValidation');
@@ -21,9 +22,9 @@ router.use(requireCustomDomains, authenticate, resolveTenant, requirePermission(
 // PLAN_FEATURE_ENFORCEMENT is on, custom_domain (billing/planFeatureGate).
 // Listing and removing stay open.
 const customDomain = requirePlanFeature('custom_domain');
-router.post('/', validate(schemas.add), requireLive, customDomain, controller.add);
+router.post('/', domainAddLimiter, validate(schemas.add), requireLive, customDomain, controller.add);
 router.get('/', validate(schemas.list), controller.list);
-router.post('/:domainId/verify', validate(schemas.verify), requireLive, customDomain, controller.verify);
+router.post('/:domainId/verify', domainVerifyLimiter, validate(schemas.verify), requireLive, customDomain, controller.verify);
 router.delete('/:domainId', validate(schemas.remove), controller.remove);
 // The domains screen: full list with DNS records, primary domain, home
 // funnel, certificate state, DNS propagation check (domainSettings.js).

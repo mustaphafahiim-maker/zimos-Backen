@@ -7,7 +7,8 @@ module.exports = (sequelize, DataTypes) => {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       workspaceId: { type: DataTypes.UUID, allowNull: false, field: 'workspace_id' },
       websiteId: { type: DataTypes.UUID, allowNull: false, field: 'website_id' },
-      hostname: { type: DataTypes.STRING(255), allowNull: false, unique: true },
+      // Unique only among verified and active rows (migration 211).
+      hostname: { type: DataTypes.STRING(255), allowNull: false },
       verificationToken: { type: DataTypes.STRING(100), allowNull: false, field: 'verification_token' },
       status: {
         type: DataTypes.ENUM('pending_verification', 'verified', 'active', 'failed'),
@@ -24,7 +25,14 @@ module.exports = (sequelize, DataTypes) => {
       sslCheckedAt: { type: DataTypes.DATE, allowNull: true, field: 'ssl_checked_at' },
       homeFunnelId: { type: DataTypes.UUID, allowNull: true, field: 'home_funnel_id' },
     },
-    { tableName: 'domains', indexes: [{ unique: true, fields: ['hostname'] }, { fields: ['website_id'] }] }
+    {
+      tableName: 'domains',
+      indexes: [
+        { unique: true, fields: ['hostname'], where: { status: ['verified', 'active'] } },
+        { fields: ['hostname'] },
+        { fields: ['website_id'] },
+      ],
+    }
   );
   Domain.associate = (models) => {
     Domain.belongsTo(models.Website, { foreignKey: 'websiteId', as: 'website' });

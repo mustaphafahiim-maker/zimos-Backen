@@ -80,7 +80,7 @@ describe('audit logging on every new mutating endpoint', () => {
     // domain
     await request(app).post(`/api/v1/workspaces/${workspace.id}/quickstart`).set(H).type('form')
       .send({ productName: 'W', price: '10.00' });
-    const dom = (await request(app).post(`/api/v1/workspaces/${workspace.id}/domains`).set(H).send({ hostname: 'audit-del.com' })).body.domain;
+    const dom = (await request(app).post(`/api/v1/workspaces/${workspace.id}/domains`).set(H).send({ hostname: 'www.audit-del.com' })).body.domain;
     await request(app).delete(`/api/v1/workspaces/${workspace.id}/domains/${dom.id}`).set(H).expect(200);
     const domDel = await auditRow('domain.delete', dom.id);
     expect(domDel.beforeState).not.toBeNull();

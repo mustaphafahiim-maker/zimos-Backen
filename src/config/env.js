@@ -597,8 +597,21 @@ const env = {
   // path. Domains already verified keep resolving: GET /store/resolve-host and
   // the host resolver are not behind it. Under NODE_ENV=test it starts off; a
   // test flips it on this object.
+  // cnameTarget is the one host every merchant domain points its CNAME at (the
+  // Cloudflare for SaaS entry, e.g. customers.zimos.co); unset, customers.
+  // under PLATFORM_ROOT_DOMAIN. maxPerStore counts every domain of a store,
+  // verified or not. resolvers are the public DNS servers verification and
+  // the DNS check ask, so a lookup never goes to the host's internal resolver.
   customDomains: {
     enabled: process.env.NODE_ENV !== 'test' && process.env.CUSTOM_DOMAINS_ENABLED === 'true',
+    cnameTarget: (
+      process.env.CUSTOM_DOMAIN_CNAME_TARGET || `customers.${process.env.PLATFORM_ROOT_DOMAIN || 'zimos.test'}`
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/\.$/, ''),
+    maxPerStore: positiveInt('CUSTOM_DOMAINS_MAX_PER_STORE', 1),
+    resolvers: csvList(process.env.DOMAIN_VERIFY_RESOLVERS, '1.1.1.1,8.8.8.8'),
   },
 };
 

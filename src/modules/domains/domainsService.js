@@ -1,63 +1,58 @@
 'use strict';
 
 const crypto = require('crypto');
+const { Op } = require('sequelize');
 const db = require('../../db/models');
 const env = require('../../config/env');
-const { NotFoundError, ConflictError, ValidationError, AppError } = require('../../core/errors/AppError');
+const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { lookupTxt } = require('./dnsVerifier');
+const rules = require('./domainRules');
 
 /**
  * Merchant custom domains: record one, then verify control of it via a DNS
- * TXT record. TLS is handled by Cloudflare in front of the domain, not here.
+ * TXT record on _zimos-verify.<host>. TLS is handled by Cloudflare in front
+ * of the domain (certificates/), not here.
+ *
+ * A hostname belongs to a store only once verified: the unique index covers
+ * verified and active rows only (migration 211), so an unverified claim never
+ * blocks the real owner, and the first store to verify removes the others'
+ * pending rows for that host.
  */
 
-const TXT_PREFIX = 'zimos-verify=';
-
-function normalizeHostname(raw) {
-  return String(raw || '')
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
-    .replace(/\/.*$/, '')
-    .replace(/\.$/, '');
-}
-
-function txtRecordFor(domain) {
-  return { type: 'TXT', name: domain.hostname, value: TXT_PREFIX + domain.verificationToken };
-}
+const USABLE = ['verified', 'active'];
+const { normalizeHostname, txtRecordFor } = rules;
 
 async function addDomain(workspaceId, { hostname }, req) {
-  const host = normalizeHostname(hostname);
-  if (!host || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host)) {
-    throw new ValidationError([{ field: 'hostname', message: 'Enter a valid domain like ahmedstore.com' }]);
-  }
-  if (env.platformRootDomain && host.endsWith('.' + env.platformRootDomain)) {
-    throw new ValidationError(
-      [{ field: 'hostname', message: `That is a ${env.platformRootDomain} subdomain — it already works, no setup needed` }]
-    );
-  }
+  const host = rules.checkHostname(hostname);
 
   const website = await db.Website.findOne({ where: { workspaceId }, order: [['createdAt', 'ASC']], attributes: ['id'] });
   if (!website) {
     throw new ConflictError('Set up your store (add a product) before connecting a domain', 'STORE_NOT_SET_UP');
   }
 
-  let domain;
-  try {
-    domain = await db.Domain.create({
-      workspaceId,
-      websiteId: website.id,
-      hostname: host,
-      verificationToken: crypto.randomBytes(16).toString('hex'),
-      status: 'pending_verification',
-    });
-  } catch (err) {
-    if (err.name === 'SequelizeUniqueConstraintError') {
-      throw new ConflictError('That domain is already connected to a store', 'DOMAIN_TAKEN');
-    }
-    throw err;
+  // The store's own pending rows past their 7 days are gone for good.
+  await db.Domain.destroy({
+    where: { workspaceId, status: 'pending_verification', createdAt: { [Op.lt]: rules.pendingCutoff() } },
+  });
+  if (await db.Domain.findOne({ where: { workspaceId, hostname: host }, attributes: ['id'] })) {
+    throw new ConflictError('That domain is already on this store', 'DOMAIN_ALREADY_ADDED');
   }
+  if (await db.Domain.findOne({ where: { hostname: host, status: USABLE }, attributes: ['id'] })) {
+    throw new ConflictError('That domain is already connected to a store', 'DOMAIN_TAKEN');
+  }
+  const max = env.customDomains.maxPerStore;
+  if ((await db.Domain.count({ where: { workspaceId } })) >= max) {
+    throw new ConflictError(`A store can connect up to ${max} domain${max === 1 ? '' : 's'}: remove one first`, 'DOMAIN_LIMIT_REACHED');
+  }
+
+  const domain = await db.Domain.create({
+    workspaceId,
+    websiteId: website.id,
+    hostname: host,
+    verificationToken: crypto.randomBytes(16).toString('hex'),
+    status: 'pending_verification',
+  });
 
   await recordAudit({
     workspaceId,
@@ -80,20 +75,25 @@ async function listDomains(workspaceId) {
     status: d.status,
     verifiedAt: d.verifiedAt,
     record: txtRecordFor(d),
+    cname: { type: 'CNAME', name: d.hostname, value: rules.cnameTarget() },
   }));
 }
 
 async function verifyDomain(workspaceId, domainId, req) {
   const domain = await db.Domain.findOne({ where: { id: domainId, workspaceId } });
   if (!domain) throw new NotFoundError('Domain');
-  if (domain.status === 'verified' || domain.status === 'active') {
+  if (USABLE.includes(domain.status)) {
     return { domain, verified: true };
   }
+  if (rules.isExpiredPending(domain)) {
+    throw new ConflictError('This domain was not verified within 7 days: remove it and add it again', 'DOMAIN_VERIFICATION_EXPIRED');
+  }
 
-  const expected = TXT_PREFIX + domain.verificationToken;
+  const expected = rules.verificationValue(domain);
+  const recordName = rules.verificationName(domain.hostname);
   let records = [];
   try {
-    records = await lookupTxt(domain.hostname);
+    records = await lookupTxt(recordName);
   } catch (err) {
     records = []; // NXDOMAIN / no TXT records — treated as "not found yet"
   }
@@ -102,12 +102,26 @@ async function verifyDomain(workspaceId, domainId, req) {
   if (!found) {
     throw new AppError(
       'DOMAIN_NOT_VERIFIED',
-      `No TXT record "${expected}" found on ${domain.hostname} yet — add it at your DNS provider and try again`,
+      `No TXT record "${expected}" found on ${recordName} yet — add it at your DNS provider and try again`,
       400
     );
   }
 
-  await domain.update({ status: 'verified', verifiedAt: new Date() });
+  try {
+    await db.sequelize.transaction(async (transaction) => {
+      await domain.update({ status: 'verified', verifiedAt: new Date() }, { transaction });
+      // The host is this store's now: other stores' unverified claims go.
+      await db.Domain.destroy({
+        where: { hostname: domain.hostname, id: { [Op.ne]: domain.id }, status: 'pending_verification' },
+        transaction,
+      });
+    });
+  } catch (err) {
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      throw new ConflictError('That domain is already connected to a store', 'DOMAIN_TAKEN');
+    }
+    throw err;
+  }
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
