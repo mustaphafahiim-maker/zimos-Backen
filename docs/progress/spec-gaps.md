@@ -1354,7 +1354,11 @@ Email:
   - An order picks its funnel's override, then its website's, then the store's; cart recovery reads them from the checkout's attribution. Every endpoint takes `?funnelId=` / `?websiteId=`, and DELETE removes an override.
 
 Domains and developers:
-- [ ] 176. Buy a domain in the dashboard: search, buy, automatic DNS, renewal (registrar interface + sandbox).
+- [x] 176. Buy a domain in the dashboard: search, buy, automatic DNS, renewal (registrar interface + sandbox). (backend done, UI in frontend-handoff.md)
+  - `domains/registrar/`: interface, sandbox adapter (availability from a real NS lookup; registers, sets DNS and renews only in the log) and README. A real registrar needs the owner's reseller account.
+  - Prices are only the registrar's (sandbox: an env table); the merchant confirms the shown price and a different quote stops the purchase (409). Charging for the domain is left to billing (SPEC §22); nothing here takes money.
+  - A bought domain is recorded in `domain_purchases` (migration 457), added to the store's domains and marked verified, since we set its DNS (routing records + the verification TXT). The plan's domain limit applies as for connected domains.
+  - Auto-renew on by default; the daily `domains.renew_due` job renews in the last 30 days and marks lapsed ones expired.
 - [ ] 177. "Redirect to the primary domain" per domain.
 - [ ] 178. Webhooks: custom headers per endpoint, plus the topics `funnel.created/updated/deleted`, `payment.paid` and `contact.updated`.
 - [ ] 179. An MCP server for the store, used by Claude, ChatGPT or any MCP client with an API key: list products and orders, check pages for problems, create a draft funnel.

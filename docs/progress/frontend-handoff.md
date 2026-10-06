@@ -923,3 +923,54 @@ Wording:
 | Custom for this funnel | مخصص للفانل ده |
 | Use store email | استخدم إيميل المتجر |
 | Off for this funnel | مقفول للفانل ده |
+
+---
+
+## 176. Buy a domain in the dashboard — UI: pending
+
+Search → buy → the store is connected with DNS set automatically → auto-renewal. Registrar is an interface with a
+**sandbox** adapter (nothing is bought, no money moves); contract in `src/modules/domains/registrar/README.md`.
+Prices come only from the registrar (sandbox: `DOMAIN_SANDBOX_PRICES` env), never from code; charging the merchant is
+the billing team's (not here).
+
+### Endpoints (permission `domain.manage`, under `/workspaces/:ws/domains`)
+**GET `/search?q=my store`** →
+```json
+{ "query": "my store", "results": [
+  { "domain": "my-store.com", "available": true, "price": { "amount": 55000, "currency": "EGP" }, "renewalPrice": { "amount": 55000, "currency": "EGP" } },
+  { "domain": "my-store.net", "available": false, "price": null, "renewalPrice": null } ] }
+```
+The exact name (when the query has a TLD) plus the label on .com .net .store .shop .online .co. `price` may be null
+(registrar gave none). 422 for a query without letters/digits.
+
+**POST `/purchases`** (live store; plan's domain limit applies) `{ "domain": "my-store.com", "years": 1, "autoRenew": true, "acceptPrice": { "amount": 55000, "currency": "EGP" } }`
+(`acceptPrice: null` when the price shown was null) → 201
+```json
+{ "purchase": { "id": "…", "hostname": "my-store.com", "status": "active", "registrar": "sandbox", "years": 1,
+  "price": { "amount": 55000, "currency": "EGP" }, "autoRenew": true, "expiresAt": "2027-10-06T…", "domainId": "…" } }
+```
+Errors: 409 `DOMAIN_PRICE_CHANGED` (`details.price` = new quote → show and re-confirm); 409 `DOMAIN_UNAVAILABLE`;
+502 `DOMAIN_PURCHASE_FAILED` ("nothing was charged"); plan-limit and draft-store errors as for connecting a domain.
+The domain then appears in the normal domains list as **verified** (DNS set by us).
+
+**GET `/purchases`** → `{ "purchases": [ … ] }` (status `pending|active|failed|expired`, `lastError`).
+**PATCH `/purchases/:purchaseId`** `{ "autoRenew": false }` · **POST `/purchases/:purchaseId/renew`** `{ "years": 1-10 }` → `{ "purchase": … }`.
+Daily job `domains.renew_due` renews auto-renew domains in their last 30 days.
+
+### Dashboard — Settings → Domains → "Buy a domain"
+- Search box → results list (domain, availability badge, price/year or "Price on request", Buy button).
+- Buy dialog: years select (1–5), auto-renew switch, the price × years, confirm. On 409 price change: show new price, ask again.
+- After purchase: success state "Your store is live on {domain}" (SSL may take a few minutes).
+- "Bought domains" table: domain, expires, auto-renew switch, "Renew now", status/last error.
+
+Wording:
+| en | ar |
+|---|---|
+| Buy a domain | اشتري دومين |
+| Search for a name | دوّر على اسم |
+| Available / Taken | متاح / محجوز |
+| {price} / year | {price} في السنة |
+| Renews automatically | بيتجدد لوحده |
+| Renew now | جدّد دلوقتي |
+| The price changed — check it and confirm again | السعر اتغير — راجعه وأكّد تاني |
+| Your store is live on {domain} | متجرك شغال على {domain} |
