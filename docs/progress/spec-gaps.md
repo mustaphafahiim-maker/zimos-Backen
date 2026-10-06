@@ -1652,3 +1652,18 @@ code.
   - Checkout `pickupLocationId`: drops the address and shipping option, sets the free-shipping marker, skips the form's address fields and the postal-code rule; every line must be free at that location (stockLocations.stockMatrix). The order is assigned to the location (stock_location_id), tagged `pickup`.
   - Collect checks the code (constant time), sets fulfillment fulfilled through orderStateService and records order.delivered, so the stage is delivered and delivery hooks run. order.cancelled cancels the pickup. Waybill line.
   - Verified: off 404, settings validation, availability per place, out of stock at the second place, pickup order with 0 shipping and no address, shopper view by tracking token, ready + email, wrong code, collect → stage delivered, cancel, normal delivery checkout unchanged, cleanup.
+
+## Ninth pass (2026-10-07) — gap pass after the eighth list
+
+How the list was made: each candidate searched under several spellings first. Not listed because already built:
+back-in-stock alerts (stockAlerts), pre-orders (preorders), customer segments with rules (contacts/segmentRules —
+covers auto-grouping), order line editing (orders/orderItemsEdit), quantity breaks, option prices
+(catalog/customFieldPricing), invoices. Not listed because of SPEC §21: anything sending to many customers at once.
+Migrations 490–499; no prices in code.
+
+- [ ] 226. Pick list: for the orders picked in the list (or every order ready to ship), the units to take off the shelves, summed per variant, grouped by stock location, with SKU and image, and which orders each serves; JSON and a printable PDF.
+- [ ] 227. Scheduled price changes: a sale on chosen variants, products or a collection — a new price (fixed or percent off) from a start time, and the old price back at an end time, applied by the server; listed, editable before it starts, cancellable.
+- [ ] 228. Business customers: company name and tax ID on a customer, a tax-exempt flag honoured at checkout for that signed-in customer, and the tax ID printed on the order invoice.
+- [ ] 229. Pay later on account (net terms) for approved business customers: a credit limit and N days to pay, an "on account" checkout method for those signed-in customers, the outstanding balance, overdue orders, and the merchant recording the payment.
+- [ ] 230. Stock lots with expiry dates: receive units with a lot and an expiry date, see what expires soon, write expired units off, and the pick list naming the lot to take first (first expiring, first out).
+- [ ] 231. Product specifications and comparison: key/value specifications per product (merchant-defined keys), shown on the product page, usable as storefront filters, and a public compare of up to 4 products side by side.
