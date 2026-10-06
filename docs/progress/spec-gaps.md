@@ -1556,7 +1556,11 @@ centre, no unofficial WhatsApp. Outside services are an interface + `sandbox` ad
   - PO numbers are PO-0001… per store (next = max + 1, unique index). Only drafts are editable; cancel only before anything is received; a supplier with orders can't be deleted.
   - Stock counts apply counted − on hand at apply time (not the expected snapshot), so sales during the count are not undone. Each change is an adjustment movement (reference stock_count).
   - Verified: supplier, PO create/order/edit refusal/partial and full receive, over-receive refusal, cost 8000 from none, updateCost false, cancel refusal, supplier in use, count create/enter/apply (−2), double apply refused; stock and cost restored.
-- [ ] 208. Free gift with purchase: rules (minimum subtotal or a product in the cart) that add a chosen gift line at no charge in the cart and at checkout, limited by stock, with the gift removed when the rule stops holding.
+- [x] 208. Free gift with purchase: rules (minimum subtotal or a product in the cart) that add a chosen gift line at no charge in the cart and at checkout, limited by stock, with the gift removed when the rule stops holding. (backend done, UI in frontend-handoff.md)
+  - modules/freeGifts; rules in settings.free_gifts (no migration). The checkout appends gift lines with the server-pinned price marker at 0 (the A/B-test price mechanism), after purchase limits, so a gift never trips a limit and the shopper can't add or keep one.
+  - Qualification uses the lines' prices before bundle tiers and the order discount (plain lines: pinned or effective price; offer lines: offer price). The cart uses its line totals (after bundles) for the "add X more" hint. The two can differ slightly when bundle tiers apply.
+  - A gift is added only while its variant is in stock (or oversells), one line per gift variant. Funnels are left alone. Gifts reserve stock like any line.
+  - Verified: rule validation, product rule (gift at 0, total unchanged), subtotal rule below/above, gift out of stock skipped, cart hints (missing amount, out of stock).
 - [ ] 209. Notes and follow-ups on customers: staff notes on a contact (with author and time), follow-up reminders assigned to a team member, and a due-reminders list and notification.
 - [ ] 210. Size charts: reusable size tables (rows/columns, cm/inch), attached to products or collections, shown on the product page.
 - [ ] 211. Storefront search analytics: what shoppers search, searches with no results, the results clicked, and merchant-set synonyms used by the store search.

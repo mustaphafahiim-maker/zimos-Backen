@@ -153,6 +153,8 @@ const checkout = asyncHandler(async (req, res) => {
   items = await require('../subscriptions/trialCheckout').pinTrialLines(workspaceId, items, orderBody.contact);
   // Each product's min / max per order and max per customer (catalog/purchaseLimits.js, item 198).
   await require('../catalog/purchaseLimits').assertWithin(workspaceId, items, orderBody.contact);
+  // Free gifts the order earns, added by the server at no charge (freeGifts/, item 208). Funnels keep their own offers.
+  if (!orderBody.funnelId) ({ items } = await require('../freeGifts').addGifts(workspace, items));
 
   // The gateway takes the order's currency, or the order is not created (payments/methodCurrency.js).
   if (isOnline) {

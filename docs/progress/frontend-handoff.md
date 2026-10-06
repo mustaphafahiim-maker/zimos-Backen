@@ -2225,3 +2225,25 @@ All under `/api/v1/workspaces/:ws/purchasing` — read `inventory.view`, change 
 - Inventory → «الموردين» / "Suppliers" (list + form).
 - Inventory → «أوامر الشراء» / "Purchase orders": list with status chips (مسودة Draft · اتطلب Ordered · استلام جزئي Partly received · اتسلّم Received · ملغي Cancelled); editor (supplier, location, expected date, lines with variant picker, quantity, unit cost, total); «اطلب» / "Mark as ordered"; «استلام» / "Receive" with quantity per line (default = what's left) and «حدّث التكلفة» / "Update cost" checkbox.
 - Inventory → «الجرد» / "Stock counts": start (location, product or all), a counting table (expected, counted input, difference coloured), «اعتمد الجرد» / "Apply count" with a confirm «هيعدّل المخزون بالفرق» / "Stock will be adjusted by the differences".
+
+## 208. Free gift with purchase — UI: pending
+
+### Rules — `/api/v1/workspaces/:ws/free-gifts` (read `products.view`, save `discounts.manage`)
+- `GET /` → `{ rules: [Rule] }`
+- `PUT /` `{ rules: [Rule] }` (≤20, replaces all) → `{ rules }` (ids added to new rules — send them back on later saves):
+```json
+{ "id": "…", "name": "Spend 400, get a tote", "giftVariantId": "…", "quantity": 1,
+  "minSubtotal": 40000, "productIds": null, "startsAt": null, "endsAt": null, "active": true }
+```
+  At least one of `minSubtotal` (minor units) and `productIds` (any of them in the cart); both set = both must hold. quantity 1–10.
+  422 when a variant/product isn't the store's or a rule ends before it starts.
+
+### Storefront
+- Cart responses carry **`freeGifts`**: `[{ ruleId, name, gift: { variantId, productName, optionValues, quantity }, eligible, outOfStock, missingAmount, needsProduct }]`.
+- The checkout adds earned gifts itself (a line at price 0, only while the gift is in stock; one per gift variant). The shopper never adds them, and they drop out by themselves when the cart stops qualifying. Funnel checkouts get no gifts.
+- Order lines at 0 are the gifts.
+
+### Screens
+- Marketing → «هدايا مع الطلب» / "Free gifts": rule list + editor (gift product/variant picker, quantity, «لما الطلب يوصل لـ» / "When the order reaches" amount, and/or «لما يكون في السلة» / "When the cart has" product picker, dates, active).
+- Cart / cart drawer: eligible → «🎁 هدية مجانية: Gift tote bag» / "Free gift: Gift tote bag" as a line at 0; not yet → progress «زوّد 150 ج.م وخد Gift tote bag هدية» / "Add EGP 150 more to get a Gift tote bag free"; out of stock → hide.
+- Order page: badge «هدية» / "Gift" on lines priced 0.
