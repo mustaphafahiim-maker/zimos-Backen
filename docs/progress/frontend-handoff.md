@@ -2346,3 +2346,20 @@ New:
 - After a paid order draws codes, the team gets a `stock.low` notification (once a day per product): «طلبات مستنية أكواد: …» / "Orders waiting for codes: …" (`data.waitingCodes`) when the pool ran out, else «الأكواد قربت تخلص: …» / "Codes running low: …" when at most `lowAt` are left. Link `/catalog/:productId?tab=digital`.
 
 Screen: digital product → Codes tab: «نبّهني لما يفضل» / "Warn me when … codes are left" (lowAt), and a red banner when `waitingCodes > 0` «في طلبات مستنية أكواد — أضف أكواد» / "Orders are waiting for codes — add codes".
+
+## 214. Gift wrap and gift message — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/gift-options` (read `products.view`, save `products.manage`)
+- `GET` / `PUT` `{ enabled, wrapVariantId: uuid | null, messageMaxLength: 20–500 (default 300) }`.
+  The wrap is a normal product the merchant creates and prices (e.g. "Gift wrap"), picked here; null = message only.
+
+### Storefront
+- `GET /store/:ws` → `store.giftOptions`: `null` when off, else `{ messageMaxLength, wrap: { variantId, name, priceAmount, currency, imageUrl } | null }`.
+- Checkout body **`gift`**: `{ wrap?: true, message?: "…", hidePrices?: true }`. Wrap adds one line of the wrap product at its price (it shows in `order.items` and the total).
+  422 on `gift`: "This store does not offer gift options" / on `gift.wrap`: not offered / not available / on `gift.message`: "At most N characters".
+- The order keeps **`order.giftOptions`** `{ wrapped, message, hidePrices }` (null when not a gift).
+
+### Screens
+- Checkout: «ده هدية؟» / "Is this a gift?" toggle → «غلّفها كهدية (+20 ج.م)» / "Gift-wrap it (+EGP 20)", message box with counter «رسالة الإهداء» / "Gift message", «اخفي الأسعار في الشحنة» / "Hide prices in the parcel".
+- Dashboard order page: a «هدية» / "Gift" badge, the message, and a "hide prices" note for whoever packs. The waybill prints "GIFT / هدية" and the message.
+- Settings → «خيارات الهدايا» / "Gift options": toggle, wrap product picker, message length.

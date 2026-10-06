@@ -56,6 +56,8 @@ module.exports = (sequelize, DataTypes) => {
       fxRateToBase: { type: DataTypes.DECIMAL(18, 8), allowNull: true, field: 'fx_rate_to_base' },
       totalAmountBase: { type: DataTypes.BIGINT, allowNull: true, field: 'total_amount_base' },
       amountPaid: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'amount_paid' },
+      // { wrapped, message, hidePrices } — a gift order (migration 483, modules/giftOptions).
+      giftOptions: { type: DataTypes.JSONB, allowNull: true, field: 'gift_options' },
       // Where the order ships from (migration 477, modules/stockLocations); null = the default location.
       stockLocationId: { type: DataTypes.UUID, allowNull: true, field: 'stock_location_id' },
       amountRefunded: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'amount_refunded' },

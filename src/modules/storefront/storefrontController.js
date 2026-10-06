@@ -31,7 +31,9 @@ const getStore = asyncHandler(async (req, res) => {
   const gateWorkspace = await require('../../db/models').Workspace.findByPk(ws, { attributes: ['id', 'settings'] });
   // A password / coming-soon / age gate to show first (storeGate, item 197).
   const gate = require('../storeGate').publicView(gateWorkspace);
-  res.json({ store: { ...store, customFonts, storefrontTexts, cookieConsent, gate } });
+  // Gift wrap and message offered at checkout (giftOptions, item 214).
+  const giftOptions = await cache.cached(ws, 'gift-options', () => require('../giftOptions').publicView(gateWorkspace));
+  res.json({ store: { ...store, customFonts, storefrontTexts, cookieConsent, gate, giftOptions } });
 });
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.

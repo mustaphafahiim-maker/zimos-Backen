@@ -133,7 +133,7 @@ async function computeWaybillModel(workspaceId, orderId) {
     shipTo: order.contactSnapshot || {},
     address: order.shippingAddressSnapshot || {},
     // The shopper's custom-field answers (waybill/customData.js).
-    customData: await require('./customData').customDataLines(order.id),
+    customData: [...require('../giftOptions').waybillLines(order), ...(await require('./customData').customDataLines(order.id))],
   };
   model.qrPayload = buildQrPayload(model);
   return model;

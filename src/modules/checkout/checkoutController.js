@@ -46,7 +46,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, trackingConsent, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, trackingConsent, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -155,6 +155,9 @@ const checkout = asyncHandler(async (req, res) => {
   await require('../catalog/purchaseLimits').assertWithin(workspaceId, items, orderBody.contact);
   // Free gifts the order earns, added by the server at no charge (freeGifts/, item 208). Funnels keep their own offers.
   if (!orderBody.funnelId) ({ items } = await require('../freeGifts').addGifts(workspace, items));
+  // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (giftOptions, item 214).
+  const giftChoice = await require('../giftOptions').prepare(workspace, gift);
+  if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
 
   // The gateway takes the order's currency, or the order is not created (payments/methodCurrency.js).
   if (isOnline) {
@@ -192,6 +195,7 @@ const checkout = asyncHandler(async (req, res) => {
     await require('./checkoutExtras').apply(order, extras);
     await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
+    await require('../giftOptions').recordOnOrder(order, giftChoice);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
     await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
@@ -222,6 +226,7 @@ const checkout = asyncHandler(async (req, res) => {
   await require('./checkoutExtras').apply(order, extras);
   await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
+  await require('../giftOptions').recordOnOrder(order, giftChoice);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
   await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 

@@ -290,6 +290,8 @@ v1.use('/workspaces/:workspaceId/size-charts', require('./modules/sizeCharts').s
 v1.use('/workspaces/:workspaceId/search-insights', require('./modules/searchInsights').staff);
 // Product questions and answers (spec-gaps item 212).
 v1.use('/workspaces/:workspaceId/product-questions', require('./modules/productQuestions').staff);
+// Gift wrap and gift message (spec-gaps item 214).
+v1.use('/workspaces/:workspaceId/gift-options', require('./modules/giftOptions').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
