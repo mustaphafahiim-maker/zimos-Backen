@@ -10,6 +10,8 @@ const slugify = require('../../core/utils/slugify');
 const inventoryService = require('../inventory/inventoryService');
 const { resolveProductShipping } = require('../shipping/shippingRules');
 const { MAX_COLLECTION_DEPTH, findTreeProblem } = require('./collectionTree');
+// Installs the hooks that keep smart collections filled (smartCollections.js).
+const smartCollections = require('./smartCollections');
 const { bumpProblem } = require('../checkout/orderBump');
 const { escapeLike } = require('../storefront/productSearch');
 
@@ -904,6 +906,7 @@ async function deleteCollection(workspaceId, collectionId, req) {
 async function removeProductFromCollection(workspaceId, productId, collectionId, req) {
   const product = await scoped(db.Product, workspaceId).findByPkOrThrow(productId);
   const collection = await scoped(db.Collection, workspaceId, 'Collection').findByPkOrThrow(collectionId);
+  smartCollections.assertManual(collection);
   await db.ProductCollection.destroy({ where: { productId: product.id, collectionId: collection.id } });
   await recordAudit({
     workspaceId,
@@ -997,6 +1000,7 @@ async function createCollection(workspaceId, data, req) {
 async function addProductToCollection(workspaceId, productId, collectionId, req) {
   const product = await scoped(db.Product, workspaceId).findByPkOrThrow(productId);
   const collection = await scoped(db.Collection, workspaceId, 'Collection').findByPkOrThrow(collectionId);
+  smartCollections.assertManual(collection);
   // A product joins at the end of the collection's order.
   const last = await db.ProductCollection.max('position', { where: { collectionId: collection.id } });
   const [, created] = await db.ProductCollection.findOrCreate({

@@ -235,7 +235,8 @@ const collection = {
     name: Joi.string().min(1).max(200).required(),
     slug: Joi.string().max(200).optional(),
     description: Joi.string().allow('').optional(),
-    rules: Joi.object().allow(null).optional(),
+    // Smart-collection rules (smartCollections.js); null = a manual collection.
+    rules: require('./smartCollections').rulesSchema.optional(),
     // Same keys as a product's (title, description, imageUrl, noindex): the store's category page reads them.
     seo: productFields.seo.default({}),
     // Null (or absent) is a top-level collection.
@@ -260,7 +261,8 @@ const collectionUpdate = {
     name: Joi.string().min(1).max(200).optional(),
     slug: Joi.string().max(200).optional(),
     description: Joi.string().allow('').optional(),
-    rules: Joi.object().allow(null).optional(),
+    // Smart-collection rules (smartCollections.js); null = a manual collection.
+    rules: require('./smartCollections').rulesSchema.optional(),
     seo: productFields.seo.optional(),
     parentId: uuid.allow(null).optional(),
     position: collectionPosition.optional(),

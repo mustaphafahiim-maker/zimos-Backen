@@ -76,6 +76,7 @@ async function bulkEditProducts(workspaceId, { productIds, changes }, req) {
     if (changes.collection) {
       collection = await db.Collection.findOne({ where: { id: changes.collection.id, workspaceId }, transaction: t });
       if (!collection) throw new NotFoundError('Collection');
+      require('./smartCollections').assertManual(collection);
     }
 
     let variantsRepriced = 0;
@@ -295,7 +296,8 @@ async function duplicateProduct(workspaceId, productId, req, { slugFor, generate
       }
     }
 
-    for (const collection of source.collections) {
+    // Smart collections already took the copy in through its tags (smartCollections.js).
+    for (const collection of source.collections.filter((c) => !require('./smartCollections').isSmart(c))) {
       const last = await db.ProductCollection.max('position', { where: { collectionId: collection.id }, transaction: t });
       await db.ProductCollection.create(
         { productId: product.id, collectionId: collection.id, position: Number.isFinite(last) ? last + 1 : 0 },

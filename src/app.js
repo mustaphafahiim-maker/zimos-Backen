@@ -244,6 +244,8 @@ v1.use('/workspaces/:workspaceId/webhooks', appGate.requireAppForChanges('webhoo
 // Features that are apps take changes only while the store has the app (apps/appGate.js).
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 // Google Sheets sync: the account, the sheets, "Sync existing" (modules/sheets, SPEC §16.4).
+// Smart collections: the "All products" collection and a manual re-fill (catalog/smartCollections.js).
+v1.use('/workspaces/:workspaceId/smart-collections', require('./modules/catalog/smartCollections').router);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
 v1.use('/workspaces/:workspaceId/integrations/google-sheets', appGate.requireAppForChanges('google_sheets'), require('./modules/sheets/sheetsRoutes').router);

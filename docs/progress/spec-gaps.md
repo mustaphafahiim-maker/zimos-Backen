@@ -1284,7 +1284,11 @@ Design (page builder):
   - The public custom-code read returns them as `scripts` beside the existing `slots`; the existing fixed slots stay as they are.
 
 Commerce:
-- [ ] 162. Smart collections by product tags (any/all), and a default "all products" collection.
+- [x] 162. Smart collections by product tags (any/all), and a default "all products" collection. (backend done, UI in frontend-handoff.md)
+  - Uses the existing `collections.rules` column (no migration). Membership is kept as ordinary `product_collections` links, filled by model hooks in the same transaction, so every reader of a collection works unchanged.
+  - Tags match case-insensitively; at most 20 tags per rule.
+  - A smart collection refuses hand-added or hand-removed products (409 `SMART_COLLECTION`), single and bulk; reordering stays. Duplicating a product skips copying smart links (the hook already linked the copy).
+  - "All products" is made with one click (slug `all`, idempotent) rather than for every store at sign-up, so workspace creation is untouched. A store copy (bulkCreate) keeps its copied links; `POST …/sync` repairs any collection by hand.
 - [ ] 163. The store's own places: regions → cities → areas per country, imported from CSV, with three-level pickers at checkout.
 - [ ] 164. Shipping prices per city and area, from a CSV or the places list.
 - [ ] 165. A file-upload field in the checkout form, and an optional billing address ("same as shipping").

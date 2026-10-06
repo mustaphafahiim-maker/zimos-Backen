@@ -167,3 +167,60 @@ Wording:
 | Code runs only on your live store, not in the editor preview. | الكود بيشتغل على المتجر الحقيقي بس، مش في المعاينة. |
 | No scripts yet | مفيش سكريبتات لسه |
 | A store keeps at most 30 scripts | المتجر ياخد ٣٠ سكريبت بالكتير |
+
+---
+
+## 162. Smart collections by tags, and an "All products" collection — UI: pending
+
+A collection with `rules` fills itself; membership is kept as normal collection
+links, so the store's collection pages, filters and counts need **no change**.
+
+### Rules (on the existing collection endpoints)
+
+`POST /workspaces/:ws/catalog/collections` and `PATCH /workspaces/:ws/catalog/collections/:id`
+(permission `products.manage`) now validate `rules`:
+
+```json
+{ "rules": { "type": "tags", "match": "any", "tags": ["summer", "sale"] } }
+{ "rules": { "type": "all_products" } }
+{ "rules": null }
+```
+- `match`: `any` (default) or `all`; `tags`: 1–20 strings, 1–100 chars each, matched case-insensitively against product tags.
+- `null` makes it a manual collection again (current links stay, editable by hand).
+- Saving rules re-fills the collection at once; creating a product or changing its tags updates its smart collections at once.
+- 422 `VALIDATION_ERROR` (`field: "rules"`) on a bad shape.
+- Adding/removing a product by hand on a smart collection (single or bulk edit) → 409 `SMART_COLLECTION`. Reordering still works.
+
+### New endpoints (permission `products.manage`)
+
+**POST `/workspaces/:ws/smart-collections/all-products`** body `{ "name": "All products" }` (optional, default "All products").
+Creates the store's "All products" collection (slug `all`, rules `all_products`) once;
+→ 201 `{ "collection": {…}, "created": true }`, or 200 `{ "collection": {…}, "created": false }` when it exists.
+
+**POST `/workspaces/:ws/smart-collections/:collectionId/sync`** → `{ "id": "…", "added": 2, "removed": 0 }`.
+Re-fills one smart collection by hand. 409 `NOT_SMART_COLLECTION` for a manual one.
+
+### Dashboard — Products → Collections
+- Collection form: a "Collection type" choice: **Manual** / **Automatic (by tags)** / **All products**.
+  Automatic shows: a tag input (chips, from the store's existing tags if available), and
+  "Products must match: any tag / all tags".
+- Collection list: a badge "Automatic" on smart collections; product count as today.
+- Collection page: for a smart collection, hide "Add products" and the per-product remove,
+  show a note with the rule ("Products tagged summer or sale") and a "Refresh" button (sync).
+- Empty state of the collections list: a button "Create 'All products' collection" (POST all-products).
+- Map 409 `SMART_COLLECTION` to a toast.
+
+Wording:
+| en | ar |
+|---|---|
+| Collection type | نوع المجموعة |
+| Manual | يدوي |
+| Automatic (by tags) | تلقائي (بالتاجز) |
+| All products | كل المنتجات |
+| Products must match | المنتجات لازم تطابق |
+| any tag / all tags | أي تاج / كل التاجز |
+| Automatic | تلقائي |
+| Products tagged {tags} join this collection by themselves. | المنتجات اللي عليها {tags} بتدخل المجموعة لوحدها. |
+| Refresh | تحديث |
+| Create "All products" collection | اعمل مجموعة "كل المنتجات" |
+| This collection fills itself from its rules. | المجموعة دي بتتملى لوحدها من الشروط بتاعتها. |
