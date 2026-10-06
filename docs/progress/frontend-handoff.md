@@ -2363,3 +2363,18 @@ Screen: digital product → Codes tab: «نبّهني لما يفضل» / "Warn 
 - Checkout: «ده هدية؟» / "Is this a gift?" toggle → «غلّفها كهدية (+20 ج.م)» / "Gift-wrap it (+EGP 20)", message box with counter «رسالة الإهداء» / "Gift message", «اخفي الأسعار في الشحنة» / "Hide prices in the parcel".
 - Dashboard order page: a «هدية» / "Gift" badge, the message, and a "hide prices" note for whoever packs. The waybill prints "GIFT / هدية" and the message.
 - Settings → «خيارات الهدايا» / "Gift options": toggle, wrap product picker, message length.
+
+## 215. Mix-and-match box — UI: pending
+
+Built on the existing quantity bundles (SPEC §10.1). A bundle now has **`mixAndMatch`**: when true, all the products attached
+to it are priced **together** ("any 3 of these for EGP 400"), instead of each product on its own.
+
+- `POST /workspaces/:ws/bundles` and `PATCH /:bundleId` accept `mixAndMatch: boolean` (default false). Responses include it. Products are attached as before (`PUT /:bundleId/products`).
+  Use any tier type; "any N for a set price" = tier `{ quantity: N, discountType: "fixed_price", discountValue: <price> }`.
+- Storefront: `GET /store/:ws/bundles/:bundleId/products` → `{ bundle: { id, name, displayStyle, mixAndMatch: true, tiers: [...] }, products: [{ id, name, slug, imageUrl, variants: [{ id, optionValues, priceAmount, currency, available }] }] }` (404 unless active and mix-and-match).
+  The product payload's `bundle.mixAndMatch` says when a product belongs to such a box.
+- The shopper adds the pieces as ordinary cart lines (or `item` + `extraItems` at checkout). The cart (`bundleDiscount`) and the order price them together. The order's discount snapshot entry has `mixAndMatch: true, productIds: [...]`.
+
+### Screens
+- Bundles editor: «اخلط واختار» / "Mix and match" toggle with the hint «المنتجات دي بتتحسب مع بعض: أي 3 منهم بسعر واحد» / "These products count together: any 3 of them for one price".
+- Storefront: on a product in a box, a «كوّن البوكس بتاعك» / "Build your box" entry → box page listing the products (from the endpoint), slots «اختار 3» / "Pick 3" with a counter, «ضيف البوكس للسلة» / "Add box to cart" (adds the chosen variants as lines). Cart shows the box discount.

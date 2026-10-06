@@ -60,6 +60,8 @@ const schemas = {
         .valid(...DISPLAY_STYLES)
         .default('cards'),
       isActive: Joi.boolean().default(true),
+      // Price all its products together — "any 3 of these" (item 215).
+      mixAndMatch: Joi.boolean().default(false),
       tiers: tiersSchema.required(),
     }),
   },
@@ -69,6 +71,7 @@ const schemas = {
       name: Joi.string().trim().min(1).max(200),
       displayStyle: Joi.string().valid(...DISPLAY_STYLES),
       isActive: Joi.boolean(),
+      mixAndMatch: Joi.boolean(),
       tiers: tiersSchema,
     }).min(1),
   },
@@ -174,7 +177,7 @@ async function createBundle(workspaceId, data, req) {
   checkTiers(data.tiers);
   const id = await db.sequelize.transaction(async (transaction) => {
     const bundle = await db.Bundle.create(
-      { workspaceId, name: data.name, displayStyle: data.displayStyle, isActive: data.isActive },
+      { workspaceId, name: data.name, displayStyle: data.displayStyle, isActive: data.isActive, mixAndMatch: Boolean(data.mixAndMatch) },
       { transaction }
     );
     const tiers = normalizeTiers(data.tiers);

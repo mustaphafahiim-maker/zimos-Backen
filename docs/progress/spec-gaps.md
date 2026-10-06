@@ -1594,7 +1594,10 @@ social proof, no fake reviews, no call centre, no unofficial WhatsApp. A store m
   - modules/giftOptions + migration 483 (orders.gift_options). The wrap is a merchant-priced product added as a line (no prices in code; tax, stock and reports work unchanged). Message and hidePrices are kept on the order and printed on the waybill (plain text, PDF-safe).
   - Settings in settings.gift_options; the storefront reads store.giftOptions (cached with the store). Works for COD and online checkouts.
   - Verified: off refused, settings, store view with wrap price, message length, wrap line (+2000) and options saved, waybill lines, message-only gift.
-- [ ] 215. Mix-and-match box: "any 3 from this collection for a set price" built by the shopper, priced by the server at checkout.
+- [x] 215. Mix-and-match box: "any 3 from this collection for a set price" built by the shopper, priced by the server at checkout. (backend done, UI in frontend-handoff.md)
+  - Extends quantity bundles instead of a new engine (migration 484, bundles.mix_and_match). applyBundleTiers groups the lines of a mix-and-match bundle's products into one unit set, so the cart, shipping quote and order all price the box the same way, with every tier type and free shipping. The default (false) keeps the per-product behaviour.
+  - Public box builder endpoint lists the bundle's active products with variants and availability. The pieces are ordinary cart lines.
+  - Verified: 1 shirt (250) + 2 caps (100) with "3 for 400" → cart discount 50 and order total 400; with the flag off, 450 (per product, unchanged).
 - [ ] 216. Holiday mode: the store keeps showing but stops taking orders between dates (or takes them with a "ships after" notice), with a message.
 - [ ] 217. Sign in with Google for shopper accounts: an interface + sandbox adapter + README, linked to the shopper account by email.
 - [ ] 218. VIP tiers: customers move up automatically by what they spent (tiers the merchant defines), with perks applied at checkout (a percent off, free shipping, a points multiplier) for signed-in shoppers.

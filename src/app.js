@@ -370,6 +370,8 @@ v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').accou
 v1.use('/store/:workspaceId/account/store-credit', require('./modules/storeCredit').account);
 v1.use('/store/:workspaceId/price-list', require('./modules/priceLists').store);
 v1.use('/store/:workspaceId/size-chart', require('./modules/sizeCharts').store);
+// The mix-and-match box builder (spec-gaps item 215).
+v1.use('/store/:workspaceId/bundles', require('./modules/bundles/mixAndMatch').store);
 v1.use('/store/:workspaceId/search', require('./modules/searchInsights').store);
 v1.use('/store/:workspaceId/products/:productId/questions', require('./modules/productQuestions').store);
 v1.use('/store/:workspaceId/loyalty', require('./modules/loyalty').store);
