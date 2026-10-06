@@ -848,6 +848,20 @@ Physical products have a "Track quantity" switch, and variant prices are labelle
   - Through the API on Demo Cap: untracked set its variant to overselling. Trying to switch overselling off on a variant stayed on. A stock drop across a low-stock threshold raised no event while untracked, the store showed it in stock, and the same drop raised one event once it was tracked again.
   - In the dashboard (Arabic): turning the switch off and saving showed "غير متتبع" in the variants table and the products list. The new-variant form had no stock or overselling field. With the store's currency set to SAR for the test, the form showed SAR. Turning it back on brought the stock numbers back.
   - Thresholds, stock movements, the event, the currency and the switch were restored.
+Analytics have a currency switcher (SPEC §11.5: "Analytics include a currency switcher (EGP / USD / MAD...)") on the summary, the reports, attribution, profit, real profit and funnel analytics pages.
+
+- **Decision: display only.** Reports keep adding orders up in the store's own currency (currencies/baseAmounts.js, unchanged).
+  - The switcher shows those amounts in another currency at the store's current rates. Nothing is stored converted.
+  - When a currency is picked, a line under the switcher says the amounts are converted and that orders are added up in the store's currency.
+- **Rates:** GET /currencies (readable by any member) now also returns `reportRates`, from the store's currency to its display currencies plus a few common ones (USD, EUR, SAR, AED, MAD, EGP), whichever have a rate. The switcher hides itself when there are none.
+- **Conversion** (`lib/reportCurrency.tsx`):
+  - Each page wraps its amounts with `useReportMoney()`, which turns an amount in the store's currency into the chosen one.
+  - It allows for the two currencies' decimals and rounds half away from zero to the minor unit.
+  - An amount in any other currency is left as it is.
+  - Chart tooltips and axes go through the same function.
+- **Decision: the choice is the teammate's, per store, in this browser** (localStorage), and all report pages share it. Choosing the store's own currency again goes back to the plain amounts.
+- The live view (today's orders as they come in) and the product costs page stay in their own currencies.
+- **Tested** on the scratch DB, in Arabic: the switcher offered EGP (store), AED, EUR, MAD, SAR and USD. On the summary, 118,544.16 EGP of sales became 2,469.67 US$ (rate 0.02083333) and the note showed. The reports, attribution and profit pages opened already in USD. Switching back showed EGP again.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1063,7 +1077,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
 - [x] 150. Formatted product descriptions, sanitized (§7.1).
 - [x] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
-- [ ] 152. A currency switcher on attribution, reports and profit (§11.5).
+- [x] 152. A currency switcher on attribution, reports and profit (§11.5).
 - [ ] 153. Order export presets in a courier's own layout (§12.3).
 - [ ] 154. The Pinterest tag (§13.1).
 - [ ] 155. Google Sheets sync for orders and lost orders: adapter + sandbox + README (§16.4).
