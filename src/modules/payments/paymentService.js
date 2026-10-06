@@ -14,11 +14,15 @@ const { GatewayRejectedError, GatewayAuthError } = require('./gateways/gatewayEr
 // `mock` authorises and captures in-process without moving any money, so it is
 // a development/test fixture only — never a production gateway. `cod` is real:
 // the money is collected by the courier on delivery.
+// Store-held tenders: refunded to the card or the points, never through a gateway.
+const STORE_TENDERS = ['gift_card', 'loyalty'];
 const PROVIDERS = {
   mock: require('./providers/mockProvider'),
   cod: require('./providers/codProvider'),
   // A gift card's part of an order (giftCards/, item 189): refunds credit the card.
   gift_card: require('../giftCards/giftCardProvider'),
+  // Loyalty points spent on an order (loyalty/, item 203): refunds give the points back.
+  loyalty: require('../loyalty/loyaltyProvider'),
 };
 
 // env.payments.defaultProvider (PAYMENTS_DEFAULT_PROVIDER) is not read on this
@@ -156,6 +160,15 @@ async function processRefund(workspaceId, orderId, { amount, reason, paymentId }
       transaction,
     });
     const gatewayPayments = captured.filter((p) => gateways.isGateway(p.providerCode));
+
+    // A gift card's or points' part, named by the merchant: back to the card or the points (items 189, 203),
+    // at most what is left of that payment.
+    const storeTender = paymentId ? captured.find((p) => p.id === paymentId && STORE_TENDERS.includes(p.providerCode)) : null;
+    if (storeTender) {
+      const left = await refundableOnPayment(storeTender, transaction);
+      if (amount > left) throw new AppError('REFUND_EXCEEDS_PAYMENT', `Cannot refund ${amount}; only ${left} is left on that payment`, 422);
+      return { refund: await refundOffline(workspaceId, order, storeTender, { amount, reason }, req, transaction) };
+    }
 
     if (gatewayPayments.length === 0) {
       if (paymentId) {

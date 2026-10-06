@@ -270,6 +270,8 @@ v1.use('/workspaces/:workspaceId/purchase-limits', require('./modules/catalog/pu
 v1.use('/workspaces/:workspaceId/delivery-estimates', require('./modules/shipping/deliveryEstimates').staff);
 // Daily / weekly summary emails to team members (spec-gaps item 202).
 v1.use('/workspaces/:workspaceId/scheduled-reports', require('./modules/scheduledReports').router);
+// Loyalty points (spec-gaps item 203).
+v1.use('/workspaces/:workspaceId/loyalty', require('./modules/loyalty').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
@@ -344,6 +346,8 @@ v1.use('/store/:workspaceId/address', require('./modules/places/autocomplete').s
 // Shopper accounts: sign in with a code, orders, addresses (item 185).
 // The signed-in shopper's wishlist (item 188), ahead of the account router.
 v1.use('/store/:workspaceId/account/wishlist', require('./modules/shopperAccounts/wishlist').store);
+v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').account);
+v1.use('/store/:workspaceId/loyalty', require('./modules/loyalty').store);
 v1.use('/store/:workspaceId/account', require('./modules/shopperAccounts').store);
 // Returns asked for by the shopper (item 186).
 v1.use('/store/:workspaceId/returns', require('./modules/returns/shopperReturns').store);

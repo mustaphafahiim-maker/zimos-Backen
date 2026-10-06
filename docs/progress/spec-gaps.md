@@ -1523,7 +1523,14 @@ with purchase, notes on customers, size charts and search analytics. Every item 
 centre, no unofficial WhatsApp. Outside services are an interface + `sandbox` adapter + README; migrations stay in
 474–499; no prices in code.
 
-- [ ] 203. Loyalty points: the merchant sets the earn rate (points per currency unit on delivered orders) and the value of a point; points are redeemed at checkout as a discount, can expire, are shown in the shopper account, and are taken back when an order is returned or refunded.
+- [x] 203. Loyalty points: the merchant sets the earn rate (points per currency unit on delivered orders) and the value of a point; points are redeemed at checkout as a discount, can expire, are shown in the shopper account, and are taken back when an order is returned or refunded. (backend done, UI in frontend-handoff.md)
+  - modules/loyalty + migration 474 (customers.loyalty_points / loyalty_activity_at, loyalty_transactions; an order earns once, by a unique partial index).
+  - Spending points is a captured `loyalty` payment (like a gift card), not a discount: the order total and its tax and discount logic stay as they are, refunds give the points back (Refund hook), and the hold/capture/release for online orders is shared with gift cards through payments/heldTenders.js. That layer replaced the gift-card-only calls in onlinePaymentService.
+  - Earn on order.delivered, on what was paid for goods (total − shipping − refunded − paid by points), rounded down; taken back on order.returned and order.cancelled (clamped at 0). Partial refunds after delivery don't reduce earned points.
+  - Spending needs a signed-in shopper (X-Shopper-Token) — a phone number proves nothing. Only orders in the store currency earn or spend.
+  - Expiry: the whole balance expires after expiryDays without earning or spending (daily job), not per-earn FIFO.
+  - Merchant refunds may now name a gift_card/loyalty paymentId (paymentService STORE_TENDERS); before, only gateway payments could be named on a mixed order.
+  - Verified: settings validation, COD spend + 50% cap, auth/min/balance errors, cancel returns points, earn once + reverse on return, online hold → gateway paid → captured, merchant refund 2000 → 200 points, expiry, staff history; gift-card test (201) re-run unchanged.
 - [ ] 204. Store credit: staff give a customer credit (or refund an order to store credit), the shopper spends it at checkout (COD and online, like gift cards), and the balance and its history are shown to staff and in the shopper account.
 - [ ] 205. Wholesale price lists: price lists by customer tag (a percentage off, or fixed variant prices, with minimum quantities), applied to signed-in shoppers in the cart and at checkout, and shown on product pages.
 - [ ] 206. Multiple stock locations: stock per location (warehouse, shop), orders assigned to a location that has the stock, transfers between locations, and the location on the packing slip (the plan feature `multi_warehouse`).

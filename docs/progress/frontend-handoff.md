@@ -2071,3 +2071,36 @@ Daily covers yesterday (store time); weekly covers the 7 days before the send da
 - Buttons: «معاينة» / "Preview" (render `email.html` in a frame) and «ابعتهولي دلوقتي» / "Send it to me now".
 - Footer: last sent from `lastSent` «آخر تقرير اتبعت: …» / "Last sent: …".
 - Hint when no member has analytics access: «مفيش حد في الفريق يقدر يشوف التحليلات» / "No team member can see analytics".
+
+## 203. Loyalty points — UI: pending
+
+Customers earn points on delivered orders and spend them at checkout. Spending needs a **signed-in shopper**
+(`X-Shopper-Token`, shopper accounts from 185 must be on). The merchant sets every number; with no earn rate or point
+value the programme stays off.
+
+### Settings — `/api/v1/workspaces/:ws/loyalty`
+- `GET /` (`customers.view`) → `{ settings: { enabled, earnPointsPerUnit, pointValue, minRedeemPoints, maxRedeemPercent, expiryDays }, active, currency, customersWithPoints, outstandingPoints, outstandingWorth }`
+  (`active` = enabled and fully set; `outstandingWorth` in minor units).
+- `PUT /` (`discounts.manage`) `{ enabled, earnPointsPerUnit (0.01–1000, points per 1 unit of the store currency), pointValue (int minor units per point, e.g. 10 = EGP 0.10), minRedeemPoints (≥1, default 1), maxRedeemPercent (1–100, default 100), expiryDays (30–1825 or null) }` — `earnPointsPerUnit` and `pointValue` required when `enabled`.
+- `GET /customers/:customerId` (`customers.view`) → `{ balance, worth, currency, expiresAt, history: [{ kind, points, balanceAfter, amount, currency, orderId, note, createdAt }] }`
+- `POST /customers/:customerId/adjust` (`customers.manage`) `{ points: ±int (not 0), note (1–200) }` → `{ balance, applied }` (never below 0).
+
+History `kind`s: `earn`, `redeem`, `hold` (for an unpaid online order), `release` (given back), `refund` (refund of a points payment), `reverse` (taken back: return/cancel), `expire`, `adjust`.
+
+### Storefront
+- `GET /store/:ws/loyalty` → `{ program: { earnPointsPerUnit, pointValue, minRedeemPoints, maxRedeemPercent, expiryDays, currency } | null }` (5-min cache).
+- `GET /store/:ws/account/loyalty` (X-Shopper-Token) → `{ program, balance, worth, currency, expiresAt, history }`.
+- Checkout `POST /store/:ws/checkout` takes **`loyaltyPoints`** (int) with `X-Shopper-Token`, with COD or online (not bank transfer).
+  Errors (on `loyaltyPoints`): 401 `SHOPPER_NOT_SIGNED_IN`, 422 `LOYALTY_OFF`, `LOYALTY_TOO_FEW`, `LOYALTY_NOT_ENOUGH`.
+  Response `loyalty`: `{ applied: true, held: false|true, points: 1000, amount: "10000", balance: 2000, currency: "EGP" }`. Fewer points than asked may be used: at most `maxRedeemPercent` of the total and what's still due.
+  COD: paid at once (order `partially_paid`). Online: held, and the gateway charges the rest. The hold is taken when paid, or on a switch to COD, and returned on expiry or cancel (same as gift cards, 201).
+  Points (plus any gift card) covering the whole order → COD with nothing to collect: `paidInStore: true` (and `paidByGiftCard` when a card took part).
+- Shopper payment status adds **`pointsHeld`** (beside `giftCardHeld` and `amountDue`).
+
+### Screens
+- Dashboard → Customers → **Loyalty programme**: toggle, «كل 1 ج.م = X نقطة» / "Points per EGP 1", «قيمة النقطة» / "Value of a point" (show "100 points = EGP 10"), min points, max % of an order, expiry «النقط بتنتهي بعد X يوم من غير شرا» / "Points expire after X days without activity". Summary: customers with points, outstanding points and their worth.
+- Customer page: balance card + history + «إضافة/خصم نقط» / "Add or take points" (points, note).
+- Storefront product page: «هتكسب 250 نقطة» / "Earn 250 points" (price ÷ 100 × earnPointsPerUnit, rounded down).
+- Checkout (signed in): «استخدم نقطك (عندك 2000 = 200 ج.م)» / "Use your points (2000 = EGP 200)" with an amount field; not signed in: «سجّل دخول عشان تستخدم نقطك» / "Sign in to use your points".
+- Account → «نقطي» / "My points": balance, worth, expiry date, history.
+- Refunds: the merchant can refund a gift-card or points payment by its `paymentId` too (it goes back to the card or the points). Before this, only gateway payments could be named.

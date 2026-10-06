@@ -184,4 +184,4 @@ async function signOutEverywhere(customer) {
   return { signedOut: true };
 }
 
-module.exports = { requestCode, verifyCode, readToken, signOutEverywhere, LIMITS };
+module.exports = { requestCode, verifyCode, readToken, signToken, signOutEverywhere, LIMITS };

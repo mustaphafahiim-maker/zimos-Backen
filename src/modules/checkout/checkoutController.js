@@ -46,7 +46,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, trackingConsent, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, trackingConsent, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -69,6 +69,13 @@ const checkout = asyncHandler(async (req, res) => {
   if (giftCardCode) {
     if (orderBody.paymentMethod === 'bank_transfer') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery or an online payment' }], 'Invalid body');
     await require('../giftCards/giftCardService').assertUsable(workspaceId, giftCardCode, null);
+  }
+  // Loyalty points: only a signed-in shopper's, checked now and taken once the order exists (loyalty/, item 203).
+  let pointsOwner = null;
+  if (loyaltyPoints) {
+    if (orderBody.paymentMethod === 'bank_transfer') throw new ValidationError([{ field: 'loyaltyPoints', message: 'Points can be used with cash on delivery or an online payment' }], 'Invalid body');
+    const shopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    pointsOwner = await require('../loyalty/loyaltyService').assertCanSpend(workspace, shopper, loyaltyPoints);
   }
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
@@ -177,8 +184,9 @@ const checkout = asyncHandler(async (req, res) => {
     await afterOrderCompleted(workspaceId, order, context);
     const transferPayment = await manualCheckout.record(order, manualTransfer);
     const giftCard = giftCardCode ? await require('../giftCards/giftCardService').redeemOnOrder(order, giftCardCode, req) : null;
-    if (giftCard && giftCard.applied) await order.reload();
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}) });
+    const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
+    if ((giftCard && giftCard.applied) || (points && points.applied)) await order.reload();
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(points ? { loyalty: points } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -204,17 +212,27 @@ const checkout = asyncHandler(async (req, res) => {
 
   // The card's part is held now and taken when the payment lands (giftCards/giftCardHolds.js, item 201).
   let giftCard = giftCardCode ? await require('../giftCards/giftCardHolds').hold(order, giftCardCode).catch(() => ({ applied: false, reason: 'error' })) : null;
-  if (giftCard && giftCard.coversOrder) {
+  // Points too (loyalty/, item 203), held the same way.
+  let points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { held: true }) : null;
+  const heldNow = (giftCard && giftCard.applied) || (points && points.applied) ? await require('../payments/heldTenders').heldOn(order.id) : 0;
+  if (heldNow > 0 && heldNow >= Number(order.totalAmount) - Number(order.amountPaid)) {
     // Nothing left for the gateway: the order goes on as cash on delivery with nothing to collect.
     try {
       await online.switchToCod(workspaceId, order.id, prepared.token, req);
       const paidOrder = await require('../../db/models').Order.findByPk(order.id);
-      const { coversOrder, ...card } = giftCard;
-      return res.status(201).json({ order: { ...paidOrder.toJSON(), items: orderItems }, giftCard: { ...card, held: false }, paidByGiftCard: true });
+      const { coversOrder, ...card } = giftCard || {};
+      return res.status(201).json({
+        order: { ...paidOrder.toJSON(), items: orderItems },
+        ...(giftCard ? { giftCard: { ...card, held: false } } : {}),
+        ...(points ? { loyalty: { ...points, held: false } } : {}),
+        paidByGiftCard: Boolean(giftCard && giftCard.applied),
+        paidInStore: true,
+      });
     } catch (err) {
-      // COD not offered (or refused): the card goes back and the gateway takes the whole order.
-      await require('../../db/models').sequelize.transaction((t) => require('../giftCards/giftCardHolds').release(order.id, t, 'cash on delivery unavailable'));
-      giftCard = { applied: false, reason: 'covers_order_cod_unavailable' };
+      // COD not offered (or refused): the card and points go back and the gateway takes the whole order.
+      await require('../../db/models').sequelize.transaction((t) => require('../payments/heldTenders').release(order.id, t, 'cash on delivery unavailable'));
+      if (giftCard && giftCard.applied) giftCard = { applied: false, reason: 'covers_order_cod_unavailable' };
+      if (points && points.applied) points = { applied: false, reason: 'covers_order_cod_unavailable' };
     }
   }
 
@@ -238,6 +256,7 @@ const checkout = asyncHandler(async (req, res) => {
     },
     paymentToken: prepared.token,
     ...(giftCard ? { giftCard: (({ coversOrder, ...card }) => card)(giftCard) } : {}),
+    ...(points ? { loyalty: points } : {}),
   });
 });
 

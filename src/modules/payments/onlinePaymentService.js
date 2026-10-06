@@ -193,8 +193,8 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
     method,
     mode: ctx.mode,
     status: OPEN_ATTEMPT,
-    // What is left once earlier payments and a held gift card are counted (giftCards/giftCardHolds.js).
-    amount: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('../giftCards/giftCardHolds').heldOn(order.id))),
+    // What is left once earlier payments and held gift cards or points are counted (heldTenders.js).
+    amount: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('./heldTenders').heldOn(order.id))),
     currency: order.currency,
     returnUrl,
     expiresAt,
@@ -375,8 +375,8 @@ async function recordPaymentTransaction(account, tx) {
       { transaction }
     );
 
-    // A gift card held at checkout pays its part now, or goes back if the order does not stand (item 201).
-    const holds = require('../giftCards/giftCardHolds');
+    // A gift card or points held at checkout pay their part now, or go back if the order does not stand (items 201, 203).
+    const holds = require('./heldTenders');
     const stands = !platformBlock && (!order.cancelledAt || reopened);
     const fromCard = stands
       ? await holds.capture(order, Number(order.totalAmount) - Number(order.amountPaid) - (sameCurrency ? received : 0), transaction)
@@ -543,8 +543,8 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
     if (new Date(locked.paymentExpiresAt).getTime() > Date.now()) return 'not_due';
 
     await releaseStock(locked, transaction, 'order_payment_expired');
-    // A gift card held for it goes back (giftCards/giftCardHolds.js).
-    await require('../giftCards/giftCardHolds').release(locked.id, transaction, 'payment expired');
+    // A gift card or points held for it go back (heldTenders.js).
+    await require('./heldTenders').release(locked.id, transaction, 'payment expired');
     await db.Payment.update(
       { status: 'expired' },
       { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction }
@@ -636,9 +636,10 @@ async function describeForShopper(order, workspace, preview) {
     paymentMethod: order.paymentMethod,
     totalAmount: Number(order.totalAmount),
     amountPaid: Number(order.amountPaid),
-    // A gift card held for this payment (giftCards/giftCardHolds.js), and what is left to pay.
+    // What gift cards and points hold for this payment (heldTenders.js), and what is left to pay.
     giftCardHeld: await require('../giftCards/giftCardHolds').heldOn(order.id),
-    amountDue: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('../giftCards/giftCardHolds').heldOn(order.id))),
+    pointsHeld: await require('../loyalty/loyaltyHolds').heldOn(order.id),
+    amountDue: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('./heldTenders').heldOn(order.id))),
     currency: order.currency,
     expiresAt: order.paymentExpiresAt,
     testMode: Boolean(latest && latest.mode === 'test'),
@@ -841,8 +842,8 @@ async function switchToCod(workspaceId, orderId, token, req) {
     const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
     const riskFlags = [...new Set([...(locked.riskFlags || []), ...codChecks.flags])];
     await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced, riskFlags }, { transaction });
-    // A gift card held for the online payment pays its part now; the courier collects the rest (item 201).
-    const fromCard = await require('../giftCards/giftCardHolds').capture(locked, Number(locked.totalAmount) - Number(locked.amountPaid), transaction);
+    // A gift card or points held for the online payment pay their part now; the courier collects the rest (items 201, 203).
+    const fromCard = await require('./heldTenders').capture(locked, Number(locked.totalAmount) - Number(locked.amountPaid), transaction);
     if (fromCard > 0) {
       const amountPaid = Number(locked.amountPaid) + fromCard;
       await locked.update({ amountPaid }, { transaction });

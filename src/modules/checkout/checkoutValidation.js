@@ -61,6 +61,8 @@ module.exports = {
       discountCode: Joi.string().max(100).optional(),
       // A gift card paying part or all of a cash-on-delivery order (giftCards, item 189).
       giftCardCode: Joi.string().trim().max(40).optional(),
+      // Loyalty points a signed-in shopper (X-Shopper-Token) spends on this order (loyalty/, item 203).
+      loyaltyPoints: Joi.number().integer().min(1).max(100000000).optional(),
       // The shopper's cookie choice, kept on the order for purchase events (marketing/cookieConsent.js).
       trackingConsent: Joi.boolean().optional(),
       // The shipping option the shopper picked (shipping/shippingOptions.js); absent = standard.

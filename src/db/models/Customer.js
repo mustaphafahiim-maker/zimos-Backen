@@ -16,6 +16,9 @@ module.exports = (sequelize, DataTypes) => {
       alternatePhone: { type: DataTypes.STRING(32), allowNull: true, field: 'alternate_phone' },
       email: { type: DataTypes.STRING(255), allowNull: true },
       fullName: { type: DataTypes.STRING(200), allowNull: true, field: 'full_name' },
+      // Loyalty points balance and last earn/spend (migration 474, modules/loyalty).
+      loyaltyPoints: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'loyalty_points' },
+      loyaltyActivityAt: { type: DataTypes.DATE, allowNull: true, field: 'loyalty_activity_at' },
       marketingConsent: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'marketing_consent' },
       isBlacklisted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_blacklisted' },
       blacklistReason: { type: DataTypes.STRING(300), allowNull: true, field: 'blacklist_reason' },
