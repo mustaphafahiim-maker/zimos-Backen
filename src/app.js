@@ -300,6 +300,7 @@ v1.use('/workspaces/:workspaceId/delivery-slots', require('./modules/deliverySlo
 v1.use('/workspaces/:workspaceId/customer-referrals', require('./modules/customerReferrals').staff);
 v1.use('/workspaces/:workspaceId/bought-together', require('./modules/boughtTogether').staff);
 v1.use('/workspaces/:workspaceId/click-and-collect', require('./modules/clickAndCollect').staff);
+v1.use('/workspaces/:workspaceId/price-schedules', require('./modules/priceSchedules').router);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);

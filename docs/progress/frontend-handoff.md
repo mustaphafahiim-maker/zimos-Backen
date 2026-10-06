@@ -2611,3 +2611,27 @@ The storefront strip already exists: `GET /api/v1/store/:ws/cross-sell?productId
 ### Screens
 - Orders list: in the bulk actions next to «طباعة البوالص» / "Print waybills", add «قائمة التجهيز» / "Pick list" for the selected orders. In the "Ready to ship" tab add a button «جهّز كل الجاهز للشحن» / "Pick everything ready to ship".
 - A pick-list view (or the PDF): per location «المخزن الرئيسي» / "Main stock", rows «3 × ZZ Pick Socks — ZZ-SOCK» with the order numbers under each, checkboxes, and «اطبع» / "Print".
+
+## 227. Scheduled price changes (sales with a start and an end) — UI: pending
+
+### `/api/v1/workspaces/:ws/price-schedules` (read `products.view`, change `products.manage`)
+Body for create / edit / preview:
+```json
+{ "name": "Weekend sale", "startsAt": "2026-10-09T08:00:00Z", "endsAt": "2026-10-11T22:00:00Z",
+  "target": { "type": "products", "ids": ["…"] },
+  "change": { "mode": "percent_off", "value": 20 }, "showWasPrice": true }
+```
+- `target.type`: `variants` | `products` | `collection` (exactly one id), ids of this store (422). `change.mode`: `percent_off` (1–90), `amount_off` (minor units), `set_price` (minor units). `endsAt` null = no end; must be after `startsAt` and in the future (422 `endsAt`).
+- `GET ?status=scheduled|active|ended|cancelled` → `{ schedules: [{ id, name, status, startsAt, endsAt, target, change, showWasPrice, appliedAt, revertedAt, createdAt }] }`.
+- `POST /preview` → `{ total, variants: [{ variantId, productName, sku, options, price, salePrice }] }` (up to 500 shown).
+- `POST /` → 201 `{ schedule }` (with `items` once started — a start time in the past starts it at once).
+- `GET /:id` → `{ schedule }` with `items: [{ variantId, productName, sku, options, oldPrice, newPrice, state }]`. `state`: `applied`, `restored`, `kept` (the team changed the price during the sale, so it was left), `skipped` (already in another running sale, or no change).
+- `PUT /:id` — only while `scheduled` (409 `PRICE_SCHEDULE_LOCKED`).
+- `POST /:id/stop` — scheduled → `cancelled`; active → `ended` now with prices back; else 409 `PRICE_SCHEDULE_OVER`.
+- How it works: at the start the variants' real price changes (so the cart, checkout, feeds and pixels all agree), with the price before the sale as the compare-at "was" price when `showWasPrice`; at the end the old price and compare-at come back. Switching happens every minute.
+
+### Screens
+- Products → «التخفيضات المجدولة» / "Scheduled sales": list with status chips «مستني» / "Scheduled", «شغال» / "Running", «خلص» / "Ended", «اتلغى» / "Cancelled".
+- Editor: name, what's on sale («منتجات» / "Products", «أصناف» / "Variants", «تشكيلة» / "Collection" pickers), «خصم %» / "% off", «خصم مبلغ» / "Amount off", «سعر ثابت» / "Set price", start / end date-time (store time), «اعرض السعر القديم مشطوب» / "Show the old price crossed out", and the preview table (price → sale price).
+- Detail: per variant old → new and state; «وقّف التخفيض» / "Stop sale" (confirm «الأسعار هترجع زي ما كانت» / "Prices go back now"), «إلغاء» / "Cancel" before it starts.
+- Product page in the dashboard: a note when the variant is in a running sale «في تخفيض لحد …» / "On sale until …".
