@@ -1308,7 +1308,10 @@ Commerce:
   - The order keeps the photo in `checkoutFields` as `{ type: 'file', uploadId }`; the order page adds a signed link per read.
   - Billing: `checkout_settings.billing_address` on/off; unticked "same as shipping" requires country, city and address line. Stored only when different (`orders.billing_address_snapshot`, migration 453); null means same as shipping.
   - Attaching and storing run after the order commits and never fail it (like the form answers).
-- [ ] 166. Bulk actions on funnels: publish, pause, duplicate and delete several at once.
+- [x] 166. Bulk actions on funnels: publish, pause, duplicate and delete several at once. (backend done, UI in frontend-handoff.md)
+  - One endpoint, `POST /funnels/bulk`, with resume added beside the four listed. Each funnel runs through its own button's service call, in its own transaction, so one refusal never blocks the rest; the answer reports each one (the orders bulk shape).
+  - Guards follow the single actions: funnels.publish (+ live store for publish/resume), funnels.manage (+ creation allowed for duplicate). Up to 50 funnels per call.
+  - Copies take the default "(copy)" name and a fresh subdomain, and count against the plan like single copies.
 
 Tracking and analytics:
 - [ ] 167. "Send Lead instead of Purchase" per funnel and store (COD stores optimising on leads).

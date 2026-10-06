@@ -21,6 +21,8 @@ const PUBLISH = requirePermission(PERMISSIONS.FUNNELS_PUBLISH);
 require('./funnelExtras').mount(router, { MANAGE, requireCreationAllowed });
 // Geo redirects and the funnel's own settings.
 require('./geoRedirects').mount(router, { MANAGE });
+// Publish, pause, resume, duplicate or delete several funnels at once (funnelBulk.js).
+require('./funnelBulk').mount(router);
 
 // --- funnels ---
 // Creating a funnel is refused while the store is restricted (unpaid past its

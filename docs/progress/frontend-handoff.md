@@ -506,3 +506,44 @@ Example (`Accept-Language: ar-EG`): `{"error":{"code":"INVALID_CREDENTIALS","mes
 
 UI: send `Accept-Language` (dashboard: the user's UI language) on every API call; storefront: nothing to do
 (X-Store-Locale is already sent). Show `error.message` for unmapped codes.
+
+---
+
+## 166. Bulk actions on funnels — UI: pending
+
+**POST `/workspaces/:ws/funnels/bulk`**
+```json
+{ "action": "pause", "funnelIds": ["…", "…"], "note": "optional, publish only" }
+```
+- `action`: `publish` | `pause` | `resume` | `duplicate` | `delete`; `funnelIds`: 1–50 uuids (duplicates ignored).
+- Permission per action, as the single buttons: publish/pause/resume → `funnels.publish` (publish and resume also
+  need a live store, 402/403 from the subscription guard); duplicate/delete → `funnels.manage` (duplicate is refused
+  on a restricted store and counts against the plan's funnels a month, per copy).
+- Always 200 when the request is valid; each funnel is done on its own:
+```json
+{ "action": "duplicate", "total": 2, "succeeded": 1, "failed": 1,
+  "results": [
+    { "funnelId": "…", "name": "Summer offer", "ok": true, "newFunnelId": "…" },
+    { "funnelId": "…", "name": "Old", "ok": false, "error": { "code": "FUNNEL_NOT_PUBLISHED", "message": "Publish this funnel before pausing or resuming it" } }
+  ] }
+```
+  Typical per-funnel errors: `VALIDATION_ERROR` with `details` (publish: "A funnel needs at least one step"),
+  `FUNNEL_NOT_PUBLISHED` (pause/resume a draft), `PLAN_LIMIT_REACHED` (duplicate), `PRODUCT_IN_FUNNEL`-style
+  refusals from delete, `NOT_FOUND`.
+
+### Dashboard — Funnels list
+- Row checkboxes + "select all on this page"; a bulk bar with: Publish, Pause, Resume, Duplicate, Delete
+  (Delete asks to confirm with the count). Hide buttons the user's permissions don't allow.
+- After the call: toast "{succeeded} done, {failed} failed"; when some failed, a small dialog listing each failed
+  funnel's name and `error.message`; refresh the list; keep failed ones selected.
+- Max 50 selected (disable with a hint past that).
+
+Wording:
+| en | ar |
+|---|---|
+| {n} selected | {n} متحدد |
+| Publish / Pause / Resume / Duplicate / Delete | نشر / إيقاف / تشغيل / نسخ / حذف |
+| Delete {n} funnels? This can't be undone. | حذف {n} فانل؟ مش هتقدر ترجعهم. |
+| {ok} done, {failed} failed | {ok} اتعملوا، {failed} ماتعملوش |
+| These funnels were not changed | الفانلز دي ماتغيرتش |
+| Up to 50 at a time | لحد ٥٠ مرة واحدة |
