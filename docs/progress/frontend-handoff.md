@@ -2395,3 +2395,21 @@ to it are priced **together** ("any 3 of these for EGP 400"), instead of each pr
 - Settings → «وضع الإجازة» / "Holiday mode": toggle, choice «وقّف الطلبات» / "Pause orders" vs «اقبل الطلبات واشحن بعدين» / "Take orders, ship later", from/until dates, ships-from date (delay), message ar/en. Show «شغال دلوقتي» / "On now" when `activeNow`.
 - Storefront: a banner with the message and date «المتجر في إجازة لحد 11 أكتوبر» / "We're on holiday until 11 October". Pause: disable checkout buttons «الطلبات موقوفة مؤقتًا» / "Orders are paused for now". Delay: on the product page, cart and checkout «الطلبات هتتشحن من 11 أكتوبر» / "Orders ship from 11 October".
 - Dashboard order list: the `holiday` tag as a chip.
+
+## 217. Sign in with Google (shopper accounts) — UI: pending
+
+Uses Google's own "Sign in with Google" button (Google Identity Services); the button gives the browser an **ID token**.
+
+### Storefront — `/api/v1/store/:ws/account/google`
+- `GET` → `{ enabled, clientId }`: show the button only when `enabled` (shopper accounts on + Google on), and initialise it with `clientId`.
+- `POST` `{ idToken }` → `{ token, expiresInSeconds, customer: { id, fullName, email } }`: the same `X-Shopper-Token` as a code sign-in.
+  Errors: 404 `GOOGLE_SIGN_IN_OFF`; 401 `GOOGLE_TOKEN_INVALID` «تسجيل الدخول بجوجل منجحش — جرّب تاني» / "Google sign-in did not work — try again";
+  422 `GOOGLE_EMAIL_UNVERIFIED`; 404 `ACCOUNT_NOT_FOUND` «مفيش حساب بالإيميل ده لسه — اطلب أو ادخل برقم موبايلك الأول» / "No account with this email yet — place an order or sign in with your phone first".
+  It signs in to the store's existing contact with that (verified) email; it does not create one (a contact needs a phone).
+
+### Dashboard — `/api/v1/workspaces/:ws/shopper-accounts/google` (`workspace.manage`)
+- `GET` → `{ enabled, clientId, platformClientAvailable }`; `PUT` `{ enabled, clientId? }` — the store's own web client id (`…apps.googleusercontent.com`), needed for a custom domain. Empty = the platform's, when `platformClientAvailable`.
+
+### Screens
+- Settings → Customer accounts: «الدخول بحساب جوجل» / "Sign in with Google" toggle + client id field with a short guide link, and a note when the platform has none.
+- Storefront sign-in sheet: the Google button above the phone/email code form.

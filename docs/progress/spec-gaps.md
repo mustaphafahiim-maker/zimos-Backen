@@ -1602,6 +1602,10 @@ social proof, no fake reviews, no call centre, no unofficial WhatsApp. A store m
   - modules/holidayMode; settings.holiday_mode (no migration). Pause = 423 STORE_ON_HOLIDAY from the checkout only (store and funnel checkouts share it); browsing, carts and tracking keep working. Delay = the order is tagged holiday with shippingSnapshot.holiday { shipsFrom, message }. Dashboard orders are never blocked.
   - The window is checked live (from/until), so a scheduled holiday starts and ends on time without a job. Saving clears the store cache.
   - Verified: date validation, pause → 423 with details, store.holiday, delay → tag + snapshot, future holiday not active yet.
-- [ ] 217. Sign in with Google for shopper accounts: an interface + sandbox adapter + README, linked to the shopper account by email.
+- [x] 217. Sign in with Google for shopper accounts: an interface + sandbox adapter + README, linked to the shopper account by email. (backend done, UI in frontend-handoff.md)
+  - shopperAccounts/google/ (google.js verifies the GIS ID token with google-auth-library, sandbox.js for SHOPPER_GOOGLE_MODE=sandbox outside production, README). Settings in settings.shopper_google, separate from shopper_accounts, whose PUT replaces it whole.
+  - Only a Google-verified email is used, matched case-insensitively to the store's existing contact. No contact is created, because customers need a phone; documented in the README and the error text.
+  - The store's own client id is needed for custom domains (Google checks the origin); otherwise the platform's GOOGLE_CLIENT_ID is used. The id is public; no secret in this flow.
+  - Verified (sandbox): off, bad client id, config, no account, invalid token, sign-in with case-different email, token works on /account/me.
 - [ ] 218. VIP tiers: customers move up automatically by what they spent (tiers the merchant defines), with perks applied at checkout (a percent off, free shipping, a points multiplier) for signed-in shoppers.
 - [ ] 219. Quote requests (B2B): a shopper asks for a quote for quantities; staff answer with prices and a validity date; the shopper accepts and it becomes an order (payment link reused).

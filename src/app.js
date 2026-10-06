@@ -254,6 +254,8 @@ v1.use('/workspaces/:workspaceId/smart-collections', require('./modules/catalog/
 v1.use('/workspaces/:workspaceId/store-places', require('./modules/places/storePlaces').staff);
 // Address suggestions at checkout (item 184).
 v1.use('/workspaces/:workspaceId/address-autocomplete', require('./modules/places/autocomplete').staff);
+// Sign in with Google for shoppers (spec-gaps item 217) — before the general shopper-accounts routes.
+v1.use('/workspaces/:workspaceId/shopper-accounts/google', require('./modules/shopperAccounts/google').staff);
 v1.use('/workspaces/:workspaceId/shopper-accounts', require('./modules/shopperAccounts').staff);
 v1.use('/workspaces/:workspaceId/wishlists', require('./modules/shopperAccounts/wishlist').staff);
 v1.use('/workspaces/:workspaceId/gift-cards', require('./modules/giftCards').staff);
@@ -368,6 +370,7 @@ v1.use('/store/:workspaceId/address', require('./modules/places/autocomplete').s
 // Shopper accounts: sign in with a code, orders, addresses (item 185).
 // The signed-in shopper's wishlist (item 188), ahead of the account router.
 v1.use('/store/:workspaceId/account/wishlist', require('./modules/shopperAccounts/wishlist').store);
+v1.use('/store/:workspaceId/account/google', require('./modules/shopperAccounts/google').store);
 v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').account);
 v1.use('/store/:workspaceId/account/store-credit', require('./modules/storeCredit').account);
 v1.use('/store/:workspaceId/price-list', require('./modules/priceLists').store);
