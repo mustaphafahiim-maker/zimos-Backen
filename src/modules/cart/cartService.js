@@ -127,6 +127,8 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
   // line of its own; only identical ones add up.
   const candidates = await db.CartItem.findAll({ where: { cartId, variantId, offerId: offerId || null } });
   const existing = candidates.find((line) => sameCustomizations(line.customizations, snapshot));
+  // The product's maximum per order (catalog/purchaseLimits.js, item 198).
+  await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, variantId, (existing ? existing.quantity : 0) + quantity, existing ? existing.id : null);
   if (existing) {
     await existing.update({ quantity: existing.quantity + quantity, unitPriceSnapshot: unitPrice });
   } else {
@@ -150,6 +152,7 @@ async function updateItemQuantity(workspaceId, cartId, itemId, quantity) {
   if (quantity <= 0) {
     await item.destroy();
   } else {
+    await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, item.variantId, quantity, item.id);
     await item.update({ quantity });
   }
   return getCart(workspaceId, cartId);

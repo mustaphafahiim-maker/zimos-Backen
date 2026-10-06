@@ -1900,3 +1900,31 @@ Wording:
 | Store access | الدخول للمتجر |
 | Open / Password / Coming soon | مفتوح / بباسورد / قريبًا |
 | Also lock funnels | اقفل الفانلز كمان |
+
+## 198. Purchase limits per product — UI: pending
+
+### Dashboard — product page → "Purchase limits" (view `products.view`, save `products.manage`)
+- **GET `/workspaces/:ws/purchase-limits/:productId`** → `{ "productId", "limits": { "min": 2, "max": 3, "maxPerCustomer": 4 } }` (nulls = no limit).
+- **PUT** same `{ "min"?, "max"?, "maxPerCustomer"? }` (1–100000 or null; min ≤ max; maxPerCustomer ≥ max). `{}` clears them.
+- Fields: "Minimum per order", "Maximum per order", "Maximum per customer (all orders)". Units count every variant and
+  offer of the product together. Staff-created orders are not limited.
+
+### Storefront
+- Product payload: `product.purchaseLimits` = `{ min, max, maxPerCustomer }` or null — set the quantity picker's min/max and
+  show "Max {n} per order" / "Min {n}".
+- Cart (`POST /store/:ws/cart/items`, `PATCH /cart/items/:id`): 422 when the product's units in the cart would pass `max`,
+  `details: [{ field: "quantity", message: "At most 3 of \"…\" per order", productId, max }]`.
+- Checkout (`POST /store/:ws/checkout`): 422 with `details: [{ field: "items", message, productId, min | max | maxPerCustomer, left? }]` —
+  messages "Order at least 2 of …", "At most 3 of … per order", "You can buy 1 more of …" / "You already bought the most …
+  one customer can" (per customer = earlier orders by the same phone that were not cancelled). Show the message on the
+  product's line.
+
+Wording:
+| en | ar |
+|---|---|
+| Purchase limits | حدود الشراء |
+| Minimum per order | أقل كمية في الطلب |
+| Maximum per order | أكبر كمية في الطلب |
+| Maximum per customer | أكبر كمية للعميل الواحد |
+| Max {n} per order | بحد أقصى {n} في الطلب |
+| You can buy {n} more | تقدر تشتري {n} كمان |

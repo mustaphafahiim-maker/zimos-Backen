@@ -1488,7 +1488,11 @@ interface + `sandbox` adapter + README; migrations stay in 450–499; no prices 
   - Enforced server-side in resolvePublicWorkspace: locked stores answer 423 STORE_LOCKED except the metadata, the gate, analytics/fonts/visitor context, existing customers' areas (orders/*, downloads, learn, subscriptions, affiliate) and funnels unless lockFunnels; staff previews pass.
   - Age check is a storefront notice (cannot be verified), not a lock.
   - Verified: password required, lock, products/cart/blog 423 with gate details, metadata/gate/visitor/order tracking open, wrong password, unlock token works, sign-ups deduped, token void after password change, coming soon, hash never returned, reopened. Settings and sign-ups removed.
-- [ ] 198. Purchase limits per product: minimum and maximum quantity per order (and per customer), enforced at checkout and in the cart quote.
+- [x] 198. Purchase limits per product: minimum and maximum quantity per order (and per customer), enforced at checkout and in the cart quote. (backend done, UI in frontend-handoff.md)
+  - `catalog/purchaseLimits.js` + `products.purchase_limits` (migration 470). Units counted per product across variants and offers.
+  - Checkout (store and funnel, before stock is held): min, max, and maxPerCustomer (earlier non-cancelled, non-test orders by the same phone). Cart add/update: max, so shoppers hear early. Staff orders are not limited. Product payload carries the limits.
+  - Errors keep the existing 422 shape with per-product `details` (productId and the limit hit, `left` for per-customer).
+  - Verified: min>max refused, below min, above max, within, per-customer remainder, another customer unaffected, cart max, public limits. Orders, stock and test cart restored.
 - [ ] 199. Estimated delivery dates: min/max days per governorate/place and shipping option, shown on the product page, cart and checkout, and stored on the order.
 - [ ] 200. Email campaigns: a broadcast to a contact segment (consented contacts only), with the block designer, a test send, scheduling, an unsubscribe link and sent/opened counts.
 - [ ] 201. Gift cards with online payments: the gateway attempt charges the total minus the card (follow-up of 189).

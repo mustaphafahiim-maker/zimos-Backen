@@ -57,6 +57,8 @@ module.exports = (sequelize, DataTypes) => {
       cms: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
       // Sold beyond stock as a pre-order (migration 468, modules/preorders): { enabled, shipsAt, limit, message }.
       preorder: { type: DataTypes.JSONB, allowNull: true },
+      // { min, max, maxPerCustomer } units per order / per customer (migration 470, catalog/purchaseLimits.js).
+      purchaseLimits: { type: DataTypes.JSONB, allowNull: true, field: 'purchase_limits' },
       // "Track quantity": off, the product never runs out (catalog/stockTracking.js).
       trackInventory: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'track_inventory' },
       // null = sold once; otherwise a subscription or installments plan (migration 315, modules/subscriptions).
