@@ -65,7 +65,12 @@ function serializeForMerchant(row) {
     kind: row.kind,
     label: { ar: row.labelAr, en: row.labelEn },
     ...(row.kind === 'manual'
-      ? { accountNumber: row.accountNumber, note: { ar: row.noteAr || null, en: row.noteEn || null } }
+      ? {
+          accountNumber: row.accountNumber,
+          // Null when the console left it empty: no link is shown.
+          paymentLink: row.paymentLink || null,
+          note: { ar: row.noteAr || null, en: row.noteEn || null },
+        }
       : {}),
   };
 }
@@ -100,7 +105,7 @@ function serializeForAdmin(row) {
     sortOrder: row.sortOrder,
     enabled: row.enabled,
     ...(row.kind === 'manual'
-      ? { accountNumber: row.accountNumber, noteAr: row.noteAr, noteEn: row.noteEn }
+      ? { accountNumber: row.accountNumber, paymentLink: row.paymentLink || null, noteAr: row.noteAr, noteEn: row.noteEn }
       : {
           gateway: {
             name: adapter ? adapter.name : null,
@@ -147,7 +152,7 @@ const auditState = (row) => ({
   sortOrder: row.sortOrder,
   labelAr: row.labelAr,
   labelEn: row.labelEn,
-  ...(row.kind === 'manual' ? { accountNumber: row.accountNumber, noteAr: row.noteAr, noteEn: row.noteEn } : {}),
+  ...(row.kind === 'manual' ? { accountNumber: row.accountNumber, paymentLink: row.paymentLink, noteAr: row.noteAr, noteEn: row.noteEn } : {}),
 });
 
 /**
@@ -228,7 +233,7 @@ async function reorder(codes, req) {
  * note (payment_methods.edit_numbers). Audited with the old and new values.
  * The number can't be cleared while the method is on.
  */
-async function updateManualDetails(code, { accountNumber, noteAr, noteEn }, req) {
+async function updateManualDetails(code, { accountNumber, paymentLink, noteAr, noteEn }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const row = await db.PaymentMethod.findOne({ where: { code }, transaction, lock: transaction.LOCK.UPDATE });
     if (!row) throw new NotFoundError('Payment method');
@@ -237,12 +242,13 @@ async function updateManualDetails(code, { accountNumber, noteAr, noteEn }, req)
     }
     const changes = {};
     if (accountNumber !== undefined) changes.accountNumber = accountNumber || null;
+    if (paymentLink !== undefined) changes.paymentLink = paymentLink || null;
     if (noteAr !== undefined) changes.noteAr = noteAr || null;
     if (noteEn !== undefined) changes.noteEn = noteEn || null;
     if (row.enabled && changes.accountNumber === null) {
       throw new ConflictError('Turn this method off before removing its number.', 'PAYMENT_METHOD_NEEDS_NUMBER');
     }
-    const before = { accountNumber: row.accountNumber, noteAr: row.noteAr, noteEn: row.noteEn };
+    const before = { accountNumber: row.accountNumber, paymentLink: row.paymentLink, noteAr: row.noteAr, noteEn: row.noteEn };
     await row.update(changes, { transaction });
     await recordAudit({
       actorUserId: req.user.id,
@@ -250,7 +256,7 @@ async function updateManualDetails(code, { accountNumber, noteAr, noteEn }, req)
       entityType: 'PaymentMethod',
       entityId: row.id,
       before,
-      after: { accountNumber: row.accountNumber, noteAr: row.noteAr, noteEn: row.noteEn },
+      after: { accountNumber: row.accountNumber, paymentLink: row.paymentLink, noteAr: row.noteAr, noteEn: row.noteEn },
       metadata: { code: row.code },
       req,
       transaction,

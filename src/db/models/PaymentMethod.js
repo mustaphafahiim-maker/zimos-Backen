@@ -17,6 +17,8 @@ module.exports = (sequelize, DataTypes) => {
       enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       // Manual only: where the money goes, and how to send it.
       accountNumber: { type: DataTypes.STRING(80), allowNull: true, field: 'account_number' },
+      // Optional, https only (migration 210); null = no link.
+      paymentLink: { type: DataTypes.STRING(500), allowNull: true, field: 'payment_link' },
       noteAr: { type: DataTypes.STRING(500), allowNull: true, field: 'note_ar' },
       noteEn: { type: DataTypes.STRING(500), allowNull: true, field: 'note_en' },
     },

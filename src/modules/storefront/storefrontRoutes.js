@@ -3,7 +3,7 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
-const { trackingLimiter, suggestLimiter, uploadLimiter } = require('../../core/middleware/rateLimiters');
+const { trackingLimiter, suggestLimiter, uploadLimiter, manualProofLimiter } = require('../../core/middleware/rateLimiters');
 const customerUploadController = require('../customerUploads/customerUploadController');
 const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
@@ -17,6 +17,8 @@ const checkoutSessionController = require('../checkoutSessions/checkoutSessionCo
 const checkoutSessionSchemas = require('../checkoutSessions/checkoutSessionValidation');
 const onlinePaymentController = require('../payments/onlinePaymentController');
 const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
+const manualPaymentController = require('../manualPayments/manualPaymentController');
+const manualPaymentSchemas = require('../manualPayments/manualPaymentValidation');
 const botProtection = require('../risk/botProtection');
 const checkoutOtp = require('../risk/checkoutOtp');
 const lostOrders = require('../checkoutSessions/lostOrderService');
@@ -78,6 +80,18 @@ router.get('/payment-methods', validate(onlinePaymentSchemas.storeMethods), onli
 router.get('/orders/:orderId/payment', validate(onlinePaymentSchemas.shopperStatus), onlinePaymentController.shopperStatus);
 router.post('/orders/:orderId/payment/return', validate(onlinePaymentSchemas.shopperReturn), onlinePaymentController.shopperReturn);
 router.post('/orders/:orderId/payment/retry', validate(onlinePaymentSchemas.shopperRetry), onlinePaymentController.shopperRetry);
+// The store's manual methods (InstaPay, a wallet) and, for an order paid by
+// one, the shopper's proof (X-Payment-Token): the number they paid from and a
+// screenshot, limited per IP before multer reads a byte (modules/manualPayments).
+router.get('/manual-payment-methods', validate(manualPaymentSchemas.storeMethods), manualPaymentController.storefrontMethods);
+router.get('/orders/:orderId/manual-payment', validate(manualPaymentSchemas.shopperStatus), manualPaymentController.shopperStatus);
+router.post(
+  '/orders/:orderId/manual-payment/proof',
+  manualProofLimiter,
+  validate(manualPaymentSchemas.shopperStatus),
+  customerUploadController.acceptFile,
+  manualPaymentController.submitProof
+);
 router.post(
   '/orders/:orderId/payment/switch-to-cod',
   validate(onlinePaymentSchemas.shopperAction),

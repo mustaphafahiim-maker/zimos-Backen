@@ -436,6 +436,9 @@ function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}
 
 const publicPlansLimiter = createIpMinuteLimiter('public-plans', env.rateLimit.publicPlansMinuteMax, { skip });
 const verifyCodeLimiter = createIpMinuteLimiter('verify-code', env.rateLimit.verifyMinuteMax, { skip });
+// A shopper's payment screenshot for a store order (manualPayments): a few tries a minute per IP.
+const MANUAL_PROOFS_PER_MINUTE = 5;
+const manualProofLimiter = createIpMinuteLimiter('manual-payment-proof', MANUAL_PROOFS_PER_MINUTE, { skip });
 
 /*
  * Password reset requests, per IP per hour, keyed on the IP alone (unlike
@@ -582,6 +585,8 @@ module.exports = {
   createSuggestLimiter,
   uploadLimiter,
   createUploadLimiter,
+  MANUAL_PROOFS_PER_MINUTE,
+  manualProofLimiter,
   usernameCheckLimiter,
   createUsernameCheckLimiter,
   publicPlansLimiter,

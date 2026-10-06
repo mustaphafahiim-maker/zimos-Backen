@@ -108,6 +108,8 @@ async function trackStage(
 async function setConfirmationState(workspaceId, orderId, state, req, transaction) {
   const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction });
   if (!order) throw new NotFoundError('Order');
+  // Paid by InstaPay / a wallet: not confirmed for shipping until the proof is approved.
+  if (state === 'confirmed') await require('../manualPayments/manualPaymentService').assertConfirmable(order, transaction);
   const before = order.confirmationState;
   await order.update({ confirmationState: state, confirmedAt: confirmedAtFor(order, state) }, { transaction });
   await recordAudit({

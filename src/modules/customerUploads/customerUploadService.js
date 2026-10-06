@@ -183,6 +183,42 @@ async function presentCustomizations(workspaceId, customizations) {
   });
 }
 
+/**
+ * A shopper's payment screenshot for an order (manualPayments): the same
+ * checks and re-encoding as a product photo, stored privately and attached at
+ * once, so the sweep never removes it. Returns the row.
+ */
+async function createPaymentProofUpload(workspaceId, file, transaction) {
+  if (!file || !file.buffer) throw new AppError('NO_FILE', 'No file was uploaded (field name must be "file")', 422);
+  if (!ACCEPTED.some((sig) => sig.match(file.buffer))) {
+    throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Only JPEG, PNG or WebP photos are accepted', 415);
+  }
+  const processed = await processCustomerImage(file.buffer);
+  const key = `customer-uploads/${workspaceId}/${crypto.randomUUID()}.${processed.ext}`;
+  await getStorage().putPrivate({ key, buffer: processed.buffer, contentType: processed.mime });
+  try {
+    return await db.CustomerUpload.create(
+      {
+        workspaceId,
+        path: key,
+        mime: processed.mime,
+        sizeBytes: processed.buffer.length,
+        width: processed.width,
+        height: processed.height,
+        visitorId: 'payment-proof',
+        status: 'attached',
+        expiresAt: null,
+      },
+      { transaction }
+    );
+  } catch (err) {
+    await getStorage()
+      .removePrivate(key)
+      .catch(() => {});
+    throw err;
+  }
+}
+
 /** Adds signed photo links to every item of every order given (mutates the plain objects). */
 async function presentOrderItems(workspaceId, items) {
   for (const item of items || []) {
@@ -196,6 +232,7 @@ module.exports = {
   ACCEPTED_IMAGE_TYPES: ACCEPTED,
   readVisitorId,
   createUpload,
+  createPaymentProofUpload,
   sweepExpiredUploads,
   startUploadSweep,
   readUpload,
