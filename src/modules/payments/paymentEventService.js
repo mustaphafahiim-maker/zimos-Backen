@@ -159,7 +159,7 @@ async function acceptWebhook(code, token, req) {
   const account = await accounts.findByWebhookToken(code, token);
   if (!account) throw new NotFoundError('Webhook');
 
-  const parsed = adapter.parseWebhook({ query: req.query || {}, body: req.body, headers: req.headers || {} }, account.credentials);
+  const parsed = adapter.parseWebhook({ query: req.query || {}, body: req.body, headers: req.headers || {}, rawBody: req.rawBody }, account.credentials);
   if (!parsed) return { statusCode: 200, body: { received: true, ignored: true } };
   if (!parsed.valid) {
     // Never log the received or expected signature.

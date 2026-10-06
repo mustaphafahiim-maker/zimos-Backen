@@ -18,7 +18,7 @@ const Joi = require('joi');
 const code = 'sandbox';
 const name = 'Sandbox';
 // Every method a real gateway may offer, so each can be tried from the store preview.
-const METHODS = ['card', 'wallet', 'valu', 'kiosk'];
+const METHODS = ['card', 'wallet', 'valu', 'kiosk', 'paypal'];
 const CURRENCIES = ['EGP', 'USD', 'SAR', 'AED', 'MAD', 'EUR'];
 const SIGNED_FIELDS = ['sbx_order', 'sbx_txn', 'sbx_status', 'sbx_amount', 'sbx_currency'];
 
@@ -63,6 +63,9 @@ const modeFromCredentials = () => 'test';
 function availableMethods() {
   return METHODS;
 }
+
+// The express buttons of Stripe and PayPal (item 183), to try in the store preview.
+const expressFor = (method) => (method === 'card' ? { wallets: ['apple_pay', 'google_pay'] } : method === 'paypal' ? { wallets: ['paypal'] } : null);
 
 async function verifyCredentials() {
   return { mode: 'test' };
@@ -178,6 +181,7 @@ module.exports = {
   settingsSchema,
   modeFromCredentials,
   availableMethods,
+  expressFor,
   verifyCredentials,
   createPayment,
   inquire,

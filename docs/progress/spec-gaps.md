@@ -1391,7 +1391,12 @@ Integrations (interface + sandbox + README):
   - Live: consumer on lead.created / customer.created / contact.updated; "Sync now" is an io job (pages of 200, at most 20,000). Unreachable → outbox retry; refused → `lastError` on the card.
   - Mailchimp and Klaviyo became installable app-store apps (were "coming soon"); routes work only while installed. Adding a contact by hand now records customer.created, so it syncs (and reaches customer.created webhooks) too.
   - Verified with the sandbox (connect, lists, settings, live sync of the consented contact only, Sync now) and with stubbed fetch for the Mailchimp/Klaviyo request shapes.
-- [ ] 183. Express checkout buttons (wallets) and Stripe and PayPal adapters behind the payment interface. They stay sandbox until the owner's keys are set.
+- [x] 183. Express checkout buttons (wallets) and Stripe and PayPal adapters behind the payment interface. They stay sandbox until the owner's keys are set. (backend done, UI in frontend-handoff.md)
+  - `payments/gateways/stripe.js` (Checkout Session; card with Apple Pay / Google Pay; test/live from the key; signed checkout.session webhooks over the raw body, which paymentEventService now passes as `rawBody`) and `paypal.js` (Orders v2; sandbox/live detected; captured by `inquire` once approved, idempotent; no webhooks since verifying them needs a call back).
+  - New method `paypal` (migration 460 on the order enum, methodNames, export/invoice labels). PayPal takes USD/EUR/GBP/CAD/AUD only; Stripe the two-decimal currencies incl. EGP.
+  - Express buttons = adapter `expressFor` → `express: { wallets }` on the storefront methods list; the button runs the normal checkout + redirect, so no new shopper endpoint. The sandbox gateway offers both, so the preview works with no keys ("sandbox until keys are set").
+  - `gatewayHttp.request` takes `form` (form-encoded). `STRIPE_API_BASE`/`PAYPAL_API_BASE` point at a mock outside production.
+  - Verified on a mock Stripe/PayPal: connect (bad pattern 422, bad key GATEWAY_AUTH_FAILED), methods list with express (PayPal only for USD), Stripe checkout → pay → return = paid → refund, webhook good/forged/stale/ignored; PayPal create → approve → capture → refund at adapter level.
 - [ ] 184. Address autocomplete at checkout (places-provider interface + sandbox).
 
 What the platform still lacks (the owner's "كل حاجه ناقصه"):

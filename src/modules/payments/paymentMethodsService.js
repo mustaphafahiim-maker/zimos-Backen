@@ -65,7 +65,8 @@ async function allMethods(workspace, accounts = null) {
     const adapter = gateways.getAdapter(account.providerCode);
     if (!adapter) continue;
     for (const method of adapter.availableMethods(account.settings || {})) {
-      available.set(methodId(account.providerCode, method), { provider: account.providerCode, method, mode: account.mode });
+      const express = typeof adapter.expressFor === 'function' ? adapter.expressFor(method, account.settings || {}) : null;
+      available.set(methodId(account.providerCode, method), { provider: account.providerCode, method, mode: account.mode, ...(express ? { express } : {}) });
     }
   }
 
@@ -83,12 +84,13 @@ async function allMethods(workspace, accounts = null) {
       enabled: entry.enabled !== false,
       available: Boolean(info),
       mode: info ? info.mode : null,
+      ...(info && info.express ? { express: info.express } : {}),
     });
   }
   for (const [id, info] of available) {
     if (seen.has(id)) continue;
     const taken = info.method !== COD && out.some((m) => m.method === info.method && m.enabled);
-    out.push({ id, provider: info.provider, method: info.method, enabled: !taken, available: true, mode: info.mode });
+    out.push({ id, provider: info.provider, method: info.method, enabled: !taken, available: true, mode: info.mode, ...(info.express ? { express: info.express } : {}) });
   }
   return out;
 }
@@ -113,7 +115,8 @@ async function storefrontMethods(workspace, { preview = false, currency = null }
       list.push({ id: m.id, provider: m.provider, method: m.method, mode: m.mode, hidden: true });
       continue;
     }
-    list.push({ id: m.id, provider: m.provider, method: m.method, mode: m.mode });
+    // `express`: shown as wallet buttons (Apple Pay, Google Pay, PayPal) at the top of checkout (item 183).
+    list.push({ id: m.id, provider: m.provider, method: m.method, mode: m.mode, ...(m.express ? { express: m.express } : {}) });
   }
   const shown = list.filter((m) => !m.hidden);
   return shown.length > 0 ? shown : codOnly;

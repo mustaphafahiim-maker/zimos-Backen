@@ -143,7 +143,7 @@ function drawInvoice(doc, { order, invoice, workspace }) {
 
   y += 8;
   doc.font('Helvetica').fontSize(9).fillColor('#555');
-  const method = { cod: 'Cash on delivery', card: 'Card', wallet: 'Wallet', bank_transfer: 'Bank transfer' }[order.paymentMethod] || order.paymentMethod;
+  const method = { cod: 'Cash on delivery', card: 'Card', wallet: 'Wallet', paypal: 'PayPal', bank_transfer: 'Bank transfer' }[order.paymentMethod] || order.paymentMethod;
   doc.text(`Payment method: ${method}`, left, y, { lineBreak: false });
   doc.fillColor('#000');
 }

@@ -30,13 +30,18 @@ class GatewayUnreachableError extends Error {
   }
 }
 
-async function sendOnce({ method, url, headers, body, timeoutMs }) {
+async function sendOnce({ method, url, headers, body, form, timeoutMs }) {
   let res;
   try {
     res = await fetch(url, {
       method,
-      headers: { accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...headers },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers: {
+        accept: 'application/json',
+        ...(form !== undefined ? { 'content-type': 'application/x-www-form-urlencoded' } : body !== undefined ? { 'content-type': 'application/json' } : {}),
+        ...headers,
+      },
+      // `form`: a form-encoded body (Stripe, PayPal's token call) instead of JSON.
+      body: form !== undefined ? new URLSearchParams(form).toString() : body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
@@ -57,9 +62,9 @@ async function sendOnce({ method, url, headers, body, timeoutMs }) {
  *                                create or a refund: a retried refund whose
  *                                first attempt landed refunds twice.
  */
-async function request({ method = 'GET', url, headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS, retry = false }) {
+async function request({ method = 'GET', url, headers = {}, body, form, timeoutMs = DEFAULT_TIMEOUT_MS, retry = false }) {
   const once = async () => {
-    const res = await sendOnce({ method, url, headers, body, timeoutMs });
+    const res = await sendOnce({ method, url, headers, body, form, timeoutMs });
     if (retry && (res.status === 429 || res.status >= 500)) {
       const err = new Error(`gateway returned ${res.status}`);
       err.response = res;

@@ -117,3 +117,27 @@ when `NODE_ENV !== 'production'` or `PAYMENTS_SANDBOX_GATEWAY=true`.
    to `config/env.js` and `.env.example`.
 4. Connect it in test mode from Payments in the dashboard, pay from the store
    preview, refund from the order page.
+
+## Stripe and PayPal (`stripe.js`, `paypal.js`, spec-gaps item 183)
+
+Both follow the contract above; neither has a signed redirect, so the way
+back asks the gateway (`inquire`) and the payments sweep settles anything left.
+
+| | Stripe | PayPal |
+|---|---|---|
+| Method | `card` (Checkout page: card, Apple Pay, Google Pay, Link) | `paypal` (new method, migration 460) |
+| Credentials | `secretKey` (sk_test_/sk_live_ → mode), optional `webhookSecret` (whsec_) | `clientId`, `clientSecret`; live or sandbox found by signing in, kept as `environment` |
+| Currencies | USD EUR GBP EGP SAR AED MAD QAR CAD AUD TRY | USD EUR GBP CAD AUD |
+| Payment | Checkout Session, Idempotency-Key = attempt | Orders v2 CAPTURE, PayPal-Request-Id = attempt |
+| Paid when | session `payment_status = paid` | `inquire` captures an APPROVED order (once) |
+| Webhook | `checkout.session.*`, Stripe-Signature over the raw body (5 min tolerance); ignored without a signing secret | not used (verifying needs a call back to PayPal) |
+| Refund | `/v1/refunds` on the payment intent | `/v2/payments/captures/:id/refund` |
+
+`expressFor(method, settings)` (optional): `{ wallets: [...] }` marks a method
+as express buttons; the storefront methods list carries it as `express`.
+Stripe's card has `apple_pay`, `google_pay` unless the setting
+`expressWallets` is false; PayPal has `paypal`; the sandbox offers both so
+they can be tried in the store preview.
+
+`STRIPE_API_BASE` / `PAYPAL_API_BASE` (ignored in production) point them at a
+mock; `gatewayHttp.request` takes `form` for form-encoded bodies.

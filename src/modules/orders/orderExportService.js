@@ -74,6 +74,7 @@ const LABELS = {
     cod: ['Cash on delivery', 'الدفع عند الاستلام'],
     card: ['Card', 'بطاقة'],
     wallet: ['Wallet', 'محفظة إلكترونية'],
+    paypal: ['PayPal', 'باي بال'],
     bank_transfer: ['Bank transfer', 'تحويل بنكي'],
   },
   source: {

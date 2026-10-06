@@ -2,6 +2,8 @@
 
 const paymob = require('./paymob');
 const kashier = require('./kashier');
+const stripe = require('./stripe');
+const paypal = require('./paypal');
 
 /**
  * Online payment gateways a merchant connects with their own account: one
@@ -48,6 +50,9 @@ const kashier = require('./kashier');
  *   refund(creds, { payment, amount }) -> { status, providerRefundReference, failureReason, failureCode? }
  *   parseWebhook({ query, body, headers }, creds) -> null | { valid, eventKey, transaction, payload }
  *   parseRedirect(query, creds)          -> null | { valid, eventKey, transaction, payload }
+ *   expressFor?(method, settings)        -> null | { wallets: ['apple_pay'|'google_pay'|'paypal'] }
+ *       the method is offered as express buttons at the top of checkout
+ *   parseWebhook also gets `rawBody` (the exact bytes) for signatures over the body (Stripe)
  *
  * `transaction` (normalized): { kind: 'payment'|'refund'|'void', status,
  *   transactionId, parentTransactionId, providerOrderId, amount, currency,
@@ -59,6 +64,9 @@ const kashier = require('./kashier');
 const ADAPTERS = {
   [paymob.code]: paymob,
   [kashier.code]: kashier,
+  // Item 183: card with Apple Pay / Google Pay, and PayPal (expressFor marks the express buttons).
+  [stripe.code]: stripe,
+  [paypal.code]: paypal,
 };
 
 // The sandbox gateway (./sandbox.js, contract in ./README.md): never in

@@ -1220,3 +1220,56 @@ Wording:
 | Last synced {time} — {n} contacts | آخر مزامنة {time} — {n} عميل |
 | Only contacts who agreed to marketing are sent. | بنبعت بس العملاء اللي وافقوا على التسويق. |
 | Pick a list first | اختار قائمة الأول |
+
+## 183. Express checkout buttons (Apple Pay, Google Pay, PayPal), Stripe and PayPal — UI: pending
+
+Two new gateways on the **existing Payments screen** (`/workspaces/:ws/payments/gateways`, permission `workspace.manage`); the
+connect form is rendered from the adapter's fields as for Paymob/Kashier — **no new endpoint**.
+
+**PUT `/workspaces/:ws/payments/gateways/stripe`**
+`{ "credentials": { "secretKey": "sk_live_…", "webhookSecret": "whsec_…" }, "settings": { "expressWallets": true } }`
+- `secretKey` must start `sk_test_`/`sk_live_` (or `rk_`) — 422 "A Stripe secret key starts with sk_test_ or sk_live_";
+  refused key → 422 `GATEWAY_AUTH_FAILED`. Mode comes from the key (sk_test_ = test, shown only in the store preview).
+- `webhookSecret` optional (whsec_…). Show the account's `webhookUrl` with "add it in Stripe → Developers → Webhooks for
+  the checkout.session events". Without it, payments are still confirmed when the shopper comes back.
+- Setting `expressWallets` (boolean, default true): "Show Apple Pay and Google Pay buttons".
+
+**PUT `/workspaces/:ws/payments/gateways/paypal`** `{ "credentials": { "clientId": "…", "clientSecret": "…" } }`
+- Sandbox or live is detected (the account's `mode` is `test` for sandbox keys). Currencies: USD, EUR, GBP, CAD, AUD only.
+
+**New payment method `paypal`** (orders.payment_method; order lists/exports/invoices show "PayPal" / "باي بال"). Filters and
+badges that list methods should add it.
+
+### Storefront — express buttons
+**GET `/store/:ws/payment-methods?currency=USD`** — methods may now carry `express`:
+```json
+{ "methods": [
+  { "id": "cod", "provider": null, "method": "cod", "mode": "live" },
+  { "id": "stripe:card", "provider": "stripe", "method": "card", "mode": "live", "express": { "wallets": ["apple_pay", "google_pay"] } },
+  { "id": "paypal:paypal", "provider": "paypal", "method": "paypal", "mode": "live", "express": { "wallets": ["paypal"] } }
+], "currency": "USD" }
+```
+- At the **top of checkout**, for each method with `express`, show its buttons: "Apple Pay" (only where
+  `window.ApplePaySession` exists), "Google Pay", "PayPal" (yellow PayPal button). Below: "Or pay another way".
+- A button submits the normal checkout (same contact/address fields, validated first) with
+  `paymentMethod` = the method (`card` for Apple/Google Pay, `paypal` for PayPal), `paymentProvider` = its provider and
+  `returnUrl`; then redirect to `payment.redirectUrl` exactly as for card today. Stripe's page shows Apple Pay /
+  Google Pay on capable devices; PayPal's page asks the shopper to approve.
+- Coming back: call the existing `POST /store/:ws/orders/:orderId/payment/return` (the payment is confirmed by asking the
+  gateway; status `paid`). PayPal is collected at that moment.
+- PayPal is not offered for EGP/SAR/AED/MAD orders (the list already leaves it out).
+- The sandbox gateway offers `card` and `paypal` with `express` too, to try in the store preview.
+
+### Dashboard
+- Payments → connect cards "Stripe" and "PayPal" (logos), with setup steps and help links from the adapter.
+- Payment methods list: show the wallet badges from `express` next to "Card (Stripe)" and "PayPal".
+
+Wording:
+| en | ar |
+|---|---|
+| Express checkout | دفع سريع |
+| Or pay another way | أو ادفع بطريقة تانية |
+| Pay with PayPal | ادفع بـ PayPal |
+| Show Apple Pay and Google Pay buttons | اعرض أزرار Apple Pay وGoogle Pay |
+| PayPal | باي بال |
+| PayPal isn't available in this currency | PayPal مش متاح بالعملة دي |
