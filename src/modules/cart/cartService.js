@@ -29,7 +29,7 @@ async function getOrCreateCart(workspaceId, guestToken) {
   return db.Cart.create({ workspaceId, guestToken: token, status: 'active' });
 }
 
-async function getCart(workspaceId, cartId) {
+async function getCart(workspaceId, cartId, { shopperToken = null } = {}) {
   const cart = await db.Cart.findOne({
     where: { id: cartId, workspaceId },
     include: [
@@ -46,7 +46,9 @@ async function getCart(workspaceId, cartId) {
   });
   if (!cart) throw new NotFoundError('Cart');
   // A product A/B test prices plain lines for whoever filled the cart (catalog/productTests.js).
-  const testPrices = await productTests.visitorPrices(workspaceId, (cart.items || []).filter((i) => !i.offerId).map((i) => i.variantId), cart.visitorId);
+  let testPrices = await productTests.visitorPrices(workspaceId, (cart.items || []).filter((i) => !i.offerId).map((i) => i.variantId), cart.visitorId);
+  // A signed-in wholesale customer's price lists (priceLists/, item 205), as the checkout will pin them.
+  if (shopperToken) testPrices = await require('../priceLists').cartPrices(workspaceId, cart, shopperToken, testPrices);
   // Quantity bundles lower the lines they cover, as they will on the order.
   return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart, testPrices));
 }

@@ -144,6 +144,11 @@ const checkout = asyncHandler(async (req, res) => {
   // cart's (whoever filled it) or this visitor's for a Buy Now. Funnels price their own way.
   const testVisitor = orderBody.funnelId ? null : (cart && cart.visitorId) || productTests.visitorOf(req);
   items = await productTests.pinPrices(workspaceId, items, testVisitor);
+  // A signed-in wholesale customer's price lists, lower prices only (priceLists/, item 205). Funnels keep their own prices.
+  if (!orderBody.funnelId && req.headers['x-shopper-token']) {
+    const listShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    if (listShopper) items = await require('../priceLists').pinPrices(workspaceId, items, listShopper);
+  }
   // A free trial prices its product at nothing on the first order (subscriptions/trialCheckout.js).
   items = await require('../subscriptions/trialCheckout').pinTrialLines(workspaceId, items, orderBody.contact);
   // Each product's min / max per order and max per customer (catalog/purchaseLimits.js, item 198).

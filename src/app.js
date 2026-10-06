@@ -274,6 +274,8 @@ v1.use('/workspaces/:workspaceId/scheduled-reports', require('./modules/schedule
 v1.use('/workspaces/:workspaceId/loyalty', require('./modules/loyalty').staff);
 // Store credit (spec-gaps item 204).
 v1.use('/workspaces/:workspaceId/store-credit', require('./modules/storeCredit').staff);
+// Wholesale price lists by customer tag (spec-gaps item 205).
+v1.use('/workspaces/:workspaceId/price-lists', require('./modules/priceLists').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
@@ -350,6 +352,7 @@ v1.use('/store/:workspaceId/address', require('./modules/places/autocomplete').s
 v1.use('/store/:workspaceId/account/wishlist', require('./modules/shopperAccounts/wishlist').store);
 v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').account);
 v1.use('/store/:workspaceId/account/store-credit', require('./modules/storeCredit').account);
+v1.use('/store/:workspaceId/price-list', require('./modules/priceLists').store);
 v1.use('/store/:workspaceId/loyalty', require('./modules/loyalty').store);
 v1.use('/store/:workspaceId/account', require('./modules/shopperAccounts').store);
 // Returns asked for by the shopper (item 186).

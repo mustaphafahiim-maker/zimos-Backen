@@ -2134,3 +2134,37 @@ transfer), exactly like gift cards and points.
 - Customers → «أرصدة العملاء» / "Store credit balances": list + total outstanding; toggle «العملاء يقدروا يستخدموا رصيدهم في الدفع» / "Customers can spend credit at checkout".
 - Checkout (signed in, balance > 0): checkbox «استخدم رصيدك (150 ج.م)» / "Use your store credit (EGP 150)".
 - Account: «رصيدي» / "My credit" with the history.
+
+## 205. Wholesale price lists — UI: pending
+
+Prices for customers with a tag (e.g. `wholesale`), applied only when they are **signed in** (`X-Shopper-Token`). A list
+is either a **percent** off (every product or chosen products) or **fixed** prices per variant with minimum quantities
+(tiers). A line gets the lowest price among its normal price and every list that matches it. Offer bundles and funnels keep
+their own prices.
+
+### Staff — `/api/v1/workspaces/:ws/price-lists` (read `products.view`, change `products.manage`)
+- `GET /` → `{ priceLists: [PriceList] }`; `GET /:id`; `DELETE /:id` → 204.
+- `POST /` (201) and `PUT /:id` (full replace):
+```json
+{ "name": "Wholesale", "customerTags": ["wholesale"], "kind": "fixed",
+  "prices": [{ "variantId": "…", "minQuantity": 1, "priceAmount": 20000 }, { "variantId": "…", "minQuantity": 5, "priceAmount": 18000 }],
+  "isActive": true }
+{ "name": "VIP", "customerTags": ["vip"], "kind": "percent", "percent": 30, "productIds": ["…"] }   // productIds null/[] = all products
+```
+  Rules: name 1–120; 1–20 tags (stored lower-case, matched to the contact's tags); percent 1–90; fixed: 1–2000 rows, one per
+  variant + minQuantity, priceAmount ≥ 0 minor units; every variant/product must be the store's (422 otherwise).
+  PriceList = the body plus `id`, `createdAt`, `updatedAt` (`prices[].priceAmount` as strings).
+
+### Storefront
+- `GET /store/:ws/price-list?variantIds=a,b,c` (≤100, with `X-Shopper-Token`) → `{ priceList: "Wholesale" | null, prices: [{ variantId, basePrice, tiers: [{ minQuantity, priceAmount }] }] }`
+  — only variants with a lower price for this shopper; empty when not signed in or not tagged.
+- Cart (`/store/:ws/cart…`): send `X-Shopper-Token` too and `items[].currentUnitPrice` / `subtotal` include the list price for the line's quantity.
+- Checkout: send `X-Shopper-Token` — the order is priced with it (server-side).
+
+### Screens
+- Products → «قوايم الأسعار» / "Price lists": list (name, tags, type, active), editor with tags, type switch
+  «نسبة خصم» / "Percent off" (percent + product picker «كل المنتجات» / "All products") or «أسعار ثابتة» / "Fixed prices"
+  (variant picker → rows of «من كمية» / "From quantity" + «السعر» / "Price").
+- Customer page: hint that the tag gives wholesale prices «العميل ده بياخد أسعار: Wholesale» / "This customer gets: Wholesale prices".
+- Storefront product page (signed-in, tiers present): «سعرك: 200 ج.م بدل 250» / "Your price: EGP 200 instead of 250" and the tier table
+  «من 5 قطع: 180 ج.م» / "From 5 pieces: EGP 180"; cart lines show the reduced price.
