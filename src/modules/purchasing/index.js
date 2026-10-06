@@ -298,4 +298,4 @@ router.post('/stock-counts/:countId/cancel', canManage, validate({ params: idP('
   res.json(await countView(await findCount(req.tenant.workspaceId, req.params.countId)));
 }));
 
-module.exports = { router };
+module.exports = { router, savePo };

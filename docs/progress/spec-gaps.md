@@ -1642,5 +1642,9 @@ code.
   - Mostly there already: offers/offerRules.js suggestCrossSell (merchant cross-sell rules = pins, else a live order query) at cart/checkout/thank-you. Added: boughtTogether/{index.js, jobs.js}; migration 488 product_affinities (top 20 per product, nightly + on save); settings.bought_together (window, minOrders default 1 as before, excludedProductIds); placement 'product' for the product page; test orders now left out.
   - offerRules.boughtTogether delegates to boughtTogether.suggest; a store not computed yet reads live (same SQL plus the exclusions).
   - Verified: live list, minOrders 2 drops the single pair, exclusion, product view counts, pin rule wins, bad exclusion 422, off, computeAll.
-- [ ] 224. Stock forecast: sales speed per variant, days of stock left, a suggested reorder quantity, and "make a purchase order" from the suggestions (item 207).
+- [x] 224. Stock forecast: sales speed per variant, days of stock left, a suggested reorder quantity, and "make a purchase order" from the suggestions (item 207). (backend done, UI in frontend-handoff.md)
+  - stockForecast/index.js; settings.stock_forecast; no migration (computed on request, one SQL over order_items and open PO lines). available = on hand − reserved (sold units stay reserved). incoming = ordered/partially received PO lines not yet received.
+  - suggested = ceil(perDay × (lead time + cover + safety)) − available − incoming. Status: out, reorder_now (days left ≤ lead time + safety), soon (+7 days), ok, no_sales. Whole store, not per location.
+  - Draft PO through purchasing.savePo (now exported); quantity defaults to the suggestion, unit cost to the variant cost.
+  - Verified: 6 sold in 30 days → 0.2/day, 30 days left, suggestion 3 → 9 after a settings change, PO created, incoming counted (suggestion 0), nothing-to-order and foreign-variant refusals, cleanup.
 - [ ] 225. Click and collect: pickup at a stock location (item 206) as a shipping option, with no delivery address, a "ready for pickup" step, and a pickup code checked when the customer collects.

@@ -2543,3 +2543,26 @@ The storefront strip already exists: `GET /api/v1/store/:ws/cross-sell?productId
 - Cart: the existing strip (placement `cart`) now honours the exclusions.
 - Dashboard product page → «بيتشري مع» / "Bought with": the list with order counts («في 12 طلب» / "in 12 orders"), a toggle «متقترحوش» / "Don't suggest" (adds to `excludedProductIds`), and a link «ثبّت منتجات» / "Pin products" to a cross-sell rule with placement "product".
 - Settings → Offers → «بيتشروا مع بعض» / "Bought together": on/off, «آخر كام يوم» / "Look back (days)", «أقل عدد طلبات مشتركة» / "Minimum shared orders", excluded products, «آخر تحديث» / "Last updated" (`computedAt`) and «حدّث دلوقتي» / "Update now".
+
+## 224. Stock forecast — UI: pending
+
+### `/api/v1/workspaces/:ws/stock-forecast` (read `inventory.view`, change `inventory.manage`)
+- `GET ?status=out|reorder_now|soon|ok|no_sales|needs_order&productId=&limit=` (limit ≤ 1000, default 200) →
+  ```json
+  { "settings": { "windowDays": 30, "leadTimeDays": 7, "coverDays": 30, "safetyDays": 7 },
+    "counts": { "reorder_now": 3, "ok": 40, "no_sales": 12 }, "total": 3,
+    "variants": [{ "variantId": "…", "productId": "…", "productName": "ZZ Mug", "sku": "ZZMUG", "optionValues": {},
+      "available": 6, "incoming": 0, "soldInWindow": 6, "perDay": 0.2, "daysLeft": 30,
+      "runsOutOn": "2026-11-05", "reorderBy": "2026-10-22", "suggested": 3, "unitCost": "4000", "status": "ok" }] }
+  ```
+  Most urgent first. `needs_order` = `suggested > 0`. `daysLeft`, `runsOutOn` and `reorderBy` are null without sales. Only stock-tracked, non-archived products.
+- `PUT /settings` `{ windowDays 7–180, leadTimeDays 0–180, coverDays 1–365, safetyDays 0–90 }` (all required).
+- `POST /purchase-order` `{ supplierId, locationId?, expectedAt?, note?, lines: [{ variantId, quantity?, unitCost? }] }` → 201 the draft purchase order (same shape as `GET /purchasing/purchase-orders/:id`). A line without `quantity` takes `suggested`, and without `unitCost` takes the variant's cost. 422 `lines.N.quantity` «مفيش حاجة تتطلب للصنف ده — اكتب كمية» / "Nothing to order for this one — type a quantity"; 422 `lines.N.variantId` for a product that isn't stock-tracked or isn't this store's.
+
+### Screens
+- Inventory → «توقّع المخزون» / "Stock forecast":
+  - Filter chips with counts: «خلص» / "Out", «اطلب دلوقتي» / "Reorder now", «قرّب يخلص» / "Running low", «تمام» / "OK", «مفيش مبيعات» / "No sales", «محتاج طلب» / "Needs ordering".
+  - Table columns: product/variant, available, incoming «جاي في الطريق», per day «بيتباع في اليوم», days left «يكفي كام يوم», «هيخلص يوم», «اطلب قبل», suggested quantity (editable).
+  - Row checkboxes, then «اعمل أمر شراء» / "Create purchase order": pick the supplier (and location), then open the new draft PO.
+- Settings dialog: «احسب المبيعات من آخر … يوم» / "Sales over the last … days", «المورّد بيوصّل في … يوم» / "Supplier lead time (days)", «عايز المخزون يكفي … يوم» / "Stock to cover (days)", «هامش أمان … يوم» / "Safety margin (days)".
+- Product page in the dashboard: a small card from `?productId=` («يكفي 30 يوم — اطلب قبل 22 أكتوبر» / "30 days left — reorder by 22 Oct").
