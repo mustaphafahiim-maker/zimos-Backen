@@ -258,6 +258,7 @@ v1.use('/workspaces/:workspaceId/shopper-accounts', require('./modules/shopperAc
 v1.use('/workspaces/:workspaceId/wishlists', require('./modules/shopperAccounts/wishlist').staff);
 v1.use('/workspaces/:workspaceId/gift-cards', require('./modules/giftCards').staff);
 v1.use('/workspaces/:workspaceId/blog', require('./modules/blog').staff);
+v1.use('/workspaces/:workspaceId/marketplace', require('./modules/marketplace').merchant);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);

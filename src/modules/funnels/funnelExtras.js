@@ -367,4 +367,4 @@ function mount(router, { MANAGE, requireCreationAllowed }) {
   );
 }
 
-module.exports = { mount, shareFunnel, unshareFunnel, importFunnel, getDraft, saveDraft, discardDraft, listIssues };
+module.exports = { mount, shareFunnel, unshareFunnel, importFunnel, getDraft, saveDraft, discardDraft, listIssues, withoutProducts };

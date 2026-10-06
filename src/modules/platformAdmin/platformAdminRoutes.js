@@ -27,6 +27,8 @@ router.use(require('../referrals/merchantReferrals').admin);
 router.use(require('./educationLinks').admin);
 // The theme catalog (themes/themesCatalog.js).
 router.use(require('../themes/themesCatalog').admin);
+// Reviewing merchants' marketplace templates (marketplace/, item 192).
+router.use(require('../marketplace').admin);
 
 // --- Plans ---------------------------------------------------------------
 router.get('/plans', can(P.PLANS_VIEW), controller.listPlans);

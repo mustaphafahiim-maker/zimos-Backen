@@ -1700,3 +1700,47 @@ Wording:
 | Only for visitors from (UTM source) | للزوار اللي جايين من (UTM source) |
 | Rules | شروط |
 | Clear rules | امسح الشروط |
+
+## 192. Template marketplace: merchants submit funnel templates, the platform reviews, others use them — UI: pending
+
+Free templates only (no price anywhere). Built on the funnel share code's copy: products, offers and bumps are taken out.
+
+### Merchant — `/workspaces/:ws/marketplace` (permission `funnels.manage`)
+- **Browse**: `GET /templates?category=&q=&language=ar|en|fr&sort=popular|new&page=&limit=24` →
+  `{ templates: [ { id, name, description, category, tags, thumbnailUrl, authorName, language, stepCount, usesCount, createdAt } ], total, page, limit, categories: ["ecommerce","lead_generation","webinar","digital_product","course","service","event","other"] }`.
+- **Detail / preview**: `GET /templates/:id` → `{ template: { …card, steps: [ { key, stepType, name } ], pages: [ { key, name, builderData } ] } }`
+  (render `builderData` with the page renderer for the preview).
+- **Use**: `POST /templates/:id/use` `{ name? }` → 201 `{ funnel: { id, name, status: "draft" }, stepCount }` — open the new funnel's
+  editor; its issues list says which pages need a product/offer. Counts against the plan like any new funnel.
+- **Submit**: `POST /submissions` `{ funnelId, name (3–120), category, description?, tags? (≤10, lower-cased), thumbnailUrl? (https), authorName? (default: store name), language? }`
+  → 201 `{ submission: { …card, status: "pending", reviewNote: null, reviewedAt: null, funnelId, updatedAt } }`.
+  422 "The funnel has no pages yet"; 409 `ALREADY_SUBMITTED` (that funnel is pending or listed). The pages are copied
+  **at submission**: later edits to the funnel don't change the template until "Resubmit".
+- **Mine**: `GET /submissions` → `{ submissions: [...] }` with `status` pending | approved | rejected | withdrawn and the
+  reviewer's `reviewNote`. `PATCH /submissions/:id` `{ …card fields, resubmit?: true }` — `resubmit` takes a fresh copy of the
+  funnel and goes back to pending; editing a listed card also goes back to review. `DELETE /submissions/:id` → withdrawn
+  (removed from the marketplace; funnels already copied stay).
+
+### Platform console — `/admin/marketplace` (platform permission `templates.view` / `templates.manage`)
+- `GET /admin/marketplace?status=pending|approved|rejected|withdrawn` → `{ templates: [ …own view + workspaceId ], total }` (oldest first).
+- `GET /admin/marketplace/:id` → with `steps`, `pages` (builderData) and `edges` for the review preview.
+- `POST /admin/marketplace/:id/review` `{ action: "approve" | "reject" | "unlist", note? }` — reject needs a note (422).
+
+### Screens
+- Funnels → "Template marketplace" tab: category chips, search, sort, cards (picture, name, author, pages, uses), preview
+  modal with page tabs, "Use this template" (name prompt).
+- Funnel editor → "Share to marketplace" (form: name, category, description, tags, picture, author name, language), and
+  Funnels → "My submissions" with status badges and the reviewer's note, Edit / Resubmit / Withdraw.
+- Platform console → "Marketplace review" queue with preview, Approve / Reject (note) / Unlist.
+
+Wording:
+| en | ar |
+|---|---|
+| Template marketplace | سوق القوالب |
+| Use this template | استخدم القالب ده |
+| Share to marketplace | شارك في سوق القوالب |
+| Pending review / Listed / Needs changes / Withdrawn | مستني المراجعة / منشور / محتاج تعديل / اتسحب |
+| Resubmit | ابعته تاني |
+| Withdraw | اسحبه |
+| {n} pages · used {m} times | {n} صفحات · اتستخدم {m} مرة |
+| Products and offers are not copied — pick yours after | المنتجات والعروض مش بتتنقل — اختار بتوعك بعدين |

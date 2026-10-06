@@ -1442,7 +1442,11 @@ What the platform still lacks (the owner's "كل حاجه ناقصه"):
   - Dates are enforced server-side: public page and funnel-step payloads drop elements outside their window, so hidden offers/codes never reach the browser early.
   - Device/country/UTM are per visitor, so the cached page carries the rules and the storefront applies them, with `GET /store/:ws/visitor-context` (country from the IP lookup used by geo redirects, device from the user agent) and `evaluate` as the reference. Same page for every visitor of a kind — not a cloak (SPEC §21).
   - Verified: every invalid rule shape reported, a valid rule set accepted, past/future elements stripped and open/plain kept, evaluate cases (device, include/exclude with unknown country, UTM case-insensitive), visitor context.
-- [ ] 192. A template marketplace: merchants submit funnel templates (built on the share code), the platform reviews them, and others use them (no prices in code).
+- [x] 192. A template marketplace: merchants submit funnel templates (built on the share code), the platform reviews them, and others use them (no prices in code). (backend done, UI in frontend-handoff.md)
+  - `marketplace/` + migration 466 (`marketplace_templates`): the funnel's steps and links are snapshotted at submission (products/offers/bumps removed with the share code's `withoutProducts`), so the author's later edits don't change what others copy until they resubmit.
+  - States pending → approved / rejected (note required) → resubmit; withdraw any time; editing a listed card sends it back to review. One open submission per funnel.
+  - Review in the platform console with the existing templates.view/manage permissions; merchants browse/use with funnels.manage. "Use" creates a draft funnel counted against the plan and bumps usesCount. Free only.
+  - Verified: empty funnel refused, submit, duplicate 409, hidden before approval, non-admin 403, reject without note 422, reject → note visible → resubmit → approve, browse by category/tag, preview pages, use creates a draft, withdraw hides it. Test admin rights removed and test funnels deleted.
 
 Not built, and why:
 - **Cloaks:** SPEC §21.
