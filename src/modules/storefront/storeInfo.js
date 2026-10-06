@@ -12,7 +12,10 @@ const { NotFoundError } = require('../../core/errors/AppError');
  * returns, cash on delivery), each a title and bullet points. The storefront
  * shows them as trust cards under the buy button.
  *
- * settings.legal — the long policies: refund, privacy, terms of service.
+ * settings.legal — the long policies: shipping, refund, privacy, terms of
+ * service. (Shipping joined the three of SPEC §8.3: the page notes that
+ * shipping, returns and privacy policies are required for TikTok ads, and
+ * the AI writes all three — ai/applyPolicies.js.)
  * Plain text, written once, linked from the store footer, every funnel and
  * the checkout. {{store.name}}, {{store.address}}, {{store.email}} and
  * {{store.phone}} are filled in when a policy is served, so a merchant who
@@ -21,7 +24,7 @@ const { NotFoundError } = require('../../core/errors/AppError');
  * Everything here is text the storefront prints as text — never markup.
  */
 
-const LEGAL_KEYS = ['refund_policy', 'privacy_policy', 'terms_of_service'];
+const LEGAL_KEYS = ['shipping_policy', 'refund_policy', 'privacy_policy', 'terms_of_service'];
 const CARD_KEYS = ['shipping_policy', 'return_policy', 'cod_policy'];
 
 const card = Joi.object({

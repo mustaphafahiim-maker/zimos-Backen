@@ -85,7 +85,7 @@ const MAX_NODES = 10000;
 // for any product. Sources are a closed list — a binding is a name, never an
 // expression.
 const BINDING_SOURCE =
-  /^(?:product\.(?:title|description|price|compare_at|special_offer_text|images\[[0-9]\])|store\.(?:name|phone|email|address)|legal\.(?:refund_policy|privacy_policy|terms_of_service))$/;
+  /^(?:product\.(?:title|description|price|compare_at|special_offer_text|images\[[0-9]\])|store\.(?:name|phone|email|address)|legal\.(?:shipping_policy|refund_policy|privacy_policy|terms_of_service))$/;
 const REPEATER_SOURCES = ['product.cms.features', 'product.cms.testimonials', 'product.cms.faqs', 'product.reviews'];
 
 function validateBindings(bindings, field, errors) {

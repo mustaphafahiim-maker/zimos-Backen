@@ -90,4 +90,16 @@ router.post(
   asyncHandler(async (req, res) => res.json({ job: await service.applyJob(wsId(req), req.params.jobId, req.body, req) }))
 );
 
+// The policies of a "policies" or store builder result written into the store's own policies
+// (applyPolicies.js) — what PATCH /workspaces asks for them: website.edit.
+router.post(
+  '/jobs/:jobId/apply-policies',
+  requireAnyPermission(P.WEBSITE_EDIT),
+  validate({
+    params: jobParams,
+    body: Joi.object({ policies: Joi.array().items(Joi.string().valid('shipping', 'returns', 'privacy')).min(1).unique().optional() }).default({}),
+  }),
+  asyncHandler(async (req, res) => res.json(await require('./applyPolicies').applyPolicies(wsId(req), req.params.jobId, req.body, req)))
+);
+
 module.exports = router;

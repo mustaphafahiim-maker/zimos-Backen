@@ -278,7 +278,7 @@ async function listIssues(workspaceId, funnelId) {
   if (workspace) issues.push(...(await require('./funnelTranslationIssues').untranslatedIssues(workspace, funnelId, steps)));
 
   const legal = (workspace && workspace.settings && workspace.settings.legal) || {};
-  if (!['refund_policy', 'privacy_policy', 'terms_of_service'].some((key) => !blank(legal[key]))) {
+  if (!require('../storefront/storeInfo').LEGAL_KEYS.some((key) => !blank(legal[key]))) {
     issues.push({
       severity: 'warning',
       code: 'missing_policies',
