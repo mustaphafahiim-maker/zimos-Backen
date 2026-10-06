@@ -782,6 +782,33 @@ A funnel page's settings have a Details tab (SPEC §9.3: "Details tab (the link 
     - Apply and Save stored the new key and title.
     - Going back to `our-story` left `previousKeys: ["our-story-2024", "about"]`.
   - The test page was deleted and the funnel republished.
+The rest of the store's own words can now be translated (SPEC §8.10). Product names and descriptions, collections, pages and funnels were already translated.
+
+- **Two new kinds, text by text, like pages** (`translations/moreTexts.js`). Each text is stored once under a hash of the original, so an edited text shows as untranslated again.
+  - **Product details** (`product_details`, one entity per active product): the special-offer line, option names and values, offer names and badges, and the product page content (feature titles and descriptions, what customers said, questions and answers).
+  - **Store texts** (`store_text`): four sections per store, each with an id made from the store's id:
+    - menus: header links, footer columns and their links, footer text, and the announcement bar;
+    - the legal policies;
+    - store info: the tagline and the trust cards;
+    - the thank-you page text and the checkout's thank-you line.
+- **They use the existing machinery:**
+  - The `/translations/content` list and save.
+  - The Languages percentages, which now count these texts too.
+  - "Translate what's missing with AI", which takes both kinds.
+  - The dashboard's Languages screen has two more tabs, "Product details" and "Store texts", with the sections named in the merchant's language.
+- **In the shopper's language** (X-Store-Locale, when the store offers it):
+  - The public product answers carry the translated texts.
+  - The store answer carries the translated menus, announcement, footer, tagline, trust cards and thank-you texts.
+  - A policy is translated first and has its `{{store.name}}`-style variables filled in after.
+  - A missing translation shows the original, and nothing throws.
+- **Decision: option values are never replaced.** The storefront finds the variant by them and swatches are keyed by them. The product carries `optionLabels` instead, and the option picker shows those labels for the option's name and values while still selecting by the stored value.
+- **Decision: custom field labels are left out.** They are already written in Arabic and English on the product itself.
+- **Tested** on the scratch DB with temporary texts (a header link, announcement, footer column, refund policy, thank-you line, and a product with an option, a special-offer line, a question and an offer):
+  - Both kinds listed every text. English translations saved (7/7 and 6/6), and the overview went to 31%.
+  - In English, the API and the store page showed "Size (EN): Medium", "Limited-time offer", the translated question, and "Deals / Free shipping over 500 EGP / Help / Track your order".
+  - The refund policy page read "…within 14 days from Demo Store.", and the offer came back as "Buy 2 and save / Best seller".
+  - In Arabic, everything stayed the original. The variant still matched by "M".
+  - The store, the product, the offer and the translations were restored afterwards.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -994,7 +1021,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 146. Split tests with more than two versions (§9.6).
 - [x] 147. Copy a coupon's share link (§10.5).
 - [x] 148. Page settings Details tab: a generic page's address and its title (§9.3).
-- [ ] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
+- [x] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
 - [ ] 150. Formatted product descriptions, sanitized (§7.1).
 - [ ] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
 - [ ] 152. A currency switcher on attribution, reports and profit (§11.5).
