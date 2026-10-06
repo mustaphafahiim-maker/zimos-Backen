@@ -22,8 +22,10 @@ const carrierIdUnlessPathOrNames = () =>
 // the length check — two spaces are not a two-character search.
 const search = {
   q: Joi.string().trim().min(2).max(100).optional(),
-  from: Joi.date().iso().optional(),
-  to: Joi.date().iso().optional(),
+  // A date (YYYY-MM-DD) or an exact instant; `tz` makes a date mean that day in the zone (orderDateRange.js).
+  from: require('./orderDateRange').dateParam.optional(),
+  to: require('./orderDateRange').dateParam.optional(),
+  tz: require('./orderDateRange').tzParam.optional(),
   // SPEC §4.3 filters (orderFilters.js). Archived orders are left out unless asked for.
   archived: Joi.string().valid('exclude', 'only', 'include').optional(),
   tag: Joi.string().trim().min(1).max(40).optional(),

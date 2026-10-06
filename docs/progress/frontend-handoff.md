@@ -592,3 +592,19 @@ Wording:
 | Purchase / Lead | شراء (Purchase) / عميل محتمل (Lead) |
 | Store default ({value}) | زي المتجر ({value}) |
 | Lead suits cash-on-delivery stores that optimise ads on orders placed. | الـ Lead مناسب لمتاجر الدفع عند الاستلام اللي بتحسّن الإعلانات على الطلبات. |
+
+---
+
+## Frontend request — time-zone aware date range on orders — done
+
+From `docs/ux/backend-requests.md` (U-09). Applies to **GET `/workspaces/:ws/orders`**, **`/orders/pipeline`** (tab
+counts and risk counts) and **`/orders/export`** (same query), permission `orders.view`.
+
+- `to` with a time (`2026-10-06T21:00:00.000Z`) is now an **exact exclusive instant** (send the next local midnight).
+- `to` / `from` as a date (`2026-10-06`) plus **`tz`** (IANA, e.g. `Africa/Cairo`, `Asia/Riyadh`) = that whole day
+  in the zone (Cairo's summer/winter clock handled). Without `tz`, a date is still the UTC day (unchanged).
+- `from` with a time is used as is (unchanged).
+- 422 `"tz" must be an IANA time zone, e.g. Africa/Cairo` for an unknown zone.
+
+Either way works; the simplest for the dashboard: `from=YYYY-MM-DD&to=YYYY-MM-DD&tz=<store or browser zone>`
+for the picker and its shortcuts (Today, Yesterday, Last 7 days…).

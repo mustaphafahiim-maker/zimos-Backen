@@ -915,7 +915,7 @@ const escapeLike = (value) => value.replace(/[\\%_]/g, (char) => `\\${char}`);
  * here (see platformAdmin/overviewMetricsService) is UTC. Making this one
  * endpoint local time would be the odd one out, not the fix.
  */
-function applySearchAndDates(conditions, bind, { q, from, to }) {
+function applySearchAndDates(conditions, bind, { q, from, to, tz }) {
   if (q) {
     const term = q.trim();
     const arms = [];
@@ -951,16 +951,16 @@ function applySearchAndDates(conditions, bind, { q, from, to }) {
     conditions.push(`(${arms.join(' OR ')})`);
   }
 
-  if (from) {
+  // A date is a whole day (in `tz` when given, else UTC); an exact instant is used as is,
+  // `to` exclusive (orderDateRange.js).
+  const { fromInstant, toExclusive } = require('./orderDateRange').resolveRange({ from, to, tz });
+  if (fromInstant) {
     conditions.push('o.created_at >= $from::timestamptz');
-    bind.from = new Date(from).toISOString();
+    bind.from = fromInstant;
   }
-  if (to) {
-    const day = new Date(to);
+  if (toExclusive) {
     conditions.push('o.created_at < $toExclusive::timestamptz');
-    bind.toExclusive = new Date(
-      Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + 1)
-    ).toISOString();
+    bind.toExclusive = toExclusive;
   }
 }
 
@@ -1093,7 +1093,7 @@ async function listOrders(
     conditions.push(`${STAGE_SQL} = $stage`);
     bind.stage = stage;
   }
-  applySearchAndDates(conditions, bind, { q, from, to });
+  applySearchAndDates(conditions, bind, { q, from, to, tz: filters.tz });
 
   if (cursor) {
     const anchor = await resolveCursor(workspaceId, cursor);
@@ -1134,7 +1134,7 @@ async function orderPipeline(workspaceId, { q, from, to, ...filters } = {}) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId };
   applyOrderFilters(conditions, bind, filters);
-  applySearchAndDates(conditions, bind, { q, from, to });
+  applySearchAndDates(conditions, bind, { q, from, to, tz: filters.tz });
 
   const rows = await db.sequelize.query(
     `SELECT ${STAGE_SQL} AS stage, COUNT(*)::int AS count
@@ -1158,7 +1158,7 @@ async function riskCounts(workspaceId, { q, from, to, riskLevel, ...filters }) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId };
   applyOrderFilters(conditions, bind, filters);
-  applySearchAndDates(conditions, bind, { q, from, to });
+  applySearchAndDates(conditions, bind, { q, from, to, tz: filters.tz });
   const rows = await db.sequelize.query(
     `SELECT o.risk_level AS level, COUNT(*)::int AS count FROM orders o WHERE ${conditions.join(' AND ')} GROUP BY 1`,
     { bind, type: QueryTypes.SELECT }
