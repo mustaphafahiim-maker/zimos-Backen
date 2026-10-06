@@ -296,6 +296,7 @@ v1.use('/workspaces/:workspaceId/product-questions', require('./modules/productQ
 v1.use('/workspaces/:workspaceId/gift-options', require('./modules/giftOptions').staff);
 // Holiday mode (spec-gaps item 216).
 v1.use('/workspaces/:workspaceId/delivery-slots', require('./modules/deliverySlots').staff);
+v1.use('/workspaces/:workspaceId/customer-referrals', require('./modules/customerReferrals').staff);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
@@ -378,6 +379,8 @@ v1.use('/store/:workspaceId/address', require('./modules/places/autocomplete').s
 // The signed-in shopper's wishlist (item 188), ahead of the account router.
 v1.use('/store/:workspaceId/account/wishlist', require('./modules/shopperAccounts/wishlist').store);
 v1.use('/store/:workspaceId/account/google', require('./modules/shopperAccounts/google').store);
+v1.use('/store/:workspaceId/account/referral', require('./modules/customerReferrals').account);
+v1.use('/store/:workspaceId/referrals', require('./modules/customerReferrals').store);
 v1.use('/store/:workspaceId/account/vip', require('./modules/vipTiers').account);
 v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').account);
 v1.use('/store/:workspaceId/account/store-credit', require('./modules/storeCredit').account);

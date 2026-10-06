@@ -2500,3 +2500,28 @@ Proof of ownership: `X-Shopper-Token` of the order's customer, **or** the order'
 - Order page: «ميعاد التوصيل» / "Delivery time" with «تغيير» / "Change" (day + slot, confirm «الميعاد مليان — احجز برضه؟» / "This slot is full — book anyway?" → `force`).
 - Orders → «جدول التوصيل» / "Delivery schedule": per day and slot, the orders booked, count vs capacity.
 - Thank-you page / tracking page: «هيوصلك يوم الخميس 9 أكتوبر بين 10:00 و 14:00» / "Arriving Thursday 9 October, 10:00–14:00".
+
+## 222. Customer referral program (invite a friend) — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/customer-referrals` (read `customers.view`, save `discounts.manage`)
+- `GET` / `PUT`:
+  ```json
+  { "enabled": true, "friend": { "percentOff": 10, "freeShipping": false },
+    "referrer": { "type": "store_credit", "amount": 5000 }, "minOrderAmount": null, "maxRewardsPerReferrer": 20 }
+  ```
+  `percentOff` 0–50; when enabled the friend needs a percent off or free shipping (422 `friend`). `referrer.type` `store_credit` (amount in minor units) or `points` (needs loyalty on, else 422 `referrer.type`). `minOrderAmount` minor units or null; `maxRewardsPerReferrer` 1–1000 or null.
+- `GET /list?status=pending|rewarded|void&customerId=&limit=&offset=` → `{ referrals: [{ id, status, voidReason, reward, rewardedAt, createdAt, order: { id, orderNumber, totalAmount, currency }, referrer: { id, name }, friend: { id, name } }], total }`. `voidReason`: `cancelled`, `returned`, `below_minimum`, `limit_reached`, `program_off`.
+
+### Storefront
+- `GET /api/v1/store/:ws/account/referral` (X-Shopper-Token; 401 `SHOPPER_NOT_SIGNED_IN`) → `{ enabled: false }` or
+  `{ enabled: true, code: "Y45IFBG", path: "/?ref=Y45IFBG", offer: { friend, referrer, minOrderAmount }, stats: { pending, rewarded }, referrals: [{ id, status, reward, rewardedAt, createdAt }] }` (friends are not named to the inviter).
+- `GET /api/v1/store/:ws/referrals/:code` → `{ valid: true, code, friend: { percentOff, freeShipping } }` or `{ valid: false }` — for the banner when a visitor lands with `?ref=`. Keep the code (e.g. localStorage) and send it at checkout.
+- Checkout body: `referralCode: "Y45IFBG"`. Refusals are 422 on `referralCode`: «كود الدعوة مش صحيح» / "This invite code is not valid"; «مينفعش تستخدم دعوتك لنفسك» / "You can't use your own invite"; «الدعوة لأول طلب بس في المتجر» / "Invites are for a first order in this store"; «المتجر مفيهوش برنامج دعوات» / "This store has no invite program". On a refusal, offer to place the order without the code.
+- The friend's percent off is applied to plain lines' prices (like VIP), free shipping on the order. The order gets the tag `referral`. The inviter is rewarded when the friend's order is delivered; a cancelled or returned order cancels the invite.
+
+### Screens
+- Marketing → «ادعي صاحبك» / "Refer a friend": on/off, friend's offer (percent / free shipping), inviter's reward (store credit amount or points), minimum order, max rewards per customer; a table of invites with status chips «مستني التوصيل» / "Waiting for delivery", «اتكافئ» / "Rewarded", «اتلغى» / "Cancelled".
+- Customer page: their invites (`list?customerId=`).
+- Storefront account → «ادعي صحابك» / "Invite friends": the link to copy/share (WhatsApp share link by the shopper themself), «صاحبك ياخد خصم 10% على أول طلب، وانت تاخد 50 جنيه رصيد لما يوصله» / "Your friend gets 10% off their first order; you get EGP 50 credit once it's delivered", counts and list.
+- Landing banner on `?ref=`: «معاك دعوة! خصم 10% على أول طلب» / "You've been invited! 10% off your first order".
+- Checkout: show the invite as applied, with its error messages.

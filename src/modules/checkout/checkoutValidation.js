@@ -65,6 +65,8 @@ module.exports = {
       gift: Joi.object({ wrap: Joi.boolean(), message: Joi.string().trim().max(500).allow(''), hidePrices: Joi.boolean() }).optional(),
       // The delivery day and time slot (deliverySlots/, item 221).
       deliverySlot: Joi.object({ date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(), slotId: Joi.string().max(40).required() }).optional(),
+      // A friend's invite code (customerReferrals/, item 222).
+      referralCode: Joi.string().trim().max(16).optional(),
       // Loyalty points a signed-in shopper (X-Shopper-Token) spends on this order (loyalty/, item 203).
       loyaltyPoints: Joi.number().integer().min(1).max(100000000).optional(),
       // The signed-in shopper's store credit (storeCredit/, item 204): true = as much as the order takes.

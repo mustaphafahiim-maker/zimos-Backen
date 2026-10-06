@@ -46,7 +46,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, trackingConsent, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, trackingConsent, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -160,6 +160,12 @@ const checkout = asyncHandler(async (req, res) => {
     const vipShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
     if (vipShopper) ({ items } = await require('../vipTiers').applyAtCheckout(workspace, items, vipShopper, orderBody));
   }
+  // A friend's invite: their offer on a first order, never on the inviter's own phone/email/account (customerReferrals/, item 222).
+  let referral = null;
+  if (referralCode) {
+    const inviteShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    ({ items, referral } = await require('../customerReferrals').applyAtCheckout(workspace, items, referralCode, orderBody, inviteShopper));
+  }
   // Free gifts the order earns, added by the server at no charge (freeGifts/, item 208). Funnels keep their own offers.
   if (!orderBody.funnelId) ({ items } = await require('../freeGifts').addGifts(workspace, items));
   // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (giftOptions, item 214).
@@ -207,6 +213,7 @@ const checkout = asyncHandler(async (req, res) => {
     await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
     await require('../deliverySlots').attach(order, slotBooking);
+    await require('../customerReferrals').recordOnOrder(order, referral);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
     await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
@@ -240,6 +247,7 @@ const checkout = asyncHandler(async (req, res) => {
   await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
     await require('../deliverySlots').attach(order, slotBooking);
+    await require('../customerReferrals').recordOnOrder(order, referral);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
   await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 
