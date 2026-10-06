@@ -1473,7 +1473,11 @@ interface + `sandbox` adapter + README; migrations stay in 450–499; no prices 
   - A ProductVariant afterUpdate hook (like product.low_stock) records `variant.back_in_stock` when available stock crosses from ≤0 to >0 and someone is waiting; the consumer re-checks stock and tells each shopper once (email template `back_in_stock` or SMS with the product link), then marks them notified.
   - No marketing consent is implied: the address is used for that one message. Merchant summary per variant (waiting/notified).
   - Verified: in-stock refused, email + phone subscribe, duplicate no-op, both fields refused, summary, restock → both notified once. Variant stock restored, alerts removed.
-- [ ] 195. Pre-orders: a sold-out variant can be sold as a pre-order with an expected ship date and an optional limit; the order and the shopper see it.
+- [x] 195. Pre-orders: a sold-out variant can be sold as a pre-order with an expected ship date and an optional limit; the order and the shopper see it. (backend done, UI in frontend-handoff.md)
+  - Migration 468: `products.preorder` { enabled, shipsAt, limit, message } and `order_items.preorder_ships_at`. Per product (all its variants), limit per variant.
+  - One change at the single stock gate: `inventoryService.reserve` asks `preorders.allowsPreorder` before refusing; pre-sold units = reserved − on hand, so the limit holds across orders and frees itself on cancel/restock.
+  - An OrderItem afterCreate hook (in the order's transaction) marks lines saved while oversold with the ship date and tags the order `preorder`. Product payload gets `preorder`.
+  - Verified: refused without pre-orders, accepted within the limit with item date + order tag, refused over the limit, merchant list with pre-sold counts, public field. Stock, reservations and test orders restored.
 - [ ] 196. Cookie consent: the store's consent banner settings, and pixels (browser and server events) sent only with the shopper's consent where the store asks for it.
 - [ ] 197. Store gates: a password-protected or "coming soon" store with an email sign-up, and an optional age check.
 - [ ] 198. Purchase limits per product: minimum and maximum quantity per order (and per customer), enforced at checkout and in the cart quote.

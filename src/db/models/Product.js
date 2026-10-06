@@ -55,6 +55,8 @@ module.exports = (sequelize, DataTypes) => {
       externalRefs: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'external_refs' },
       pageSettings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'page_settings' },
       cms: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // Sold beyond stock as a pre-order (migration 468, modules/preorders): { enabled, shipsAt, limit, message }.
+      preorder: { type: DataTypes.JSONB, allowNull: true },
       // "Track quantity": off, the product never runs out (catalog/stockTracking.js).
       trackInventory: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'track_inventory' },
       // null = sold once; otherwise a subscription or installments plan (migration 315, modules/subscriptions).

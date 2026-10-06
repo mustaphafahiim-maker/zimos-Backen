@@ -1797,3 +1797,37 @@ Wording:
 | We'll tell you once when it's back | هنبلغك مرة واحدة لما يرجع |
 | Waiting for restock | مستنيين يرجع |
 | {n} waiting | {n} مستني |
+
+## 195. Pre-orders — UI: pending
+
+### Dashboard — product page → "Pre-orders" card (view `products.view`, save `products.manage`)
+- **GET `/workspaces/:ws/preorders/:productId`** →
+```json
+{ "productId": "…", "name": "Demo T-Shirt",
+  "preorder": { "enabled": true, "shipsAt": "2026-11-15", "limit": 3, "message": "Ships mid-November" },
+  "variants": [ { "id": "…", "sku": "DEMO-TSHIRT-M", "optionValues": { "Size": "M" }, "available": -2, "preordered": 2 } ] }
+```
+- **PUT `/workspaces/:ws/preorders/:productId`** `{ "enabled": true, "shipsAt"?: "YYYY-MM-DD" | null, "limit"?: 1–1000000 | null (no limit), "message"?: ≤200 }` → same shape.
+- **GET `/workspaces/:ws/preorders`** → `{ products: [ { productId, name, shipsAt, limit, preordered } ] }` (products taking pre-orders).
+- Card: switch "Take pre-orders when sold out", "Expected ship date", "Limit per variant (units beyond stock)", "Message on
+  the product page". Variants table shows "Pre-ordered: n".
+
+How it works: when a variant runs out, checkout keeps selling it until `limit` units beyond stock (per variant; no limit
+when null) — otherwise 409 `INSUFFICIENT_STOCK` as before. Cancelling orders or adding stock frees room. A line sold beyond
+stock gets **`preorderShipsAt`** (on the order's items) and the order gets the tag **`preorder`** (filter orders by tag).
+
+### Storefront
+- Product payload (`GET /store/:ws/products/:id` → `product.preorder`): `{ "shipsAt": "2026-11-15", "message": "…", "limited": true }`
+  or null. When the selected variant is sold out and `preorder` is set: button "Pre-order", note "Ships by {date}" + message;
+  otherwise "Sold out" (and the back-in-stock form, 194).
+- Order tracking / thank-you: show "Pre-order — ships by {date}" for items with `preorderShipsAt`.
+
+Wording:
+| en | ar |
+|---|---|
+| Pre-order | اطلبه مسبقًا |
+| Ships by {date} | هيتشحن قبل {date} |
+| Take pre-orders when sold out | استقبل طلبات مسبقة لما المنتج يخلص |
+| Expected ship date | معاد الشحن المتوقع |
+| Limit per variant | الحد لكل نوع |
+| Pre-ordered | اتطلب مسبقًا |

@@ -33,7 +33,8 @@ async function reserve({ workspaceId, variantId, quantity, referenceType, refere
     const variant = await lockVariant(variantId, workspaceId, transaction);
     const available = variant.stockOnHand - variant.reservedStock;
 
-    if (!variant.allowOverselling && available < quantity) {
+    // A product taking pre-orders sells beyond its stock, up to its limit (preorders/, item 195).
+    if (!variant.allowOverselling && available < quantity && !(await require('../preorders').allowsPreorder(variant, quantity, transaction))) {
       throw new InsufficientStockError(
         `Insufficient stock for variant ${variantId}: requested ${quantity}, available ${available}`
       );

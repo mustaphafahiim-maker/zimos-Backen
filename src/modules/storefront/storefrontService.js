@@ -80,6 +80,8 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
     bundle: bundle ? bundlePricing.presentBundle(bundle, publicProduct.variants) : null,
     // A running A/B test: the page asks for this visitor's prices and pictures (catalog/productTests.js).
     abTest: await require('../catalog/productTests').hasRunningTest(workspaceId, product.id),
+    // Sold beyond stock as a pre-order: { shipsAt, message, limited } or null (preorders/, item 195).
+    preorder: require('../preorders').publicView(product),
     rating,
     reviews,
   };

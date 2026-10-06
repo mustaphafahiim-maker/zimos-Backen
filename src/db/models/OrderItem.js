@@ -11,6 +11,8 @@ module.exports = (sequelize, DataTypes) => {
       orderId: { type: DataTypes.UUID, allowNull: false, field: 'order_id' },
       productId: { type: DataTypes.UUID, allowNull: true, field: 'product_id' },
       variantId: { type: DataTypes.UUID, allowNull: true, field: 'variant_id' },
+      // The expected ship date when the line was taken as a pre-order (migration 468, modules/preorders).
+      preorderShipsAt: { type: DataTypes.DATEONLY, allowNull: true, field: 'preorder_ships_at' },
       offerId: { type: DataTypes.UUID, allowNull: true, field: 'offer_id' },
 
       productNameSnapshot: { type: DataTypes.STRING(300), allowNull: false, field: 'product_name_snapshot' },
