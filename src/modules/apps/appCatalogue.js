@@ -41,7 +41,7 @@ const APPS = [
   app('taager', 'dropshipping', 'integration', { en: 'Taager', ar: 'تاجر' }, { en: 'Import Taager products and forward orders to them.', ar: 'استورد منتجات تاجر وابعت لهم الطلبات.' }, soon),
   app('shopify', 'store', 'integration', { en: 'Shopify', ar: 'شوبيفاي' }, { en: 'Import products and push orders to a Shopify store.', ar: 'استورد المنتجات وابعت الطلبات لمتجر شوبيفاي.' }, soon),
   app('woocommerce', 'store', 'integration', { en: 'WooCommerce', ar: 'ووكومرس' }, { en: 'Import products and receive orders from WordPress.', ar: 'استورد المنتجات واستقبل الطلبات من ووردبريس.' }, soon),
-  app('google_sheets', 'orders', 'integration', { en: 'Google Sheets', ar: 'جوجل شيتس' }, { en: 'New orders and status changes written to a sheet.', ar: 'الطلبات الجديدة وتغيّر حالتها تتكتب في شيت.' }, soon),
+  app('google_sheets', 'orders', 'integration', { en: 'Google Sheets', ar: 'جوجل شيتس' }, { en: 'Orders, lost orders and leads written to your sheets as they happen.', ar: 'الطلبات والطلبات الضايعة والعملاء المحتملين يتكتبوا في شيتاتك أول ما يحصلوا.' }, { openPath: '/apps/google-sheets' }),
   // The store's product feed for Google (offers/productFeed.js): Merchant Center fetches it by URL.
   app('google_merchant', 'seo', 'integration', { en: 'Google Merchant', ar: 'جوجل ميرشانت' }, { en: 'A product feed for Google Shopping, with a checklist of what Merchant Center needs.', ar: 'ملف منتجات لجوجل شوبنج، مع قائمة بما يحتاجه Merchant Center.' }, { openPath: '/offers/feed', standard: true }),
   // A Clarity project id among the tracking pixels (marketing/trackingPixelService.js) loads its script in the store.

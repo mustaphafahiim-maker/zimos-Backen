@@ -243,6 +243,8 @@ v1.use('/workspaces/:workspaceId/webhooks', appGate.requireAppForChanges('webhoo
 // Lane 7: the app store, the app install link and dropshipping providers.
 // Features that are apps take changes only while the store has the app (apps/appGate.js).
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
+// Google Sheets sync: the account, the sheets, "Sync existing" (modules/sheets, SPEC §16.4).
+v1.use('/workspaces/:workspaceId/integrations/google-sheets', appGate.requireAppForChanges('google_sheets'), require('./modules/sheets/sheetsRoutes').router);
 v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
 // Lane 7: the simple invite (sections → permissions) and support access.
 v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));

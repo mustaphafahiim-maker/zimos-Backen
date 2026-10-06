@@ -292,6 +292,11 @@ async function shipmentsFor(workspaceId, orderIds) {
 function layoutColumns(layout) {
   return layout.map((entry) => {
     const header = String(entry.header || '');
+    // A checkout form field's answer ('field:custom_1'), as the order kept it (checkout/checkoutForm.js).
+    if (typeof entry.key === 'string' && entry.key.startsWith('field:')) {
+      const fieldKey = entry.key.slice(6);
+      return { key: entry.key, en: header, ar: header, value: (o) => ((o.checkoutFields || []).find((a) => a && a.key === fieldKey) || {}).value || '' };
+    }
     if (entry.key && byKey.has(entry.key)) {
       const column = byKey.get(entry.key);
       return { ...column, en: header, ar: header };
@@ -408,4 +413,23 @@ async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'o
   return rows;
 }
 
-module.exports = { csvChunks, tableRows, columnCatalogue, COLUMN_KEYS, MAX_ORDERS };
+/**
+ * One order as rows of cells in a layout — what the Google Sheets sync writes
+ * (modules/sheets): the same columns and words as the export, numbers as
+ * numbers. `order` is shaped as the list shows it (with `stage` and its
+ * latest `shipment`).
+ */
+function rowsForOrder(order, { layout, rowPer = 'order', lang = 'en', timezone, maskPhones = false } = {}) {
+  const columns = resolveColumns(undefined, rowPer, layout);
+  const x = exportContext({ lang, timezone });
+  const row = phoneShape(maskPhones)(order);
+  const asCell = (column, value) => {
+    if (value === null || value === undefined) return '';
+    if (NUMERIC_COLUMNS.has(column.key) && /^-?\d+(\.\d+)?$/.test(String(value))) return Number(value);
+    return String(value);
+  };
+  const items = rowPer === 'item' && row.items && row.items.length > 0 ? row.items : [null];
+  return items.map((item) => columns.map((c) => asCell(c, c.value(row, item, x))));
+}
+
+module.exports = { csvChunks, tableRows, rowsForOrder, columnCatalogue, COLUMN_KEYS, MAX_ORDERS };
