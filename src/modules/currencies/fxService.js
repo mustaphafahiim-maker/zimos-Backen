@@ -110,6 +110,8 @@ async function ratesFrom(base, quotes) {
   return { rates, fetchedAt, available: Object.keys(table).sort() };
 }
 
+const REPORT_CURRENCIES = ['USD', 'EUR', 'SAR', 'AED', 'MAD', 'EGP'];
+
 async function getForDashboard(workspaceId) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultCurrency', 'settings'] });
   if (!workspace) throw new NotFoundError('Workspace');
@@ -117,8 +119,12 @@ async function getForDashboard(workspaceId) {
   const base = workspace.defaultCurrency || 'EGP';
   const { rates, fetchedAt, available } = await ratesFrom(base, settings.useAll ? Object.keys((await pivotTable()).table) : settings.display);
   const hasOrders = (await db.Order.count({ where: { workspaceId }, limit: 1 })) > 0;
+  // The analytics currency switcher (SPEC §11.5 "EGP / USD / MAD…"): the store's
+  // display currencies and a few common ones, for showing report amounts only.
+  const report = await ratesFrom(base, [...new Set([...settings.display, ...REPORT_CURRENCIES])]);
   return {
     baseCurrency: base,
+    reportRates: report.rates,
     // The account currency cannot change once the store has taken an order.
     baseCurrencyLocked: hasOrders,
     settings,
