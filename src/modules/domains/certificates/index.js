@@ -1,22 +1,14 @@
 'use strict';
 
-const env = require('../../../config/env');
+const { CertificateProviderError } = require('./errors');
+const { cloudflare } = require('./cloudflare');
 
 /**
  * Certificate providers for merchant domains — the contract is in README.md.
  * Add a real adapter by requiring it here.
  */
 
-class CertificateProviderError extends Error {
-  constructor(message, { retryable = true } = {}) {
-    super(message);
-    this.name = 'CertificateProviderError';
-    this.retryable = retryable;
-  }
-}
-
-// No certificate provider is connected yet: each one is added here by its code.
-const ADAPTERS = {};
+const ADAPTERS = { cloudflare };
 
 /** The configured adapter (CERTIFICATE_PROVIDER). */
 function getCertificateProvider() {
@@ -27,4 +19,14 @@ function getCertificateProvider() {
   return adapter;
 }
 
-module.exports = { getCertificateProvider, CertificateProviderError };
+/** True when CERTIFICATE_PROVIDER names an adapter that exists. */
+function certificateProviderConfigured() {
+  try {
+    getCertificateProvider();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { getCertificateProvider, certificateProviderConfigured, CertificateProviderError };

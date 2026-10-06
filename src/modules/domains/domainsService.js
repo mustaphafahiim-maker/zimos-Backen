@@ -131,6 +131,8 @@ async function verifyDomain(workspaceId, domainId, req) {
     after: { hostname: domain.hostname, status: 'verified' },
     req,
   });
+  // The provider hears of the hostname only now that our TXT proved control.
+  await require('./domainSettings').requestAfterVerify(domain);
 
   return { domain, verified: true };
 }

@@ -3,18 +3,33 @@
 Automatic TLS for merchant domains is done by a **certificate provider**: a
 service that issues and renews a certificate for a hostname once the merchant
 has pointed it at the platform (Cloudflare for SaaS custom hostnames, Caddy
-on-demand TLS, …). Which one ZIMOS uses is an open decision; the feature code
-talks only to this interface.
+on-demand TLS, …). The feature code talks only to this interface.
 
-Only the `sandbox` adapter exists in this repository. A real adapter is one
-file in this folder plus one line in `index.js`.
+The one adapter is `cloudflare` (`cloudflare.js`, Cloudflare for SaaS custom
+hostnames). Another adapter is one file in this folder plus one line in
+`index.js`. There is no sandbox adapter.
 
 ## Choosing the provider
 
-`CERTIFICATE_PROVIDER` (environment) names the adapter; unset means `sandbox`.
-The sandbox is refused in production unless `CERTIFICATE_PROVIDER=sandbox` is
-set explicitly, so a production deploy never silently reports fake
-certificates.
+`CERTIFICATE_PROVIDER` (environment) names the adapter; unset means none:
+`POST /domains/:id/ssl/check` answers 502 CERTIFICATE_PROVIDER_ERROR and
+verification does not ask for a certificate.
+
+## Cloudflare (`CERTIFICATE_PROVIDER=cloudflare`)
+
+- `CLOUDFLARE_API_TOKEN`: Zone > SSL and Certificates: Edit, on the platform
+  zone only. Never logged or put in an error.
+- `CLOUDFLARE_ZONE_ID`: that zone's id.
+- Requests go to `https://api.cloudflare.com/client/v4` only, with a 10 s
+  timeout. `requestCertificate` creates the custom hostname (`ssl.method`
+  http, `type` dv, minimum TLS 1.2); a duplicate is looked up by hostname.
+- `getStatus` maps Cloudflare's states: hostname and certificate active =
+  `issued`; `moved` = `moved` (the merchant's CNAME no longer points at us);
+  blocked, `*_timed_out`, expired, deleted = `failed` with Cloudflare's reason
+  as `detail`; anything else = `pending`.
+- `revoke` deletes the custom hostname; 404 counts as done. Any other failure
+  is thrown: the domains service keeps it as a `domain_provider_deletions` row
+  and the domains job retries it.
 
 ## The contract
 
@@ -63,15 +78,10 @@ previous `ssl_status`.
 
 ## How the feature uses it
 
-1. The merchant verifies the domain (TXT record). The dashboard then calls
-   `POST /domains/:id/ssl/check`; the first call on a domain is
-   `requestCertificate` → `domains.ssl_status = pending`.
+1. The merchant verifies the domain (TXT record on `_zimos-verify.<host>`).
+   Only then does the server call `requestCertificate` →
+   `domains.ssl_status = pending`. A failure there leaves `none` and the
+   domains job asks again.
 2. Every later `POST /domains/:id/ssl/check` → `getStatus` → `ssl_status` updated; on
    `issued` the domain's `status` becomes `active`.
-3. Deleting the domain → `revoke`.
-
-## The sandbox adapter
-
-No network. `requestCertificate` answers `pending` with a ref `SBX-CERT-<hostname>`;
-the first `getStatus` after that answers `issued`. A hostname starting with
-`fail.` answers `failed`, so the failure path can be exercised.
+3. Deleting the domain → `revoke`; a failure is retried by the domains job.

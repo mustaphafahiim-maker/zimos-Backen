@@ -8,7 +8,8 @@ const env = require('../../config/env');
 const validate = require('../../core/middleware/validate');
 const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { getCertificateProvider, CertificateProviderError } = require('./certificates');
+const { getCertificateProvider, certificateProviderConfigured, CertificateProviderError } = require('./certificates');
+const logger = require('../../core/utils/logger');
 const primaryHost = require('./primaryHost');
 const { domainDnsCheckLimiter } = require('../../core/middleware/rateLimiters');
 const rules = require('./domainRules');
@@ -21,7 +22,8 @@ const { lookupTxt, lookupCname } = require('./dnsVerifier');
  * propagation check, and the public host lookup the storefront's proxy uses.
  */
 
-const SSL_STATUSES = ['none', 'pending', 'issued', 'failed'];
+// moved: the provider saw the merchant's CNAME stop pointing at us.
+const SSL_STATUSES = ['none', 'pending', 'issued', 'failed', 'moved'];
 const USABLE = ['verified', 'active'];
 
 function present(domain, funnel) {
@@ -35,6 +37,7 @@ function present(domain, funnel) {
     sslStatus: SSL_STATUSES.includes(domain.sslStatus) ? domain.sslStatus : 'none',
     sslProvider: domain.sslProvider || null,
     sslCheckedAt: domain.sslCheckedAt || null,
+    sslDetail: domain.sslDetail || null,
     homeFunnel: funnel ? { id: funnel.id, name: funnel.name, status: funnel.status } : null,
     // The two records the merchant creates at their DNS provider: the TXT on
     // its own name, since nothing else may sit beside a CNAME.
@@ -103,6 +106,53 @@ function canonicalChanged(workspaceId) {
   require('../storefront/storefrontCache').invalidate(workspaceId);
 }
 
+/**
+ * Asks the provider for the hostname (the first time) or where it stands, and
+ * stores the answer on the row. Only ever for a verified domain: the provider
+ * hears of a hostname after our TXT proved the merchant controls it. Throws
+ * CertificateProviderError. The merchant's button, the verification and the
+ * domains job (jobs.js) all come through here.
+ */
+async function refreshCertificate(domain) {
+  if (!USABLE.includes(domain.status)) {
+    throw new ConflictError('Verify the domain before requesting its certificate', 'DOMAIN_NOT_VERIFIED');
+  }
+  const provider = getCertificateProvider();
+  const result =
+    domain.sslStatus === 'none' || !domain.sslProviderRef
+      ? await provider.requestCertificate({ hostname: domain.hostname })
+      : await provider.getStatus({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
+  const sslStatus = SSL_STATUSES.includes(result.status) ? result.status : 'pending';
+  await domain.update({
+    sslStatus,
+    sslProvider: provider.code,
+    sslProviderRef: result.providerRef || domain.sslProviderRef,
+    sslCheckedAt: new Date(),
+    sslDetail: result.detail ? String(result.detail).slice(0, 300) : null,
+    // A verified domain with a certificate is fully live.
+    status: sslStatus === 'issued' ? 'active' : domain.status,
+  });
+  return result;
+}
+
+/**
+ * Right after verification: ask for the certificate when a provider is set.
+ * A failure here does not undo the verification; the domains job asks again
+ * for every verified domain that has no certificate request yet.
+ */
+async function requestAfterVerify(domain) {
+  if (!certificateProviderConfigured()) return;
+  try {
+    await refreshCertificate(domain);
+    canonicalChanged(domain.workspaceId);
+  } catch (err) {
+    logger.warn('domains: certificate request after verification failed; the job retries', {
+      domainId: domain.id,
+      error: err.message,
+    });
+  }
+}
+
 async function syncCertificate(workspaceId, domainId, req) {
   const domain = await loadDomain(workspaceId, domainId);
   if (!USABLE.includes(domain.status)) {
@@ -110,25 +160,11 @@ async function syncCertificate(workspaceId, domainId, req) {
   }
   const before = { sslStatus: domain.sslStatus, status: domain.status };
   let result;
-  let provider;
   try {
-    provider = getCertificateProvider();
-    result =
-      domain.sslStatus === 'none' || !domain.sslProviderRef
-        ? await provider.requestCertificate({ hostname: domain.hostname })
-        : await provider.getStatus({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
+    result = await refreshCertificate(domain);
   } catch (err) {
     throw providerFailure(err);
   }
-
-  await domain.update({
-    sslStatus: SSL_STATUSES.includes(result.status) ? result.status : 'pending',
-    sslProvider: provider.code,
-    sslProviderRef: result.providerRef || domain.sslProviderRef,
-    sslCheckedAt: new Date(),
-    // A verified domain with a certificate is fully live.
-    status: result.status === 'issued' ? 'active' : domain.status,
-  });
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -221,14 +257,39 @@ async function checkDns(workspaceId, domainId) {
   };
 }
 
-/** Tells the provider a removed domain's certificate is no longer wanted. Never throws. */
+/**
+ * Tells the provider a removed domain's hostname is no longer wanted. The
+ * domain row goes either way, so this never throws: a failure is kept as a
+ * DomainProviderDeletion row the domains job retries (jobs.js), so the
+ * hostname is not left behind at the provider.
+ */
 async function revokeCertificate(domain) {
-  if (!domain || domain.sslStatus === 'none' || !domain.sslProviderRef) return;
+  if (!domain || !domain.sslProviderRef) return;
   try {
     await getCertificateProvider().revoke({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
-  } catch {
-    /* the row is going away either way */
+  } catch (err) {
+    await rememberDeletion(domain, err);
   }
+}
+
+const RETRY_AFTER_MS = 5 * 60 * 1000;
+
+async function rememberDeletion(domain, err) {
+  const fields = {
+    workspaceId: domain.workspaceId,
+    hostname: domain.hostname,
+    provider: domain.sslProvider || String(process.env.CERTIFICATE_PROVIDER || 'unknown').trim().toLowerCase(),
+    providerRef: domain.sslProviderRef,
+  };
+  const lastError = String((err && err.message) || 'unknown error').slice(0, 500);
+  const [row, created] = await db.DomainProviderDeletion.findOrCreate({
+    where: { provider: fields.provider, providerRef: fields.providerRef },
+    defaults: { ...fields, attempts: 1, lastError, nextAttemptAt: new Date(Date.now() + RETRY_AFTER_MS) },
+  });
+  if (!created) {
+    await row.update({ attempts: row.attempts + 1, lastError, nextAttemptAt: new Date(Date.now() + RETRY_AFTER_MS) });
+  }
+  logger.warn('domains: provider deletion failed; kept for the retry job', { hostname: domain.hostname, error: lastError });
 }
 
 /**
@@ -333,6 +394,9 @@ module.exports = {
   listDomains,
   updateDomain,
   syncCertificate,
+  refreshCertificate,
+  requestAfterVerify,
+  rememberDeletion,
   checkDns,
   revokeCertificate,
   resolveHost,

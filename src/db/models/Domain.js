@@ -23,6 +23,8 @@ module.exports = (sequelize, DataTypes) => {
       sslProvider: { type: DataTypes.STRING(40), allowNull: true, field: 'ssl_provider' },
       sslProviderRef: { type: DataTypes.STRING(200), allowNull: true, field: 'ssl_provider_ref' },
       sslCheckedAt: { type: DataTypes.DATE, allowNull: true, field: 'ssl_checked_at' },
+      // The provider's reason when the certificate failed (migration 212).
+      sslDetail: { type: DataTypes.STRING(300), allowNull: true, field: 'ssl_detail' },
       homeFunnelId: { type: DataTypes.UUID, allowNull: true, field: 'home_funnel_id' },
     },
     {

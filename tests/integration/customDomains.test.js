@@ -279,3 +279,83 @@ describe('the records and the DNS check', () => {
     expect(lookupCname).toHaveBeenCalledWith('shop.check.com');
   });
 });
+
+describe('the certificate provider (Cloudflare, fetch mocked)', () => {
+  const REF = 'aaaaaaaabbbbccccddddeeeeeeeeeeee';
+  const reply = (status, body) => ({ status, json: async () => body });
+  let fetchMock;
+  beforeEach(() => {
+    process.env.CERTIFICATE_PROVIDER = 'cloudflare';
+    env.customDomains.cloudflare.apiToken = 'test-only-cloudflare-token';
+    env.customDomains.cloudflare.zoneId = '0123456789abcdef0123456789abcdef';
+    fetchMock = jest.spyOn(global, 'fetch');
+  });
+  afterEach(() => {
+    fetchMock.mockRestore();
+    delete process.env.CERTIFICATE_PROVIDER;
+    env.customDomains.cloudflare.apiToken = '';
+    env.customDomains.cloudflare.zoneId = '';
+  });
+
+  async function verified(name, hostname) {
+    const s = await setupStore(name);
+    const add = await addDomain(s.wid, s.H, hostname);
+    lookupTxt.mockResolvedValueOnce([[add.body.record.value]]);
+    const res = await request(app).post(`/api/v1/workspaces/${s.wid}/domains/${add.body.domain.id}/verify`).set(s.H);
+    return { ...s, id: add.body.domain.id, res };
+  }
+
+  it('asks Cloudflare for the hostname only once the TXT is verified', async () => {
+    const s = await setupStore();
+    const add = await addDomain(s.wid, s.H, 'www.certshop.com');
+    const early = await request(app).post(`/api/v1/workspaces/${s.wid}/domains/${add.body.domain.id}/ssl/check`).set(s.H);
+    expect(early.status).toBe(409);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce(
+      reply(201, { success: true, result: { id: REF, hostname: 'www.certshop.com', status: 'pending', ssl: { status: 'pending_validation' } } })
+    );
+    lookupTxt.mockResolvedValueOnce([[add.body.record.value]]);
+    const ok = await request(app).post(`/api/v1/workspaces/${s.wid}/domains/${add.body.domain.id}/verify`).set(s.H);
+    expect(ok.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const row = await db.Domain.findByPk(add.body.domain.id);
+    expect(row).toMatchObject({ status: 'verified', sslStatus: 'pending', sslProvider: 'cloudflare', sslProviderRef: REF });
+  });
+
+  it('a Cloudflare failure right after verifying does not undo the verification', async () => {
+    fetchMock.mockResolvedValueOnce(reply(503, null));
+    const v = await verified('Cf Down', 'www.cfdown.com');
+    expect(v.res.status).toBe(200);
+    expect(await db.Domain.findByPk(v.id)).toMatchObject({ status: 'verified', sslStatus: 'none' });
+  });
+
+  it('the merchant button maps an issued certificate to active, and a failure shows its reason', async () => {
+    fetchMock.mockResolvedValueOnce(reply(201, { success: true, result: { id: REF, status: 'pending', ssl: { status: 'pending_validation' } } }));
+    const v = await verified('Cf Ok', 'www.cfok.com');
+    fetchMock.mockResolvedValueOnce(reply(200, { success: true, result: { id: REF, status: 'active', ssl: { status: 'active' } } }));
+    const check = await request(app).post(`/api/v1/workspaces/${v.wid}/domains/${v.id}/ssl/check`).set(v.H);
+    expect(check.status).toBe(200);
+    expect(check.body.domain).toMatchObject({ status: 'active', sslStatus: 'issued' });
+  });
+
+  it('removing a domain: a 404 at Cloudflare is fine; a real failure is kept for the retry job', async () => {
+    fetchMock.mockResolvedValueOnce(reply(201, { success: true, result: { id: REF, status: 'pending', ssl: { status: 'pending_validation' } } }));
+    const v = await verified('Cf Del', 'www.cfdel.com');
+    fetchMock.mockResolvedValueOnce(reply(500, null));
+    const del = await request(app).delete(`/api/v1/workspaces/${v.wid}/domains/${v.id}`).set(v.H);
+    expect(del.status).toBe(200);
+    expect(await db.Domain.findByPk(v.id)).toBeNull();
+    const kept = await db.DomainProviderDeletion.findOne({ where: { providerRef: REF } });
+    expect(kept).toMatchObject({ hostname: 'www.cfdel.com', provider: 'cloudflare', attempts: 1 });
+    expect(kept.lastError).toMatch(/500/);
+
+    await db.DomainProviderDeletion.destroy({ where: {} });
+    const ref2 = 'bbbbbbbbccccddddeeeeffffffffffff';
+    fetchMock.mockResolvedValueOnce(reply(201, { success: true, result: { id: ref2, status: 'pending', ssl: { status: 'pending_validation' } } }));
+    const w = await verified('Cf Gone', 'www.cfgone.com');
+    fetchMock.mockResolvedValueOnce(reply(404, { success: false, errors: [] }));
+    expect((await request(app).delete(`/api/v1/workspaces/${w.wid}/domains/${w.id}`).set(w.H)).status).toBe(200);
+    expect(await db.DomainProviderDeletion.count()).toBe(0);
+  });
+});

@@ -612,6 +612,14 @@ const env = {
       .replace(/\.$/, ''),
     maxPerStore: positiveInt('CUSTOM_DOMAINS_MAX_PER_STORE', 1),
     resolvers: csvList(process.env.DOMAIN_VERIFY_RESOLVERS, '1.1.1.1,8.8.8.8'),
+    // Cloudflare for SaaS custom hostnames (domains/certificates/cloudflare.js,
+    // CERTIFICATE_PROVIDER=cloudflare). The token needs Zone > SSL and
+    // Certificates: Edit on that zone only. Empty under NODE_ENV=test, so a
+    // dev .env never reaches the suite; a test sets them here.
+    cloudflare: {
+      apiToken: process.env.NODE_ENV === 'test' ? '' : (process.env.CLOUDFLARE_API_TOKEN || '').trim(),
+      zoneId: process.env.NODE_ENV === 'test' ? '' : (process.env.CLOUDFLARE_ZONE_ID || '').trim(),
+    },
   },
 };
 
