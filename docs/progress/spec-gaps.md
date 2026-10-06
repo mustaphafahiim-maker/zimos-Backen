@@ -1174,3 +1174,77 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 Not queued (decided already or waiting on the owner): cross-sell discounts and "once per customer" by phone/email (lane 3), the full style/layout tab list (lane 5), city/district shipping prices (decision 19 keeps the city as free text), service ratings (lane 8: no fake ratings), a niche-template wizard card (decision 75).
 
 §5 (fraud) and §22 Gate 1 (no mock pages, no mockCommerce.ts) are complete.
+
+## Fourth pass (2026-10-06) — Lightfunnels parity
+
+The owner, 2026-10-06: "كمل كل حاجه ناقصه … عايز يبقي لايت فانل … تضيفلي كل الفيتشرز اللي هناك ما عدا لايت اسكول". Every Lightfunnels feature except LightSchool (their school/course product) is in scope, plus what the platform still lacks. Built the same way as the passes above.
+
+How the list was made:
+- Lightfunnels' features were gathered from their help center, API reference and app store (search excerpts; this environment's network blocks their hosts). They were compared with an inventory of both repos.
+- What we already match is not listed. That covers the funnel canvas, step types, split tests, one-click upsells, price bundles, bumps, payment-method fees, smart sections, data binding and repeater, reviews, personalization, digital products, abandoned checkouts, Google Sheets, feeds, pixels with server events, geo redirects, the fraud guards, domains, currencies and multi-store.
+
+Rules that still hold:
+- SPEC §21 still holds, so cloaks, evergreen timers and AI-written reviews (all in Lightfunnels) are not built.
+- An outside service is an interface, a `sandbox` adapter and a README; a real adapter needs the owner's keys to be verified.
+- Earlier "not queued" items that Lightfunnels has are queued now at the owner's request: the full Style tab (lane 5) and city/area places with prices (decision 19).
+
+Migrations for this pass: **450–499**.
+
+Design (page builder):
+- [ ] 157. The full element Style tab (SPEC §9.3): background gradient and image, height and min/max sizes, custom shadow (inner/outer, x, y, blur, spread, colour), overflow, cursor, and visibility on mobile portrait/landscape.
+- [ ] 158. Entrance animations per element (fade, slide, zoom; delay, duration; respects reduced motion).
+- [ ] 159. Fonts: Google Fonts for the store and per element, plus the merchant's uploaded fonts (woff2).
+- [ ] 160. Editable storefront texts per language: button labels, form errors, cart/checkout/bundle wording.
+- [ ] 161. Store scripts targeted by position (head, body start, body end) and by page type (all, home, collection, product, checkout, thank you).
+
+Commerce:
+- [ ] 162. Smart collections by product tags (any/all), and a default "all products" collection.
+- [ ] 163. The store's own places: regions → cities → areas per country, imported from CSV, with three-level pickers at checkout.
+- [ ] 164. Shipping prices per city and area, from a CSV or the places list.
+- [ ] 165. A file-upload field in the checkout form, and an optional billing address ("same as shipping").
+- [ ] 166. Bulk actions on funnels: publish, pause, duplicate and delete several at once.
+
+Tracking and analytics:
+- [ ] 167. "Send Lead instead of Purchase" per funnel and store (COD stores optimising on leads).
+- [ ] 168. Pinterest Conversions API, using an ad account id and token. This reverses item 154's browser-only decision at the owner's request.
+- [ ] 169. Google Ads purchase conversions with a conversion label (`send_to AW-…/label`).
+- [ ] 170. Google Tag Manager: a ready-made container to import (triggers and tags for the store's events), with the dataLayer events listed.
+- [ ] 171. Live View on a world map: visitors, checkouts and orders from the last 10 minutes.
+- [ ] 172. Dashboard home: filter by product and by store, beside the funnel filter.
+
+Email:
+- [ ] 173. A sending domain for customer emails: DNS records shown, then verified (interface + sandbox).
+- [ ] 174. A block email designer (heading, text, button, image, order table, divider) for order emails and cart recovery.
+- [ ] 175. Order emails chosen per funnel or store, instead of one set per store.
+
+Domains and developers:
+- [ ] 176. Buy a domain in the dashboard: search, buy, automatic DNS, renewal (registrar interface + sandbox).
+- [ ] 177. "Redirect to the primary domain" per domain.
+- [ ] 178. Webhooks: custom headers per endpoint, plus the topics `funnel.created/updated/deleted`, `payment.paid` and `contact.updated`.
+- [ ] 179. An MCP server for the store, used by Claude, ChatGPT or any MCP client with an API key: list products and orders, check pages for problems, create a draft funnel.
+
+Integrations (interface + sandbox + README):
+- [ ] 180. Import products and reviews from AliExpress, Etsy, CJ and YouCan links, as importer adapters beside Shopify.
+- [ ] 181. Send orders to a Shopify or WooCommerce store, and bring back fulfilment.
+- [ ] 182. Sync contacts and leads to Mailchimp or Klaviyo lists.
+- [ ] 183. Express checkout buttons (wallets) and Stripe and PayPal adapters behind the payment interface. They stay sandbox until the owner's keys are set.
+- [ ] 184. Address autocomplete at checkout (places-provider interface + sandbox).
+
+What the platform still lacks (the owner's "كل حاجه ناقصه"):
+- [ ] 185. Shopper accounts: sign in by phone or email code, with order history, saved addresses and reorder.
+- [ ] 186. Shopper returns: ask for a return from the order tracking page, which feeds the existing returns flow.
+- [ ] 187. Import contacts from CSV, with tags and marketing consent.
+- [ ] 188. A wishlist for signed-in shoppers.
+- [ ] 189. Gift cards: issue, sell as a product, redeem at checkout, check the balance.
+- [ ] 190. A blog: a posts index, categories, and the latest posts on the home page.
+- [ ] 191. Element display rules: show between dates, and by device, country or UTM source.
+- [ ] 192. A template marketplace: merchants submit funnel templates (built on the share code), the platform reviews them, and others use them (no prices in code).
+
+Not built, and why:
+- **Cloaks:** SPEC §21.
+- **Evergreen countdowns:** SPEC §21.
+- **AI-written reviews:** SPEC §21.
+- **The native mobile app:** a separate project. The dashboard installs as an app with push and live sales.
+- **LightSchool:** excluded by the owner.
+- **Square, Checkout.com, Razorpay, MercadoPago and CinetPay gateways:** these are new payment gateways, the integrations team's work per SPEC §22. The payment interface already takes them.
+- **ShineOn and other print-on-demand services:** they would be new providers on the existing DropshipProvider interface.

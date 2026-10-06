@@ -41,6 +41,8 @@ code was merged in, and the project owner changed some rules afterwards.
    cloaking, no fake counters/stock/reviews, no QR WhatsApp). Plans, billing
    and Fawaterak are Ziad's and already built: read limits from his plan
    features, do not rebuild or change billing.
+   Owner, 2026-10-06: every Lightfunnels feature except LightSchool is in
+   scope too (docs/progress/spec-gaps.md, fourth pass); §21 still holds.
 7. **Backend rules** (SPEC §1): routes under `/api/v1/workspaces/:workspaceId`
    go through `authenticate` → `resolveTenant` → `requirePermission`; the
    workspace only ever comes from `req.tenant.workspaceId`; money is integer
