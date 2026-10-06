@@ -1041,3 +1041,43 @@ Wording:
 | Funnel created / updated / deleted | فانل اتعمل / اتعدل / اتمسح |
 | Payment received | دفعة وصلت |
 | Contact updated | جهة اتصال اتعدلت |
+
+---
+
+## 179. An MCP server for the store (Claude, ChatGPT, any MCP client) — UI: pending
+
+**POST `/api/public/v1/mcp`** with `Authorization: Bearer <store API key>` — MCP over HTTP (JSON-RPC 2.0, the
+"Streamable HTTP" transport answered as plain JSON; GET → 405). Protocol versions 2025-06-18 / 2025-03-26 / 2024-11-05.
+Methods: `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`.
+
+| tool | does | needs the key's scope |
+|---|---|---|
+| `list_products` `{ query?, status?, limit? }` | products with variants, prices (minor units, strings), stock | `products:read` (or `products:update`) |
+| `list_orders` `{ query?, from?, to?, limit? }` | recent orders (same JSON as the public REST API) | `orders:read` / `orders:write` / `orders:update` |
+| `get_order` `{ orderId? \| orderNumber? }` | one order in full | same |
+| `check_pages` `{ funnelId? }` | each funnel's problems (fatal + warnings) before publishing | `funnels:read` or `funnels:write` (new) |
+| `create_draft_funnel` `{ name }` | a draft funnel the merchant publishes later | `funnels:write` (new) |
+The key's creator's role must also allow it (same rule as the REST API). A refusal or a store error comes back as a tool
+result with `isError: true` and a readable message; a bad key is HTTP 401.
+
+New API-key scopes: **`funnels:read`**, **`funnels:write`** (in `GET /workspaces/:ws/api-keys` → `scopes`).
+
+Example `.mcp.json` / Claude Desktop entry the dashboard can show:
+```json
+{ "mcpServers": { "my-store": { "type": "http", "url": "https://api.<platform>/api/public/v1/mcp",
+  "headers": { "Authorization": "Bearer <API key>" } } } }
+```
+
+### Dashboard — Settings → Developers → "AI assistants (MCP)"
+- Short explanation, the server URL with a copy button, "Create a key for AI" (preset scopes: products:read, orders:read,
+  funnels:read, funnels:write — editable), and copy-ready config for Claude (Desktop / Code) and ChatGPT connectors.
+- The tools table above (name + what it does), and a note that funnels it creates stay drafts.
+
+Wording:
+| en | ar |
+|---|---|
+| AI assistants (MCP) | مساعدين الذكاء الاصطناعي (MCP) |
+| Let Claude, ChatGPT or another assistant work with your store using an API key. | خلي Claude أو ChatGPT أو أي مساعد يشتغل على متجرك بمفتاح API. |
+| Server URL | رابط السيرفر |
+| Create a key for AI | اعمل مفتاح للذكاء الاصطناعي |
+| Funnels it creates stay drafts until you publish them. | الفانلز اللي بيعملها بتفضل مسودة لحد ما تنشرها انت. |

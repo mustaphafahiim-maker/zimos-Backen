@@ -296,6 +296,8 @@ v1.use('/admin', platformAdminRoutes);
 // docs/public-api.md. Outbound webhooks are sent by modules/webhooks.
 v1.use('/public', publicApiRoutes);
 // The same API under the path the spec and other platforms' docs use.
+// The store's MCP server for AI assistants, on a store API key (modules/mcp).
+app.use('/api/public/v1/mcp', require('./modules/mcp/mcpServer').router);
 app.use('/api/public/v1', publicApiRoutes);
 
 // --- Public storefront (no staff auth) ------------------------------------

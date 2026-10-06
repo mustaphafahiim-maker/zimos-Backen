@@ -1368,7 +1368,10 @@ Domains and developers:
   - The new topics come from model hooks (`webhooks/modelEvents.js`) that record outbox events inside the change's transaction: funnel create/update/destroy, a payment saved as captured (once), and a customer's own fields (name, phone, email, tags, consent) — counters do not fire it.
   - `contact.updated` is the customers table read as contacts (SPEC §18.4); the older `customer.updated` topic is kept as listed.
   - Fixed: the funnel payload asked for a `slug` column funnels do not have, so `funnel.published` never delivered; it now reads `subdomain`.
-- [ ] 179. An MCP server for the store, used by Claude, ChatGPT or any MCP client with an API key: list products and orders, check pages for problems, create a draft funnel.
+- [x] 179. An MCP server for the store, used by Claude, ChatGPT or any MCP client with an API key: list products and orders, check pages for problems, create a draft funnel. (backend done, UI in frontend-handoff.md)
+  - `POST /api/public/v1/mcp` (`modules/mcp/mcpServer.js`): JSON-RPC 2.0 on the MCP Streamable HTTP transport, answered as plain JSON with no event stream or session (GET → 405), written by hand rather than adding an SDK dependency.
+  - Same rules as the public REST API: the store API key authenticates, its creator's role and its scopes must allow each tool, the per-key rate limit applies. Two scopes added: `funnels:read`, `funnels:write`.
+  - Tools call the existing services only (catalog list, public order serializer, funnel issues, funnel create), so nothing bypasses their checks. Errors are tool results with `isError` so the assistant can read them.
 
 Integrations (interface + sandbox + README):
 - [ ] 180. Import products and reviews from AliExpress, Etsy, CJ and YouCan links, as importer adapters beside Shopify.
