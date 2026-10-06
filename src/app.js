@@ -264,6 +264,7 @@ v1.use('/workspaces/:workspaceId/stock-alerts', require('./modules/stockAlerts')
 v1.use('/workspaces/:workspaceId/preorders', require('./modules/preorders').router);
 // Cookie consent (item 196).
 v1.use('/workspaces/:workspaceId/cookie-consent', require('./modules/marketing/cookieConsent').router);
+v1.use('/workspaces/:workspaceId/store-gate', require('./modules/storeGate').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
@@ -347,6 +348,8 @@ v1.use('/store/:workspaceId/gift-cards', require('./modules/giftCards').store);
 v1.use('/store/:workspaceId/blog', require('./modules/blog').store);
 // Back-in-stock alerts (item 194).
 v1.use('/store/:workspaceId/stock-alerts', require('./modules/stockAlerts').store);
+// Store gates: password, coming soon, age check (item 197).
+v1.use('/store/:workspaceId/gate', require('./modules/storeGate').store);
 // The visitor's country and device, for element display rules (item 191).
 v1.get('/store/:workspaceId/visitor-context', require('./core/middleware/publicWorkspace').resolvePublicWorkspace, (req, res, next) => require('./modules/pages/displayRules').visitorContext(req).then((ctx) => res.set('Cache-Control', 'private, no-store').json(ctx), next));
 v1.use('/store/:workspaceId/fonts', require('./modules/fonts/storeFonts').store);

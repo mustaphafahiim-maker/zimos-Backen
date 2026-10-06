@@ -1483,7 +1483,11 @@ interface + `sandbox` adapter + README; migrations stay in 450–499; no prices 
   - opt_in is enforced server-side at both ad-platform exits: the browser-event relay needs `consent.marketing === true` in the batch, and purchase events need the order's `attribution.consent` (from checkout `trackingConsent`). With a country list, visitors from other known countries are not asked (relay country via the IP lookup, orders via ipCountry).
   - Zimos' own first-party analytics are not gated. Default off keeps every store as it was.
   - Verified: invalid mode 422, settings + store exposure, relay none/accepted/rejected, order consent false/true/unanswered, country list EG vs DE, notice mode passes.
-- [ ] 197. Store gates: a password-protected or "coming soon" store with an email sign-up, and an optional age check.
+- [x] 197. Store gates: a password-protected or "coming soon" store with an email sign-up, and an optional age check. (backend done, UI in frontend-handoff.md)
+  - `storeGate/`: `settings.store_gate` (website.publish) + `store_gate_signups` (migration 469). Password stored as scrypt hash; unlock token HMAC-signed with the password version (30 days; changing the password signs everyone out).
+  - Enforced server-side in resolvePublicWorkspace: locked stores answer 423 STORE_LOCKED except the metadata, the gate, analytics/fonts/visitor context, existing customers' areas (orders/*, downloads, learn, subscriptions, affiliate) and funnels unless lockFunnels; staff previews pass.
+  - Age check is a storefront notice (cannot be verified), not a lock.
+  - Verified: password required, lock, products/cart/blog 423 with gate details, metadata/gate/visitor/order tracking open, wrong password, unlock token works, sign-ups deduped, token void after password change, coming soon, hash never returned, reopened. Settings and sign-ups removed.
 - [ ] 198. Purchase limits per product: minimum and maximum quantity per order (and per customer), enforced at checkout and in the cart quote.
 - [ ] 199. Estimated delivery dates: min/max days per governorate/place and shipping option, shown on the product page, cart and checkout, and stored on the order.
 - [ ] 200. Email campaigns: a broadcast to a contact segment (consented contacts only), with the block designer, a test send, scheduling, an unsubscribe link and sent/opened counts.

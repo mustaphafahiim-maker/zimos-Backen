@@ -1864,3 +1864,39 @@ Wording:
 | Privacy policy | سياسة الخصوصية |
 | Off / Notice only / Ask first | مقفول / إشعار بس / اسأل الأول |
 | Ask only visitors from | اسأل بس الزوار من |
+
+## 197. Store gates: password, coming soon, age check — UI: pending
+
+### Dashboard — Store settings → Store access (permission `website.publish`)
+- **GET `/workspaces/:ws/store-gate`** → `{ "mode": "off" | "password" | "coming_soon", "hasPassword": true, "message": "Private sale", "opensAt": null, "lockFunnels": false, "ageCheck": { "enabled": true, "minAge": 18, "message": null } }` (the password is never returned).
+- **PUT** same `{ "mode", "password"? (4–100; required the first time for password mode), "message"? (≤500), "opensAt"? ISO|null, "lockFunnels"?, "ageCheck"?: { "enabled", "minAge" 13–25, "message"? } }`.
+  Changing the password signs every visitor out.
+- **GET `/workspaces/:ws/store-gate/signups`** → `{ signups: [ { email, locale, createdAt, notifiedAt } ], total }` (export as CSV
+  client-side; "Email them when you open" can use the email campaigns of item 200).
+- Card: radio Open / Password / Coming soon; password field; message; opening date; "Also lock funnels" switch;
+  Age check switch + minimum age + message; "Sign-ups ({n})" link.
+
+### Storefront
+- `GET /store/:ws` → `store.gate`: `{ mode, message, opensAt, ageCheck }`. When `mode` ≠ off, every store route except the
+  gate's answers **423 `STORE_LOCKED`** with `details.gate` — show the gate page instead of the store:
+  - password: message + password field → **POST `/store/:ws/gate/unlock`** `{ password }` → `{ token, expiresInSeconds }` (30 days);
+    send it as header **`X-Store-Gate`** on every store call (localStorage). 422 `WRONG_PASSWORD`.
+  - coming soon: message, countdown to `opensAt` if set, and the email form.
+  - both: **POST `/store/:ws/gate/signup`** `{ email, locale? }` → 201 `{ signedUp: true }` (same email twice is fine).
+- Still open while locked: order tracking and payment returns, downloads, courses, subscriptions, affiliate portal,
+  analytics events, fonts, visitor context — and funnels unless `lockFunnels`. Staff previews (X-Store-Preview) pass.
+- Age check (`ageCheck.enabled`): a full-screen "Are you {minAge} or older?" before entering (Yes → remember for the
+  session; No → a "Sorry" screen). It is the shopper's own answer, not a lock.
+
+Wording:
+| en | ar |
+|---|---|
+| This store is password protected | المتجر ده محمي بباسورد |
+| Enter password | اكتب الباسورد |
+| Opening soon | هنفتح قريب |
+| Tell me when you open | بلغني لما تفتحوا |
+| Are you {n} or older? | عندك {n} سنة أو أكتر؟ |
+| Yes / No | أيوه / لأ |
+| Store access | الدخول للمتجر |
+| Open / Password / Coming soon | مفتوح / بباسورد / قريبًا |
+| Also lock funnels | اقفل الفانلز كمان |
