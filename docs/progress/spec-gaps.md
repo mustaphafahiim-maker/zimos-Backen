@@ -1271,7 +1271,12 @@ Design (page builder):
 - [x] 157. The full element Style tab (SPEC §9.3): background gradient and image, height and min/max sizes, custom shadow (inner/outer, x, y, blur, spread, colour), overflow, cursor, and visibility on mobile portrait/landscape.
 - [x] 158. Entrance animations per element (fade, slide, zoom; delay, duration; respects reduced motion).
 - [x] 159. Fonts: Google Fonts for the store and per element, plus the merchant's uploaded fonts (woff2).
-- [ ] 160. Editable storefront texts per language: button labels, form errors, cart/checkout/bundle wording.
+- [x] 160. Editable storefront texts per language: button labels, form errors, cart/checkout/bundle wording. (backend done, UI in frontend-handoff.md)
+  - Only overrides are stored, in `settings.storefront_texts` = { locale: { "section.key": text } }; the defaults stay in the storefront dictionary, so new storefront labels need no backend change.
+  - Languages are the translation module's list (ar, en, fr, es, it, de), not only ar/en/fr, so a store's extra languages can be reworded too.
+  - Keys are checked by shape (2–4 dot parts), not against a list: the dictionary lives in the frontend repo and changes there; the storefront ignores unknown keys.
+  - PUT replaces the whole object; a blank text drops the override. Plain text only, 500 characters, 400 per language; `{arg}` placeholders kept for function entries.
+  - `GET /store/:ws` exposes every language as `storefrontTexts` (small, cached 60 s like `customFonts`); the storefront picks the shopper's.
 - [ ] 161. Store scripts targeted by position (head, body start, body end) and by page type (all, home, collection, product, checkout, thank you).
 
 Commerce:

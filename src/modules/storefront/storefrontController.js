@@ -24,7 +24,9 @@ const getStore = asyncHandler(async (req, res) => {
   const store = await require('../translations/moreTexts').localizeStore(req, await cache.cached(ws, 'store', () => service.getStorefront(ws)));
   // The store's uploaded fonts, for its @font-face rules (fonts/storeFonts.js).
   const customFonts = await cache.cached(ws, 'fonts', () => require('../fonts/storeFonts').publicList(ws));
-  res.json({ store: { ...store, customFonts } });
+  // The merchant's rewording of the storefront's labels, per language (storefront/storefrontTexts.js).
+  const storefrontTexts = await cache.cached(ws, 'texts', () => require('./storefrontTexts').get(ws));
+  res.json({ store: { ...store, customFonts, storefrontTexts } });
 });
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.
