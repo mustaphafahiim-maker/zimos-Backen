@@ -152,6 +152,8 @@ module.exports = {
       reason: Joi.string().trim().max(500).allow('', null).optional(),
       // → needs_follow_up: which of the two it is. Defaults to unreachable.
       followUp: Joi.string().valid('unreachable', 'postponed').optional(),
+      // → needs_follow_up: when the customer asked to be called back (cod/confirmationService.js).
+      callbackAt: require('../cod/confirmationValidation').callbackAt.optional(),
       // → cancelled, on an order booked with a courier that has no cancel API.
       acknowledgeManualCancel: Joi.boolean().optional(),
       // A shipping stage on an order with no shipment yet: the manual

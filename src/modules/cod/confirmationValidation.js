@@ -9,8 +9,16 @@ const taskParams = Joi.object({ workspaceId: uuid.required(), taskId: uuid.requi
 // ENUM column, so a new channel needs no migration.
 const CHANNELS = ['call', 'whatsapp', 'other'];
 const channel = Joi.string().valid(...CHANNELS);
+// A callback time the customer gave: in the future, at most 60 days ahead.
+const CALLBACK_MAX_DAYS = 60;
+const callbackAt = Joi.date()
+  .iso()
+  .greater('now')
+  .custom((value, helpers) => (value.getTime() > Date.now() + CALLBACK_MAX_DAYS * 864e5 ? helpers.message(`"callbackAt" must be within ${CALLBACK_MAX_DAYS} days`) : value));
 
 module.exports = {
+  // Shared with the order page's "needs follow-up" move (orders/orderValidation.js).
+  callbackAt,
   CHANNELS,
   channel,
   listQueue: {
@@ -54,6 +62,8 @@ module.exports = {
       notes: Joi.string().max(1000).allow('').optional(),
       rejectionReason: Joi.string().max(300).when('outcome', { is: 'rejected', then: Joi.required() }),
       channel: channel.optional(),
+      // "Call me tomorrow at 5" (postponed or unreachable): the task is due again then. Future, within 60 days.
+      callbackAt: callbackAt.when('outcome', { is: Joi.valid('postponed', 'unreachable'), then: Joi.optional(), otherwise: Joi.forbidden() }),
     }),
   },
   correction: {

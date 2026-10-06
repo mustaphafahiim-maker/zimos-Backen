@@ -57,14 +57,14 @@ async function latestLiveShipment(workspaceId, orderId) {
 }
 
 /** unreachable / postponed recorded from the order page, as the queue would record it. */
-async function followUp(workspaceId, orderId, { outcome, reason }, req) {
+async function followUp(workspaceId, orderId, { outcome, reason, callbackAt }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!order) throw new NotFoundError('Order');
     confirmationService.assertOrderOpen(order);
     const task = await confirmationService.openTaskForOrder(workspaceId, order.id, transaction);
     await confirmationService.assertMayWorkFromOrder(task, req, transaction);
-    await confirmationService.applyOutcome(task, order, { outcome, notes: reason, source: 'order_page' }, req, transaction);
+    await confirmationService.applyOutcome(task, order, { outcome, notes: reason, callbackAt, source: 'order_page' }, req, transaction);
   });
 }
 
@@ -218,7 +218,7 @@ async function changeStage(workspaceId, orderId, data, req) {
   } else if (to === 'ready_to_ship') {
     await confirmationService.confirmFromOrder(workspaceId, orderId, { notes: reason || undefined }, req);
   } else if (to === 'needs_follow_up') {
-    await followUp(workspaceId, orderId, { outcome: data.followUp || 'unreachable', reason }, req);
+    await followUp(workspaceId, orderId, { outcome: data.followUp || 'unreachable', reason, callbackAt: data.callbackAt }, req);
   } else if (to === 'pending_confirmation') {
     await backToQueue(workspaceId, orderId, { reason }, req);
   } else {

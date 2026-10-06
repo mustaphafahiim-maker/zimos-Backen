@@ -450,3 +450,37 @@ Analytics: the Fulfillment role has no `analytics.view` on the backend (matches 
 
 UI: show "Book courier" (order page and the list's bulk bar) to users with `orders.manage` **or** `shipping.manage`;
 keep the other bulk actions behind `orders.manage`.
+
+---
+
+## Frontend request — "postponed" with a callback time — done
+
+From `docs/ux/backend-requests.md` (U-31). «كلّمني بكرة الساعة ٥» is kept and drives when the order is due again.
+
+**POST `/workspaces/:ws/confirmation-tasks/:taskId/outcome`** (permission `orders.confirm`, agent holding the task):
+```json
+{ "outcome": "postponed", "notes": "كلمني بكرة الساعة ٥", "callbackAt": "2026-10-07T14:00:00.000Z" }
+```
+- `callbackAt`: ISO date-time, in the future, at most 60 days ahead; allowed with `postponed` and `unreachable` only
+  (422 `"callbackAt" is not allowed` with confirmed/rejected; `must be greater than "now"`; `must be within 60 days`).
+- The task is due again exactly then: `nextRetryAt = callbackAt` (the queue already sorts and counts by it;
+  "due now" excludes it until then). Without `callbackAt` the defaults stay (postponed +24h, unreachable +4h).
+- Answer/task objects (queue list, task, `order.confirmationTask`) now carry **`callbackAt`** (null when none).
+  The `order.postponed` / `order.unreachable` event payload carries `callbackAt` too (for reminders/automations).
+
+**PATCH `/workspaces/:ws/orders/:orderId/status`** `{ "status": "needs_follow_up", "followUp": "postponed", "callbackAt": "…" }`
+— the same from the order page.
+
+UI:
+- Queue outcome "Postponed" (and "No answer"): a "Call back at" picker — quick chips (In 1 hour, Tonight 8 pm,
+  Tomorrow 10 am, Tomorrow 5 pm) plus date + time; send in UTC ISO; show in the store's local time.
+- Queue rows and the order's confirmation card: "Call back {relative time}" badge when `callbackAt` is set; highlight
+  when due (`callbackAt <= now`).
+
+Wording:
+| en | ar |
+|---|---|
+| Call back at | يتكلم تاني الساعة |
+| In 1 hour / Tonight 8 pm / Tomorrow 10 am / Tomorrow 5 pm | بعد ساعة / النهارده ٨ بالليل / بكرة ١٠ الصبح / بكرة ٥ العصر |
+| Call back {time} | يتكلم تاني {time} |
+| Callback due | معاد المكالمة جه |
