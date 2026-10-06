@@ -1586,7 +1586,10 @@ social proof, no fake reviews, no call centre, no unofficial WhatsApp. A store m
   - modules/productQuestions + migration 482. Pre-moderated: nothing a shopper writes is public until the store answers and publishes it, so no spam or made-up content is shown. Asker email private; 5 questions per IP per hour.
   - New merchant notification product.question (products.manage). The answer email goes once to the asker — a reply to their own question, not marketing (§21 holds).
   - Verified: ask (+ validation), hidden before answer, publish without answer refused, answer publishes + one email, hide, public list without emails, notifications.
-- [ ] 213. License keys for digital products: a product sells codes from a pool the merchant uploads; a paid order gets its codes (email and order page); stock = codes left; low-pool alert.
+- [x] 213. License keys for digital products: a product sells codes from a pool the merchant uploads; a paid order gets its codes (email and order page); stock = codes left; low-pool alert. (backend done, UI in frontend-handoff.md)
+  - Mostly already built under SPEC §18.2 (digital/digitalService: the pool, drawing on payment, late filling, codes in the delivery email and download page). The gap pass missed it because it searched for "license_key"; noted so the next pass searches by feature, not by one spelling.
+  - Added: digital/codePoolAlerts.js. After a paid order draws codes (afterCommit of the payment), stock.low notifications go out once a day per product, for "orders waiting for codes" or "pool at or below settings.license_codes_low_at" (default 5). Plus GET/PUT /digital/code-alerts.
+  - Verified: duplicates skipped, codes drawn (2), low alert, waiting alert with 2 missing, late fill on adding codes.
 - [ ] 214. Gift wrap and gift message at checkout: an optional wrap with the merchant's price and a message from the shopper, on the order and the packing slip, with the prices hidden on a gift slip.
 - [ ] 215. Mix-and-match box: "any 3 from this collection for a set price" built by the shopper, priced by the server at checkout.
 - [ ] 216. Holiday mode: the store keeps showing but stops taking orders between dates (or takes them with a "ships after" notice), with a message.

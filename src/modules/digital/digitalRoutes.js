@@ -52,6 +52,8 @@ staff.get('/files', validate({ params: Joi.object(ws) }), view, asyncHandler(asy
 staff.post('/files', manage, acceptFile, requireStorageRoom(), asyncHandler(async (req, res) => res.status(201).json({ file: await service.uploadFile(wsId(req), req.file, req) })));
 // Large files, uploaded in parts straight to storage (multipartUploads.js).
 staff.use('/files/multipart', require('./multipartUploads').router);
+// When to warn that a licence code pool runs low (codePoolAlerts.js, item 213).
+staff.use('/code-alerts', require('./codePoolAlerts').router);
 staff.delete(
   '/files/:fileId',
   validate({ params: Joi.object({ ...ws, fileId: uuid.required() }) }),

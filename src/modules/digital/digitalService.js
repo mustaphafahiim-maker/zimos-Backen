@@ -404,6 +404,10 @@ async function onOrderPaid(workspaceId, orderId, outer) {
       created.push(grant);
     }
 
+    // Code pools that just gave codes are checked once the payment is saved (codePoolAlerts.js, item 213).
+    const coded = created.filter((g) => g.type === 'license_codes').map((g) => g.productId);
+    if (coded.length) (outer || transaction).afterCommit(() => require('./codePoolAlerts').checkPools(workspaceId, coded));
+
     if (created.length > 0) {
       const allDigital = items.every((i) => digitalIds.includes(i.productId));
       if (allDigital) {

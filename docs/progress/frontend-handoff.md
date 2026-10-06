@@ -2334,3 +2334,15 @@ still reflects that variant only. The per-item product request can go.
 ### Screens
 - Product page (storefront): «أسئلة وأجوبة» / "Questions & answers" list + «اسأل سؤال» / "Ask a question" form (question, name, email optional «هنبلغك لما نرد» / "We'll tell you when we answer"); after sending: «وصلنا سؤالك، هيظهر بعد ما نرد عليه» / "Got it — it will appear once we answer".
 - Dashboard: «الأسئلة» / "Questions" inbox (pending count badge, filters), answer box with «انشر» / "Publish" / «اخفي» / "Hide"; a «أسئلة» tab on the product page.
+
+## 213. Licence keys for digital products — UI: pending (only the alert is new)
+
+Already in the code from SPEC §18.2 (`modules/digital`): delivery type `license_codes`, pasting codes
+(`POST /workspaces/:ws/digital/products/:id/codes`), listing and stock (`GET …/codes`), one code per unit drawn when an order is paid,
+codes filled in later for paid orders that were waiting, and the codes on the download page and in the delivery email.
+
+New:
+- `GET /workspaces/:ws/digital/code-alerts` (`products.view`) → `{ lowAt: 5 }`; `PUT` (`products.manage`) `{ lowAt: 0–100000 }`.
+- After a paid order draws codes, the team gets a `stock.low` notification (once a day per product): «طلبات مستنية أكواد: …» / "Orders waiting for codes: …" (`data.waitingCodes`) when the pool ran out, else «الأكواد قربت تخلص: …» / "Codes running low: …" when at most `lowAt` are left. Link `/catalog/:productId?tab=digital`.
+
+Screen: digital product → Codes tab: «نبّهني لما يفضل» / "Warn me when … codes are left" (lowAt), and a red banner when `waitingCodes > 0` «في طلبات مستنية أكواد — أضف أكواد» / "Orders are waiting for codes — add codes".
