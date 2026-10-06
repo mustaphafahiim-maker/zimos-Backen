@@ -168,6 +168,8 @@ const checkout = asyncHandler(async (req, res) => {
     const inviteShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
     ({ items, referral } = await require('../customerReferrals').applyAtCheckout(workspace, items, referralCode, orderBody, inviteShopper));
   }
+  // A signed-in tax-exempt business customer pays no added tax (businessCustomers/, item 228).
+  await require('../businessCustomers').markCheckout(workspaceId, req.headers['x-shopper-token'], orderBody);
   // Free gifts the order earns, added by the server at no charge (freeGifts/, item 208). Funnels keep their own offers.
   if (!orderBody.funnelId) ({ items } = await require('../freeGifts').addGifts(workspace, items));
   // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (giftOptions, item 214).

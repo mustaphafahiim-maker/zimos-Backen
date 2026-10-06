@@ -2635,3 +2635,21 @@ Body for create / edit / preview:
 - Editor: name, what's on sale («منتجات» / "Products", «أصناف» / "Variants", «تشكيلة» / "Collection" pickers), «خصم %» / "% off", «خصم مبلغ» / "Amount off", «سعر ثابت» / "Set price", start / end date-time (store time), «اعرض السعر القديم مشطوب» / "Show the old price crossed out", and the preview table (price → sale price).
 - Detail: per variant old → new and state; «وقّف التخفيض» / "Stop sale" (confirm «الأسعار هترجع زي ما كانت» / "Prices go back now"), «إلغاء» / "Cancel" before it starts.
 - Product page in the dashboard: a note when the variant is in a running sale «في تخفيض لحد …» / "On sale until …".
+
+## 228. Business customers (company, tax ID, tax exemption) — UI: pending
+
+### Dashboard — `/api/v1/workspaces/:ws/customers/:customerId/business` (read `customers.view`, change `customers.manage`)
+- `GET` → `{ companyName, taxId, taxExempt, taxExemptNote }`.
+- `PUT` any of `{ companyName ≤ 200, taxId ≤ 40, taxExempt: boolean, taxExemptNote ≤ 300 }` (empty string = clear) → the same.
+
+### Storefront — `/api/v1/store/:ws/account/business` (X-Shopper-Token; 401 `SHOPPER_NOT_SIGNED_IN`)
+- `GET` → `{ companyName, taxId, taxExempt }`; `PUT { companyName?, taxId? }` → the same. Changing the tax ID of an exempt customer turns the exemption off until the store checks it again.
+
+### Behaviour
+- Only the store sets `taxExempt`. It applies to an order placed by that customer **signed in** (checkout with X-Shopper-Token, order under their phone), or entered by the team for them. A guest checkout with the same phone is taxed. Exempt = no tax added (a price that includes tax is not lowered).
+- The order's `contactSnapshot` carries `company`, `taxId` and `taxExempt: true` when they apply; the invoice prints them under "Bill to" («Tax ID: …», «Tax exempt / معفى من الضريبة»).
+
+### Screens
+- Customer page → «بيانات الشركة» / "Business details": company, tax ID, toggle «معفى من الضريبة» / "Tax exempt" with a note («شوفت شهادة الإعفاء رقم …» / "Exemption certificate seen").
+- Storefront account → «بيانات الشركة» / "Company details": company name «اسم الشركة», tax ID «الرقم الضريبي», and a badge «معفى من الضريبة» / "Tax exempt" when set.
+- Checkout (signed in, exempt): the tax line shows «معفى» / "Exempt"; order page / invoice: company and tax ID under the customer.

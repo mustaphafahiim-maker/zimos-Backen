@@ -69,6 +69,10 @@ function drawInvoice(doc, { order, invoice, workspace }) {
   doc.fillColor('#000');
   y += 12;
   y = drawText(doc, contact.fullName || '—', { x: left, y, width, size: 11, bold: true, align });
+  // A business customer (businessCustomers/, item 228).
+  if (contact.company) y = drawText(doc, contact.company, { x: left, y, width, size: 10, bold: true, align });
+  if (contact.taxId) y = drawText(doc, `Tax ID: ${contact.taxId}`, { x: left, y, width, size: 9, align, direction: 'ltr' });
+  if (contact.taxExempt) y = drawText(doc, 'Tax exempt / معفى من الضريبة', { x: left, y, width, size: 9, align });
   if (contact.phone) y = drawText(doc, contact.phone, { x: left, y, width, size: 10, align, direction: 'ltr' });
   if (addressText) y = drawText(doc, addressText, { x: left, y, width, size: 10, align });
   y += 14;

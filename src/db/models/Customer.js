@@ -12,6 +12,11 @@ module.exports = (sequelize, DataTypes) => {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       workspaceId: { type: DataTypes.UUID, allowNull: false, field: 'workspace_id' },
       phoneNormalized: { type: DataTypes.STRING(32), allowNull: false, field: 'phone_normalized' },
+      // A business customer (migration 491, modules/businessCustomers).
+      companyName: { type: DataTypes.STRING(200), allowNull: true, field: 'company_name' },
+      taxId: { type: DataTypes.STRING(40), allowNull: true, field: 'tax_id' },
+      taxExempt: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'tax_exempt' },
+      taxExemptNote: { type: DataTypes.STRING(300), allowNull: true, field: 'tax_exempt_note' },
       phoneRaw: { type: DataTypes.STRING(32), allowNull: true, field: 'phone_raw' },
       alternatePhone: { type: DataTypes.STRING(32), allowNull: true, field: 'alternate_phone' },
       email: { type: DataTypes.STRING(255), allowNull: true },

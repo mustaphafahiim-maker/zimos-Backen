@@ -478,13 +478,17 @@ async function createOrder(
     const chosenShipping = await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
     const shippingAmount = chosenShipping ? chosenShipping.amount : shipping.amount;
 
-    const { taxAmount } = await calculateTax(workspaceId, {
+    // A tax-exempt business customer pays no added tax (businessCustomers/, item 228).
+    const taxExempt = require('../businessCustomers').exemptFor(customer, payload, req);
+    let { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
       lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
       shippingAmount,
       transaction,
     });
+
+    if (taxExempt) taxAmount = 0;
 
     // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
     const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction, pricedLines[0].currency);
@@ -509,7 +513,7 @@ async function createOrder(
         paymentAdjustmentAmount: paymentAdjustment.amount,
         paymentAdjustmentLabel: paymentAdjustment.label,
         ...(await fxService.baseFieldsFor(workspaceId, { currency: pricedLines[0].currency, totalAmount }, transaction)),
-        contactSnapshot: contact,
+        contactSnapshot: require('../businessCustomers').withBusiness(contact, customer, taxExempt),
         shippingAddressSnapshot: shippingAddress || null,
         discountsSnapshot,
         notes: notes || null,
