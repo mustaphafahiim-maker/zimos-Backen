@@ -1302,7 +1302,12 @@ Commerce:
   - Sheet prices are in major units (what merchants type), converted with two minor digits; a bulk `PUT …/prices` saves the prices table.
   - A hidden place of the store's list, or an unknown `placeId`, is refused at checkout.
   - Platform cities get prices by copying the platform list into the store's list (item 163), rather than a second price table.
-- [ ] 165. A file-upload field in the checkout form, and an optional billing address ("same as shipping").
+- [x] 165. A file-upload field in the checkout form, and an optional billing address ("same as shipping"). (backend done, UI in frontend-handoff.md)
+  - The file field is a custom field type `file` in the existing form builder; the answer is a shopper-upload id, checked to be this visitor's (X-Visitor-Id), pending and unexpired, and attached to the order once it exists (`checkout/checkoutExtras.js`).
+  - Photos only (JPEG/PNG/WebP, re-encoded), as for page forms: other files have no step that makes a stranger's file safe to open in the dashboard.
+  - The order keeps the photo in `checkoutFields` as `{ type: 'file', uploadId }`; the order page adds a signed link per read.
+  - Billing: `checkout_settings.billing_address` on/off; unticked "same as shipping" requires country, city and address line. Stored only when different (`orders.billing_address_snapshot`, migration 453); null means same as shipping.
+  - Attaching and storing run after the order commits and never fail it (like the form answers).
 - [ ] 166. Bulk actions on funnels: publish, pause, duplicate and delete several at once.
 
 Tracking and analytics:

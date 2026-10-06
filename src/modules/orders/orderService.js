@@ -842,6 +842,8 @@ async function getOrder(workspaceId, orderId) {
   const json = order.toJSON();
   // Shoppers' photos are shown through short-lived signed links, made per read.
   await presentOrderItems(workspaceId, json.items);
+  // Photos the shopper gave in the checkout form (checkout/checkoutExtras.js).
+  json.checkoutFields = require('../checkout/checkoutExtras').presentCheckoutFields(json.checkoutFields);
   // Each line's product picture and the funnel's name (orderListDecor.js).
   await require('./orderListDecor').decorateOne(workspaceId, json);
   // A funnel offer the shopper took after this order had left its offer

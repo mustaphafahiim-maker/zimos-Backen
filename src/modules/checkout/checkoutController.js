@@ -45,7 +45,8 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, ...orderBody } = req.body;
+  // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -56,6 +57,8 @@ const checkout = asyncHandler(async (req, res) => {
   await require('../shipping/shippingPlaces').assertDeliverable(workspace, req.body.shippingAddress);
   // A hidden or unknown place of the store's own list (places/placePricing.js).
   await require('../places/placePricing').assertDeliverable(workspace.id, req.body.shippingAddress);
+  // Photo answers and the billing address, checked now and saved with the order (checkoutExtras.js).
+  const extras = await require('./checkoutExtras').prepare(workspace, req);
 
   // A manual transfer (the whole order, or a COD order's deposit) is checked
   // here, before any cart work; it is not an online (gateway) payment.
@@ -158,6 +161,7 @@ const checkout = asyncHandler(async (req, res) => {
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
+    await require('./checkoutExtras').apply(order, extras);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
     await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
@@ -181,6 +185,7 @@ const checkout = asyncHandler(async (req, res) => {
   );
 
   await saveCheckoutAnswers(order, workspace, formFields);
+  await require('./checkoutExtras').apply(order, extras);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
   await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 

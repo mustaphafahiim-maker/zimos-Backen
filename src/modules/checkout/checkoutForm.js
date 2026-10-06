@@ -95,7 +95,8 @@ const fieldSchema = Joi.object({
   enabled: Joi.boolean().required(),
   required: Joi.boolean().required(),
   // Custom fields only.
-  type: Joi.string().valid('text', 'choice').optional(),
+  // 'file': a photo the shopper uploads first (checkoutExtras.js).
+  type: Joi.string().valid('text', 'choice', 'file').optional(),
   options: Joi.array().items(Joi.string().trim().min(1).max(80)).max(20).optional(),
 });
 
@@ -109,6 +110,8 @@ const checkoutFormSettingsKeys = {
   thank_you_message: Joi.string().trim().max(500).allow(null, '').optional(),
   auto_select_region: Joi.boolean().allow(null).optional(),
   auto_select_variant: Joi.boolean().allow(null).optional(),
+  // 'on' asks for a billing address, "same as shipping" ticked by default (checkoutExtras.js).
+  billing_address: Joi.string().valid('off', 'on').allow(null).optional(),
 };
 
 /** What the checkout body may carry for the fields with no column of their own. */
@@ -169,14 +172,14 @@ function resolveCheckoutForm(workspace) {
 
   for (const s of storedFields || []) {
     if (!CUSTOM_KEY.test(s.key)) continue;
-    const type = s.type === 'choice' ? 'choice' : 'text';
+    const type = s.type === 'choice' || s.type === 'file' ? s.type : 'text';
     const options = type === 'choice' && Array.isArray(s.options) ? s.options.map(text).filter(Boolean) : [];
     fields.push({
       key: s.key,
       label: cleanLocalized(s.label),
       helpText: cleanLocalized(s.helpText),
       position: Number.isInteger(s.position) ? s.position : 50,
-      enabled: s.enabled === true && (type === 'text' || options.length > 0),
+      enabled: s.enabled === true && (type !== 'choice' || options.length > 0),
       required: s.enabled === true && s.required === true,
       custom: true,
       type,
@@ -205,6 +208,7 @@ function resolveCheckoutForm(workspace) {
     thank_you_message: text(stored.thank_you_message) || null,
     auto_select_region: bool('auto_select_region'),
     auto_select_variant: bool('auto_select_variant'),
+    billing_address: stored.billing_address === 'on' ? 'on' : 'off',
   };
 }
 
@@ -276,7 +280,9 @@ function snapshotFormFields(workspace, formFields) {
   for (const f of form.fields) {
     if (!f.enabled || !EXTRA_KEY.test(f.key)) continue;
     const value = text(formFields[f.key]);
-    if (value) out.push({ key: f.key, label: f.label, value });
+    // A photo is kept by its upload id; staff open it through a signed link (checkoutExtras.js).
+    if (value && f.type === 'file') out.push({ key: f.key, label: f.label, type: 'file', uploadId: value, value: '📎' });
+    else if (value) out.push({ key: f.key, label: f.label, value });
   }
   return out;
 }

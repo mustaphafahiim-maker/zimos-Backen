@@ -362,3 +362,53 @@ Wording:
 | City/area price | سعر المدينة/المنطقة |
 | Prices saved | الأسعار اتحفظت |
 | The store does not deliver to this area | المتجر مش بيوصل للمنطقة دي |
+
+---
+
+## 165. Checkout file field and optional billing address — UI: pending
+
+### Settings (existing endpoint `PATCH /workspaces/:ws`, `settings.checkout_settings`)
+- A custom field (`custom_1` … `custom_5`) may now have `"type": "file"` (besides `text`, `choice`):
+  ```json
+  { "settings": { "checkout_settings": { "fields": [ { "key": "custom_1", "enabled": true, "required": true, "type": "file",
+      "label": { "ar": "صورة البطاقة", "en": "ID photo" } } ], "billing_address": "on" } } }
+  ```
+- `billing_address`: `"off"` (default) | `"on"`.
+- `GET /store/:ws` → `store.checkout.fields[]` carries `type: "file"`, and `store.checkout.billing_address`.
+
+### Storefront checkout
+**File field** (photos only: JPEG, PNG, WebP; up to 15MB raw):
+1. On pick, `POST /store/:ws/uploads` (multipart `file`, header `X-Visitor-Id: <the visitor id the storefront already keeps>`)
+   → `{ "upload": { "uploadId": "…", "mime": "image/jpeg", "width": 20, "height": 20, "expiresAt": "…" } }`.
+   Show a thumbnail (from the local file) and "Change"/"Remove".
+2. Send the id as the answer: `formFields: { "custom_1": "<uploadId>" }`, and send the **same `X-Visitor-Id` header on the checkout request**.
+- Errors: 422 `formFields.custom_1` "\"custom_1\" is required" (required and empty); "The photo is missing or has expired — upload it again"
+  (wrong visitor, expired after 48h, or unknown id); upload 415 `UNSUPPORTED_MEDIA_TYPE`, 429 `TOO_MANY_PENDING_UPLOADS`.
+
+**Billing address** (when `billing_address = "on"`): a checkbox "Billing address same as shipping", ticked by default.
+Unticked → a billing block: full name (optional), country, region, city, area, address line, postal code; send
+```json
+{ "billingSameAsShipping": false,
+  "billingAddress": { "fullName": "Co LLC", "country": "EG", "province": "الجيزة", "city": "الدقي", "addressLine": "12 Tahrir", "postalCode": "" } }
+```
+`country`, `city`, `addressLine` are required when unticked (422 fields `billingAddress.city` etc.). Ticked: send nothing (or `true`).
+
+### Dashboard
+- **Settings → Checkout form**: the custom-field type select gains "Photo upload"; a switch
+  "Ask for a billing address" (`billing_address` on/off).
+- **Order page**: `order.checkoutFields[]` entries with `type: "file"` carry `url` (signed, short-lived) and
+  `urlExpiresAt` — show a thumbnail that opens the photo; `value` is "📎" (also in the order note line).
+  `order.billingAddressSnapshot` (null = same as shipping) → a "Billing address" card under the shipping one;
+  when null show "Same as shipping" only if the store has billing on.
+
+Wording:
+| en | ar |
+|---|---|
+| Photo upload | رفع صورة |
+| Upload a photo | ارفع صورة |
+| Change / Remove | تغيير / حذف |
+| The photo is missing or has expired — upload it again | الصورة مش موجودة أو انتهت صلاحيتها — ارفعها تاني |
+| Ask for a billing address | اطلب عنوان الفاتورة |
+| Billing address same as shipping | عنوان الفاتورة نفس عنوان الشحن |
+| Billing address | عنوان الفاتورة |
+| Same as shipping | نفس عنوان الشحن |

@@ -121,6 +121,8 @@ module.exports = (sequelize, DataTypes) => {
       completionContext: { type: DataTypes.JSONB, allowNull: true, field: 'completion_context' },
       // Answers to the purchase-form fields with no column (checkout/checkoutForm.js).
       checkoutFields: { type: DataTypes.JSONB, allowNull: true, field: 'checkout_fields' },
+      // A billing address other than the shipping one (migration 453, checkout/checkoutExtras.js).
+      billingAddressSnapshot: { type: DataTypes.JSONB, allowNull: true, field: 'billing_address_snapshot' },
     },
     {
       tableName: 'orders',

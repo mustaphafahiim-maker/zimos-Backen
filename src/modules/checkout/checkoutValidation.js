@@ -35,6 +35,8 @@ module.exports = {
     body: Joi.object({
       contact: contact.required(),
       shippingAddress: address.optional(),
+      // "Billing address same as shipping" (checkout/checkoutExtras.js).
+      ...require('./checkoutExtras').billingBodyKeys(Joi),
       // 'card' / 'wallet' go through the store's connected gateway and are
       // refused unless PAYMENTS_ONLINE_ENABLED is on (see checkoutController):
       // with it off the checkout takes cash on delivery only, as it always
