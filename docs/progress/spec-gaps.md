@@ -828,6 +828,26 @@ Product descriptions can be formatted (SPEC §7.1 "description (rich text)"): he
   - In the dashboard (Arabic), Bold wrapped the selection, Numbered list numbered two lines, and Preview showed the numbered list.
   - The cap's description was put back afterwards.
   - Dashboard, storefront and platform-admin typecheck.
+Physical products have a "Track quantity" switch, and variant prices are labelled in the store's own currency (SPEC §7.1 "Inventory: quantity, tracking, disable when out of stock — present them more simply").
+
+- **`products.track_inventory`** (migration 440, default on: every product so far was tracked), `trackInventory` on the product API.
+- **Decision: an untracked product keeps every variant at `allowOverselling = true`** (`catalog/stockTracking.js`).
+  - Everything that decides whether a variant can be sold already asks `allowOverselling || available > 0`: the store, checkout, reservations, order bumps, feeds and the WhatsApp bot. So none of them had to change, and stock movements are still recorded.
+  - Turning tracking off sets every variant to allow overselling. Turning it back on starts them all at "stop at zero"; overselling can then be allowed per variant again.
+  - A variant added to, or edited on, an untracked product keeps allowing overselling.
+- **Low-stock alerts:**
+  - An untracked product raises no `product.low_stock` event (the variant hook checks the product).
+  - The stores overview's low-stock count leaves untracked products out.
+- **Dashboard:**
+  - The product form shows the switch for physical products, with a line saying what it does.
+  - When it is off, creating the product asks for no initial stock and no overselling choice.
+  - The variants table shows "Not tracked" instead of stock, and the variant form hides stock and overselling.
+  - The products list says "Not tracked" for such a product, as it does for digital products and services.
+- **Currency:** the price, compare-at and extra-fee inputs of a new product, and a new variant's price, cost and compare-at, now show the store's currency (`defaultCurrency`, which the backend prices new variants in) instead of a fixed "EGP". An existing variant still shows its own currency.
+- **Tested** on the scratch DB:
+  - Through the API on Demo Cap: untracked set its variant to overselling. Trying to switch overselling off on a variant stayed on. A stock drop across a low-stock threshold raised no event while untracked, the store showed it in stock, and the same drop raised one event once it was tracked again.
+  - In the dashboard (Arabic): turning the switch off and saving showed "غير متتبع" in the variants table and the products list. The new-variant form had no stock or overselling field. With the store's currency set to SAR for the test, the form showed SAR. Turning it back on brought the stock numbers back.
+  - Thresholds, stock movements, the event, the currency and the switch were restored.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1042,7 +1062,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 148. Page settings Details tab: a generic page's address and its title (§9.3).
 - [x] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
 - [x] 150. Formatted product descriptions, sanitized (§7.1).
-- [ ] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
+- [x] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
 - [ ] 152. A currency switcher on attribution, reports and profit (§11.5).
 - [ ] 153. Order export presets in a courier's own layout (§12.3).
 - [ ] 154. The Pinterest tag (§13.1).
