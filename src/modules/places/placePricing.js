@@ -22,10 +22,19 @@ const { AppError } = require('../../core/errors/AppError');
 const RULE = 'store_place_rate';
 const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
+/** The spellings a name may come in: as typed, and the storefront's "<ar> (<en>)" split in two (frontend request). */
+function spellings(name) {
+  const raw = String(name || '').trim();
+  const m = raw.match(/^(.+?)\s*\((.+)\)$/);
+  return m ? [raw, m[1].trim(), m[2].trim()] : [raw];
+}
+
 async function findByName(workspaceId, country, level, parentId, name, transaction) {
   if (!name || !String(name).trim()) return null;
   const rows = await db.StorePlace.findAll({ where: { workspaceId, country, level, parentId: parentId || null }, transaction });
-  return rows.find((r) => same(r.nameAr, name) || same(r.nameEn, name)) || null;
+  const names = spellings(name);
+  // By name (Arabic or English), else by the platform code a region or city carries (e.g. "cairo").
+  return rows.find((r) => names.some((n) => same(r.nameAr, n) || same(r.nameEn, n))) || rows.find((r) => r.geoCode && names.some((n) => same(r.geoCode, n))) || null;
 }
 
 /** The address's places of the store's list: { region, city, area } (any may be null), or null when none matches. */
@@ -60,6 +69,11 @@ async function priceFor(workspaceId, address, transaction) {
     if (p && !p.hidden && p.shippingAmount !== null) return { rule: RULE, amount: p.shippingAmount, placeId: p.id, level };
   }
   return null;
+}
+
+/** Whether any visible place of the store's list carries a price (the quote's `configured`). */
+async function hasPrices(workspaceId, transaction) {
+  return (await db.StorePlace.count({ where: { workspaceId, hidden: false, shippingAmount: { [Op.ne]: null } }, transaction })) > 0;
 }
 
 /** Checkout: refuses an address picked from (or named after) a hidden place of the store's list. */
@@ -103,4 +117,5 @@ function parseSheetPrice(raw, minorDigits = 2) {
   return Math.round(Number(text) * 10 ** minorDigits);
 }
 
-module.exports = { RULE, priceFor, placesOf, assertDeliverable, setPrices, parseSheetPrice };
+module.exports = {
+  hasPrices, RULE, priceFor, placesOf, assertDeliverable, setPrices, parseSheetPrice };

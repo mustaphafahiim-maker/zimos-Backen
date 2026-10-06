@@ -1537,3 +1537,15 @@ Wording:
 | Unavailable | مش متاح |
 | Most wished | الأكتر في المفضلة |
 | {n} shoppers | {n} عميل |
+
+### Shipping quote `configured` with only place prices — done
+`POST /store/:ws/shipping-quote` → `quote.configured` is now **true** when any visible place of the store's own list
+(regions/cities/areas, item 163/164) has a price, even with no governorate rates, default rate, free threshold or zones.
+Before an address is picked such a store answers `rule: "no_rate"`, `amount: 0`, `configured: true` → the storefront can show
+"Calculated once you pick your area" / «بيتحسب بعد ما تختار منطقتك».
+
+### Cart quote with "<ar> (<en>)" governorate — done
+The place-name matching (`placePricing.placesOf`, used by the quote and checkout when no `placeId` is sent) now accepts the
+storefront's "القاهرة (Cairo)" spelling (either half matches), the plain Arabic or English name, and the region/city's
+platform code (`geoCode`, e.g. "cairo"). Verified: a Cairo region price of 65.00 applies to "القاهرة (Cairo)", "القاهرة",
+"Cairo" and "cairo".

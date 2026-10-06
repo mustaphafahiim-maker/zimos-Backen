@@ -78,7 +78,9 @@ async function pricesShipping(workspaceId, shipping) {
   if (shipping.extraFeesAmount > 0) return true;
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'] });
   if (settingsPriceShipping(workspace && workspace.settings)) return true;
-  return (await db.ShippingZone.count({ where: { workspaceId, isActive: true } })) > 0;
+  if ((await db.ShippingZone.count({ where: { workspaceId, isActive: true } })) > 0) return true;
+  // Prices only on the store's own cities/areas still price shipping (frontend request).
+  return require('../places/placePricing').hasPrices(workspaceId);
 }
 
 module.exports = { quote };
