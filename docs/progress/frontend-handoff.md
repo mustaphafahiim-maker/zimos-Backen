@@ -2043,3 +2043,40 @@ Campaign:
 ### Storefront
 Nothing new: the unsubscribe link opens the existing `/unsubscribe?t=…` page, which posts to `/store/:ws/marketing/unsubscribe`
 (now also open while the store is locked by a store gate).
+
+## 201. Gift cards with online payments — UI: pending
+
+`POST /store/:ws/checkout` now takes **`giftCardCode` with online payments** too (card / wallet / any gateway method), not
+only cash on delivery. Bank transfer still refuses it (422 on `giftCardCode`: "A gift card can be used with cash on delivery
+or an online payment").
+
+- The card's part is **held** at checkout and the gateway is asked only for the rest. The response's `giftCard`:
+  `{ "applied": true, "held": true, "amount": "5000", "last4": "LFDM", "balanceAmount": "0", "currency": "EGP" }`
+  (`applied: false` + `reason`: `unusable` | `nothing_due` | `error` | `covers_order_cod_unavailable` — then the gateway charges the
+  full total). `payment.redirectUrl` charges total − card.
+- Paid at the gateway → the order shows two payments (gateway + `gift_card`), `amountPaid = totalAmount`, `paid`.
+- Expired unpaid or cancelled → the hold goes back to the card (card ledger: `hold_released` + `release`).
+- **Switch to cash on delivery** → the card pays its part now; the courier collects the rest.
+- **Card covers the whole order** → no gateway at all: 201 with **`paidByGiftCard: true`**, `order.paymentMethod: "cod"`,
+  `financialState: "paid"`, no `payment` object. (If the store has cash on delivery off, the hold is undone and the gateway
+  charges the full total; `giftCard.reason: "covers_order_cod_unavailable"`.)
+
+Shopper payment status (`GET /store/:ws/orders/:id/payment`) has two new fields: **`giftCardHeld`** (the held amount) and
+**`amountDue`** (total − paid − held). A cash-on-delivery order partly paid by a card or deposit now reads `status: "cod"`
+(it read `paid` before).
+
+Card ledger (`GET /workspaces/:ws/gift-cards/:id` → `transactions[].kind`) has new kinds: `hold` (held for an unpaid online
+order), `hold_released`, `release` (given back). A captured hold reads `redeem` as before.
+
+### Storefront
+- Checkout: show the gift card field for every payment method except bank transfer; after it's applied show
+  «كارت الهدية هيدفع 50 ج.م — هتدفع الباقي 200 ج.م أونلاين» / "Your gift card pays EGP 50 — pay the remaining EGP 200 online".
+- When the response has `paidByGiftCard: true`, go straight to the thank-you page: «كارت الهدية دفع الطلب كله» / "Your gift
+  card paid for the whole order".
+- Payment page / retry: show `amountDue` as the amount to pay and, when `giftCardHeld > 0`, a line «من كارت الهدية: 50 ج.م» /
+  "From gift card: EGP 50".
+- Expired order page: «رجعنا رصيد كارت الهدية» / "Your gift card balance was returned".
+
+### Dashboard
+- Gift card detail ledger: labels for the new kinds — hold «محجوز لطلب» / "Held for an order", release «رجع للكارت» /
+  "Returned to card", hold_released «اتفك الحجز» / "Hold released".

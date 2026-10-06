@@ -218,6 +218,8 @@ async function refundCancelledOrder(event) {
   await db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({ where: { id: p.orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!order) return;
+    // A card only held for an unpaid online payment goes straight back (giftCardHolds.js).
+    await require('./giftCardHolds').release(order.id, transaction, 'order cancelled');
     const payments = await db.Payment.findAll({ where: { workspaceId, orderId: order.id, providerCode: 'gift_card', status: 'captured' }, transaction });
     let refundedNow = 0;
     for (const payment of payments) {
@@ -315,4 +317,4 @@ async function revealCode(workspaceId, id, { resend = false } = {}, req) {
   return { code: pretty(code), sent: Boolean(resend) };
 }
 
-module.exports = { issue, check, assertUsable, redeemOnOrder, credit, refundCancelledOrder, issueForOrder, settingsOf, list, get, update, revealCode, normalize, stateOf };
+module.exports = { findByCode, issue, check, assertUsable, redeemOnOrder, credit, refundCancelledOrder, issueForOrder, settingsOf, list, get, update, revealCode, normalize, stateOf };

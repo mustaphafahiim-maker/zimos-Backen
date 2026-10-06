@@ -193,7 +193,8 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
     method,
     mode: ctx.mode,
     status: OPEN_ATTEMPT,
-    amount: order.totalAmount,
+    // What is left once earlier payments and a held gift card are counted (giftCards/giftCardHolds.js).
+    amount: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('../giftCards/giftCardHolds').heldOn(order.id))),
     currency: order.currency,
     returnUrl,
     expiresAt,
@@ -374,7 +375,13 @@ async function recordPaymentTransaction(account, tx) {
       { transaction }
     );
 
-    const amountPaid = Number(order.amountPaid) + (sameCurrency ? received : 0);
+    // A gift card held at checkout pays its part now, or goes back if the order does not stand (item 201).
+    const holds = require('../giftCards/giftCardHolds');
+    const stands = !platformBlock && (!order.cancelledAt || reopened);
+    const fromCard = stands
+      ? await holds.capture(order, Number(order.totalAmount) - Number(order.amountPaid) - (sameCurrency ? received : 0), transaction)
+      : (await holds.release(order.id, transaction, 'payment on a cancelled order'), 0);
+    const amountPaid = Number(order.amountPaid) + (sameCurrency ? received : 0) + fromCard;
     const updates = { amountPaid, riskFlags: flags };
     if (platformBlock) {
       updates.cancelledAt = order.cancelledAt || new Date();
@@ -536,6 +543,8 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
     if (new Date(locked.paymentExpiresAt).getTime() > Date.now()) return 'not_due';
 
     await releaseStock(locked, transaction, 'order_payment_expired');
+    // A gift card held for it goes back (giftCards/giftCardHolds.js).
+    await require('../giftCards/giftCardHolds').release(locked.id, transaction, 'payment expired');
     await db.Payment.update(
       { status: 'expired' },
       { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction }
@@ -600,6 +609,8 @@ function shopperStatusOf(order) {
   // Paid, but not going ahead: the shopper sees a cancelled order, not a
   // confirmation, and is told nothing about why.
   if (order.cancelledAt && order.cancellationReason === BLOCKED_REASON) return 'cancelled';
+  // Cash on delivery partly paid already (a gift card, a deposit): the courier still collects the rest.
+  if (order.paymentMethod === 'cod' && order.financialState === 'partially_paid' && !order.cancelledAt) return 'cod';
   // A free trial with nothing to pay is paid at 0 once its card is saved (subscriptions/trialCheckout.js).
   if (isPaid(order) && (Number(order.amountPaid) > 0 || (Number(order.totalAmount) === 0 && order.completedAt))) return 'paid';
   if (order.cancelledAt) return order.cancellationReason === EXPIRED_REASON ? 'expired' : 'cancelled';
@@ -625,6 +636,9 @@ async function describeForShopper(order, workspace, preview) {
     paymentMethod: order.paymentMethod,
     totalAmount: Number(order.totalAmount),
     amountPaid: Number(order.amountPaid),
+    // A gift card held for this payment (giftCards/giftCardHolds.js), and what is left to pay.
+    giftCardHeld: await require('../giftCards/giftCardHolds').heldOn(order.id),
+    amountDue: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('../giftCards/giftCardHolds').heldOn(order.id))),
     currency: order.currency,
     expiresAt: order.paymentExpiresAt,
     testMode: Boolean(latest && latest.mode === 'test'),
@@ -827,6 +841,13 @@ async function switchToCod(workspaceId, orderId, token, req) {
     const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
     const riskFlags = [...new Set([...(locked.riskFlags || []), ...codChecks.flags])];
     await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced, riskFlags }, { transaction });
+    // A gift card held for the online payment pays its part now; the courier collects the rest (item 201).
+    const fromCard = await require('../giftCards/giftCardHolds').capture(locked, Number(locked.totalAmount) - Number(locked.amountPaid), transaction);
+    if (fromCard > 0) {
+      const amountPaid = Number(locked.amountPaid) + fromCard;
+      await locked.update({ amountPaid }, { transaction });
+      await setFinancialState(workspaceId, locked.id, amountPaid >= Number(locked.totalAmount) ? 'paid' : 'partially_paid', null, transaction);
+    }
     // Cash on delivery: unpaid, not failed (paymentFailure.js).
     await require('./paymentFailure').reopen(locked, transaction);
     await require('./codSwitchChecks').recordDeposit(locked, codChecks.deposit, transaction);

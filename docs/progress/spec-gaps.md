@@ -1505,5 +1505,12 @@ interface + `sandbox` adapter + README; migrations stay in 450–499; no prices 
   - Unsubscribe: the existing store page and token; the token names the campaign recipient ("r:<id>"). It records the opt-out for the address and phone and withdraws the contact's consent. The store gate leaves /marketing/unsubscribe open.
   - Opens: a signed 1×1 pixel at /api/v1/email-campaigns/open/<token>.gif; the first load counts. Mail apps that block images don't count, so open rates are a lower bound.
   - Also done in this pass (frontend requests): X-Shopper-Token and X-Store-Gate allowed by store CORS; Shopify/WooCommerce apps available (opening the dropship page); import report productIds/results/sourceCurrency/reviewsImported (migration 471); separate LINK_* error codes.
-- [ ] 201. Gift cards with online payments: the gateway attempt charges the total minus the card (follow-up of 189).
+- [x] 201. Gift cards with online payments: the gateway attempt charges the total minus the card (follow-up of 189). (backend done, UI in frontend-handoff.md)
+  - giftCards/giftCardHolds.js: the card's part is held at checkout (off the card's balance at once, a `hold` ledger line), not paid: the order's money only moves when it is really paid. startAttempt charges total − paid − held (retries too).
+  - recordPaymentTransaction captures the holds into `gift_card` payments in the same transaction, before amountPaid and the financial state are set, so the order is `paid` by both. A payment on an order that stays cancelled or blocked releases them instead.
+  - Released on expiry (expireOrder) and on order.cancelled (refundCancelledOrder); idempotent. Switch to COD captures them (up to the repriced total, the rest given back) and sets partially_paid/paid.
+  - Card covering the whole order: the order is switched to COD at once through switchToCod (its COD checks apply) and paid by the card; if COD is refused, the hold is undone and the gateway charges everything.
+  - Shopper status: a COD order partly paid (card or deposit) now reads `cod`, not `paid`; new giftCardHeld/amountDue.
+  - Paid after expiry and reopened: the hold was given back at expiry, so the order is partly paid and the merchant sees it (not retaken from the card).
+  - Verified with the sandbox gateway: part card + gateway paid, expiry release, switch to COD, full-cover, bank transfer refused; data cleaned.
 - [ ] 202. Scheduled reports: a daily or weekly summary email (sales, orders, confirmation and delivery rates, top products) to chosen team members.

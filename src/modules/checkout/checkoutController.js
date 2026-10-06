@@ -65,9 +65,9 @@ const checkout = asyncHandler(async (req, res) => {
   const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
   const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
   if (orderBody.paymentMethod === 'cod') paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: 'cod' });
-  // A gift card goes with cash on delivery: it lowers what the courier collects (giftCards, item 189).
+  // A gift card lowers what the courier collects (COD, item 189) or what the gateway charges (online, item 201).
   if (giftCardCode) {
-    if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery' }], 'Invalid body');
+    if (orderBody.paymentMethod === 'bank_transfer') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery or an online payment' }], 'Invalid body');
     await require('../giftCards/giftCardService').assertUsable(workspaceId, giftCardCode, null);
   }
   if (isOnline && !env.payments.onlineEnabled) {
@@ -202,6 +202,22 @@ const checkout = asyncHandler(async (req, res) => {
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
   await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 
+  // The card's part is held now and taken when the payment lands (giftCards/giftCardHolds.js, item 201).
+  let giftCard = giftCardCode ? await require('../giftCards/giftCardHolds').hold(order, giftCardCode).catch(() => ({ applied: false, reason: 'error' })) : null;
+  if (giftCard && giftCard.coversOrder) {
+    // Nothing left for the gateway: the order goes on as cash on delivery with nothing to collect.
+    try {
+      await online.switchToCod(workspaceId, order.id, prepared.token, req);
+      const paidOrder = await require('../../db/models').Order.findByPk(order.id);
+      const { coversOrder, ...card } = giftCard;
+      return res.status(201).json({ order: { ...paidOrder.toJSON(), items: orderItems }, giftCard: { ...card, held: false }, paidByGiftCard: true });
+    } catch (err) {
+      // COD not offered (or refused): the card goes back and the gateway takes the whole order.
+      await require('../../db/models').sequelize.transaction((t) => require('../giftCards/giftCardHolds').release(order.id, t, 'cash on delivery unavailable'));
+      giftCard = { applied: false, reason: 'covers_order_cod_unavailable' };
+    }
+  }
+
   const attempt = await online.startAttempt(order, {
     provider: prepared.method.provider,
     method: prepared.method.method,
@@ -221,6 +237,7 @@ const checkout = asyncHandler(async (req, res) => {
       expiresAt: order.paymentExpiresAt,
     },
     paymentToken: prepared.token,
+    ...(giftCard ? { giftCard: (({ coversOrder, ...card }) => card)(giftCard) } : {}),
   });
 });
 
