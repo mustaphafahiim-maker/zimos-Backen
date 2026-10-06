@@ -95,7 +95,8 @@ async function createProduct(workspaceId, data, req) {
 
     if (!variantData) return { product };
 
-    const { stockOnHand, ...variantFields } = variantData;
+    // An untracked product's variant sells past its stock (stockTracking.js).
+    const { stockOnHand, ...variantFields } = require('./stockTracking').firstVariant(productData, variantData);
     const variant = await db.ProductVariant.create(
       {
         ...variantFields,
@@ -214,6 +215,8 @@ async function updateProduct(workspaceId, productId, data, req) {
       { ...rest, ...productShippingFields(before, { shippingMode, shippingExtraAmount }) },
       { transaction: t }
     );
+    // "Track quantity" switched: the variants follow (stockTracking.js).
+    await require('./stockTracking').afterProductUpdate(before, product, t);
 
     let cascade;
     if (before.status !== 'archived' && product.status === 'archived') {
@@ -246,7 +249,7 @@ async function createVariant(workspaceId, productId, data, req) {
   // (see catalogController), so every stock change — including the very
   // first one — goes through the one code path that writes an
   // InventoryMovement audit row. Never set it directly here.
-  const { stockOnHand, ...createData } = data;
+  const { stockOnHand, ...createData } = require('./stockTracking').variantFields(product, data);
   const currency = createData.currency || (await require('../currencies/baseCurrency').storeCurrency(workspaceId));
   const variant = await db.ProductVariant.create({ ...createData, currency, workspaceId, productId: product.id, stockOnHand: 0 });
   await recordAudit({
@@ -269,7 +272,10 @@ async function updateVariant(workspaceId, variantId, data, req) {
   // Stock is never mutated through this endpoint — only inventoryService can
   // change stockOnHand/reservedStock, so silently strip those fields even if
   // a caller mistakenly includes them.
-  const { stockOnHand, reservedStock, ...safeData } = data;
+  const { stockOnHand, reservedStock, ...rawData } = data;
+  // A variant of an untracked product keeps selling past its stock (stockTracking.js).
+  const safeData =
+    rawData.allowOverselling === false && (await require('./stockTracking').untracked(variant.productId)) ? { ...rawData, allowOverselling: true } : rawData;
   // A status the merchant sets by hand is theirs, not the product cascade's.
   if (safeData.status) safeData.archivedWithProduct = false;
   await variant.update(safeData);

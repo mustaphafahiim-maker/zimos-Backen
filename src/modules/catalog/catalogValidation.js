@@ -27,6 +27,8 @@ const productFields = {
   slug: Joi.string().max(300),
   description: Joi.string().allow('').max(20000),
   productType: Joi.string().valid('physical', 'digital', 'service'),
+  // "Track quantity" (catalog/stockTracking.js): false, its variants sell past their stock.
+  trackInventory: Joi.boolean(),
   status: productStatus,
   options: Joi.array().items(optionSchema),
   media: Joi.array().items(Joi.object()),

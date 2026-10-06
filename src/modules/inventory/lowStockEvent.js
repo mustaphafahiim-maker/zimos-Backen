@@ -26,6 +26,8 @@ async function afterUpdate(variant, options) {
     const before = available(prev.stockOnHand ?? variant.stockOnHand, prev.reservedStock ?? variant.reservedStock);
     const now = available(variant.stockOnHand, variant.reservedStock);
     if (!(before > threshold && now <= threshold)) return;
+    // A product whose quantity is not tracked never runs low (catalog/stockTracking.js).
+    if (variant.allowOverselling && (await require('../catalog/stockTracking').untracked(variant.productId, options && options.transaction))) return;
     // eslint-disable-next-line global-require
     await require('../../core/outbox/outbox').record(options && options.transaction ? options.transaction : null, 'product.low_stock', {
       workspaceId: variant.workspaceId,
