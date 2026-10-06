@@ -246,6 +246,8 @@ v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 // Google Sheets sync: the account, the sheets, "Sync existing" (modules/sheets, SPEC §16.4).
 // Smart collections: the "All products" collection and a manual re-fill (catalog/smartCollections.js).
 v1.use('/workspaces/:workspaceId/smart-collections', require('./modules/catalog/smartCollections').router);
+// The store's own regions → cities → areas (modules/places).
+v1.use('/workspaces/:workspaceId/store-places', require('./modules/places/storePlaces').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
 v1.use('/workspaces/:workspaceId/integrations/google-sheets', appGate.requireAppForChanges('google_sheets'), require('./modules/sheets/sheetsRoutes').router);
@@ -310,6 +312,7 @@ v1.use('/store/:workspaceId/subscriptions', customerSubscriptionRoutes.portal);
 v1.use('/store/:workspaceId/shoppable-images', shoppableImageRoutes.store);
 v1.use('/store/:workspaceId/learn', courseRoutes.portal);
 // A store's uploaded fonts, served to any origin (modules/fonts).
+v1.use('/store/:workspaceId/places', require('./modules/places/storePlaces').store);
 v1.use('/store/:workspaceId/fonts', require('./modules/fonts/storeFonts').store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);

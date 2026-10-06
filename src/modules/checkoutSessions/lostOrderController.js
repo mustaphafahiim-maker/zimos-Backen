@@ -25,6 +25,9 @@ const address = Joi.object({
   province: Joi.string().max(100).allow(null, '').optional(),
   city: Joi.string().max(100).required(),
   addressLine: Joi.string().max(500).required(),
+  // The third level of the store's places, and the place picked from its list (places/storePlaces.js).
+  area: Joi.string().max(120).allow(null, '').optional(),
+  placeId: Joi.string().uuid().allow(null).optional(),
   postalCode: Joi.string().max(20).allow(null, '').optional(),
   notes: Joi.string().max(500).allow(null, '').optional(),
 });

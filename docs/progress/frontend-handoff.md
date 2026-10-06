@@ -224,3 +224,86 @@ Wording:
 | Refresh | تحديث |
 | Create "All products" collection | اعمل مجموعة "كل المنتجات" |
 | This collection fills itself from its rules. | المجموعة دي بتتملى لوحدها من الشروط بتاعتها. |
+
+---
+
+## 163. The store's own places: regions → cities → areas — UI: pending
+
+A store keeps its own three-level place list per country (typed, imported from
+a sheet, or copied from the platform's governorates and cities), and the
+checkout picks the address from it in three dropdowns.
+
+### Staff endpoints (permission `shipping.manage`)
+
+**GET `/workspaces/:ws/store-places?country=EG`** (country defaults to the store's)
+
+```json
+{ "country": "EG", "counts": { "region": 2, "city": 2, "area": 3 }, "max": 5000,
+  "places": [ { "id": "…", "level": "region", "parentId": null, "nameAr": "القاهرة", "nameEn": "Cairo", "geoCode": "cairo",
+               "sortOrder": 1, "hidden": false,
+               "children": [ { "id": "…", "level": "city", "nameAr": "مدينة نصر", "nameEn": "Nasr City", "geoCode": "cairo.nasr-city",
+                               "children": [ { "id": "…", "level": "area", "nameAr": "الحي العاشر", "nameEn": "10th District", "geoCode": null } ] } ] } ] }
+```
+Areas have no `children` key.
+
+**POST `/workspaces/:ws/store-places`** → 201 `{ "place": {…} }`
+```json
+{ "country": "EG", "level": "area", "parentId": "<city id>", "nameAr": "مكرم عبيد", "nameEn": "Makram Ebeid", "hidden": false }
+```
+- `level` region|city|area; a city needs a region `parentId`, an area a city `parentId` (422 / 404 otherwise);
+- names 1–120 chars, `nameEn` defaults to `nameAr`; at most 5000 places per country.
+- `geoCode` is filled by the server when the platform's list knows the region/city name (keeps governorate prices and courier maps working).
+
+**PATCH `/workspaces/:ws/store-places/:id`** `{ nameAr?, nameEn?, hidden?, sortOrder? }` → `{ "place": {…} }`.
+Hidden places (and everything under them) disappear from the checkout.
+
+**DELETE `/workspaces/:ws/store-places/:id`** → `{ "deleted": true, "id": "…" }` — deletes its children too (confirm in UI).
+
+**POST `/workspaces/:ws/store-places/import`** — multipart: `file` (CSV or .xlsx, ≤ 2MB, ≤ 5000 rows),
+`country` (EG), `mode` (`merge` default — adds, reusing names already there; `replace` — clears the country first).
+Columns (first row): `region_ar, region_en, city_ar, city_en, area_ar, area_en`; a row may stop at region or city.
+→ `{ "country": "EG", "mode": "merge", "created": 6, "total": 6, "errors": [ { "row": 5, "message": "An area needs its city" } ] }`
+(422 `INVALID_FILE` for an unreadable file or missing header.)
+
+**POST `/workspaces/:ws/store-places/copy-platform`** `{ "country": "EG" }` → same answer as import.
+Copies the platform's governorates and cities (Egypt 28 + 344 cities; Saudi regions); then the merchant adds areas.
+
+### Public (storefront)
+
+**GET `/store/:ws/places?country=EG`**
+```json
+{ "country": "EG", "source": "store",
+  "places": [ { "id": "…", "ar": "القاهرة", "en": "Cairo", "code": "cairo",
+               "children": [ { "id": "…", "ar": "مدينة نصر", "en": "Nasr City", "code": "cairo.nasr-city",
+                               "children": [ { "id": "…", "ar": "الحي العاشر", "en": "10th District", "code": null } ] } ] } ] }
+```
+With no own list: `source: "platform"`, governorates → cities (ids `null`, no areas), minus the store's hidden places.
+
+### Checkout address
+The checkout, lost-order and staff order address now also take `area` (≤ 120) and `placeId` (uuid of
+the deepest place picked from the store's list). Send `province` = region name, `city` = city name,
+`area` = area name, `placeId` = the area's (or city's) id. Item 164 prices shipping from `placeId`.
+
+### Screens
+- **Dashboard → Shipping → Places** (`shipping.manage`): country select; a three-column
+  browser (Regions | Cities | Areas) or an expandable tree; add / rename / hide / delete at
+  each level; counts; buttons "Import sheet" (file + merge/replace + downloadable sample CSV with the
+  six columns) and "Start from the platform list". Import result: created count and the row errors table.
+  States: loading, empty ("No places yet — import a sheet or start from the platform list"), error, no permission.
+- **Storefront checkout**: when `source = "store"`, three dependent selects Region → City → Area
+  (Area only when the chosen city has areas); fill province/city/area/placeId. With `source = "platform"`,
+  keep today's governorate + city behaviour.
+
+Wording:
+| en | ar |
+|---|---|
+| Places | المناطق |
+| Region / City / Area | المحافظة / المدينة / المنطقة |
+| Add region / Add city / Add area | إضافة محافظة / إضافة مدينة / إضافة منطقة |
+| Import sheet | استيراد شيت |
+| Add to the list / Replace the list | إضافة للقائمة / استبدال القائمة |
+| Start from the platform list | ابدأ من قائمة المنصة |
+| Hidden from checkout | مخفية من صفحة الطلب |
+| Deleting a region deletes its cities and areas. | حذف المحافظة بيحذف مدنها ومناطقها. |
+| No places yet — import a sheet or start from the platform list. | مفيش مناطق لسه — استورد شيت أو ابدأ من قائمة المنصة. |
+| Choose your area | اختار منطقتك |

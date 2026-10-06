@@ -1289,7 +1289,12 @@ Commerce:
   - Tags match case-insensitively; at most 20 tags per rule.
   - A smart collection refuses hand-added or hand-removed products (409 `SMART_COLLECTION`), single and bulk; reordering stays. Duplicating a product skips copying smart links (the hook already linked the copy).
   - "All products" is made with one click (slug `all`, idempotent) rather than for every store at sign-up, so workspace creation is untouched. A store copy (bulkCreate) keeps its copied links; `POST …/sync` repairs any collection by hand.
-- [ ] 163. The store's own places: regions → cities → areas per country, imported from CSV, with three-level pickers at checkout.
+- [x] 163. The store's own places: regions → cities → areas per country, imported from CSV, with three-level pickers at checkout. (backend done, UI in frontend-handoff.md)
+  - New table `store_places` (migration 451), one row per region/city/area, parent links with cascade delete; at most 5000 per country.
+  - A region or city keeps the platform's code (`geo_code`) when `geoRegions.resolve` finds its name, so governorate prices, hidden places and courier area maps keep applying to addresses picked from the store's list.
+  - Import reads CSV or .xlsx through the catalog's sheet reader (no new dependency); `merge` reuses names already there, `replace` clears the country first. "Start from the platform list" is the same import fed from `geo_regions`.
+  - The public list falls back to the platform's governorates and cities when the store has none, so every checkout has pickers.
+  - Addresses take `area` and `placeId` (checkout, lost orders, staff orders); they are stored with the order's address. Pricing by place is item 164.
 - [ ] 164. Shipping prices per city and area, from a CSV or the places list.
 - [ ] 165. A file-upload field in the checkout form, and an optional billing address ("same as shipping").
 - [ ] 166. Bulk actions on funnels: publish, pause, duplicate and delete several at once.
