@@ -292,6 +292,8 @@ v1.use('/workspaces/:workspaceId/search-insights', require('./modules/searchInsi
 v1.use('/workspaces/:workspaceId/product-questions', require('./modules/productQuestions').staff);
 // Gift wrap and gift message (spec-gaps item 214).
 v1.use('/workspaces/:workspaceId/gift-options', require('./modules/giftOptions').staff);
+// Holiday mode (spec-gaps item 216).
+v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);

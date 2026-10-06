@@ -2378,3 +2378,20 @@ to it are priced **together** ("any 3 of these for EGP 400"), instead of each pr
 ### Screens
 - Bundles editor: «اخلط واختار» / "Mix and match" toggle with the hint «المنتجات دي بتتحسب مع بعض: أي 3 منهم بسعر واحد» / "These products count together: any 3 of them for one price".
 - Storefront: on a product in a box, a «كوّن البوكس بتاعك» / "Build your box" entry → box page listing the products (from the endpoint), slots «اختار 3» / "Pick 3" with a counter, «ضيف البوكس للسلة» / "Add box to cart" (adds the chosen variants as lines). Cart shows the box discount.
+
+## 216. Holiday mode — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/holiday-mode`
+- `GET` (`orders.view`) → `{ enabled, mode: "pause"|"delay", from, until, shipsFrom, message: { ar, en } | null, activeNow }`
+- `PUT` (`workspace.manage`) `{ enabled, mode, from?, until?, shipsFrom?, message? }` — dates ISO (null `from` = from now, null `until` = until switched off); `until` after `from` (422).
+
+### Storefront
+- `GET /store/:ws` → `store.holiday`: `null` normally, else `{ mode, until, shipsFrom, message }` while the holiday is on.
+- **pause**: checkout answers **423 `STORE_ON_HOLIDAY`** with `error.details.holiday` (same object). The store, cart and pages keep working.
+- **delay**: orders go through; the order gets the tag `holiday` and `shippingSnapshot.holiday = { shipsFrom, message }`.
+- Orders entered in the dashboard are never blocked.
+
+### Screens
+- Settings → «وضع الإجازة» / "Holiday mode": toggle, choice «وقّف الطلبات» / "Pause orders" vs «اقبل الطلبات واشحن بعدين» / "Take orders, ship later", from/until dates, ships-from date (delay), message ar/en. Show «شغال دلوقتي» / "On now" when `activeNow`.
+- Storefront: a banner with the message and date «المتجر في إجازة لحد 11 أكتوبر» / "We're on holiday until 11 October". Pause: disable checkout buttons «الطلبات موقوفة مؤقتًا» / "Orders are paused for now". Delay: on the product page, cart and checkout «الطلبات هتتشحن من 11 أكتوبر» / "Orders ship from 11 October".
+- Dashboard order list: the `holiday` tag as a chip.

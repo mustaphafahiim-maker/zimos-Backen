@@ -50,6 +50,8 @@ const checkout = asyncHandler(async (req, res) => {
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
+  // A store on a "pause" holiday takes no orders (holidayMode, item 216).
+  require('../holidayMode').assertOpen(workspace);
   // Per-store required fields (settings.checkout_settings). Checked before any
   // cart work so a rejected checkout costs nothing.
   assertRequiredCheckoutFields(workspace, req.body);
@@ -196,6 +198,7 @@ const checkout = asyncHandler(async (req, res) => {
     await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
     await require('../giftOptions').recordOnOrder(order, giftChoice);
+    await require('../holidayMode').markOrder(workspace, order);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
     await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
@@ -227,6 +230,7 @@ const checkout = asyncHandler(async (req, res) => {
   await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
   await require('../giftOptions').recordOnOrder(order, giftChoice);
+    await require('../holidayMode').markOrder(workspace, order);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
   await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 

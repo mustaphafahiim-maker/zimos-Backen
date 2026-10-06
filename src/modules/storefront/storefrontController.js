@@ -33,7 +33,9 @@ const getStore = asyncHandler(async (req, res) => {
   const gate = require('../storeGate').publicView(gateWorkspace);
   // Gift wrap and message offered at checkout (giftOptions, item 214).
   const giftOptions = await cache.cached(ws, 'gift-options', () => require('../giftOptions').publicView(gateWorkspace));
-  res.json({ store: { ...store, customFonts, storefrontTexts, cookieConsent, gate, giftOptions } });
+  // A holiday: orders paused, or taken and shipped later (holidayMode, item 216).
+  const holiday = require('../holidayMode').publicView(gateWorkspace);
+  res.json({ store: { ...store, customFonts, storefrontTexts, cookieConsent, gate, giftOptions, holiday } });
 });
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.

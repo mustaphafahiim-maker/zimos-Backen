@@ -1598,7 +1598,10 @@ social proof, no fake reviews, no call centre, no unofficial WhatsApp. A store m
   - Extends quantity bundles instead of a new engine (migration 484, bundles.mix_and_match). applyBundleTiers groups the lines of a mix-and-match bundle's products into one unit set, so the cart, shipping quote and order all price the box the same way, with every tier type and free shipping. The default (false) keeps the per-product behaviour.
   - Public box builder endpoint lists the bundle's active products with variants and availability. The pieces are ordinary cart lines.
   - Verified: 1 shirt (250) + 2 caps (100) with "3 for 400" → cart discount 50 and order total 400; with the flag off, 450 (per product, unchanged).
-- [ ] 216. Holiday mode: the store keeps showing but stops taking orders between dates (or takes them with a "ships after" notice), with a message.
+- [x] 216. Holiday mode: the store keeps showing but stops taking orders between dates (or takes them with a "ships after" notice), with a message. (backend done, UI in frontend-handoff.md)
+  - modules/holidayMode; settings.holiday_mode (no migration). Pause = 423 STORE_ON_HOLIDAY from the checkout only (store and funnel checkouts share it); browsing, carts and tracking keep working. Delay = the order is tagged holiday with shippingSnapshot.holiday { shipsFrom, message }. Dashboard orders are never blocked.
+  - The window is checked live (from/until), so a scheduled holiday starts and ends on time without a job. Saving clears the store cache.
+  - Verified: date validation, pause → 423 with details, store.holiday, delay → tag + snapshot, future holiday not active yet.
 - [ ] 217. Sign in with Google for shopper accounts: an interface + sandbox adapter + README, linked to the shopper account by email.
 - [ ] 218. VIP tiers: customers move up automatically by what they spent (tiers the merchant defines), with perks applied at checkout (a percent off, free shipping, a points multiplier) for signed-in shoppers.
 - [ ] 219. Quote requests (B2B): a shopper asks for a quote for quantities; staff answer with prices and a validity date; the shopper accepts and it becomes an order (payment link reused).
