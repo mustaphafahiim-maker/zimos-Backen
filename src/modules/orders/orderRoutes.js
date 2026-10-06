@@ -7,6 +7,8 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { idempotent } = require('../../core/middleware/idempotency');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { requireLive } = require('../../core/middleware/subscriptionGuard');
+// Booking and following couriers: the Fulfillment role (shipping.manage) as well as order managers.
+const canShip = require('../../core/middleware/rbac').requireAnyPermission(PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.SHIPPING_MANAGE);
 const controller = require('./orderController');
 const schemas = require('./orderValidation');
 const exportController = require('./orderExportController');
@@ -58,7 +60,7 @@ router.post(
 router.post(
   '/import-tracking',
   validate(schemas.importTracking),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   requireLive,
   controller.importTracking
 );
@@ -87,7 +89,8 @@ router.get(
 router.post(
   '/bulk',
   validate(schemas.bulk),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  // Booking a courier for many orders is also the Fulfillment role's; every other action needs orders.manage.
+  (req, res, next) => (req.body.action === 'ship' ? canShip : requirePermission(PERMISSIONS.ORDERS_MANAGE))(req, res, next),
   (req, res, next) => (req.body.action === 'ship' ? requireLive(req, res, next) : next()),
   controller.bulk
 );
@@ -201,14 +204,14 @@ router.get(
 router.post(
   '/:orderId/shipments',
   validate(schemas.createShipment),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   requireLive,
   controller.createShipment
 );
 router.patch(
   '/:orderId/shipments/:shipmentId',
   validate(schemas.updateShipment),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   controller.updateShipment
 );
 
@@ -217,13 +220,13 @@ router.patch(
 router.post(
   '/:orderId/shipments/:shipmentId/sync',
   validate(carrierSchemas.shipmentAction),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   carrierController.sync
 );
 router.get(
   '/:orderId/shipments/:shipmentId/label',
   validate(carrierSchemas.shipmentAction),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   carrierController.label
 );
 

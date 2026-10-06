@@ -427,3 +427,26 @@ The ⌘K search (`GET /workspaces/:ws/search`) already matched 4+ digits anywher
 
 UI: nothing new needed — the Orders list and ⌘K just send the digits. Suggested placeholder:
 "Order #, name, phone or its last 4 digits" / «رقم الطلب أو الاسم أو التليفون أو آخر ٤ أرقام».
+
+---
+
+## Frontend request — the Fulfillment role can book couriers — done
+
+From `docs/ux/backend-requests.md`. Decision: booking and following couriers accepts **`orders.manage` or
+`shipping.manage`** (the Fulfillment role has `shipping.manage`; no new permission, no role change).
+
+Now open to `shipping.manage`:
+- `POST /workspaces/:ws/orders/:orderId/shipments` (book / record a shipment)
+- `PATCH /workspaces/:ws/orders/:orderId/shipments/:shipmentId`
+- `POST /workspaces/:ws/orders/:orderId/shipments/:shipmentId/sync`, `GET …/label`
+- `PUT/DELETE` the shipping card's draft (`shipmentDraft`)
+- `POST /workspaces/:ws/orders/bulk` **only when `action: "ship"`** (every other bulk action still needs `orders.manage`)
+- everything under `/workspaces/:ws/shipment-batches` (bulk ship preview, start, list, retry)
+- `POST /workspaces/:ws/orders/import-tracking`
+
+Unchanged: editing, cancelling, tagging and confirming orders still need `orders.manage` / `orders.confirm`.
+A COD order must still be confirmed before booking (409 `ORDER_NOT_CONFIRMED`).
+Analytics: the Fulfillment role has no `analytics.view` on the backend (matches the frontend's intended rule).
+
+UI: show "Book courier" (order page and the list's bulk bar) to users with `orders.manage` **or** `shipping.manage`;
+keep the other bulk actions behind `orders.manage`.

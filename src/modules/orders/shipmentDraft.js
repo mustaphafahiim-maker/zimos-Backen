@@ -5,8 +5,10 @@ const Joi = require('joi');
 const asyncHandler = require('express-async-handler');
 const db = require('../../db/models');
 const validate = require('../../core/middleware/validate');
-const { requirePermission } = require('../../core/middleware/rbac');
+const { requireAnyPermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
+// Orders managers and the Fulfillment role (shipping.manage) both prepare shipments.
+const canShip = requireAnyPermission(PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.SHIPPING_MANAGE);
 const { NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 
@@ -106,13 +108,13 @@ const router = Router({ mergeParams: true });
 router.put(
   '/:orderId/shipment-draft',
   validate(schemas.save),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   asyncHandler(async (req, res) => res.json({ shipmentDraft: await save(req.tenant.workspaceId, req.params.orderId, req.body, req) }))
 );
 router.delete(
   '/:orderId/shipment-draft',
   validate(schemas.remove),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   asyncHandler(async (req, res) => {
     await remove(req.tenant.workspaceId, req.params.orderId, req);
     res.status(204).end();

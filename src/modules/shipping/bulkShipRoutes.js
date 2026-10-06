@@ -5,7 +5,7 @@ const asyncHandler = require('express-async-handler');
 const validate = require('../../core/middleware/validate');
 const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
-const { requirePermission } = require('../../core/middleware/rbac');
+const { requireAnyPermission } = require('../../core/middleware/rbac');
 const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const bulk = require('./bulkShipping');
@@ -14,7 +14,8 @@ const bulk = require('./bulkShipping');
 // with a connected courier (bulkShipping.js). Booking needs a live store,
 // like the single-order shipment route.
 const router = Router({ mergeParams: true });
-router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.ORDERS_MANAGE));
+// The Fulfillment role (shipping.manage) books couriers too.
+router.use(authenticate, resolveTenant, requireAnyPermission(PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.SHIPPING_MANAGE));
 
 const ws = (req) => req.tenant.workspaceId;
 
