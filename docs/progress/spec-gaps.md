@@ -1374,7 +1374,11 @@ Domains and developers:
   - Tools call the existing services only (catalog list, public order serializer, funnel issues, funnel create), so nothing bypasses their checks. Errors are tool results with `isError` so the assistant can read them.
 
 Integrations (interface + sandbox + README):
-- [ ] 180. Import products and reviews from AliExpress, Etsy, CJ and YouCan links, as importer adapters beside Shopify.
+- [x] 180. Import products and reviews from AliExpress, Etsy, CJ and YouCan links, as importer adapters beside Shopify. (backend done, UI in frontend-handoff.md)
+  - `catalog/importExport/importers/`: a link → source registry, a structured-data reader (schema.org JSON-LD Product, Open Graph fallback) fetched with the Shopify importer's guard (https, public addresses, no redirects, size cap), a sandbox mode and a README naming the official-API adapters that need the owner's keys.
+  - Products land through the existing import job as drafts with stock 0; the page's price is kept in its own currency and noted in the description for the merchant to check.
+  - Reviews: only those the page publishes, `source: 'import'`, `status: 'pending'` until approved; the sandbox brings none, so no review is ever made up (SPEC §21).
+  - This environment has no outside network, so live pages answered 403 here; the reader and the job were checked on a saved product page with JSON-LD and reviews.
 - [ ] 181. Send orders to a Shopify or WooCommerce store, and bring back fulfilment.
 - [ ] 182. Sync contacts and leads to Mailchimp or Klaviyo lists.
 - [ ] 183. Express checkout buttons (wallets) and Stripe and PayPal adapters behind the payment interface. They stay sandbox until the owner's keys are set.

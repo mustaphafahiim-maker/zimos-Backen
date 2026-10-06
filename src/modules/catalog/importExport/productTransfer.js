@@ -434,6 +434,8 @@ async function importOne(workspaceId, source, req, collectionCache) {
     throw err;
   }
   const product = created.product;
+  // The reviews the source page published (importers/): real ones, held for the merchant's approval.
+  await require('./importers/reviews').saveImported(workspaceId, product.id, source.reviews, req);
   // What createProduct's first variant does not take.
   const firstExtras = pick(first, ['barcode', 'optionValues', 'costAmount', 'lowStockThreshold', 'currency']);
   if (Object.keys(firstExtras).length > 0) await created.variant.update(firstExtras);

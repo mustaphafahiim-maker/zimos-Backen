@@ -1081,3 +1081,38 @@ Wording:
 | Server URL | رابط السيرفر |
 | Create a key for AI | اعمل مفتاح للذكاء الاصطناعي |
 | Funnels it creates stay drafts until you publish them. | الفانلز اللي بيعملها بتفضل مسودة لحد ما تنشرها انت. |
+
+---
+
+## 180. Import products and reviews from AliExpress, Etsy, CJ and YouCan links — UI: pending
+
+**POST `/workspaces/:ws/catalog/products/import`** (existing endpoint, permission `products.manage`) with `{ "url": "…" }`
+now accepts product links from **AliExpress, Etsy, CJ Dropshipping and YouCan** besides Shopify. → 202
+`{ "import": { "id", "kind": "aliexpress_link" | "etsy_link" | "cj_link" | "youcan_link" | "shopify_link", "status": "queued", … } }`;
+poll **GET `/workspaces/:ws/catalog/imports/:importId`** as today (status `done`, `createdCount`, `errors[]`).
+
+- The product (name, description, pictures, price, SKU) is read from the page's public structured data and created as a
+  **draft with stock 0**. The page's price is kept as minor units of the **page's currency**, and the description ends with
+  "(Imported price: 24.5 USD)" — the merchant checks price/currency before publishing. A missing price imports as 0.
+- The **reviews the page publishes** (up to 50) are imported with `source: "import"`, **`status: "pending"`** — they show
+  only after approval in Reviews. None are ever invented.
+- Errors: 422 `IMPORT_SOURCE_UNREACHABLE` with the reason ("The page answered 403", "That page does not publish its product
+  details; download them as a sheet and import the file instead"); 422 for a non-https link.
+- `PRODUCT_IMPORT_MODE=sandbox` (server env) imports a "Sample product from X (sandbox)" with no reviews, for demos.
+- Contract and the official-API adapters to add: `src/modules/catalog/importExport/importers/README.md`.
+
+### Dashboard — Products → Import
+- The "Import from a link" field's hint lists the sources (Shopify, AliExpress, Etsy, CJ, YouCan) with small logos/badges
+  detected from the pasted link.
+- After the import: "Imported as a draft — check the price ({currency}) and stock", and "{n} reviews waiting for approval"
+  linking to Reviews filtered to pending + source import.
+- Reviews list: a source badge "Imported" for `source = "import"`.
+
+Wording:
+| en | ar |
+|---|---|
+| Import from a link (Shopify, AliExpress, Etsy, CJ, YouCan) | استورد من لينك (شوبيفاي، علي إكسبريس، إتسي، CJ، يوكان) |
+| Imported as a draft — check the price and stock | اتضاف كمسودة — راجع السعر والمخزون |
+| {n} reviews waiting for your approval | {n} تقييم مستني موافقتك |
+| Imported | مستورد |
+| That page does not publish its product details | الصفحة دي مش بتعرض بيانات المنتج |

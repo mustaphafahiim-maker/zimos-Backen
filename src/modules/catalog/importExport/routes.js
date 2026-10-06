@@ -106,6 +106,12 @@ router.post(
         }
         if (products.length === 0) throw new ValidationError([{ field: 'file', message: 'The sheet has no product rows' }]);
       }
+    } else if (req.body && typeof req.body.url === 'string' && require('./importers').detect(req.body.url)) {
+      // AliExpress, Etsy, CJ, YouCan (importers/README.md): the product and the reviews its page publishes.
+      const out = await require('./importers').fromLink(req.body.url);
+      kind = `${out.source}_link`;
+      sourceName = req.body.url;
+      products = out.products;
     } else if (req.body && typeof req.body.url === 'string') {
       kind = 'shopify_link';
       sourceName = req.body.url;
