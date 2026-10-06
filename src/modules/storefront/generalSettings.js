@@ -140,6 +140,8 @@ async function storeSitemap(workspace) {
     if (text(legal[key])) entries.push({ path: `/policies/${key.replace(/_/g, '-')}`, updatedAt: workspace.updatedAt });
   }
 
+  // The blog's index and published posts (modules/blog, item 190).
+  entries.push(...(await require('../blog').sitemapEntries(workspaceId)));
   return entries.map((e) => ({ path: e.path, updatedAt: e.updatedAt ? new Date(e.updatedAt).toISOString() : null }));
 }
 

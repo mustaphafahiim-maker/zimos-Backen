@@ -1603,3 +1603,56 @@ Wording:
 | Products sold as gift cards | منتجات بتتباع ككروت هدايا |
 | Adjust balance | عدّل الرصيد |
 | Resend to recipient | ابعته تاني للمستلم |
+
+## 190. Blog: posts, categories, a posts index and the latest posts on the home page — UI: pending
+
+### Dashboard — Store → Blog (permission `website.edit`), `/workspaces/:ws/blog`
+- **Categories**: `GET /categories` → `{ categories: [ { id, name, slug, description, position, postsCount } ] }`;
+  `POST /categories` `{ name (1–120), slug?, description? (≤500), position? }` → 201 `{ category }`; `PATCH /categories/:id`;
+  `DELETE /categories/:id` (its posts stay, uncategorised). Slugs keep Arabic letters ("نصائح-العناية"); 409 `SLUG_TAKEN`.
+- **Posts**: `GET /posts?state=draft|published|scheduled&categoryId&q&page&limit` → `{ posts: [summary + state + updatedAt], total, page, limit }`;
+  `POST /posts`, `GET /posts/:id`, `PATCH /posts/:id`, `DELETE /posts/:id`. Body:
+```json
+{ "title": "أفضل نصائح العناية بالبشرة", "slug": "", "excerpt": "…", "coverUrl": "https://…", "authorName": "Mona",
+  "tags": ["skin"], "categoryId": "…", "status": "draft" | "published", "publishedAt": "2026-10-10T08:00:00Z" | null,
+  "seo": { "title": "", "description": "", "noindex": false },
+  "blocks": [
+    { "type": "heading", "text": "مقدمة", "level": 2 },
+    { "type": "paragraph", "text": "…" },
+    { "type": "image", "url": "https://…", "alt": "", "caption": "" },
+    { "type": "list", "items": ["…", "…"], "ordered": false },
+    { "type": "quote", "text": "…", "cite": "" },
+    { "type": "product", "productId": "…" },
+    { "type": "button", "label": "تسوق", "url": "/products" },
+    { "type": "divider" } ] }
+```
+  → `{ post: { id, title, slug, excerpt, coverUrl, authorName, tags, category, publishedAt, readingMinutes, state, status, blocks, seo, updatedAt } }`.
+  Rules: ≤200 blocks; image/cover URLs https only; button URLs https or a store path starting with "/"; product blocks must be
+  this store's products; no HTML anywhere (text is shown as text). `status: "published"` without `publishedAt` publishes now;
+  a future `publishedAt` = **scheduled** (goes live by itself). `state` = draft | published | scheduled.
+- Screens: Blog list (tabs Drafts / Published / Scheduled, search, category filter), post editor (title, link, cover,
+  excerpt, category, tags, author, block editor with the 8 block types, SEO, "Save draft" / "Publish" / "Schedule"),
+  Categories manager.
+
+### Storefront — `/store/:ws/blog` (public, cached 60 s)
+- `GET /posts?category=<slug>&tag=&page=&limit=12` → `{ posts: [ { id, title, slug, excerpt, coverUrl, authorName, tags, category, publishedAt, readingMinutes } ], total, page, limit, category }` (404 unknown category).
+- `GET /posts/:slug` → `{ post: { …summary, blocks, seo }, related: [3 summaries] }`. Product blocks come filled:
+  `{ "type": "product", "productId", "product": { "name", "slug", "imageUrl", "price": { "amount", "compareAt", "currency" } } }`
+  (a product no longer for sale is dropped). Drafts and scheduled posts: 404.
+- `GET /categories` (with `postsCount`), `GET /latest?limit=3` (home page section "From our blog").
+- Pages: `/blog` (index with category chips, pagination), `/blog/<slug>` (cover, title, date, reading time, blocks, product
+  cards with add to cart, related posts), `/blog?category=<slug>`. The sitemap now lists `/blog` and `/blog/<slug>`.
+- Home page section "Latest posts" (3 cards) for themes that want it.
+
+Wording:
+| en | ar |
+|---|---|
+| Blog | المدونة |
+| New post | مقال جديد |
+| Draft / Published / Scheduled | مسودة / منشور / مجدول |
+| Publish / Schedule / Save draft | انشر / جدوِل / احفظ مسودة |
+| {n} min read | قراءة {n} دقيقة |
+| Related posts | مقالات ذات صلة |
+| From our blog | من مدونتنا |
+| Read more | اقرأ أكتر |
+| Categories | التصنيفات |

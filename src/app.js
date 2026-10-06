@@ -257,6 +257,7 @@ v1.use('/workspaces/:workspaceId/address-autocomplete', require('./modules/place
 v1.use('/workspaces/:workspaceId/shopper-accounts', require('./modules/shopperAccounts').staff);
 v1.use('/workspaces/:workspaceId/wishlists', require('./modules/shopperAccounts/wishlist').staff);
 v1.use('/workspaces/:workspaceId/gift-cards', require('./modules/giftCards').staff);
+v1.use('/workspaces/:workspaceId/blog', require('./modules/blog').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
@@ -336,6 +337,8 @@ v1.use('/store/:workspaceId/account', require('./modules/shopperAccounts').store
 v1.use('/store/:workspaceId/returns', require('./modules/returns/shopperReturns').store);
 // Gift cards (item 189).
 v1.use('/store/:workspaceId/gift-cards', require('./modules/giftCards').store);
+// The store's blog (item 190).
+v1.use('/store/:workspaceId/blog', require('./modules/blog').store);
 v1.use('/store/:workspaceId/fonts', require('./modules/fonts/storeFonts').store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);

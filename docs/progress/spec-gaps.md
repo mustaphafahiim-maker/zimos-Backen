@@ -1431,7 +1431,12 @@ What the platform still lacks (the owner's "كل حاجه ناقصه"):
   - Refunds: a Refund model hook credits the card in the refund's own transaction (merchant refunds and the automatic one on order.cancelled) — first built in a separate transaction, which deadlocked on the order row and double-credited on retries; fixed before commit. Locks are order first, then card.
   - Sold as a product: `settings.gift_cards.productIds` → one card per unit at the line's unit price on order.paid/order.delivered, idempotent per unit (unique index), emailed to the buyer; optional validity days.
   - Verified: issue + email, check (spacing/case) and 404, full and partial redemption, empty card refused, online refused, cancel returns the balance once, merchant refund credits, reveal, adjust, disable, list by last 4, sold cards issued once.
-- [ ] 190. A blog: a posts index, categories, and the latest posts on the home page.
+- [x] 190. A blog: a posts index, categories, and the latest posts on the home page. (backend done, UI in frontend-handoff.md)
+  - New `blog/` module + migration 465 (`blog_categories`, `blog_posts`). Separate from the builder's `blog_post` page type: articles need excerpt, cover, dates, categories and an index.
+  - Body = validated blocks (heading, paragraph, image, list, quote, product, button, divider); no HTML is stored or sanitised — the storefront renders text. URLs https (buttons may be store paths). Product blocks are filled live on read.
+  - Scheduling without a job: published + future publishedAt is hidden until then. Slugs keep Arabic letters and get -2, -3 when taken.
+  - Public index/post/categories/latest with 60 s cache; posts added to the store sitemap (noindex respected). Staff permission website.edit.
+  - Verified: Arabic slugs, bad image URL and extra fields refused, publish/draft/scheduled states, slug conflict 409, public list/category/tag, product block filled, draft/scheduled 404, latest, sitemap, deleting a category keeps its posts.
 - [ ] 191. Element display rules: show between dates, and by device, country or UTM source.
 - [ ] 192. A template marketplace: merchants submit funnel templates (built on the share code), the platform reviews them, and others use them (no prices in code).
 
