@@ -1684,4 +1684,7 @@ Migrations 490–499; no prices in code.
   - Consumption FEFO on order.shipped / order.delivered, once per order (allocations). Daily stock_lots.alert_expiring → merchant notification type stock.lot_expiring, once per lot (alerted_at reset when the date changes).
   - Pick list lines carry FEFO lot suggestions (JSON and PDF).
   - Verified: 2 lots → stock 10, over-label refused, pick list A 5 + B 2, consumption idempotent (A 0, B 3), expired/expiring filters, one notification, write-off 12 → 10, empty lot refused, PDF checked as an image.
-- [ ] 231. Product specifications and comparison: key/value specifications per product (merchant-defined keys), shown on the product page, usable as storefront filters, and a public compare of up to 4 products side by side.
+- [x] 231. Product specifications and comparison: key/value specifications per product (merchant-defined keys), shown on the product page, usable as storefront filters, and a public compare of up to 4 products side by side. (backend done, UI in frontend-handoff.md)
+  - productSpecs/index.js; migration 494 (spec_keys, product_specs). Keys per store (≤ 100, ar/en name, unit, filterable, order); one text value per product and key, replaced whole.
+  - Storefront specs and filters read through storefrontCache; filtered list is its own endpoint (keys AND, values OR, optional collection, hidden products left out) rather than a change to the main listing query; compare 2–4 with a differs flag per key.
+  - Verified: key validation, values per product, suggestions, store specs, filter counts, AND/OR filtering, bad filter 422, compare + differs, 1 product 422, key delete cascades.

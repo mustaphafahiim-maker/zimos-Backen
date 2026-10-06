@@ -2695,3 +2695,24 @@ Body for create / edit / preview:
 - Row actions: edit, «إعدام / شطب» / "Write off" (quantity, reason) with confirm «الكمية دي هتخرج من المخزون» / "These units leave stock".
 - Product variant page: its lots (first to go first). Pick list view: the lot to take under each line.
 - Settings: «نبّهني قبل الانتهاء بـ … يوم» / "Warn me … days before expiry".
+
+## 231. Product specifications and comparison — UI: pending
+
+### Dashboard — `/api/v1/workspaces/:ws/product-specs` (read `products.view`, change `products.manage`)
+- `GET /keys` → `{ keys: [{ id, name: { ar, en }, unit, filterable, position }] }`.
+- `POST /keys` `{ name: { ar?, en? } (one required, ≤ 60), unit? ≤ 20, filterable = false, position = 0 }` → 201 `{ key }` (≤ 100 keys). `PUT /keys/:keyId` same body. `DELETE /keys/:keyId` → 204 (its values go too).
+- `GET /keys/:keyId/values` → `{ values: [{ value, products }] }` (suggestions while typing).
+- `GET /products/:productId` → `{ values: { "<keyId>": "128" } }`; `PUT /products/:productId` `{ values: { "<keyId>": "value ≤ 200" | "" } }` replaces them all (empty = none); unknown key → 422.
+
+### Storefront — `/api/v1/store/:ws/specs`
+- `GET /products/:productId` → `{ specs: [{ id, name, unit, filterable, position, value }] }` (only keys with a value, store order).
+- `GET /filters?collectionId=` → `{ filters: [{ id, name, unit, values: [{ value, products }] }] }` (filterable keys, active products).
+- `GET /products?f=<keyId>:<value>&f=…&collectionId=&page=&limit≤48` → `{ products: [public products], total, page, limit }` — values of one key are OR, different keys AND.
+- `GET /compare?productIds=a,b,c` (2–4) → `{ keys: [{ id, name, unit, differs }], products: [{ product, values: { keyId: value } }] }`; else 422.
+
+### Screens
+- Settings → Products → «المواصفات» / "Specifications": list of keys (name ar/en, unit «الوحدة», «فلتر في المتجر» / "Use as a store filter", order), add / edit / delete.
+- Product editor → «المواصفات» / "Specifications": one field per key with suggestions from `/values`.
+- Product page: a «المواصفات» / "Specifications" table (value + unit), and «قارن» / "Compare" (adds to a compare tray kept in the browser, max 4).
+- Collection / search pages: filter panel from `/filters` (checkbox values with counts), results from `/products?f=…`.
+- Compare page: products as columns, keys as rows, «اعرض الاختلافات بس» / "Show differences only" (uses `differs`), add to cart per column.
