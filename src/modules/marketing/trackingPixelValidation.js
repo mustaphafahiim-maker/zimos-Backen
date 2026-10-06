@@ -21,6 +21,8 @@ const scope = Joi.object({
 const config = Joi.object({
   // Google Ads conversion label ("AbC-D_efG-h12_34-567"), used with an AW- id.
   adsConversionLabel: Joi.string().trim().pattern(/^[A-Za-z0-9_-]{4,60}$/).allow(null, ''),
+  // Pinterest ad account id, for its Conversions API (pixelProviders/pinterestCapi.js).
+  adAccountId: Joi.string().trim().pattern(/^\d{6,20}$/).allow(null, ''),
 });
 
 const shared = {

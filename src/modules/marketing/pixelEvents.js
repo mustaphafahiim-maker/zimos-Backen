@@ -112,6 +112,9 @@ async function run(workspaceId, trigger, orderId) {
     snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: nameFor('snapchat') }),
     google: ({ pixel, token }) =>
       isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId, matching, eventName: nameFor('google') }) : null,
+    // Per ad account (pixel.config.adAccountId); sandbox until PINTEREST_CAPI_MODE=live (pinterestCapi.js).
+    pinterest: ({ pixel, token }) =>
+      require('./pixelProviders/pinterestCapi').sendPurchase({ adAccountId: (pixel.config || {}).adAccountId, secrets: { pinterestAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: nameFor('pinterest'), test: Boolean(pixel.testEventCode) }),
   };
 
   const results = [];

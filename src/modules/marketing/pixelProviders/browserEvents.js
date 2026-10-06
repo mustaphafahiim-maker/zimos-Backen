@@ -19,13 +19,14 @@ const googleMp = require('./googleMp');
 
 // internal name → each platform's name
 const NAMES = Object.freeze({
-  page_view: { meta: 'PageView', tiktok: 'Pageview', snapchat: 'PAGE_VIEW', google: 'page_view' },
-  view_content: { meta: 'ViewContent', tiktok: 'ViewContent', snapchat: 'VIEW_CONTENT', google: 'view_item' },
-  add_to_cart: { meta: 'AddToCart', tiktok: 'AddToCart', snapchat: 'ADD_CART', google: 'add_to_cart' },
+  page_view: { meta: 'PageView', tiktok: 'Pageview', snapchat: 'PAGE_VIEW', google: 'page_view', pinterest: 'page_visit' },
+  view_content: { meta: 'ViewContent', tiktok: 'ViewContent', snapchat: 'VIEW_CONTENT', google: 'view_item', pinterest: 'page_visit' },
+  add_to_cart: { meta: 'AddToCart', tiktok: 'AddToCart', snapchat: 'ADD_CART', google: 'add_to_cart', pinterest: 'add_to_cart' },
   begin_checkout: { meta: 'InitiateCheckout', tiktok: 'InitiateCheckout', snapchat: 'START_CHECKOUT', google: 'begin_checkout' },
   add_payment_info: { meta: 'AddPaymentInfo', tiktok: 'AddPaymentInfo', snapchat: 'ADD_BILLING', google: 'add_payment_info' },
-  lead: { meta: 'Lead', tiktok: 'SubmitForm', snapchat: 'SIGN_UP', google: 'generate_lead' },
+  lead: { meta: 'Lead', tiktok: 'SubmitForm', snapchat: 'SIGN_UP', google: 'generate_lead', pinterest: 'lead' },
 });
+// Pinterest has no checkout-start or payment-info event: those two are not sent to it.
 const EVENT_NAMES = Object.keys(NAMES);
 
 const seconds = (date) => Math.floor(new Date(date || Date.now()).getTime() / 1000);
@@ -137,6 +138,38 @@ const SENDERS = {
         },
       ],
     });
+  },
+  // Per ad account (pixel.config.adAccountId); sandbox until PINTEREST_CAPI_MODE=live (pinterestCapi.js).
+  pinterest({ pixel, token }, event) {
+    const name = NAMES[event.name].pinterest;
+    if (!name) return null;
+    const pinterestCapi = require('./pinterestCapi');
+    return pinterestCapi.call(
+      (pixel.config || {}).adAccountId,
+      token,
+      {
+        data: [
+          {
+            event_name: name,
+            action_source: 'web',
+            event_time: seconds(event.occurredAt),
+            event_id: String(event.eventId),
+            ...(event.url ? { event_source_url: event.url } : {}),
+            user_data: {
+              ...(event.clientIp ? { client_ip_address: event.clientIp } : {}),
+              ...(event.userAgent ? { client_user_agent: event.userAgent } : {}),
+              ...(event.visitorId ? { external_id: [pinterestCapi.sha256(event.visitorId)] } : {}),
+            },
+            custom_data: {
+              ...(money(event).currency ? { currency: event.currency, value: String(Number(event.valueMinor) / 100) } : {}),
+              ...(event.contentIds && event.contentIds.length ? { content_ids: event.contentIds.map(String) } : {}),
+              ...(event.numItems ? { num_items: event.numItems } : {}),
+            },
+          },
+        ],
+      },
+      { test: Boolean(pixel.testEventCode) }
+    );
   },
 };
 

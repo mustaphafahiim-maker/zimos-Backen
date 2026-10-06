@@ -1318,7 +1318,11 @@ Tracking and analytics:
   - Store: `settings.conversion_event` (purchase default | lead), saved with the purchase-timing settings. Funnel: `settings.conversionEvent` (null = store's), on the funnel settings endpoint; the order's funnel wins.
   - Only the event name changes (`marketing/conversionEvent.js` holds each platform's names: Meta Lead, TikTok SubmitForm, Snapchat SIGN_UP, GA4 generate_lead, Pinterest lead); timing, value, event id, the once-only claim and the log stay as they are. The log records `lead` or `purchase`.
   - The providers take an optional `eventName`, defaulting to their purchase name, so nothing else that calls them changes.
-- [ ] 168. Pinterest Conversions API, using an ad account id and token. This reverses item 154's browser-only decision at the owner's request.
+- [x] 168. Pinterest Conversions API, using an ad account id and token. This reverses item 154's browser-only decision at the owner's request. (backend done, UI in frontend-handoff.md)
+  - New provider `marketing/pixelProviders/pinterestCapi.js` with its README; the `pinterest` pixel platform turns `capi` and test events on. The ad account id lives in the pixel's `config.adAccountId` (no migration) and is required to switch the Conversions API on.
+  - Sandbox by default (`PINTEREST_CAPI_MODE` unset): the body is built, checked and logged, nothing is sent; `live` sends it. The owner switches it once a real account has been checked.
+  - Order conversion goes as `checkout` (or `lead`, item 167); relayed browser events map to `page_visit`, `add_to_cart` and `lead`; Pinterest has no checkout-start or payment-info event, so those are skipped for it.
+  - Hashing, event id (the order id), value as a string in major units, as the README states.
 - [ ] 169. Google Ads purchase conversions with a conversion label (`send_to AW-…/label`).
 - [ ] 170. Google Tag Manager: a ready-made container to import (triggers and tags for the store's events), with the dataLayer events listed.
 - [ ] 171. Live View on a world map: visitors, checkouts and orders from the last 10 minutes.

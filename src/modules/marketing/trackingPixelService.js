@@ -19,7 +19,7 @@ const { recordAudit } = require('../audit/auditService');
  *   google     gtag (GA4 "G-", Ads "AW-") GA4 Measurement Protocol (G- only)
  *   gtm        Tag Manager container      —
  *   clarity    Microsoft Clarity project  —
- *   pinterest  Pinterest Tag              — (its Conversions API is per ad account; P2)
+ *   pinterest  Pinterest Tag              Conversions API (per ad account: config.adAccountId)
  *
  * The public half (platform, pixelId, scope) is served to the storefront by
  * publicPixels(); the token never leaves the server.
@@ -33,7 +33,8 @@ const PLATFORMS = Object.freeze({
   gtm: { idPattern: /^GTM-[A-Z0-9]{4,12}$/, capi: false, testEventCode: false },
   clarity: { idPattern: /^[a-z0-9]{6,20}$/, capi: false, testEventCode: false },
   // The Pinterest Tag id: digits, about 13 of them.
-  pinterest: { idPattern: /^\d{10,16}$/, capi: false, testEventCode: false },
+  // Its Conversions API is per ad account (config.adAccountId; pixelProviders/pinterestCapi.js).
+  pinterest: { idPattern: /^\d{10,16}$/, capi: true, testEventCode: true },
 });
 const PLATFORM_NAMES = Object.keys(PLATFORMS);
 const SCOPE_TYPES = ['all', 'funnels', 'products'];
@@ -66,6 +67,13 @@ function serialize(pixel) {
 }
 
 const fieldError = (field, message) => new ValidationError([{ field, message }], 'Invalid body');
+
+/** Pinterest's Conversions API is per ad account: its id is needed to turn it on. */
+function assertAdAccount(platform, capiEnabled, config) {
+  if (platform === 'pinterest' && capiEnabled && !(config && config.adAccountId)) {
+    throw fieldError('config.adAccountId', 'The Pinterest ad account id is needed to turn the Conversions API on');
+  }
+}
 
 function assertPixelId(platform, pixelId) {
   if (!PLATFORMS[platform].idPattern.test(pixelId)) {
@@ -105,6 +113,7 @@ async function create(workspaceId, body, req) {
     const capable = supportsCapi(body.platform, body.pixelId);
     const scope = await cleanScope(workspaceId, body.scope, transaction);
     if (body.capiEnabled && capable && !body.capiToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
+    assertAdAccount(body.platform, body.capiEnabled, body.config);
     const pixel = await db.TrackingPixel.create(
       {
         workspaceId,
@@ -159,6 +168,7 @@ async function update(workspaceId, pixelId, body, req) {
     const hasToken = patch.capiTokenSealed !== undefined ? Boolean(patch.capiTokenSealed) : Boolean(pixel.capiTokenSealed);
     const wantsCapi = body.capiEnabled !== undefined ? body.capiEnabled : pixel.capiEnabled;
     if (body.capiEnabled && capable && !hasToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
+    assertAdAccount(pixel.platform, wantsCapi, patch.config !== undefined ? patch.config : pixel.config);
     patch.capiEnabled = Boolean(wantsCapi && capable && hasToken);
 
     await pixel.update(patch, { transaction });

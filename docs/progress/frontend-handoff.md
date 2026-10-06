@@ -608,3 +608,44 @@ counts and risk counts) and **`/orders/export`** (same query), permission `order
 
 Either way works; the simplest for the dashboard: `from=YYYY-MM-DD&to=YYYY-MM-DD&tz=<store or browser zone>`
 for the picker and its shortcuts (Today, Yesterday, Last 7 days…).
+
+---
+
+## 168. Pinterest Conversions API — UI: pending
+
+A `pinterest` tracking pixel can now send its conversions from the server too (like Meta/TikTok/Snapchat),
+using the merchant's **ad account id** and **conversion access token**. Contract and modes:
+`src/modules/marketing/pixelProviders/README-pinterest.md`. Default mode is **sandbox** (nothing leaves the
+server) until the owner sets `PINTEREST_CAPI_MODE=live`.
+
+### Endpoints (existing, permission `workspace.manage`)
+**POST `/workspaces/:ws/tracking-pixels`** / **PATCH `/workspaces/:ws/tracking-pixels/:pixelId`**
+```json
+{ "platform": "pinterest", "pixelId": "2612345678901", "capiEnabled": true, "capiToken": "pina_…",
+  "testEventCode": "on", "config": { "adAccountId": "549755885175" } }
+```
+- `config.adAccountId`: 6–20 digits; **required when `capiEnabled` is true** for Pinterest
+  (422 field `config.adAccountId`: "The Pinterest ad account id is needed to turn the Conversions API on").
+- `capiToken` is sealed and never returned (`capiTokenSet`, `capiTokenMask` as for other platforms).
+- `testEventCode`: for Pinterest any non-empty value means "send as test events" (`?test=true`).
+- `GET /tracking-pixels` → `platforms[]` now lists `{ "name": "pinterest", "capi": true, "testEventCode": true }`.
+- `POST /tracking-pixels/:pixelId/test` works for Pinterest (sends a test page visit).
+
+Events sent: order → `checkout` (or `lead`, item 167); relayed browser events → `page_visit` (page view, view content),
+`add_to_cart`, `lead`. Pinterest has no checkout-start/payment-info events, so those are not sent to it.
+The event id is the order id, as the browser tag's, so Pinterest dedups.
+
+### Dashboard — Marketing → Pixels → Pinterest
+- Same form as Meta's server-side section: switch "Send events from the server (Conversions API)", fields
+  "Ad account id" and "Conversion access token" (password field, shows mask when set), switch "Send as test events".
+- Help text linking to Pinterest Ads Manager → Conversions → "Generate access token".
+- Show `lastSentAt` / `lastError` like the other platforms; the event log lists Pinterest rows.
+
+Wording:
+| en | ar |
+|---|---|
+| Send events from the server (Conversions API) | ابعت الأحداث من السيرفر (Conversions API) |
+| Ad account id | رقم الحساب الإعلاني |
+| Conversion access token | توكن التحويلات |
+| Send as test events | ابعتها كأحداث تجريبية |
+| The Pinterest ad account id is needed to turn the Conversions API on | محتاج رقم الحساب الإعلاني في بنترست علشان تشغّل الـ Conversions API |
