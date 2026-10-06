@@ -2080,3 +2080,35 @@ order), `hold_released`, `release` (given back). A captured hold reads `redeem` 
 ### Dashboard
 - Gift card detail ledger: labels for the new kinds — hold «محجوز لطلب» / "Held for an order", release «رجع للكارت» /
   "Returned to card", hold_released «اتفك الحجز» / "Hold released".
+
+## 202. Scheduled summary reports — UI: pending
+
+A daily and/or weekly summary email to chosen team members, with the dashboard home's numbers against the period before:
+sales, orders, average order, confirmation rate, delivery rate, new customers, lost orders, net profit, and the top 5
+products. Sent at the chosen hour in the store's time zone, once per period, in each member's dashboard language.
+
+### Endpoints — `/api/v1/workspaces/:ws/scheduled-reports`
+- `GET /` (`analytics.view`) →
+```json
+{ "daily": { "enabled": true, "hour": 9 }, "weekly": { "enabled": false, "weekday": 6, "hour": 9 },
+  "recipientUserIds": ["…"], "timeZone": "Africa/Cairo",
+  "members": [{ "userId": "…", "email": "sara@store.com", "fullName": "Sara", "locale": "ar" }],
+  "lastSent": [{ "kind": "daily", "periodKey": "2026-10-07", "sentCount": 2, "sentAt": "…" }] }
+```
+  `members` = active members who can see analytics (the only ones who can be chosen).
+- `PUT /` (`workspace.manage`) `{ daily: { enabled, hour 0–23 }, weekly: { enabled, weekday 0–6 (0 Sunday … 6 Saturday), hour }, recipientUserIds: [≤50] }`
+  → same as GET. 422 on `recipientUserIds`: "Only active team members who can see analytics can get reports" / "Choose who gets the report" (a report on with nobody chosen).
+- `GET /preview?kind=daily|weekly` (`analytics.view`) → `{ report, email: { subject, html, text } }`; `report` =
+  `{ kind, fromDay, lastDay, currency, metrics: [{ key, type: money|count|rate, label: { en, ar }, value, previous, changePercent, changePoints }], topProducts: [{ productId, name, quantity, sales }] }`
+  (money in minor units; rates in %, their change in points).
+- `POST /send-test` `{ kind }` (`analytics.view`) → `{ sent: true, email }`: the report now, to the signed-in member only.
+
+Daily covers yesterday (store time); weekly covers the 7 days before the send day.
+
+### Screen — Settings → Notifications → "Summary reports" (or Analytics → "Email reports")
+- Two cards: «تقرير يومي» / "Daily report" (toggle + hour) and «تقرير أسبوعي» / "Weekly report" (toggle + day + hour),
+  hours shown in the store's time zone «بتوقيت المتجر (القاهرة)» / "Store time (Cairo)".
+- «مين يستلم التقرير» / "Who gets it": checkboxes from `members` (name + email).
+- Buttons: «معاينة» / "Preview" (render `email.html` in a frame) and «ابعتهولي دلوقتي» / "Send it to me now".
+- Footer: last sent from `lastSent` «آخر تقرير اتبعت: …» / "Last sent: …".
+- Hint when no member has analytics access: «مفيش حد في الفريق يقدر يشوف التحليلات» / "No team member can see analytics".

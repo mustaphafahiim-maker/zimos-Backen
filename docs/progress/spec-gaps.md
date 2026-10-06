@@ -1513,4 +1513,8 @@ interface + `sandbox` adapter + README; migrations stay in 450–499; no prices 
   - Shopper status: a COD order partly paid (card or deposit) now reads `cod`, not `paid`; new giftCardHeld/amountDue.
   - Paid after expiry and reopened: the hold was given back at expiry, so the order is partly paid and the merchant sees it (not retaken from the card).
   - Verified with the sandbox gateway: part card + gateway paid, expiry release, switch to COD, full-cover, bank transfer refused; data cleaned.
-- [ ] 202. Scheduled reports: a daily or weekly summary email (sales, orders, confirmation and delivery rates, top products) to chosen team members.
+- [x] 202. Scheduled reports: a daily or weekly summary email (sales, orders, confirmation and delivery rates, top products) to chosen team members. (backend done, UI in frontend-handoff.md)
+  - modules/scheduledReports + migration 473 (report_deliveries: one row per store, kind and period, claimed before sending, so a report goes out once even with several workers).
+  - Numbers come from analytics/overviewService.getOverview, so they match the dashboard home. Periods are store-local: daily = yesterday, weekly = the 7 days before the chosen weekday; both are compared with the period before.
+  - A schedule runs every 15 minutes and sends once the store-local hour has passed. A report missed during downtime still goes out later that day; earlier days are not backfilled.
+  - Recipients: active members whose role has analytics.view (or *), checked again at send time. Language = the member's locale, else the store's. Settings permission: workspace.manage; preview and send-to-me: analytics.view.

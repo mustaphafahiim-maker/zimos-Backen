@@ -242,6 +242,40 @@ ${paragraphs}
     };
   },
 
+  // The daily / weekly summary to a team member (modules/scheduledReports), in their dashboard language.
+  summary_report(data = {}) {
+    const en = data.locale === 'en';
+    const money = (v) => (v === null || v === undefined ? '—' : `${(Number(v) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${data.currency || ''}`.trim());
+    const show = (m) => (m.value === null || m.value === undefined ? '—' : m.type === 'money' ? money(m.value) : m.type === 'rate' ? `${m.value}%` : String(m.value));
+    const delta = (m) => {
+      const n = m.type === 'rate' ? m.changePoints : m.changePercent;
+      if (n === null || n === undefined) return '';
+      const sign = n > 0 ? '+' : '';
+      return m.type === 'rate' ? `${sign}${n} ${en ? 'pts' : 'نقطة'}` : `${sign}${n}%`;
+    };
+    const day = (iso) => String(iso || '').slice(0, 10);
+    const weekly = data.kind === 'weekly';
+    const title = en ? `${weekly ? 'Weekly' : 'Daily'} summary — ${data.storeName || ''}` : `ملخص ${weekly ? 'الأسبوع' : 'اليوم'} — ${data.storeName || ''}`;
+    const range = weekly ? `${data.fromDay || day(data.from)} → ${data.lastDay || day(data.to)}` : data.fromDay || day(data.from);
+    const vs = en ? (weekly ? 'vs. the week before' : 'vs. the day before') : weekly ? 'مقارنة بالأسبوع اللي قبله' : 'مقارنة باليوم اللي قبله';
+    const rows = (data.metrics || [])
+      .map((m) => `<tr><td style="padding:8px;border-bottom:1px solid #e5e7eb">${escapeHtml(m.label[en ? 'en' : 'ar'])}</td><td style="padding:8px;border-bottom:1px solid #e5e7eb;font-weight:bold">${escapeHtml(show(m))}</td><td style="padding:8px;border-bottom:1px solid #e5e7eb;color:#6b7280">${escapeHtml(delta(m))}</td></tr>`)
+      .join('');
+    const top = (data.topProducts || []).length
+      ? `<h3 style="font-size:16px;margin:20px 0 8px">${en ? 'Top products' : 'أكتر المنتجات مبيعًا'}</h3><ol style="margin:0;padding-inline-start:20px">${data.topProducts.map((p) => `<li>${escapeHtml(p.name)} — ${escapeHtml(String(p.quantity))} × · ${escapeHtml(money(p.sales))}</li>`).join('')}</ol>`
+      : '';
+    const link = data.url ? `<p style="margin:20px 0 0"><a href="${escapeHtml(data.url)}">${en ? 'Open the dashboard' : 'افتح لوحة التحكم'}</a></p>` : '';
+    const text = [title, range, '', ...(data.metrics || []).map((m) => `${m.label[en ? 'en' : 'ar']}: ${show(m)} ${delta(m)}`.trim()), ...(data.topProducts || []).map((p, i) => `${i + 1}. ${p.name} — ${p.quantity} × · ${money(p.sales)}`), data.url || ''].join('\n');
+    return {
+      subject: title,
+      ...wrap(
+        `<h2 style="font-size:20px;margin:0 0 4px">${escapeHtml(title)}</h2><p style="color:#6b7280;margin:0 0 16px">${escapeHtml(range)} · ${escapeHtml(vs)}</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:14px">${rows}</table>${top}${link}`,
+        text,
+        { dir: en ? 'ltr' : 'rtl', arabicFooter: !en }
+      ),
+    };
+  },
+
   // An email campaign (modules/emailCampaigns): the same frame as the store's order emails, with its unsubscribe link.
   campaign_email(data = {}) {
     return templates.order_email(data);
