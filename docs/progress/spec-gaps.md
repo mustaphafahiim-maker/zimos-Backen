@@ -1582,7 +1582,10 @@ compare it with) that are not there. Each was checked against SPEC §21: no camp
 social proof, no fake reviews, no call centre, no unofficial WhatsApp. A store minimum order amount already exists
 (discounts/couponExtras.js) and is not listed. Migrations 482–499; no prices in code (every amount is the merchant's).
 
-- [ ] 212. Product questions and answers: shoppers ask on the product page, the merchant answers, answered questions are published (moderated), and the team is told about new questions.
+- [x] 212. Product questions and answers: shoppers ask on the product page, the merchant answers, answered questions are published (moderated), and the team is told about new questions. (backend done, UI in frontend-handoff.md)
+  - modules/productQuestions + migration 482. Pre-moderated: nothing a shopper writes is public until the store answers and publishes it, so no spam or made-up content is shown. Asker email private; 5 questions per IP per hour.
+  - New merchant notification product.question (products.manage). The answer email goes once to the asker — a reply to their own question, not marketing (§21 holds).
+  - Verified: ask (+ validation), hidden before answer, publish without answer refused, answer publishes + one email, hide, public list without emails, notifications.
 - [ ] 213. License keys for digital products: a product sells codes from a pool the merchant uploads; a paid order gets its codes (email and order page); stock = codes left; low-pool alert.
 - [ ] 214. Gift wrap and gift message at checkout: an optional wrap with the merchant's price and a message from the shopper, on the order and the packing slip, with the prices hidden on a gift slip.
 - [ ] 215. Mix-and-match box: "any 3 from this collection for a set price" built by the shopper, priced by the server at checkout.

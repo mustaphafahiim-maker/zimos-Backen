@@ -47,6 +47,8 @@ const TYPES = Object.freeze({
   automation: { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
   // A follow-up on a customer fell due (customerNotes/, item 209); sent to its assignee.
   'customer.followup': { permission: PERMISSIONS.CUSTOMERS_VIEW, defaults: { inApp: true, email: true } },
+  // A shopper asked a question on a product (productQuestions/, item 212).
+  'product.question': { permission: PERMISSIONS.PRODUCTS_MANAGE, defaults: { inApp: true, email: false } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 

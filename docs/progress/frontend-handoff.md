@@ -2317,3 +2317,20 @@ All under `/api/v1/workspaces/:ws/customer-notes` (`customers.view` unless noted
 `GET/POST /store/:ws/account/wishlist` → `items[].available` for an item saved **without** a variant is now true when **any**
 active variant of the product can be bought (in stock, overselling, or inventory not tracked). An item saved with a variant
 still reflects that variant only. The per-item product request can go.
+
+## 212. Product questions and answers — UI: pending
+
+### Storefront — `/api/v1/store/:ws/products/:productId/questions`
+- `GET ?limit=20&offset=0` → `{ questions: [{ id, question, askerName, answer, answeredAt, createdAt }], total }` — published only, newest answers first (2-min cache).
+- `POST` `{ question (5–1000), name?, email? (private, only to tell them about the answer), locale? }` → 201 `{ received: true, status: "pending" }`.
+  429 after 5 questions an hour from one address. Nothing is shown before the store answers it.
+
+### Dashboard — `/api/v1/workspaces/:ws/product-questions`
+- `GET ?status=pending|published|hidden&productId=&limit=&offset=` (`products.view`) → `{ questions: [{ …, productId, productName, askerEmail, status, locale, answeredBy }], total, pending }`
+- `PATCH /:id` (`products.manage`) `{ answer?, status? }` — an answer publishes by default; publishing without an answer → 422 `ANSWER_REQUIRED`. The first published answer emails the asker once (template `question_answered`, in their language).
+- `DELETE /:id` → 204.
+- New merchant notification type **`product.question`** (products.manage, bell on, email off by default): «سؤال جديد على …» / "New question on …", link `/products/:id?tab=questions`.
+
+### Screens
+- Product page (storefront): «أسئلة وأجوبة» / "Questions & answers" list + «اسأل سؤال» / "Ask a question" form (question, name, email optional «هنبلغك لما نرد» / "We'll tell you when we answer"); after sending: «وصلنا سؤالك، هيظهر بعد ما نرد عليه» / "Got it — it will appear once we answer".
+- Dashboard: «الأسئلة» / "Questions" inbox (pending count badge, filters), answer box with «انشر» / "Publish" / «اخفي» / "Hide"; a «أسئلة» tab on the product page.

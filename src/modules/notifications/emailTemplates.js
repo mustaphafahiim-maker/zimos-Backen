@@ -75,6 +75,18 @@ ${codeHtml}
     return { subject: `${data.productName} رجع متاح`, ...wrap(`<p><b>${name}</b> رجع متاح في ${store}.</p>${button}<p style="color:#6b7280">طلبت نبلغك مرة واحدة، ومش هنبعتلك تاني عنه.</p>`, `${data.productName} رجع متاح في ${data.storeName}: ${url}`, { dir: 'rtl', arabicFooter: true }) };
   },
 
+  // The store answered a shopper's question on a product (productQuestions, item 212): once, to the asker.
+  question_answered(data = {}) {
+    const name = escapeHtml(String(data.productName || '').slice(0, 300));
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const q = escapeHtml(String(data.question || '').slice(0, 1000));
+    const a = escapeHtml(String(data.answer || '').slice(0, 3000)).replace(/\n/g, '<br />');
+    const url = /^https?:\/\//.test(String(data.url || '')) ? String(data.url) : '';
+    const link = url ? `<p><a href="${escapeHtml(url)}">${data.locale === 'en' ? 'See the product' : 'شوف المنتج'}</a></p>` : '';
+    if (data.locale === 'en') return { subject: `${data.storeName || ''} answered your question`, ...wrap(`<p>${store} answered your question about <b>${name}</b>:</p><p style="color:#6b7280">${q}</p><p>${a}</p>${link}`, `${data.question}\n\n${data.answer}\n\n${url}`) };
+    return { subject: `${data.storeName || ''} رد على سؤالك`, ...wrap(`<p>${store} رد على سؤالك عن <b>${name}</b>:</p><p style="color:#6b7280">${q}</p><p>${a}</p>${link}`, `${data.question}\n\n${data.answer}\n\n${url}`, { dir: 'rtl', arabicFooter: true }) };
+  },
+
   // A gift card sent to its holder (giftCards, item 189): the code, the value, the store's name.
   gift_card(data = {}) {
     const store = escapeHtml(String(data.storeName || '').slice(0, 120));
