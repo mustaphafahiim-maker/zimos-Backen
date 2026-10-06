@@ -759,6 +759,29 @@ Each coupon in the dashboard's discounts list has a "Share link" (SPEC §10.5: "
   - A disabled coupon showed the warning.
   - On the storefront, the product link remembered the code and showed "كوبون SHARECAP" on the order form. The funnel link remembered its code and opened the funnel. Both paths also answer 200 through the store's own host.
   - The test coupons and the session were removed.
+A funnel page's settings have a Details tab (SPEC §9.3: "Details tab (the link using letters, digits and hyphens, internal title, type…)"). It shows the page's title and address, and a generic page's address can now change.
+
+- **The tab** (dashboard `funnels/StepDetailsForm.tsx`, shown first in the page settings dialog when a page passes one):
+  - The page's title. On a generic page this is also its link text in the funnel's footer.
+  - Its address: what is typed becomes lowercase letters, digits and hyphens, with the public path shown under it.
+  - Its type.
+  - "Apply" puts the change into the funnel draft; it is saved with the funnel's Save, like every other edit.
+- **Decision: only a generic page's address can change.** A step's key is its address, and steps on the map are referred to by key (edges, visitors' sessions). Generic pages have no edges.
+  - The backend now accepts `key` on a step update for a `custom` step that no edge touches and that has no split test (a finished test still serves its winner by key). Anything else answers 409 `FUNNEL_STEP_KEY_LOCKED`. A clash answers the existing `FUNNEL_STEP_KEY_TAKEN`. The logic is in `funnels/genericPageAddress.js`.
+  - On a page on the map, the address field is read-only and the tab says why.
+- **Decision: old addresses keep working.**
+  - The keys a page had are kept in `seo.previousKeys` (the five latest). An seo update that doesn't mention them keeps them.
+  - The public page lookup falls back to them.
+  - The storefront answers an old address with a permanent redirect (308) to the new one.
+- **Tested** on the scratch DB:
+  - Through the API: renamed a new generic page `about` → `our-story` (`previousKeys: ["about"]`). Renaming a map step answered 409 LOCKED, a clash 409 TAKEN, and "Bad Key" 422.
+  - After publishing, `/p/about` and `/p/our-story` both served the page, and the storefront redirected `/p/about` to `/p/our-story`.
+  - In the dashboard, Arabic and English:
+    - A map step's address was read-only.
+    - Typing another page's address said it was taken, and "Our Story 2024!" became `our-story-2024`.
+    - Apply and Save stored the new key and title.
+    - Going back to `our-story` left `previousKeys: ["our-story-2024", "about"]`.
+  - The test page was deleted and the funnel republished.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -970,7 +993,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
 - [x] 146. Split tests with more than two versions (§9.6).
 - [x] 147. Copy a coupon's share link (§10.5).
-- [ ] 148. Page settings Details tab: a generic page's address and its title (§9.3).
+- [x] 148. Page settings Details tab: a generic page's address and its title (§9.3).
 - [ ] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
 - [ ] 150. Formatted product descriptions, sanitized (§7.1).
 - [ ] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
