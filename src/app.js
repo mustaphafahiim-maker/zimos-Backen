@@ -282,6 +282,8 @@ v1.use('/workspaces/:workspaceId/stock-locations', require('./modules/stockLocat
 v1.use('/workspaces/:workspaceId/purchasing', require('./modules/purchasing').router);
 // Free gift with purchase (spec-gaps item 208).
 v1.use('/workspaces/:workspaceId/free-gifts', require('./modules/freeGifts').router);
+// Notes and follow-ups on customers (spec-gaps item 209).
+v1.use('/workspaces/:workspaceId/customer-notes', require('./modules/customerNotes').router);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);

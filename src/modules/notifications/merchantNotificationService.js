@@ -45,6 +45,8 @@ const TYPES = Object.freeze({
   announcement: { permission: null, defaults: { inApp: true, email: false } },
   // An automation's "notify the team" step (modules/automations).
   automation: { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
+  // A follow-up on a customer fell due (customerNotes/, item 209); sent to its assignee.
+  'customer.followup': { permission: PERMISSIONS.CUSTOMERS_VIEW, defaults: { inApp: true, email: true } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 

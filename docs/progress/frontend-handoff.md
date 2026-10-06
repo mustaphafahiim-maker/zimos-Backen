@@ -2247,3 +2247,21 @@ All under `/api/v1/workspaces/:ws/purchasing` — read `inventory.view`, change 
 - Marketing → «هدايا مع الطلب» / "Free gifts": rule list + editor (gift product/variant picker, quantity, «لما الطلب يوصل لـ» / "When the order reaches" amount, and/or «لما يكون في السلة» / "When the cart has" product picker, dates, active).
 - Cart / cart drawer: eligible → «🎁 هدية مجانية: Gift tote bag» / "Free gift: Gift tote bag" as a line at 0; not yet → progress «زوّد 150 ج.م وخد Gift tote bag هدية» / "Add EGP 150 more to get a Gift tote bag free"; out of stock → hide.
 - Order page: badge «هدية» / "Gift" on lines priced 0.
+
+## 209. Notes and follow-ups on customers — UI: pending
+
+All under `/api/v1/workspaces/:ws/customer-notes` (`customers.view` unless noted).
+
+- `GET /customers/:customerId` → `{ notes: [Note], followups: [Followup] }` (pinned notes first; open follow-ups first).
+- `POST /customers/:customerId/notes` `{ body (1–5000), isPinned? }` → 201 Note. `PATCH /notes/:id` `{ body?, isPinned? }`, `DELETE /notes/:id` → 204 — the author only, or someone with `customers.manage` (else 403).
+  Note = `{ id, customerId, body, isPinned, author: { id, fullName }, createdAt, updatedAt }`.
+- `POST /customers/:customerId/followups` `{ title (1–200), dueAt (ISO), assigneeUserId? (default: me; null = whole team) }` → 201 Followup. The assignee must be an active teammate who can see customers (422).
+- `PATCH /followups/:id` `{ title?, dueAt?, assigneeUserId?, done? }` (a new time or assignee is reminded again); `DELETE /followups/:id` (`customers.manage`).
+- `GET /followups?all=true&dueBefore=` → `{ followups: [Followup + customer { id, fullName, phone }], overdue }`: open ones, mine by default, soonest first.
+  Followup = `{ id, customerId, title, dueAt, doneAt, overdue, assignee: { id, fullName } | null, createdBy, createdAt }`.
+- When a follow-up falls due, its assignee gets the merchant notification **`customer.followup`** once (bell and email by default; it shows in the notification preferences): title «متابعة: …» / "Follow-up: …", link `/customers/:id`, `data: { followupId, customerId, customerName, title }`.
+
+### Screens
+- Customer page: «ملاحظات» / "Notes" (add box, pin toggle, edit/delete own), «متابعات» / "Follow-ups" (add: title, date/time, assignee; tick done; overdue in red «متأخرة» / "Overdue").
+- Dashboard home / Customers: «متابعاتي» / "My follow-ups" list with the overdue count badge; «كل الفريق» / "Whole team" toggle (`all=true`).
+- Notification preferences: the new type «متابعة عميل» / "Customer follow-up".

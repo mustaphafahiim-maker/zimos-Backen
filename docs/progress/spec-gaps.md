@@ -1561,6 +1561,9 @@ centre, no unofficial WhatsApp. Outside services are an interface + `sandbox` ad
   - Qualification uses the lines' prices before bundle tiers and the order discount (plain lines: pinned or effective price; offer lines: offer price). The cart uses its line totals (after bundles) for the "add X more" hint. The two can differ slightly when bundle tiers apply.
   - A gift is added only while its variant is in stock (or oversells), one line per gift variant. Funnels are left alone. Gifts reserve stock like any line.
   - Verified: rule validation, product rule (gift at 0, total unchanged), subtotal rule below/above, gift out of stock skipped, cart hints (missing amount, out of stock).
-- [ ] 209. Notes and follow-ups on customers: staff notes on a contact (with author and time), follow-up reminders assigned to a team member, and a due-reminders list and notification.
+- [x] 209. Notes and follow-ups on customers: staff notes on a contact (with author and time), follow-up reminders assigned to a team member, and a due-reminders list and notification. (backend done, UI in frontend-handoff.md)
+  - modules/customerNotes + migration 479 (customer_notes, customer_followups). Writing notes and follow-ups needs only customers.view (support staff take notes); deleting a follow-up needs customers.manage, and only the author or a manager edits a note.
+  - Reminders: a 5-minute schedule claims each due follow-up (notified_at) and sends the new merchant notification type customer.followup to the assignee (or the whole team when unassigned). Moving the time or the assignee re-arms it.
+  - Verified: notes (author, edit, pin order, delete), assignee check, overdue flag, my list and overdue count, notification sent once over two runs, done.
 - [ ] 210. Size charts: reusable size tables (rows/columns, cm/inch), attached to products or collections, shown on the product page.
 - [ ] 211. Storefront search analytics: what shoppers search, searches with no results, the results clicked, and merchant-set synonyms used by the store search.
