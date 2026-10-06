@@ -687,3 +687,41 @@ Wording:
 
 Not built: sending Google Ads conversions from the server (offline conversion upload). It needs a Google Ads
 developer token and OAuth app — the integrations team's work with the owner's account (noted in spec-gaps).
+
+---
+
+## 170. Google Tag Manager: a ready-made container and the dataLayer events — UI: pending
+
+### Endpoints (permission `workspace.manage`, under the tracking-pixels router)
+**GET `/workspaces/:ws/tracking-pixels/gtm/events`** — the reference list to show the merchant:
+```json
+{ "events": [ { "event": "view_item", "when": "A product page or a funnel product step opens" }, …,
+              { "event": "purchase", "when": "…" }, { "event": "generate_lead", "when": "…" } ],
+  "fields": [ { "name": "ecommerce.value", "type": "number", "note": "major units (e.g. 450.5)" }, … , { "name": "event_id", … } ] }
+```
+**GET `/workspaces/:ws/tracking-pixels/gtm/container[?download=true]`** — a GTM export (format v2) to import
+(GTM → Admin → Import container → choose the file → Merge). Optional query: `ga4=G-…`, `ads=AW-…`,
+`purchaseLabel=…`, `leadLabel=…`; without them the store's own Google pixels are used (first G- tag; first AW-
+tag with its labels from item 169). `download=true` adds `Content-Disposition: attachment; filename="zimos-gtm-container.json"`.
+Contents: 5 dataLayer variables, 6 Custom Event triggers (one per event), a Google tag + 6 GA4 event tags (when a
+G- id is known), a conversion linker + Google Ads conversion tags for purchase/lead (when an AW- id and labels are known).
+Meta/TikTok/Snapchat are deliberately left out (the store already loads them; GTM copies would double count).
+
+### Storefront (`lib/adPixels.ts`) — small changes so the container gets everything
+- Push `{ ecommerce: null }` before each ecommerce push (GA4's documented reset), then
+  `{ event, event_id: dedupeId, ecommerce: { value, currency, transaction_id, items: [{ item_id }] } }`.
+- When the order is reported as a lead (item 167), push `generate_lead` instead of `purchase`.
+
+### Dashboard — Marketing → Pixels → Google Tag Manager
+- On a GTM pixel: a card "Ready-made container": button "Download container" (GET …/gtm/container?download=true),
+  three steps text (Download → GTM Admin → Import → Merge), and the events table from `/gtm/events`.
+- If the store has no Google pixel: optional inputs GA4 id / Ads id / labels passed as query.
+
+Wording:
+| en | ar |
+|---|---|
+| Ready-made container | كونتينر جاهز |
+| Download container | نزّل الكونتينر |
+| In Google Tag Manager: Admin → Import container → choose the file → Merge. | في Google Tag Manager: الإدارة ← استيراد كونتينر ← اختار الملف ← دمج. |
+| Events sent to the dataLayer | الأحداث اللي بتتبعت للـ dataLayer |
+| Meta, TikTok and Snapchat stay in Zimos so nothing is counted twice. | فيسبوك وتيك توك وسناب بيفضلوا في زيموس علشان مفيش حاجة تتحسب مرتين. |

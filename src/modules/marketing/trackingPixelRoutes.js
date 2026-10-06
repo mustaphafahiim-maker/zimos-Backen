@@ -18,6 +18,8 @@ router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.WORKSPACE_
 router.get('/', validate(schemas.list), controller.list);
 router.get('/events', validate(schemas.events), controller.events);
 router.get('/settings', validate(schemas.list), controller.getSettings);
+// A Google Tag Manager container to import, and the dataLayer events it listens to (gtmContainer.js).
+require('./gtmContainer').mount(router);
 router.put('/settings', validate(schemas.updateSettings), controller.updateSettings);
 router.post('/', validate(schemas.create), controller.create);
 router.post('/:pixelId/test', validate(schemas.remove), controller.sendTest);
