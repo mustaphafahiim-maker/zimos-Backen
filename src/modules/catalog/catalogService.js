@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { normalizeDescription } = require('./richDescription');
 const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
@@ -52,6 +53,8 @@ function slugFor(source, fallback) {
 async function createProduct(workspaceId, data, req) {
   const { variant: variantData, shippingMode, shippingExtraAmount, ...rest } = data;
   const productData = { ...rest, ...productShippingFields(null, { shippingMode, shippingExtraAmount }) };
+  // A formatted description is kept as marks, never HTML (richDescription.js).
+  if (productData.description !== undefined) productData.description = normalizeDescription(productData.description);
   const products = scoped(db.Product, workspaceId);
   const baseSlug = slugFor(productData.slug || productData.name, 'product');
   let slug = baseSlug;
@@ -206,6 +209,7 @@ async function updateProduct(workspaceId, productId, data, req) {
     });
     const before = product.toJSON();
     const { shippingMode, shippingExtraAmount, ...rest } = data;
+    if (rest.description !== undefined) rest.description = normalizeDescription(rest.description);
     await product.update(
       { ...rest, ...productShippingFields(before, { shippingMode, shippingExtraAmount }) },
       { transaction: t }

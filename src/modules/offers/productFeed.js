@@ -103,7 +103,8 @@ async function buildItems(workspace) {
       .filter((m) => m && typeof m.url === 'string' && /^https?:\/\//i.test(m.url) && (!m.mimeType || String(m.mimeType).startsWith('image/')))
       .map((m) => m.url);
     if (images.length === 0) continue; // every platform refuses an item without a picture
-    const description = plain(product.description).slice(0, 5000) || product.name;
+    // Without its formatting marks (catalog/richDescription.js).
+    const description = plain(require('../catalog/richDescription').plainDescription(product.description)).slice(0, 5000) || product.name;
     for (const variant of product.variants) {
       const inStock = variant.allowOverselling || variant.stockOnHand - variant.reservedStock > 0;
       if (!inStock && config.excludeOutOfStock) continue;

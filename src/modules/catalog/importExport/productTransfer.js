@@ -264,20 +264,6 @@ function fetchPublicJson(url, { timeoutMs = 10000, maxBytes = 2 * 1024 * 1024 } 
   });
 }
 
-const stripHtml = (html) =>
-  String(html || '')
-    .replace(/<\s*(br|\/p|\/div|\/li|\/h[1-6])\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
 /** Shopify's public `/products/<handle>.json` → one transfer product, as a draft. */
 function mapShopifyProduct(shopify) {
   const options = (shopify.options || []).filter((o) => o && o.name && o.name !== 'Title');
@@ -287,7 +273,8 @@ function mapShopifyProduct(shopify) {
   return {
     __row: 1,
     name: String(shopify.title || '').slice(0, 300),
-    description: stripHtml(shopify.body_html).slice(0, 20000),
+    // Its formatting kept as marks, everything else dropped (catalog/richDescription.js).
+    description: require('../richDescription').normalizeDescription(shopify.body_html || ''),
     productType: 'physical',
     status: 'draft',
     tags: tags.map((tag) => String(tag).trim()).filter(Boolean).slice(0, 50),
