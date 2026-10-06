@@ -365,7 +365,11 @@ async function updateStep(workspaceId, funnelId, stepId, data, req) {
   const patch = {};
   if (data.stepType !== undefined) patch.stepType = data.stepType;
   if (data.name !== undefined) patch.name = data.name;
-  if (data.seo !== undefined) patch.seo = data.seo;
+  if (data.seo !== undefined) patch.seo = require('./genericPageAddress').keepPreviousKeys(step.seo, data.seo);
+  if (data.key !== undefined && data.key !== step.key) {
+    // Only a generic page's address can move; the old one is remembered (genericPageAddress.js).
+    Object.assign(patch, await require('./genericPageAddress').renameKey(step, data.key, { stepType: patch.stepType, nextSeo: patch.seo }));
+  }
   if (data.builderData !== undefined) {
     validateStepData(data.builderData, { label: `step "${step.key}"` });
     patch.builderData = data.builderData;

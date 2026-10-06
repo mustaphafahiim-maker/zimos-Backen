@@ -14,6 +14,7 @@ const { AppError } = require('../../core/errors/AppError');
  *
  *   GET /store/:ws/funnels/:funnelRef/pages            → the generic pages { key, name }
  *   GET /store/:ws/funnels/:funnelRef/pages/:stepKey   → one, as a step is served
+ *                                                       (also by an address it had before)
  *
  * Both read the published revision only. A `custom` step joined to the map by
  * an edge is an ordinary step, as before.
@@ -73,7 +74,8 @@ const list = asyncHandler(async (req, res) => {
 
 const one = asyncHandler(async (req, res) => {
   const { funnel, pages } = await published(req.tenant.workspaceId, req.params.funnelRef);
-  const step = pages.find((s) => s.key === req.params.stepKey);
+  // An address the page had before it was renamed still opens it; `step.key` is where it lives now (genericPageAddress.js).
+  const step = pages.find((s) => s.key === req.params.stepKey) || require('./genericPageAddress').findMoved(pages, req.params.stepKey);
   if (!step) throw notFound();
   const payload = {
     funnel: funnelView(funnel),

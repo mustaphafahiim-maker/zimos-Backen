@@ -103,7 +103,8 @@ const createStep = {
 const updateStep = {
   params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required(), stepId: uuid.required() }),
   body: Joi.object({
-    // `key` is immutable after create — edges reference it.
+    // `key` is fixed once created — edges reference it — except a generic page's (genericPageAddress.js).
+    key: stepKey.optional(),
     stepType: stepTypeEnum.optional(),
     name: Joi.string().min(1).max(200).optional(),
     builderData: treeData.optional(),
