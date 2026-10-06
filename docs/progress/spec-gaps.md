@@ -721,6 +721,23 @@ The funnel's page editor gets three of the §9.3 top-bar and element-menu tools 
   - On a three-column section, an element's button outlined and focused its column, and the column's button went to the section's settings.
   - The tablet button narrowed the preview.
   - Nothing was saved to the funnel.
+Funnel split tests can now have more than two versions (SPEC §9.6: "2 or more variations, each with a distribution percentage totaling 100%"). The backend already took up to five, keyed A–E; the dashboard only made A and B.
+
+- **Starting a test.** The form lists the versions and each one's share of visitors (`funnels/SplitTestVersions.tsx`):
+  - "Add a version" goes up to five and re-splits the shares evenly. There is also a "Split evenly" button, and each version except A can have a name.
+  - The test only starts when the shares add up to 100.
+  - Every version but A starts as a copy of the page.
+- **A running test.**
+  - Each version's row has its own "Edit {key}'s page". Saving it sends every version's page back, since the API checks all of them.
+  - "Versions and shares" adds a version or moves the shares; visitors already in a version stay in it.
+  - **Decision: a version visitors have seen cannot be removed from a running test.** Their pinning and its numbers would be lost. Its share can go to 0 instead, which stops sending new visitors to it.
+- **Confidence with more versions.** With more than two versions, the line names who it compares: "{pct}% sure C really converts better than A" (the leader against the runner-up, as the server computes it).
+- **Fix found on the way:** the "Tests and settings" window was the old Modal, mounted inside the funnel editor's top bar, which clipped it to the bar's height. It is now a portalled Base UI dialog.
+- **Product A/B tests** (`ProductTestSection`) stay at two versions: a price test's versions each carry prices, which is a separate change.
+- **Tested** on the scratch DB:
+  - In Arabic and in English, on two published funnels: created a three-version test with a named C, added a fourth version to the running test (25% each, only D removable), and saved C's page.
+  - On the funnel itself, 50 new visitors were spread over A 14, B 10, C 19 and D 7.
+  - The tests, their assignments and the test sessions were deleted afterwards.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -930,7 +947,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 143. AI store policies applied to the store's policies (§19.2).
 - [x] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
 - [x] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
-- [ ] 146. Split tests with more than two versions (§9.6).
+- [x] 146. Split tests with more than two versions (§9.6).
 - [ ] 147. Copy a coupon's share link (§10.5).
 - [ ] 148. Page settings Details tab: a generic page's address and its title (§9.3).
 - [ ] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
