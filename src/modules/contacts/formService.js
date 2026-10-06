@@ -24,6 +24,7 @@ function cleanTags(tags) {
 }
 
 function view(s) {
+  const { data, files } = require('./formFiles').present(s.data);
   return {
     id: s.id,
     customerId: s.customerId,
@@ -33,7 +34,8 @@ function view(s) {
     phone: s.phone,
     email: s.email,
     message: s.message,
-    data: s.data || {},
+    data,
+    files,
     tags: s.tags || [],
     marketingConsent: s.marketingConsent,
     isRead: s.isRead,
@@ -65,18 +67,33 @@ function findFormNode(node, elementId, depth = 0) {
 /** The form element as published: its name and the tags it adds. */
 async function publishedForm(workspaceId, pagePath, elementId) {
   if (!elementId) return null;
+  let node = null;
   try {
     const found = await require('../pages/pagesService').getPublishedPageForStore(workspaceId, pagePath || '/');
-    if (found.kind !== 'page') return null;
-    const node = findFormNode(found.data.page.tree, String(elementId));
-    if (!node) return null;
-    const props = node.props || {};
-    const tags = Array.isArray(props.tags) ? props.tags : String(props.tags || '').split(',');
-    return { name: String(props.formName || props.title || '').trim(), tags: cleanTags(tags) };
+    if (found.kind === 'page') node = findFormNode(found.data.page.tree, String(elementId));
   } catch (err) {
-    // An unpublished page or a funnel step: the submission is still kept.
-    return null;
+    // Not a store page (a funnel step's path, or unpublished): looked for below.
   }
+  // A form on a published funnel's step (its path is the funnel's, not a page's).
+  if (!node) node = await funnelFormNode(workspaceId, String(elementId));
+  if (!node) return null;
+  const props = node.props || {};
+  const tags = Array.isArray(props.tags) ? props.tags : String(props.tags || '').split(',');
+  return { name: String(props.formName || props.title || '').trim(), tags: cleanTags(tags), props };
+}
+
+async function funnelFormNode(workspaceId, elementId) {
+  const funnels = await db.Funnel.findAll({ where: { workspaceId, status: 'published' }, attributes: ['publishedRevisionId'] });
+  const ids = funnels.map((f) => f.publishedRevisionId).filter(Boolean);
+  if (ids.length === 0) return null;
+  const revisions = await db.FunnelRevision.findAll({ where: { id: ids, workspaceId }, attributes: ['snapshot'] });
+  for (const revision of revisions) {
+    for (const step of (revision.snapshot && revision.snapshot.steps) || []) {
+      const node = findFormNode(step.builderData, elementId);
+      if (node) return node;
+    }
+  }
+  return null;
 }
 
 /**
@@ -109,10 +126,14 @@ async function submit(workspaceId, body, req) {
   if (!phoneNormalized && !email) {
     throw new AppError('CONTACT_REQUIRED', 'A phone number or an email is required', 422);
   }
+  // A new phone is a new lead: the plan's monthly leads limit (billing/limitGuards.js).
+  await require('../billing/limitGuards').assertLeadRoom(workspaceId, phoneNormalized);
 
   const form = await publishedForm(workspaceId, body.pagePath, body.elementId);
   const tags = form ? form.tags : [];
   const consent = Boolean(body.marketingConsent);
+  // The published form's photo and stars inputs (formFiles.js).
+  const prepared = await require('./formFiles').prepare(workspaceId, form && form.props, body);
 
   await db.sequelize.transaction(async (transaction) => {
     let customer = null;
@@ -123,6 +144,8 @@ async function submit(workspaceId, body, req) {
         transaction,
       });
       customer = row;
+      // A phone the store did not know is a new lead (automations, webhooks).
+      if (created) await outbox.record(transaction, 'lead.created', { workspaceId, customerId: row.id, source: 'form' });
       if (!created) {
         const updates = {};
         if (fullName && !row.fullName) updates.fullName = fullName;
@@ -145,7 +168,7 @@ async function submit(workspaceId, body, req) {
         phone: phoneNormalized,
         email,
         message,
-        data: body.fields || {},
+        data: await require('./formFiles').attach(prepared, transaction),
         tags,
         marketingConsent: consent,
         ipAddress: req.ip || null,
@@ -220,6 +243,7 @@ async function markRead(workspaceId, submissionId, isRead) {
 async function deleteSubmission(workspaceId, submissionId, req) {
   const submission = await scoped(db.FormSubmission, workspaceId, 'FormSubmission').findByPkOrThrow(submissionId);
   await submission.destroy();
+  await require('./formFiles').removeFor(workspaceId, submission.data);
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,

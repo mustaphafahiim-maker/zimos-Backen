@@ -95,6 +95,9 @@ router.post(
 
 // ───────────────────────────── two-step sign-in ─────────────────────────────
 
+// Backup codes (twoFactorRecovery.js).
+router.use(require('./twoFactorRecovery').router);
+
 const password = Joi.string().max(200).allow('', null).optional();
 const code = Joi.string().trim().min(6).max(10).required();
 
@@ -106,6 +109,15 @@ router.post(
   authenticate,
   validate({ body: Joi.object({ password }) }),
   asyncHandler(async (req, res) => res.json(await twoFactor.enableEmail(req.user, req.body, req)))
+);
+
+// The code on WhatsApp to the verified phone (twoFactorWhatsapp.js).
+router.post(
+  '/two-factor/whatsapp/enable',
+  authLimiter,
+  authenticate,
+  validate({ body: Joi.object({ password }) }),
+  asyncHandler(async (req, res) => res.json(await twoFactor.enableWhatsapp(req.user, req.body, req)))
 );
 
 router.post(
@@ -153,3 +165,5 @@ router.post(
 );
 
 module.exports = router;
+// "Chrome on Windows" for the new sign-in alert (newDeviceSignIn.js).
+module.exports.describeAgent = describeAgent;

@@ -65,7 +65,14 @@ const SORT_ORDER = {
   price_desc: 'min_price DESC NULLS LAST, created_at DESC, id DESC',
   name: 'lower(name) ASC, id ASC',
   position: 'coll_pos ASC NULLS LAST, priority DESC, created_at DESC, id DESC',
+  // The builder's product list sources (SPEC §8.2): the merchant's picks — a
+  // display priority above 0, or the tag "featured" / "مميز" — first, the rest
+  // after them newest first, so the block never stands empty …
+  featured: 'featured DESC, priority DESC, created_at DESC, id DESC',
+  // … and units sold in the last BEST_SELLING_DAYS (cancelled orders left out).
+  best_selling: 'sold DESC, priority DESC, created_at DESC, id DESC',
 };
+const BEST_SELLING_DAYS = 90;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -483,6 +490,18 @@ async function searchProducts(workspaceId, query) {
                    : 'NULL::bigint'
                } AS min_price,
                ${positionIn} AS coll_pos,
+               ${
+                 sort === 'featured'
+                   ? "(p.priority > 0 OR EXISTS (SELECT 1 FROM unnest(p.tags) AS ft(tag) WHERE lower(ft.tag) IN ('featured', 'مميز')))"
+                   : 'false'
+               } AS featured,
+               ${
+                 sort === 'best_selling'
+                   ? `(SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                        WHERE oi.product_id = p.id AND o.workspace_id = p.workspace_id AND o.cancelled_at IS NULL
+                          AND o.created_at > now() - interval '${BEST_SELLING_DAYS} days')`
+                   : '0'
+               } AS sold,
                COUNT(*) OVER () AS total
           FROM products p ${relevanceJoin}
          WHERE ${conditions.join(' AND ')}

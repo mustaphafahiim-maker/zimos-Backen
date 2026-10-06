@@ -27,6 +27,13 @@ Endpoints (permission `apps.manage`, under `/workspaces/:workspaceId/dropship`):
 | `POST /providers/:code/import` | `{ code }` → a draft product |
 | `POST /providers/:code/orders/:orderId/push` | forward an order |
 | `POST /providers/:code/sync-stock` | copy the provider's stock onto imported variants |
+| `PATCH /providers/:code/settings` | `{ autoForward: "off" \| "created" \| "confirmed", applyStatus }` — forward orders by themselves, apply the supplier's status to the order |
+
+On the order (`orders.view` / `orders.manage`, under `/workspaces/:workspaceId/orders/:orderId`,
+`../dropshipOrders.js`): `GET /dropship` (what was forwarded, where it stands,
+which connected suppliers supply its lines), `POST /dropship/:code/push`,
+`POST /dropship/refresh` (ask the supplier now). A mixed order sends each
+supplier only the lines whose product came from it.
 
 ## The adapter
 
@@ -57,6 +64,11 @@ module.exports = {
   // → [{ externalId, code, stock }]
   async syncStock(credentials, externalIds) {},
 
+  // Optional. Where a forwarded order stands now; with it, forwarded orders
+  // are followed every few minutes until delivered / returned / cancelled.
+  // `ref.pushedAt` is when it was forwarded. → { externalStatus }
+  async getOrderStatus(credentials, externalOrderId, ref) {},
+
   // The provider's order status → a ZIMOS order stage, or null for "no change".
   mapStatus(externalStatus) {},
 };
@@ -83,5 +95,30 @@ message.
 
 `sandbox.js` answers without any network: products `SBX-1001` (two colours)
 and `SBX-1002`, order numbers `SBX-ORD-######` derived from the order number,
-fixed stock. It is registered only when `NODE_ENV` is not `production` and
+fixed stock. Its orders move on with time (confirmed after 1 minute, shipped
+after 3, delivered after 6; an order number ending in 0 comes back cancelled).
+It is registered only when `NODE_ENV` is not `production` and
 appears in the dashboard as "Test".
+
+## The merchant's own store: `shopify.js`, `woocommerce.js` (item 181)
+
+Not suppliers but the merchant's other store: ZIMOS takes the order, the
+other store fulfils it, and its fulfilment comes back through the same
+follow job (`dropship.follow_orders`). Both are registered in production too
+and share `storeHttp.js` (https only — plain http only to 127.0.0.1/localhost
+outside production, for a mock store — a 15 s timeout, no redirects, and the
+error codes above).
+
+| | Shopify | WooCommerce |
+|---|---|---|
+| Credentials | `storeUrl`, `accessToken` (custom app, Admin API: read/write orders, read products) | `storeUrl`, `consumerKey`, `consumerSecret` (REST API key, read/write) |
+| Import code | the Shopify product id | the Woo product id |
+| Variant SKU after import | the Shopify variant id | `<productId>` or `<productId>:<variationId>` |
+| A line that maps to nothing | sent as a custom line (title, price, SKU) | refused, 409 `DROPSHIP_ORDER_REJECTED` |
+| Pushing twice | finds the order by `source_identifier = zimos-<orderId>` | finds the order by meta `_zimos_order_id` |
+| Status → stage | fulfilled → shipped, delivered → delivered, cancelled → cancelled | completed → shipped, cancelled/failed → cancelled, refunded → returned |
+
+Shopify also returns the last fulfilment's tracking (`tracking`) from
+`getOrderStatus`. There is no sandbox mode for these two: the `sandbox`
+provider plays that part, and a mock store on localhost works outside
+production.

@@ -23,7 +23,8 @@ const { loadPublicProducts } = require('../storefront/publicProduct');
 
 const { Op } = db.Sequelize;
 const MAX_BUMPS = 3;
-const PLACEMENTS = ['cart', 'checkout', 'thank_you'];
+// 'product': the product page (boughtTogether/, item 223).
+const PLACEMENTS = ['cart', 'checkout', 'thank_you', 'product'];
 const UPSELL_WINDOW_MINUTES = 30;
 const EXIT_KEY = 'exit_downsell';
 
@@ -217,6 +218,9 @@ async function resolveBumpItems(workspace, offerIds, items) {
   });
   const productIds = [...new Set(variants.map((v) => v.productId))];
   const allowed = new Set((await bumpRulesFor(workspace.id, productIds)).map((r) => r.offerId));
+  // An add-on joins the order in its own money only: one priced in another currency (a
+  // funnel selling in dollars, a bump in pounds) is not offered there (SPEC §11.5).
+  const currency = await require('../payments/methodCurrency').itemsCurrency(workspace.id, items);
   const lines = [];
   for (const offerId of wanted) {
     if (!allowed.has(offerId)) {
@@ -225,7 +229,7 @@ async function resolveBumpItems(workspace, offerIds, items) {
       ]);
     }
     const card = await presentBump(workspace.id, offerId);
-    if (!card) throw orderBumpUnavailable();
+    if (!card || (currency && card.currency && card.currency !== currency)) throw orderBumpUnavailable();
     lines.push({ variantId: card.variantId, offerId, quantity: 1, isOrderBump: true });
   }
   return lines;
@@ -255,20 +259,9 @@ async function saveCrossSell(workspaceId, ruleId, data, req) {
   return row;
 }
 
-/** Products most often bought in the same order as `productIds` (real orders only). */
+/** Products most often bought in the same order as `productIds`: the nightly pairs, with the store's exclusions (boughtTogether/, item 223). */
 async function boughtTogether(workspaceId, productIds, limit) {
-  const rows = await db.sequelize.query(
-    `SELECT other.product_id AS id, COUNT(DISTINCT other.order_id)::int AS n
-       FROM order_items mine
-       JOIN orders o ON o.id = mine.order_id AND o.workspace_id = :workspaceId AND o.cancelled_at IS NULL
-       JOIN order_items other ON other.order_id = mine.order_id AND other.product_id IS NOT NULL
-      WHERE mine.product_id IN (:productIds) AND other.product_id NOT IN (:productIds)
-      GROUP BY other.product_id
-      ORDER BY n DESC, other.product_id
-      LIMIT :limit`,
-    { replacements: { workspaceId, productIds, limit }, type: db.Sequelize.QueryTypes.SELECT }
-  );
-  return rows.map((row) => row.id);
+  return require('../boughtTogether').suggest(workspaceId, productIds, limit);
 }
 
 /**
@@ -308,7 +301,8 @@ async function suggestCrossSell(workspaceId, productIds, placement) {
   const products = (await loadPublicProducts(workspaceId, candidates))
     .filter((p) => !p.pageSettings.hidden && p.variants.some((v) => v.inStock))
     .slice(0, limit);
-  return { source: chosen ? 'rule' : products.length > 0 ? 'bought_together' : null, products };
+  // ruleId: what the strip's impressions and add-to-carts are counted under (offerStats.js).
+  return { source: chosen ? 'rule' : products.length > 0 ? 'bought_together' : null, ruleId: chosen ? chosen.id : null, products };
 }
 
 // ------------------------------------------------------ post-purchase upsell --
@@ -383,29 +377,78 @@ async function orderProductIds(orderId, transaction) {
 /** GET: the upsell to show on this order's thank-you page, or null. */
 async function publicUpsell(workspaceId, orderId, orderNumber) {
   const order = await findShopperOrder(workspaceId, orderId, orderNumber);
-  if (!(await orderOpenForUpsell(order))) return null;
+  // Cash on delivery: one more line on the order. Paid online: a linked order (upsellFollowOn.js).
+  const followOn = require('./upsellFollowOn').paidOnlineOpen(order, UPSELL_WINDOW_MINUTES);
+  if (!followOn && !(await orderOpenForUpsell(order))) return null;
   if (await db.UpsellAcceptance.count({ where: { orderId: order.id } })) return null;
   const match = await upsellFor(workspaceId, await orderProductIds(order.id));
-  return match ? { ...match.card, ruleId: match.rule.id } : null;
+  if (!match) return null;
+  // The real countdown runs from the order (offers/offerCountdown.js); an ended one is not shown.
+  const offer = await db.Offer.findByPk(match.card.offerId, { attributes: ['id', 'countdownMinutes'] });
+  const expiresAt = require('./offerCountdown').deadline(offer, order.createdAt);
+  if (expiresAt && expiresAt.getTime() <= Date.now()) return null;
+  return { ...match.card, ruleId: match.rule.id, countdownMinutes: (offer && offer.countdownMinutes) || null, expiresAt, followOn };
 }
 
-/** POST: adds the upsell's offer to the order, once. */
-async function acceptUpsell(workspaceId, orderId, orderNumber, offerId) {
+/**
+ * POST: takes the upsell's offer, once — added to a cash-on-delivery order, or
+ * as a linked order after one paid online (upsellFollowOn.js), charged in one
+ * click to a card the shopper saved.
+ */
+async function acceptUpsell(workspaceId, orderId, orderNumber, offerId, variantId = null) {
   const orderService = require('../orders/orderService');
+  const followOns = require('./upsellFollowOn');
+  let charge = null;
   try {
-    return await db.sequelize.transaction(async (transaction) => {
+    const result = await db.sequelize.transaction(async (transaction) => {
       const order = await findShopperOrder(workspaceId, orderId, orderNumber, { transaction, lock: transaction.LOCK.UPDATE });
       const closed = () => new AppError('UPSELL_CLOSED', 'This order can no longer be added to', 409);
-      if (!(await orderOpenForUpsell(order, transaction))) throw closed();
+      const asFollowOn = followOns.paidOnlineOpen(order, UPSELL_WINDOW_MINUTES);
+      if (!asFollowOn && !(await orderOpenForUpsell(order, transaction))) throw closed();
       if (await db.UpsellAcceptance.count({ where: { orderId: order.id }, transaction })) throw closed();
       const match = await upsellFor(workspaceId, await orderProductIds(order.id, transaction));
       if (!match || match.card.offerId !== offerId) {
         throw new AppError('UPSELL_INVALID', 'This offer is not available for this order', 422);
       }
+      // In the variant the shopper chose (offers/offerVariantChoice.js).
+      const offer = await db.Offer.findOne({ where: { id: offerId, workspaceId }, include: [{ model: db.OfferVariant, as: 'lines' }], transaction });
+      const countdown = require('./offerCountdown');
+      countdown.assertOpen(offer, order.createdAt, countdown.upsellExpired);
+      const line = offer ? await require('./offerVariantChoice').offerLineFor(offer, variantId, transaction) : { variantId: match.card.variantId, offerId, quantity: 1 };
+
+      if (asFollowOn) {
+        const made = await followOns.createFollowOn(workspaceId, order, line, transaction);
+        await db.UpsellAcceptance.create(
+          { workspaceId, orderId: order.id, upsellRuleId: match.rule.id, offerId, orderItemId: made.item ? made.item.id : null, amount: made.order.totalAmount },
+          { transaction }
+        );
+        await recordAudit({
+          workspaceId,
+          actorUserId: null,
+          action: 'order.upsell_accepted',
+          entityType: 'Order',
+          entityId: order.id,
+          after: { offerId, upsellRuleId: match.rule.id, followOnOrderId: made.order.id },
+          transaction,
+        });
+        charge = made.chargeWith ? { orderId: made.order.id, savedMethodId: made.chargeWith } : null;
+        return {
+          id: made.order.id,
+          orderNumber: made.order.orderNumber,
+          subtotalAmount: Number(made.order.subtotalAmount),
+          shippingAmount: Number(made.order.shippingAmount),
+          totalAmount: Number(made.order.totalAmount),
+          currency: made.order.currency,
+          followOn: true,
+          paymentMethod: made.order.paymentMethod,
+          added: { name: match.card.name, productName: match.card.productName, amount: Number(made.item ? made.item.lineTotalAmount : made.order.totalAmount) },
+        };
+      }
+
       const { item } = await orderService.addLineToOpenOrder(
         workspaceId,
         order,
-        { variantId: match.card.variantId, offerId, quantity: 1 },
+        line,
         { isUpsell: true },
         transaction
       );
@@ -432,6 +475,10 @@ async function acceptUpsell(workspaceId, orderId, orderNumber, offerId) {
         added: { name: match.card.name, productName: match.card.productName, amount: Number(item.lineTotalAmount) },
       };
     });
+    // A linked order to a saved card: charged now, outside the transaction.
+    if (charge) result.payment = await followOns.chargeFollowOn(workspaceId, charge.orderId, charge.savedMethodId);
+    else if (result.followOn) result.payment = { status: 'cod' };
+    return result;
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') throw new AppError('UPSELL_CLOSED', 'This order can no longer be added to', 409);
     if (err && err.code === 'INSUFFICIENT_STOCK') throw new AppError('UPSELL_CLOSED', 'This offer just sold out', 409);

@@ -146,11 +146,14 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   const shipping = await calculateShippingAmount(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
+    address,
     subtotal,
     totalQuantity,
     offerShippingOverride: manualShipping ? { amount: Number(order.shippingAmount) } : offerShippingOverride,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
+    // A funnel's order keeps the funnel's shipping group and currency rules (funnels/funnelShipping.js).
+    funnelId: order.funnelId || null,
     transaction,
   });
   const { taxAmount } = await calculateTax(workspaceId, {
@@ -158,6 +161,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
     shippingAmount: shipping.amount,
+    transaction,
   });
   const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
 

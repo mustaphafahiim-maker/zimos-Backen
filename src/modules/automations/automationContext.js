@@ -2,7 +2,6 @@
 
 const { Op } = require('sequelize');
 const db = require('../../db/models');
-const env = require('../../config/env');
 
 /**
  * What an automation knows about its subject: the order (or lost checkout),
@@ -13,10 +12,12 @@ const TOKENS = [
   'customer_name',
   'order_number',
   'order_total',
+  'cart_total',
   'store_name',
   'tracking_url',
   'city',
   'product_names',
+  'product_name',
   'items_count',
   'shipping_amount',
   'carrier_name',
@@ -26,6 +27,8 @@ const TOKENS = [
   'coupon_code',
   'review_link',
   'payment_link',
+  // A subscription's page (cancel, change the card): subscription triggers only.
+  'subscription_link',
 ];
 
 function formatAmount(amountMinor, currency) {
@@ -38,7 +41,8 @@ function render(value, ctx) {
   return String(value).replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (_, token) => (ctx[token] !== undefined && ctx[token] !== null ? String(ctx[token]) : ''));
 }
 
-const storeBase = (workspace) => (workspace && workspace.slug ? `https://${workspace.slug}.${env.platformRootDomain}` : '');
+// The store's canonical address: its primary domain when it has one (domains/primaryHost.js).
+const storeBase = (workspace) => require('../domains/primaryHost').storeOriginOf(workspace && workspace.slug ? workspace : null);
 
 /** Everything a step needs about an order. Null when the order is gone. */
 async function loadOrderSubject(workspaceId, orderId) {
@@ -56,7 +60,7 @@ async function loadOrderSubject(workspaceId, orderId) {
   const shipments = (order.shipments || []).slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const shipment = shipments[0] || null;
   const items = order.items || [];
-  const base = storeBase(workspace);
+  const base = await storeBase(workspace);
 
   let reviewLink = '';
   const productId = items.map((i) => i.productId).find(Boolean);
@@ -75,10 +79,12 @@ async function loadOrderSubject(workspaceId, orderId) {
       customer_name: contact.fullName || '',
       order_number: order.orderNumber,
       order_total: formatAmount(order.totalAmount, order.currency),
+      cart_total: formatAmount(order.totalAmount, order.currency),
       store_name: workspace ? workspace.name : '',
       tracking_url: shipment && shipment.trackingUrl ? shipment.trackingUrl : '',
       city: address.city || '',
       product_names: [...new Set(items.map((i) => i.productNameSnapshot).filter(Boolean))].join('، '),
+      product_name: (items.find((i) => i.productNameSnapshot) || {}).productNameSnapshot || '',
       items_count: items.reduce((sum, i) => sum + (i.quantity || 0), 0),
       shipping_amount: formatAmount(order.shippingAmount, order.currency),
       carrier_name: shipment ? shipment.carrierCode : '',
@@ -87,7 +93,9 @@ async function loadOrderSubject(workspaceId, orderId) {
       order_link: base ? `${base}/track?t=${require('../storefront/orderTrackingExtras').tokenFor(order)}` : '',
       recovery_link: '',
       review_link: reviewLink,
-      payment_link: base && order.paymentMethod !== 'cod' ? `${base}/pay/${order.id}` : '',
+      // Signed, so it opens the payment page from a message (payments/paymentLinkToken.js).
+      payment_link:
+        base && order.paymentMethod !== 'cod' ? `${base}/pay/${order.id}?t=${require('../payments/paymentLinkToken').linkTokenFor(order)}` : '',
     },
     // What "the order moved on" is measured against.
     signature: [order.confirmationState, order.fulfillmentState, order.financialState, order.cancelledAt ? 'cancelled' : 'open'].join('|'),
@@ -100,9 +108,10 @@ async function loadCheckoutSubject(workspaceId, checkoutSessionId) {
   if (!session) return null;
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name', 'slug'] });
   const contact = session.contactFields || {};
-  const base = storeBase(workspace);
+  const base = await storeBase(workspace);
   // Lane 2 adds the recovery token; until then the link is the store's checkout.
   const token = session.recoveryToken || null;
+  const sessionItems = Array.isArray(session.items) ? session.items : [];
   return {
     kind: 'checkout',
     session,
@@ -113,11 +122,13 @@ async function loadCheckoutSubject(workspaceId, checkoutSessionId) {
       customer_name: contact.fullName || '',
       order_number: '',
       order_total: formatAmount(session.subtotalAmount, session.currency),
+      cart_total: formatAmount(session.subtotalAmount, session.currency),
       store_name: workspace ? workspace.name : '',
       tracking_url: '',
       city: contact.city || '',
-      product_names: '',
-      items_count: '',
+      product_names: [...new Set(sessionItems.map((i) => i.productName).filter(Boolean))].join('، '),
+      product_name: (sessionItems.find((i) => i.productName) || {}).productName || '',
+      items_count: sessionItems.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0),
       shipping_amount: '',
       carrier_name: '',
       waybill_number: '',
@@ -126,7 +137,71 @@ async function loadCheckoutSubject(workspaceId, checkoutSessionId) {
       review_link: '',
       payment_link: '',
     },
-    signature: [session.status, session.recoveryStatus, session.convertedOrderId ? 'converted' : 'open'].join('|'),
+    // "Contacted" (the sequence's own first message, recoveryContacted.js) is still open; a merchant's recovered/lost is not.
+    signature: [session.status, session.recoveryStatus === 'contacted' ? 'not_contacted' : session.recoveryStatus, session.convertedOrderId ? 'converted' : 'open'].join('|'),
+  };
+}
+
+const EMPTY_ORDER_VARS = {
+  order_number: '',
+  order_total: '',
+  cart_total: '',
+  tracking_url: '',
+  city: '',
+  product_names: '',
+  product_name: '',
+  items_count: '',
+  shipping_amount: '',
+  carrier_name: '',
+  waybill_number: '',
+  order_link: '',
+  recovery_link: '',
+  review_link: '',
+  payment_link: '',
+};
+
+/** A customer with no order in hand (lead.created). */
+async function loadCustomerSubject(workspaceId, customerId) {
+  const customer = await db.Customer.findOne({ where: { id: customerId, workspaceId } });
+  if (!customer) return null;
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name', 'slug'] });
+  return {
+    kind: 'customer',
+    customer,
+    workspace,
+    phone: customer.phoneRaw || customer.phoneNormalized || null,
+    email: customer.email || null,
+    vars: { ...EMPTY_ORDER_VARS, customer_name: customer.fullName || '', store_name: workspace ? workspace.name : '' },
+    // Nothing for a wait to watch: a lead's sequence runs to its end.
+    signature: 'customer',
+  };
+}
+
+/**
+ * A subscription whose renewal could not be charged
+ * (subscription.renewal_failed). {{payment_link}} is the customer's portal,
+ * where the subscription and its state are shown.
+ */
+async function loadSubscriptionSubject(workspaceId, subscriptionId) {
+  const sub = await db.CustomerSubscription.findOne({ where: { id: subscriptionId, workspaceId } });
+  if (!sub) return null;
+  const subject = await loadCustomerSubject(workspaceId, sub.customerId);
+  if (!subject) return null;
+  const base = await storeBase(subject.workspace);
+  return {
+    ...subject,
+    kind: 'subscription',
+    subscription: sub,
+    vars: {
+      ...subject.vars,
+      product_names: sub.productName,
+      product_name: sub.productName,
+      order_total: formatAmount(sub.amount, sub.currency),
+      payment_link: base && sub.portalToken ? `${base}/subscriptions/${sub.portalToken}` : '',
+      subscription_link: base && sub.portalToken ? `${base}/subscriptions/${sub.portalToken}` : '',
+    },
+    // The sequence stops once the subscription is paid again or cancelled.
+    signature: sub.status,
   };
 }
 
@@ -135,7 +210,12 @@ const asList = (value) => (Array.isArray(value) ? value : value === undefined ||
 /** Null when the rule applies; otherwise the reason it was skipped. */
 async function conditionsFail(conditions, subject) {
   const c = conditions && !Array.isArray(conditions) ? conditions : {};
-  if (subject.kind !== 'order') return null; // the order conditions do not apply to a lost checkout
+  // In / not in a segment: for any subject that names a contact (segmentCondition.js).
+  const workspaceId = (subject.workspace && subject.workspace.id) || (subject.order && subject.order.workspaceId);
+  const segment = await require('./segmentCondition').segmentFails(c, subject, workspaceId);
+  if (segment) return segment;
+  // A checkout, a lead or a subscription answers the same conditions from what it has (subjectConditions.js).
+  if (subject.kind !== 'order') return require('./subjectConditions').fails(c, subject);
   const { order } = subject;
 
   if (c.paymentMethod && order.paymentMethod !== c.paymentMethod) return `payment method is ${order.paymentMethod}`;
@@ -176,4 +256,4 @@ async function conditionsFail(conditions, subject) {
   return null;
 }
 
-module.exports = { TOKENS, render, formatAmount, loadOrderSubject, loadCheckoutSubject, conditionsFail };
+module.exports = { TOKENS, render, formatAmount, loadOrderSubject, loadCheckoutSubject, loadCustomerSubject, loadSubscriptionSubject, conditionsFail };

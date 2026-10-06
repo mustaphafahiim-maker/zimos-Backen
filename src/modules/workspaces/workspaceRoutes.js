@@ -6,6 +6,7 @@ const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission, requireAnyPermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
+const { requirePlanLimit } = require('../billing/planLimits');
 const controller = require('./workspaceController');
 const schemas = require('./workspaceValidation');
 
@@ -86,6 +87,8 @@ router.post(
   validate(schemas.invite),
   resolveTenant,
   requirePermission(PERMISSIONS.USERS_MANAGE),
+  // The same seat limit as /team/invite (SPEC §17.4).
+  requirePlanLimit('members'),
   controller.inviteMember
 );
 router.post(

@@ -16,13 +16,16 @@ const notify = require('./notify');
  * orders is not told about them — and (b) has not switched that type off.
  * Each teammate gets their own row, so "read" is theirs alone.
  *
- * Channels: `inApp` (the bell) and `email` (the existing email provider).
- * Web push, the mobile app and WhatsApp-to-the-merchant from the spec need
- * providers that are out of scope (§14 scope boundary); a new channel is one
- * more key in CHANNELS and one more branch in deliver().
+ * Channels: `inApp` (the bell), `email` (the existing email provider),
+ * `push` (notifications/push) and `whatsapp` — from the platform's own
+ * number to the teammate's verified phone (platformWhatsapp.js, its alert
+ * template). WhatsApp is off for every type until the teammate turns it on.
+ * A new channel is one more key in CHANNELS and one more branch in create().
  */
 
-const CHANNELS = ['inApp', 'email'];
+const CHANNELS = ['inApp', 'email', 'push', 'whatsapp'];
+// Push (notifications/push) is on by default for what needs a quick look; off for the rest.
+const PUSH_ON = new Set(['order.new', 'order.suspicious', 'integration.failed', 'export.ready', 'shipping.batch_done', 'automation', 'plan.limit_reached']);
 
 /**
  * type → the permission needed to receive it (null = every teammate) and
@@ -33,10 +36,21 @@ const TYPES = Object.freeze({
   'order.suspicious': { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
   'stock.low': { permission: PERMISSIONS.INVENTORY_VIEW, defaults: { inApp: true, email: false } },
   'integration.failed': { permission: PERMISSIONS.WORKSPACE_MANAGE, defaults: { inApp: true, email: true } },
-  'export.ready': { permission: null, defaults: { inApp: true, email: false } },
+  // SPEC §4.3: the link comes in the bell and by email (orders/exportFiles.js).
+  'export.ready': { permission: null, defaults: { inApp: true, email: true } },
+  // A "Ship selected" batch finished (shipping/bulkShipping.js); sent to whoever started it.
+  'shipping.batch_done': { permission: PERMISSIONS.ORDERS_MANAGE, defaults: { inApp: true, email: false } },
+  // A plan limit stopped something (billing/limitGuards.js): once a month per limit.
+  'plan.limit_reached': { permission: PERMISSIONS.WORKSPACE_MANAGE, defaults: { inApp: true, email: true } },
   announcement: { permission: null, defaults: { inApp: true, email: false } },
   // An automation's "notify the team" step (modules/automations).
   automation: { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
+  // A follow-up on a customer fell due (customerNotes/, item 209); sent to its assignee.
+  'customer.followup': { permission: PERMISSIONS.CUSTOMERS_VIEW, defaults: { inApp: true, email: true } },
+  // A shopper asked a question on a product (productQuestions/, item 212).
+  // A shopper asked for a quote (quotes/, item 219).
+  'quote.request': { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: true } },
+  'product.question': { permission: PERMISSIONS.PRODUCTS_MANAGE, defaults: { inApp: true, email: false } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 
@@ -50,7 +64,8 @@ function resolveChannels(stored) {
   for (const type of TYPE_NAMES) {
     out[type] = {};
     for (const channel of CHANNELS) {
-      const value = saved[type] && typeof saved[type][channel] === 'boolean' ? saved[type][channel] : TYPES[type].defaults[channel];
+      const fallback = TYPES[type].defaults[channel] ?? (channel === 'push' && PUSH_ON.has(type));
+      const value = saved[type] && typeof saved[type][channel] === 'boolean' ? saved[type][channel] : fallback;
       out[type][channel] = value;
     }
   }
@@ -79,13 +94,16 @@ const inboxWhere = (workspaceId, userId) => ({ workspaceId, [Op.or]: [{ userId }
  *   type       one of TYPE_NAMES
  *   title/body the text in the store's language (Arabic); `data` carries the
  *              values so the dashboard can render it in the viewer's language
+ *   localized  optional { en: { title, body }, ar: { title, body } }: each
+ *              teammate's row, push, email and WhatsApp in their own language
+ *              (users.locale, set by the dashboard); title/body otherwise
  *   link       a dashboard path
  *   dedupeKey  the same key is delivered to a person at most once
  *   userIds    only these teammates (still subject to permission/preferences)
  *
  * Never throws: a notification must not fail the action that caused it.
  */
-async function create(workspaceId, { type, title, body = null, link = null, data = {}, dedupeKey = null, userIds = null }) {
+async function create(workspaceId, { type, title, body = null, link = null, data = {}, dedupeKey = null, userIds = null, localized = null }) {
   try {
     const spec = TYPES[type];
     if (!spec) throw new Error(`unknown notification type "${type}"`);
@@ -95,7 +113,7 @@ async function create(workspaceId, { type, title, body = null, link = null, data
       where,
       include: [
         { model: db.Role, as: 'role' },
-        { model: db.User, as: 'user', attributes: ['id', 'email'] },
+        { model: db.User, as: 'user', attributes: ['id', 'email', 'phone', 'phoneVerifiedAt', 'locale'] },
       ],
     });
     const members = memberships.filter((m) => m.user && roleAllows(m.role, spec.permission));
@@ -104,6 +122,11 @@ async function create(workspaceId, { type, title, body = null, link = null, data
     const prefs = await db.NotificationPreference.findAll({ where: { workspaceId, userId: members.map((m) => m.userId) } });
     const prefsByUser = new Map(prefs.map((p) => [p.userId, p]));
     const channelsFor = (userId) => resolveChannels(prefsByUser.get(userId) && prefsByUser.get(userId).channels)[type];
+    // The words each teammate reads: their language's, when the caller wrote it in more than one.
+    const textFor = (m) => {
+      const own = localized && localized[m.user && m.user.locale === 'en' ? 'en' : 'ar'];
+      return own && own.title ? { title: own.title, body: own.body === undefined ? body : own.body } : { title, body };
+    };
 
     const rows = members
       .filter((m) => channelsFor(m.userId).inApp)
@@ -111,8 +134,8 @@ async function create(workspaceId, { type, title, body = null, link = null, data
         workspaceId,
         userId: m.userId,
         type,
-        title: String(title).slice(0, 200),
-        body,
+        title: String(textFor(m).title).slice(0, 200),
+        body: textFor(m).body,
         link,
         data,
         dedupeKey,
@@ -133,8 +156,20 @@ async function create(workspaceId, { type, title, body = null, link = null, data
       if (!channelsFor(m.userId).email) continue;
       // With a dedupe key, email only alongside a row that was really new.
       if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
-      await notify.email({ recipient: m.user.email, template: 'merchant_notification', data: { title, body, link }, workspaceId });
+      await notify.email({ recipient: m.user.email, template: 'merchant_notification', data: { ...textFor(m), link }, workspaceId });
       emailed += 1;
+    }
+    // Push to the person's devices (notifications/push), with the same once-only rule as email.
+    for (const m of members) {
+      if (!channelsFor(m.userId).push) continue;
+      if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
+      await require('./push/pushService').sendToUser(m.userId, { ...textFor(m), link, type, workspaceId });
+    }
+    // WhatsApp from the platform's number to a verified phone (platformWhatsapp.js), same once-only rule.
+    for (const m of members) {
+      if (!channelsFor(m.userId).whatsapp || !m.user.phone || !m.user.phoneVerifiedAt) continue;
+      if (dedupeKey && channelsFor(m.userId).inApp && !deliveredTo.has(m.userId)) continue;
+      await notify.whatsapp({ recipient: m.user.phone, template: 'merchant_notification', data: { ...textFor(m), link }, workspaceId });
     }
     return { created: deliveredTo.size, emailed };
   } catch (err) {

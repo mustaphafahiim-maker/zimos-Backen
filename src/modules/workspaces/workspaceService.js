@@ -85,7 +85,12 @@ async function createWorkspace({ name, ownerUserId, referralCode = null, planId 
     // settled the same way, by falling through to my-store-2, my-store-3, …
     let slug = baseSlug;
     let n = 1;
-    while (slugRejectionReason(slug) || (await db.Workspace.findOne({ where: { slug }, transaction: t }))) {
+    while (
+      slugRejectionReason(slug) ||
+      (await db.Workspace.findOne({ where: { slug }, transaction: t })) ||
+      // Another store's previous address (slugHistory.js) still sends its visitors there.
+      (await require('./slugHistory').ownerOf(slug, t))
+    ) {
       slug = suffixSlug(baseSlug, ++n);
     }
 
@@ -295,7 +300,8 @@ async function updateWorkspace({ workspaceId, patch }, req) {
       throw new ValidationError([{ field: 'slug', message: REASON_MESSAGES[reason] }], REASON_MESSAGES[reason]);
     }
 
-    if (await db.Workspace.findOne({ where: { slug }, attributes: ['id'] })) {
+    // Another store's current address, or one it moved away from (slugHistory.js) — its own previous ones may be taken back.
+    if ((await db.Workspace.findOne({ where: { slug }, attributes: ['id'] })) || (await require('./slugHistory').heldByOther(slug, workspaceId))) {
       throw new ConflictError(REASON_MESSAGES.taken, 'SLUG_TAKEN');
     }
     next.slug = slug;
@@ -310,6 +316,12 @@ async function updateWorkspace({ workspaceId, patch }, req) {
         'themeSettings is too large'
       );
     }
+    // A paid or withdrawn theme can't be switched on this way either (themes/themesCatalog.js).
+    await require('../themes/themesCatalog').assertThemeAllowed(
+      workspaceId,
+      blob.storeTheme,
+      (workspace.themeSettings && workspace.themeSettings.storeTheme) || 'original'
+    );
     next.themeSettings = blob;
   }
   if (patch.settings !== undefined) {
@@ -345,6 +357,8 @@ async function updateWorkspace({ workspaceId, patch }, req) {
     if (clashOnSlug) throw new ConflictError(REASON_MESSAGES.taken, 'SLUG_TAKEN');
     throw err;
   }
+  // The old address keeps sending visitors here, and stays this store's (slugHistory.js).
+  if (next.slug) await require('./slugHistory').retire(workspaceId, before.slug, next.slug);
 
   await recordAudit({
     workspaceId,
@@ -372,14 +386,17 @@ async function updateWorkspace({ workspaceId, patch }, req) {
  * GET /workspaces/check-slug emits: { available, reason? }, where reason is a
  * stable key ('taken', 'reserved', 'too_short', 'too_long', 'invalid_format').
  */
-async function checkSlugAvailability(rawSlug) {
+async function checkSlugAvailability(rawSlug, { workspaceId = null } = {}) {
   const slug = normalizeSlug(rawSlug);
 
   const reason = slugRejectionReason(slug);
   if (reason) return { available: false, reason };
 
+  // `workspaceId`: asked while changing that store's address — its own current or previous one is not "taken".
   const existing = await db.Workspace.findOne({ where: { slug }, attributes: ['id'] });
-  return existing ? { available: false, reason: 'taken' } : { available: true };
+  if (existing && existing.id !== workspaceId) return { available: false, reason: 'taken' };
+  if (await require('./slugHistory').heldByOther(slug, workspaceId)) return { available: false, reason: 'taken' };
+  return { available: true };
 }
 
 async function listWorkspacesForUser(userId) {

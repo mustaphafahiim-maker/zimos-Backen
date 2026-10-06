@@ -48,6 +48,8 @@ const STYLE_RULES = {
   paddingEnd: int(0, 300),
   marginTop: int(0, 300),
   marginBottom: int(0, 300),
+  // Background gradient/image, sizes, custom shadow, overflow, cursor, phone orientation.
+  ...require('./styleExtras').EXTRA_STYLE_RULES,
 };
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);

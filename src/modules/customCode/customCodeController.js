@@ -16,7 +16,11 @@ const save = asyncHandler(async (req, res) => {
 // beside one.
 const publicList = asyncHandler(async (req, res) => {
   const inPreview = Boolean(req.headers['x-store-preview']);
-  res.json({ slots: inPreview ? {} : await service.publicSlots(req.tenant.workspaceId) });
+  res.json({
+    slots: inPreview ? {} : await service.publicSlots(req.tenant.workspaceId),
+    // Named scripts by position and page type (storeScripts.js); empty in a preview too.
+    scripts: await require('./storeScripts').publicScripts(req),
+  });
 });
 
 module.exports = { list, save, publicList };

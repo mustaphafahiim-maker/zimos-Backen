@@ -13,6 +13,8 @@ module.exports = (sequelize, DataTypes) => {
       // Lower-cased, trimmed name: what utm_campaign is matched against.
       campaignKey: { type: DataTypes.STRING(200), allowNull: false, field: 'campaign_key' },
       campaignId: { type: DataTypes.STRING(100), allowNull: true, field: 'campaign_id' },
+      // The ads behind it, from an ad-level import (profit/adIdMatching.js).
+      adIds: { type: DataTypes.JSONB, allowNull: true, field: 'ad_ids' },
       spendAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'spend_amount' },
       currency: { type: DataTypes.STRING(3), allowNull: false },
       impressions: { type: DataTypes.INTEGER, allowNull: true },

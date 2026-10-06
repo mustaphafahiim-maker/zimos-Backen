@@ -7,6 +7,8 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { idempotent } = require('../../core/middleware/idempotency');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { requireLive } = require('../../core/middleware/subscriptionGuard');
+// Booking and following couriers: the Fulfillment role (shipping.manage) as well as order managers.
+const canShip = require('../../core/middleware/rbac').requireAnyPermission(PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.SHIPPING_MANAGE);
 const controller = require('./orderController');
 const schemas = require('./orderValidation');
 const exportController = require('./orderExportController');
@@ -36,6 +38,8 @@ router.get('/pipeline', validate(schemas.pipeline), requirePermission(PERMISSION
 // '/:orderId' for the same reason as '/pipeline'.
 router.get('/export/columns', validate(exportSchemas.columns), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.columns);
 router.get('/export', validate(exportSchemas.exportCsv), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.exportCsv);
+// Courier export layouts: GET/PUT /export/presets, DELETE /export/presets/:presetId (exportPresets.js).
+router.use(require('./exportPresets').router);
 // Printed paper for many orders: labels (A4 ×4 or 10×15 cm) and the courier
 // handover manifest. And a courier's sheet of waybill numbers and statuses.
 router.post(
@@ -44,6 +48,12 @@ router.post(
   requirePermission(PERMISSIONS.ORDERS_VIEW),
   controller.waybillsPdf
 );
+// Many invoices in one PDF (orderInvoicesPdf.js).
+const invoices = require('./orderInvoicesPdf');
+router.post('/documents/invoices', validate(invoices.schema), requirePermission(PERMISSIONS.ORDERS_VIEW), invoices.handler);
+// What to take off the shelves for a batch of orders (pickList.js, item 226).
+const pickList = require('./pickList');
+router.post('/documents/pick-list', validate(pickList.schema), requirePermission(PERMISSIONS.ORDERS_VIEW), pickList.handler);
 router.post(
   '/documents/manifest',
   validate(schemas.manifestPdf),
@@ -53,7 +63,7 @@ router.post(
 router.post(
   '/import-tracking',
   validate(schemas.importTracking),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   requireLive,
   controller.importTracking
 );
@@ -82,13 +92,22 @@ router.get(
 router.post(
   '/bulk',
   validate(schemas.bulk),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  // Booking a courier for many orders is also the Fulfillment role's; every other action needs orders.manage.
+  (req, res, next) => (req.body.action === 'ship' ? canShip : requirePermission(PERMISSIONS.ORDERS_MANAGE))(req, res, next),
   (req, res, next) => (req.body.action === 'ship' ? requireLive(req, res, next) : next()),
   controller.bulk
 );
 // Every tag in use, for the tag picker and the list's tag filter.
 router.get('/tags', validate(schemas.listTags), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.listTags);
 router.get('/:orderId', validate(schemas.get), requirePermission(PERMISSIONS.ORDERS_VIEW), controller.get);
+// "Confirm via WhatsApp" (whatsappConfirm.js): the confirmation template, or a wa.me link.
+const whatsappConfirm = require('./whatsappConfirm');
+router.post(
+  '/:orderId/whatsapp-confirm',
+  validate(whatsappConfirm.schema),
+  require('../../core/middleware/rbac').requireAnyPermission(PERMISSIONS.ORDERS_MANAGE, PERMISSIONS.ORDERS_CONFIRM),
+  whatsappConfirm.handler
+);
 
 // Tags, test, archive (orders.manage). Marking an order seen is something
 // anyone who can open it does, so a body of only { isSeen } needs orders.view.
@@ -143,11 +162,12 @@ router.delete(
   controller.deleteNote
 );
 
+// With the refund and "notify the customer" options (orderCancelRefund.js).
 router.post(
   '/:orderId/cancel',
   validate(schemas.cancel),
   requirePermission(PERMISSIONS.ORDERS_MANAGE),
-  controller.cancel
+  require('./orderCancelRefund').handler
 );
 // A COD order confirmed from the order page — same rules and bookkeeping as
 // a queue call (modules/cod/confirmationService.js#confirmFromOrder).
@@ -187,14 +207,14 @@ router.get(
 router.post(
   '/:orderId/shipments',
   validate(schemas.createShipment),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   requireLive,
   controller.createShipment
 );
 router.patch(
   '/:orderId/shipments/:shipmentId',
   validate(schemas.updateShipment),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   controller.updateShipment
 );
 
@@ -203,13 +223,13 @@ router.patch(
 router.post(
   '/:orderId/shipments/:shipmentId/sync',
   validate(carrierSchemas.shipmentAction),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   carrierController.sync
 );
 router.get(
   '/:orderId/shipments/:shipmentId/label',
   validate(carrierSchemas.shipmentAction),
-  requirePermission(PERMISSIONS.ORDERS_MANAGE),
+  canShip,
   carrierController.label
 );
 
@@ -232,5 +252,13 @@ router.get(
   requirePermission(PERMISSIONS.ORDERS_VIEW),
   waybillController.waybill
 );
+
+
+// The order page's session details, customer history and last action (orderSessionDetails.js).
+router.use(require('./orderSessionDetails').router);
+// The shipping card's "Save as draft" (shipmentDraft.js).
+router.use(require('./shipmentDraft').router);
+// The Supplier card: forward to a dropshipping supplier and follow it there (dropship/dropshipOrders.js).
+router.use(require('../dropship/dropshipOrders').router);
 
 module.exports = router;

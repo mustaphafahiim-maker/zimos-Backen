@@ -52,14 +52,33 @@ async function sendText(phoneNumberId, token, to, text) {
   return { waMessageId: data && data.messages && data.messages[0] ? data.messages[0].id : null };
 }
 
-/** An approved template (required to start a conversation). `params` fill {{1}}, {{2}}… in the body. */
-async function sendTemplate(phoneNumberId, token, to, { name, language, params = [] }) {
+/**
+ * An approved template (required to start a conversation). `params` fill {{1}}, {{2}}… in the body;
+ * `urlButtonParam` fills the first button's URL (an authentication template's copy-code button).
+ */
+async function sendTemplate(phoneNumberId, token, to, { name, language, params = [], urlButtonParam }) {
   const components = params.length ? [{ type: 'body', parameters: params.map((p) => ({ type: 'text', text: String(p) })) }] : [];
+  if (urlButtonParam !== undefined) {
+    components.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: String(urlButtonParam) }] });
+  }
   const data = await call(`/${encodeURIComponent(phoneNumberId)}/messages`, token, {
     method: 'POST',
     body: { messaging_product: 'whatsapp', to, type: 'template', template: { name, language: { code: language }, ...(components.length ? { components } : {}) } },
   });
   return { waMessageId: data && data.messages && data.messages[0] ? data.messages[0].id : null };
+}
+
+/** The WhatsApp Business account's message templates, every page (whatsappTemplates.js). */
+async function listTemplates(businessAccountId, token) {
+  const out = [];
+  let path = `/${encodeURIComponent(businessAccountId)}/message_templates?fields=id,name,language,status,category,components,rejected_reason&limit=100`;
+  for (let page = 0; page < 20 && path; page += 1) {
+    const data = await call(path, token);
+    out.push(...((data && data.data) || []));
+    const next = data && data.paging && data.paging.next;
+    path = next && next.startsWith(base()) ? next.slice(base().length) : null;
+  }
+  return out;
 }
 
 // A store connected with the phone number id `sandbox` talks to whatsappSandbox.js
@@ -71,4 +90,6 @@ module.exports = {
   verifyPhoneNumber: orSandbox(verifyPhoneNumber, sandbox.verifyPhoneNumber),
   sendText: orSandbox(sendText, sandbox.sendText),
   sendTemplate: orSandbox(sendTemplate, sandbox.sendTemplate),
+  // By business account, not phone number: whatsappTemplates.js picks the sandbox itself.
+  listTemplates,
 };

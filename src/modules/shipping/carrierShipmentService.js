@@ -10,7 +10,7 @@ const { trackStage } = require('../orders/orderStateService');
 const { getAdapter, availableFor, assertSandboxAllowed, reservedAdapterFor, MANUAL } = require('./carriers');
 const { isCityDistrict } = require('./carriers/adapterContract');
 const accounts = require('./carrierAccountService');
-const { matchAddress } = require('./carrierAddressMatching');
+const { resolveDropOff } = require('./carrierRegionMap');
 const { CarrierAuthError, CarrierPermissionError } = require('./carriers/carrierErrors');
 const { loadTiers } = require('./shippingPricing');
 
@@ -346,7 +346,7 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       assertReadyToShip(order);
       await assertNoActiveShipment(order.id, transaction);
 
-      const address = typed || (await matchAddress(adapter, index, order.shippingAddressSnapshot, data.carrierAddress));
+      const address = typed || (await resolveDropOff(adapter, index, workspaceId, order.shippingAddressSnapshot, data.carrierAddress, { transaction }));
 
       // Resolved before the carrier call, so an unmapped tier costs nothing.
       const tier = await bookingTier(workspaceId, order, data.tierId, transaction);
@@ -362,7 +362,9 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
           goodsValue: Math.max(0, Number(order.subtotalAmount) - Number(order.discountAmount)),
           itemsCount: items.reduce((sum, item) => sum + item.quantity, 0),
           description: items.map((item) => `${item.quantity}x ${item.productNameSnapshot}`).join(', '),
-          notes: data.notes || null,
+          // The account's standing notes for the courier when the booking brings none.
+          notes: data.notes || account.courierNotes || null,
+          allowInspection: Boolean(account.allowInspection),
           carrierSettings: account.settings || {},
           package: pkg,
           webhookUrl: webhookUrlForShipment(account),
@@ -396,12 +398,13 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
 
       await recordAudit({
         workspaceId,
-        actorUserId: req.user.id,
+        // Null for an automatic booking (carrierBooking.autoBook).
+        actorUserId: req && req.user ? req.user.id : null,
         action: 'shipment.create',
         entityType: 'Shipment',
         entityId: shipment.id,
         after: shipment.toJSON(),
-        metadata: { source: 'carrier', carrierCode: adapter.code },
+        metadata: { source: 'carrier', carrierCode: adapter.code, ...(data.automatic ? { automatic: data.automatic } : {}) },
         req,
         transaction,
       });
@@ -421,7 +424,7 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       });
       await recordAudit({
         workspaceId,
-        actorUserId: req.user.id,
+        actorUserId: req && req.user ? req.user.id : null,
         action: 'shipment.booking_not_saved',
         entityType: 'Order',
         entityId: orderId,
@@ -518,6 +521,10 @@ async function applyCarrierStatus(workspaceId, shipmentId, result, { trigger }) 
         reportedStatus: result.status,
         trigger: flagTrigger,
       });
+    }
+    // The courier's history (shipment_events): every move of its own state.
+    if (stateMoved) {
+      await require('./shipmentEvents').record(shipment, { status: finalStatus, carrierStatus: carrierState, trigger }, transaction);
     }
     if (decision !== 'apply') {
       if (decision === 'blocked') {

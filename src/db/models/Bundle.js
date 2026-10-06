@@ -11,6 +11,8 @@ module.exports = (sequelize, DataTypes) => {
       // 'cards' | 'radio' | 'dropdown'
       displayStyle: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'cards', field: 'display_style' },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
+      // Its products are priced together — "any 3 of these" (migration 484, item 215).
+      mixAndMatch: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'mix_and_match' },
     },
     { tableName: 'bundles', indexes: [{ fields: ['workspace_id'] }] }
   );

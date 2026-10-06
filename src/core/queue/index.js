@@ -1,5 +1,6 @@
 'use strict';
 
+const requestContext = require('../utils/requestContext');
 const env = require('../../config/env');
 const logger = require('../utils/logger');
 const { QUEUE_NAMES } = require('./queues');
@@ -33,6 +34,21 @@ function every(name, everyMs, fn) {
 }
 
 async function route(job) {
+  // Every log line of the job carries its id and store (core/utils/requestContext).
+  return requestContext.run({ jobId: `${job.queue}/${job.name}:${job.id}`, ...(job.workspaceId ? { workspaceId: job.workspaceId } : {}) }, async () => {
+    try {
+      return await routeIn(job);
+    } catch (err) {
+      // Its last attempt (or a permanent failure): nothing will retry it.
+      if (err.permanent || !job.maxAttempts || job.attempts >= job.maxAttempts) {
+        require('../errors/errorReporter').report(err, { queue: job.queue, job: job.name, attempts: job.attempts });
+      }
+      throw err;
+    }
+  });
+}
+
+async function routeIn(job) {
   const fn = jobHandlers.get(`${job.queue}/${job.name}`);
   if (!fn) {
     const err = new Error(`No handler registered for ${job.queue}/${job.name}`);
@@ -70,7 +86,10 @@ async function start() {
   started = true;
   const used = new Set([...jobHandlers.keys()].map((key) => key.split('/')[0]));
   for (const name of QUEUE_NAMES) if (used.has(name)) driver.process(name, route);
-  for (const [name, schedule] of scheduleHandlers) driver.every(name, schedule.everyMs, schedule.handle);
+  // A scheduled run logs as its schedule (core/utils/requestContext).
+  for (const [name, schedule] of scheduleHandlers) {
+    driver.every(name, schedule.everyMs, (...args) => requestContext.run({ jobId: `schedule/${name}` }, () => schedule.handle(...args)));
+  }
   await driver.start({ pollMs: env.queue.pollMs, concurrency: env.queue.concurrency });
   logger.info(`Queue worker running on the ${driver.name} driver`, {
     queues: [...used],

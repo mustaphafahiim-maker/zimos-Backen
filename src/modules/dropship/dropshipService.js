@@ -38,6 +38,8 @@ async function call(fn) {
 }
 
 async function connection(workspaceId, code) {
+  // A supplier listed in the app store works only while its app is installed.
+  if (require('../apps/appCatalogue').BY_KEY.has(`dropship_${code}`)) await require('../apps/appGate').assertEnabled(workspaceId, `dropship_${code}`);
   const row = await db.WorkspaceIntegration.findOne({ where: { workspaceId, provider: integrationKey(code) } });
   if (!row || row.status !== 'connected') throw new AppError('DROPSHIP_NOT_CONNECTED', 'Connect this supplier first', 409);
   return { row, credentials: JSON.parse(secretBox.open(row.secretsSealed)) };
@@ -58,6 +60,9 @@ async function listProviders(workspaceId) {
         connected: Boolean(row && row.status === 'connected'),
         accountName: row ? row.config.accountName || null : null,
         lastVerifiedAt: row ? row.lastVerifiedAt : null,
+        // Forwarding by itself and following the status (dropshipOrders.js).
+        ...require('./dropshipOrders').settingsOf(row),
+        followsStatus: typeof provider.getOrderStatus === 'function',
       };
     }),
     planned,
@@ -128,20 +133,25 @@ async function importProduct(workspaceId, code, productCode, req) {
   return { product: await catalogService.getProduct(workspaceId, product.id) };
 }
 
-/** Forwards an order to the provider. Pushing again returns the same reference. */
-async function pushOrder(workspaceId, code, orderId, req) {
+/**
+ * Forwards an order to the provider. Pushing again returns the same reference.
+ * `req` is null when it forwards by itself (dropshipOrders.autoForward, via "auto").
+ */
+async function pushOrder(workspaceId, code, orderId, req, { via = 'manual' } = {}) {
   const provider = providerOrThrow(code);
   const { credentials } = await connection(workspaceId, code);
   // eslint-disable-next-line global-require
-  const order = require('../publicApi/publicOrderSerializer').serializeOrder(await require('../orders/orderService').getOrder(workspaceId, orderId));
+  const full = require('../publicApi/publicOrderSerializer').serializeOrder(await require('../orders/orderService').getOrder(workspaceId, orderId));
+  // A mixed order sends this supplier only its own lines.
+  const order = await require('./dropshipOrders').linesFor(workspaceId, code, full);
   const result = await call(() => provider.pushOrder(credentials, order));
   const [ref, created] = await db.DropshipOrderRef.findOrCreate({
     where: { workspaceId, orderId, provider: code },
-    defaults: { workspaceId, orderId, provider: code, externalOrderId: result.externalOrderId, externalStatus: result.externalStatus || null },
+    defaults: { workspaceId, orderId, provider: code, externalOrderId: result.externalOrderId, externalStatus: result.externalStatus || null, forwardedBy: via },
   });
   if (!created) await ref.update({ externalOrderId: result.externalOrderId, externalStatus: result.externalStatus || ref.externalStatus });
   if (created) {
-    await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'dropship.push_order', entityType: 'Order', entityId: orderId, after: { provider: code, externalOrderId: ref.externalOrderId }, req });
+    await recordAudit({ workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'dropship.push_order', entityType: 'Order', entityId: orderId, after: { provider: code, externalOrderId: ref.externalOrderId }, metadata: { via }, req });
   }
   return { orderId, provider: code, externalOrderId: ref.externalOrderId, externalStatus: ref.externalStatus, suggestedStage: provider.mapStatus(ref.externalStatus) };
 }

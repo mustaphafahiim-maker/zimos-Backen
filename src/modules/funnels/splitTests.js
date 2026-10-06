@@ -189,7 +189,8 @@ async function create(workspaceId, body, req) {
     funnelId: body.funnelId,
     stepKey: body.stepKey,
     name: body.name,
-    variants: cleanVariants(body.variants),
+    // A variant's countdown gets its fixed date once the test is live (splitTestCountdowns.js).
+    variants: await require('./splitTestCountdowns').forSave(workspaceId, body.funnelId, cleanVariants(body.variants)),
     autoWinner: body.autoWinner || null,
     status: 'running',
   });
@@ -213,7 +214,7 @@ async function update(workspaceId, id, body, req) {
   if (body.autoWinner !== undefined) patch.autoWinner = body.autoWinner;
   if (body.variants !== undefined) {
     if (experiment.status === 'completed') throw new ConflictError('A finished test cannot be changed', 'SPLIT_TEST_COMPLETED');
-    patch.variants = cleanVariants(body.variants);
+    patch.variants = await require('./splitTestCountdowns').forSave(workspaceId, experiment.funnelId, cleanVariants(body.variants));
   }
   if (body.status !== undefined) {
     // Reopening a finished test forgets its winner; finishing one needs a winner (POST …/winner).

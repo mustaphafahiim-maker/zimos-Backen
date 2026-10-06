@@ -5,6 +5,8 @@ const queue = require('../../core/queue');
 const logger = require('../../core/utils/logger');
 const context = require('./automationContext');
 const steps = require('./automationSteps');
+const recoveryCoupon = require('./recoveryCoupon');
+const marketingGuard = require('./marketingGuard');
 
 /**
  * Runs automation rules as ordered sequences (SPEC §14.2).
@@ -18,6 +20,9 @@ const steps = require('./automationSteps');
  */
 
 const RESUME_JOB = 'automations.resume';
+
+// Steps that message the customer (a webhook or a tag is not a message).
+const MESSAGE_STEPS = new Set(['whatsapp_template', 'sms', 'email']);
 
 // A trigger that is really another event plus a delay: "ask for a review N
 // days after delivery" listens to order.delivered and waits first.
@@ -34,11 +39,21 @@ const logRun = (execution, fields) =>
     detail: fields.detail ? String(fields.detail).slice(0, 500) : null,
   });
 
-function loadSubject(workspaceId, { orderId, checkoutSessionId }) {
+function loadSubject(workspaceId, { orderId, checkoutSessionId, subscriptionId, customerId }) {
   if (orderId) return context.loadOrderSubject(workspaceId, orderId);
   if (checkoutSessionId) return context.loadCheckoutSubject(workspaceId, checkoutSessionId);
+  if (subscriptionId) return context.loadSubscriptionSubject(workspaceId, subscriptionId);
+  if (customerId) return context.loadCustomerSubject(workspaceId, customerId);
   return null;
 }
+
+// An execution keeps its order or checkout in columns; a subscription or a
+// customer (no column of its own) in context.target.
+const targetOfExecution = (execution) => ({
+  orderId: execution.orderId,
+  checkoutSessionId: execution.checkoutSessionId,
+  ...((execution.context && execution.context.target) || {}),
+});
 
 async function finish(execution, status) {
   await execution.update({ status, finishedAt: new Date(), resumeAt: null });
@@ -46,7 +61,7 @@ async function finish(execution, status) {
 
 /** Runs the execution from its next step until it ends or waits. */
 async function advance(execution, { resumed = false } = {}) {
-  const subject = await loadSubject(execution.workspaceId, execution);
+  const subject = await loadSubject(execution.workspaceId, targetOfExecution(execution));
   if (!subject) {
     await logRun(execution, { status: 'skipped', detail: 'the order no longer exists' });
     return finish(execution, 'stopped');
@@ -72,9 +87,18 @@ async function advance(execution, { resumed = false } = {}) {
       await queue.add('notifications', RESUME_JOB, { executionId: execution.id }, { workspaceId: execution.workspaceId, delayMs, dedupeKey: `aut:${execution.id}:${i}` });
       return execution;
     }
+    // Checked before every message, not only at the start: a STOP during a wait counts.
+    if (MESSAGE_STEPS.has(step.type) && marketingGuard.isMarketing(execution.trigger)) {
+      const refused = await marketingGuard.refusal(execution.workspaceId, subject.phone, subject.email);
+      if (refused) {
+        await logRun(execution, { status: 'skipped', stepIndex: i, stepType: step.type, detail: `stopped: ${refused}` });
+        return finish(execution, 'stopped');
+      }
+    }
     try {
-      const detail = await steps.runStep(step, subject, { workspaceId: execution.workspaceId, trigger: execution.trigger, rule });
+      const detail = await steps.runStep(step, recoveryCoupon.forStep(subject, step, ctx.couponCode, list), { workspaceId: execution.workspaceId, trigger: execution.trigger, rule });
       await logRun(execution, { status: 'sent', stepIndex: i, stepType: step.type, detail });
+      if (MESSAGE_STEPS.has(step.type)) await require('./recoveryContacted').mark(subject);
     } catch (err) {
       await logRun(execution, { status: 'failed', stepIndex: i, stepType: step.type, detail: err.message });
     }
@@ -95,13 +119,19 @@ async function startRule(rule, trigger, target, subject, { leadingWaitDays = 0 }
     ...base,
     checkoutSessionId: target.checkoutSessionId || null,
     steps: list,
-    context: { signature: subject.signature, stopOnStatusChange: conditions.stopOnStatusChange !== false, couponCode: conditions.couponCode || null },
+    context: {
+      signature: subject.signature,
+      stopOnStatusChange: conditions.stopOnStatusChange !== false,
+      couponCode: conditions.couponCode || null,
+      target: target.subscriptionId ? { subscriptionId: target.subscriptionId } : target.customerId ? { customerId: target.customerId } : null,
+    },
   });
   return advance(execution);
 }
 
 /**
- * An event happened. `target` is { orderId } or { checkoutSessionId }.
+ * An event happened. `target` is { orderId }, { checkoutSessionId },
+ * { subscriptionId } or { customerId }.
  * Returns what was started (executions) or skipped (run rows).
  */
 async function trigger(workspaceId, eventName, target) {

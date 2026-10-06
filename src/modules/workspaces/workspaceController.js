@@ -27,7 +27,7 @@ const list = asyncHandler(async (req, res) => {
 });
 
 const checkSlug = asyncHandler(async (req, res) => {
-  res.json(await service.checkSlugAvailability(req.query.slug));
+  res.json(await service.checkSlugAvailability(req.query.slug, { workspaceId: req.query.workspaceId || null }));
 });
 
 const updateWorkspace = asyncHandler(async (req, res) => {

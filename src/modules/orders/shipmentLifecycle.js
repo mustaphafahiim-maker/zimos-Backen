@@ -24,6 +24,7 @@ function automationTrigger(fromStatus, toStatus) {
   if (!toStatus || toStatus === fromStatus) return null;
   if (toStatus === 'delivered') return 'order.delivered';
   if (toStatus === 'out_for_delivery') return 'order.out_for_delivery';
+  if (toStatus === 'returned') return 'order.returned';
   if (SHIPMENT_IN_MOTION.includes(toStatus) && !SHIPMENT_IN_MOTION.includes(fromStatus)) return 'order.shipped';
   return null;
 }
@@ -41,9 +42,12 @@ function generateTrackingCode() {
 async function insertShipment(values, transaction) {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      return await db.sequelize.transaction({ transaction }, (sp) =>
+      const shipment = await db.sequelize.transaction({ transaction }, (sp) =>
         db.Shipment.create({ ...values, trackingCode: generateTrackingCode() }, { transaction: sp })
       );
+      // The order's saved shipment draft (shipmentDraft.js) has served its purpose.
+      await db.Order.update({ shipmentDraft: null }, { where: { id: shipment.orderId }, transaction, silent: true });
+      return shipment;
     } catch (err) {
       if (err.name === 'SequelizeUniqueConstraintError' && attempt < 5) continue;
       throw err;
@@ -126,6 +130,8 @@ async function transitionShipment(
       workspaceId,
       orderId: shipment.orderId,
       shipmentId: shipment.id,
+      // The merchant's "notify the customer" on a status change (orderStageChange.js).
+      ...(req && typeof req.notifyCustomer === 'boolean' ? { notifyCustomer: req.notifyCustomer } : {}),
     });
   }
 

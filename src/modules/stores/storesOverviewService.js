@@ -49,7 +49,7 @@ async function lowStockCounts(workspaceIds) {
        JOIN products p ON p.id = v.product_id
       WHERE v.workspace_id IN (:workspaceIds)
         AND v.low_stock_threshold IS NOT NULL
-        AND v.status = 'active' AND p.status = 'active'
+        AND v.status = 'active' AND p.status = 'active' AND p.track_inventory
         AND (v.stock_on_hand - v.reserved_stock) <= v.low_stock_threshold
       GROUP BY v.workspace_id`,
     { replacements: { workspaceIds }, type: QueryTypes.SELECT }

@@ -25,7 +25,7 @@ const ACTIONS = {
     stageChange.changeStage(
       workspaceId,
       id,
-      { status: payload.status, reason: payload.reason, followUp: payload.followUp, carrierCode: payload.carrierCode },
+      { status: payload.status, reason: payload.reason, followUp: payload.followUp, carrierCode: payload.carrierCode, notifyCustomer: payload.notifyCustomer },
       req
     ),
   add_tag: (workspaceId, id, payload, req) => orderMeta.updateMeta(workspaceId, id, { addTags: payload.tags }, req),

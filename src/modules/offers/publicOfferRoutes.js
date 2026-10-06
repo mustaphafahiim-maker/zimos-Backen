@@ -6,6 +6,7 @@ const asyncHandler = require('express-async-handler');
 const validate = require('../../core/middleware/validate');
 const { workspaceRef } = require('../../core/utils/workspaceSlug');
 const rules = require('./offerRules');
+const { NotFoundError } = require('../../core/errors/AppError');
 
 /*
  * Offer rules, shopper side — mounted inside the public store router
@@ -22,6 +23,23 @@ const router = Router({ mergeParams: true });
 const uuid = Joi.string().uuid();
 const workspaceId = workspaceRef().required();
 const ws = (req) => req.tenant.workspaceId;
+
+// With the Offers app off the shop shows none of these: the same empty answers as "nothing set up".
+// Social proof, the newsletter and coupons are not offers and keep working.
+const OFF_ANSWERS = [
+  [/^\/products\/[^/]+\/bumps$/, { bumps: [] }],
+  [/^\/cross-sell$/, { source: null, products: [] }],
+  [/^\/orders\/[^/]+\/upsell$/, { upsell: null }],
+  [/^\/exit-downsell$/, { exitDownsell: null }],
+];
+router.use(
+  asyncHandler(async (req, res, next) => {
+    const off = OFF_ANSWERS.find(([path]) => path.test(req.path));
+    if (!off || (await require('../apps/appGate').isEnabled(ws(req), 'offers'))) return next();
+    if (req.method !== 'GET') throw new NotFoundError('Offer');
+    return res.json(off[1]);
+  })
+);
 
 router.get(
   '/products/:productId/bumps',
@@ -58,10 +76,14 @@ router.get(
 
 router.post(
   '/orders/:orderId/upsell',
-  validate({ params: orderParams, body: Joi.object({ number: Joi.string().trim().max(40).required(), offerId: uuid.required() }) }),
+  validate({
+    params: orderParams,
+    // variantId: the option the shopper chose for the offer (offers/offerVariantChoice.js).
+    body: Joi.object({ number: Joi.string().trim().max(40).required(), offerId: uuid.required(), variantId: uuid.optional() }),
+  }),
   // No Idempotency-Key needed: one acceptance per order is enforced by a unique index.
   asyncHandler(async (req, res) =>
-    res.status(201).json({ order: await rules.acceptUpsell(ws(req), req.params.orderId, req.body.number, req.body.offerId) })
+    res.status(201).json({ order: await rules.acceptUpsell(ws(req), req.params.orderId, req.body.number, req.body.offerId, req.body.variantId) })
   )
 );
 
@@ -104,10 +126,20 @@ router.post(
         .min(1)
         .max(50)
         .required(),
+      // Previewed in a funnel's checkout: a funnel-limited code applies there.
+      funnelId: uuid.optional(),
     }),
   }),
   asyncHandler(async (req, res) =>
-    res.json({ coupon: await require('../discounts/couponExtras').previewCode(ws(req), req.body.code, req.body.items) })
+    res.json({
+      coupon: await require('../discounts/couponExtras').previewCode(
+        ws(req),
+        req.body.code,
+        req.body.items,
+        require('../catalog/productTests').visitorOf(req),
+        req.body.funnelId || null
+      ),
+    })
   )
 );
 

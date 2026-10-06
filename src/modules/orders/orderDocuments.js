@@ -87,6 +87,10 @@ async function drawLabel(doc, model, box) {
 
   // The amount sits at the foot of the label whatever the address length.
   const footY = box.y + box.h - pad - 34;
+  // The custom-field answers, as many as fit above it (waybill/customData.js).
+  if (model.customData && model.customData.length) {
+    require('../waybill/customData').drawCustomData(doc, model.customData, { x, y: y + 4, width: w, size: 8, maxY: footY - 4 });
+  }
   if (isCod) {
     doc.rect(x, footY, w, 34).fillAndStroke('#fff4e5', '#e08a00');
     doc.fillColor('#8a4b00').font('Helvetica-Bold').fontSize(8).text('COLLECT (CASH)', x + 6, footY + 5, { lineBreak: false });

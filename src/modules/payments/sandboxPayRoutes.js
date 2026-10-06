@@ -16,6 +16,9 @@ const sandbox = require('./gateways/sandbox');
  */
 const router = Router();
 
+// "Save a card" with no payment (sandboxSetupRoutes.js).
+router.use('/setup', require('./sandboxSetupRoutes'));
+
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 function page(title, body) {

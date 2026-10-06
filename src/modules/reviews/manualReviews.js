@@ -67,11 +67,11 @@ async function createManualReview(workspaceId, data, req) {
   return { ...review.toJSON(), product: { id: product.id, name: product.name }, customer: null };
 }
 
-/** Only a review the merchant added can be deleted; a customer's is moderated instead. */
+/** Only a review the merchant added (by hand or imported) can be deleted; a customer's is moderated instead. */
 async function deleteManualReview(workspaceId, reviewId, req) {
   const review = await db.Review.findOne({ where: { id: reviewId, workspaceId } });
   if (!review) throw new NotFoundError('Review');
-  if (review.source !== 'manual') {
+  if (review.source !== 'manual' && review.source !== 'import') {
     throw new AppError('REVIEW_NOT_MANUAL', "A customer's review cannot be deleted; reject it instead", 409);
   }
   const before = review.toJSON();
@@ -90,7 +90,7 @@ async function deleteManualReview(workspaceId, reviewId, req) {
 
 /** "Mona A." — a shopper's review shows a first name and an initial, never the full name. */
 function publicAuthor(review) {
-  if (review.source === 'manual') return review.authorName || null;
+  if (review.source !== 'customer') return review.authorName || null;
   const parts = String((review.customer && review.customer.fullName) || '')
     .trim()
     .split(/\s+/)
@@ -127,7 +127,8 @@ async function publicReviews(workspaceId, productId) {
       createdAt: row.createdAt,
       authorName: publicAuthor(row),
       photos: Array.isArray(row.photos) ? row.photos : [],
-      verified: row.source !== 'manual',
+      // Only a review sent through the store's form proved a delivered order.
+      verified: row.source === 'customer',
     })),
   };
 }

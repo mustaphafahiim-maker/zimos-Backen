@@ -17,5 +17,7 @@ router.get('/', validate(schemas.list), controller.list);
 router.patch('/:reviewId', validate(schemas.moderate), controller.moderate);
 // POST / (add a review by hand) and DELETE /:reviewId (remove one of those).
 router.use(require('./manualReviews').router);
+// Importing the merchant's own reviews from their Shopify store (import/).
+router.use(require('./import').router);
 
 module.exports = router;

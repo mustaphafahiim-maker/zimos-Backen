@@ -133,15 +133,26 @@ const resume = asyncHandler(async (req, res) => {
 });
 
 // --- public runtime ---
+// In the shopper's language, with the step's own scripts for the live store (customCode/pageScripts.js).
+const localizeStep = async (req, funnelId, payload) => {
+  await require('../translations/contentTranslations').localizeFunnelStep(req, funnelId, payload);
+  if (payload && payload.step) payload.step.scripts = await require('../customCode/pageScripts').publicScripts(req, 'step', payload.step.id);
+  // …and the custom HTML blocks it places (customCode/htmlBlocks.js).
+  if (payload && payload.step) payload.step.htmlBlocks = await require('../customCode/htmlBlocks').publicBlocks(req, payload.step.tree);
+  // Elements whose display window is closed are not sent (pages/displayRules.js).
+  return require('../pages/displayRules').stripClosed(payload);
+};
+
 const startSession = asyncHandler(async (req, res) => {
   // The visitor's country, for geo redirects (funnels/geoRedirects.js); null when unknown.
   const country = await require('./geoRedirects').countryOf(req);
   const result = await service.startSession(req.tenant.workspaceId, req.params.funnelRef, { ...req.body, country });
-  res.status(201).json(result);
+  // In the shopper's language when the funnel is translated (translations/contentTranslations.js).
+  res.status(201).json(await localizeStep(req, result.funnel && result.funnel.id, result));
 });
 
 const getSessionStep = asyncHandler(async (req, res) => {
-  res.json(await service.getSessionStep(req.tenant.workspaceId, req.params.funnelId, req.params.sessionId));
+  res.json(await localizeStep(req, req.params.funnelId, await service.getSessionStep(req.tenant.workspaceId, req.params.funnelId, req.params.sessionId)));
 });
 
 const advance = asyncHandler(async (req, res) => {
@@ -178,5 +189,6 @@ module.exports = {
   resume,
   startSession,
   getSessionStep,
+  localizeStep,
   advance,
 };

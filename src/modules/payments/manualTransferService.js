@@ -105,7 +105,17 @@ function storefrontMethods(workspace) {
     }));
 }
 
-/** Whether a cash-on-delivery order by this phone must be preceded by a deposit. */
+/**
+ * Whether a cash-on-delivery order by this phone must be preceded by a deposit.
+ *
+ * "Risky" (SPEC §11.3, §5.4): the customer's delivery rate across every
+ * store on the platform (risk/networkStats.js — delivered out of the orders
+ * that finished) is below the rule's threshold, or they were reported as
+ * spam. Without a platform history (new to ZIMOS, or the network score not
+ * on for this store) the store's own record decides, as before: a
+ * reliability score below the threshold, or a rejected order. A shopper
+ * neither knows is never asked.
+ */
 async function depositQuote(workspace, { phone }) {
   const rule = depositRule(workspace);
   const methods = storefrontMethods(workspace);
@@ -118,15 +128,20 @@ async function depositQuote(workspace, { phone }) {
     } catch {
       normalized = null;
     }
-    const customer = normalized
-      ? await db.Customer.findOne({
-          where: { workspaceId: workspace.id, phoneNormalized: normalized },
-          attributes: ['reliabilityScore', 'totalRejectedOrders', 'isBlacklisted'],
-        })
-      : null;
-    // A first-time shopper has no record against them.
-    if (!customer) return none;
-    const risky = customer.reliabilityScore < rule.maxReliabilityScore || customer.totalRejectedOrders > 0;
+    if (!normalized) return none;
+    const network = await require('../risk/networkStats').forPhone(workspace.id, normalized);
+    let risky;
+    if (network && (network.rate !== null || network.spamReports > 0)) {
+      risky = (network.rate !== null && network.rate < rule.maxReliabilityScore) || network.spamReports > 0;
+    } else {
+      const customer = await db.Customer.findOne({
+        where: { workspaceId: workspace.id, phoneNormalized: normalized },
+        attributes: ['reliabilityScore', 'totalRejectedOrders', 'isBlacklisted'],
+      });
+      // A first-time shopper has no record against them.
+      if (!customer) return none;
+      risky = customer.reliabilityScore < rule.maxReliabilityScore || customer.totalRejectedOrders > 0;
+    }
     if (!risky) return none;
   }
   return {
@@ -270,8 +285,12 @@ async function confirm(workspaceId, orderId, paymentId, req) {
   });
 }
 
-/** The receipt is wrong or the money never arrived: the payment fails; the order stays unpaid for the merchant to cancel or chase. */
-async function reject(workspaceId, orderId, paymentId, { reason }, req) {
+/**
+ * The receipt is wrong or the money never arrived: the payment fails; the order stays unpaid for the merchant to
+ * cancel or chase. The shopper is told (order.transfer_rejected, unless notifyCustomer is false) and can send a
+ * new receipt from the tracking page (transferResubmit.js).
+ */
+async function reject(workspaceId, orderId, paymentId, { reason, notifyCustomer = true }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const payment = await loadPending(workspaceId, orderId, paymentId, transaction);
     await payment.update(
@@ -281,6 +300,9 @@ async function reject(workspaceId, orderId, paymentId, { reason }, req) {
     await recordAudit({
       workspaceId, actorUserId: req.user.id, action: 'manual_transfer.reject', entityType: 'Payment', entityId: payment.id,
       after: { orderId, reason: payment.failureReason }, req, transaction,
+    });
+    await require('../../core/outbox/outbox').record(transaction, 'order.transfer_rejected', {
+      workspaceId, orderId, paymentId: payment.id, reason: payment.failureReason, notifyCustomer: notifyCustomer !== false,
     });
     return present(payment);
   });

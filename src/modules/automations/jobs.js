@@ -11,7 +11,9 @@ module.exports = {
       queue: 'notifications',
       events: automationEngine.EVENTS,
       // The payload names the order or the lost checkout the event is about.
-      handle: (event) => automationEngine.run(event.workspaceId, event.type, event.payload),
+      // "Don't notify the customer" on a cancellation or refund skips the store's automations for it.
+      handle: (event) =>
+        event.payload && event.payload.notifyCustomer === false ? null : automationEngine.run(event.workspaceId, event.type, event.payload),
     },
   ],
   // A sequence that was waiting (a `wait` step) picks up at its next step.

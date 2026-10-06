@@ -19,6 +19,8 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 'active',
       },
       attribution: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // Who last added to it: the cart is priced for them (catalog/productTests.js).
+      visitorId: { type: DataTypes.STRING(64), allowNull: true, field: 'visitor_id' },
     },
     {
       tableName: 'carts',

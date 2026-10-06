@@ -14,6 +14,18 @@ const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
 const { resolveOrderBumpItem } = require('./orderBump');
 const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
+const productTests = require('../catalog/productTests');
+const logger = require('../../core/utils/logger');
+
+/** Credits the order to the shopper's variant in its products' A/B tests; never fails the checkout. */
+async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
+  if (!visitorId) return;
+  try {
+    await productTests.recordOrder(workspaceId, (orderItems || []).map((i) => i.productId).filter(Boolean), visitorId, orderId);
+  } catch (err) {
+    logger.warn('Product test order could not be recorded', { error: err.message });
+  }
+}
 
 /**
  * Guest checkout (no login). Runs the same orderService.createOrder as the
@@ -33,19 +45,49 @@ const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, ...orderBody } = req.body;
+  // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, pickupLocationId, trackingConsent, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
+  // A store on a "pause" holiday takes no orders (holidayMode, item 216).
+  require('../holidayMode').assertOpen(workspace);
+  // Click and collect: no delivery address, no shipping charge (clickAndCollect, item 225).
+  const pickupLocation = await require('../clickAndCollect').prepare(workspace, pickupLocationId, req.body, orderBody);
   // Per-store required fields (settings.checkout_settings). Checked before any
   // cart work so a rejected checkout costs nothing.
   assertRequiredCheckoutFields(workspace, req.body);
+  // A place the store hid is not delivered to (shipping/shippingPlaces.js).
+  await require('../shipping/shippingPlaces').assertDeliverable(workspace, req.body.shippingAddress);
+  // A hidden or unknown place of the store's own list (places/placePricing.js).
+  await require('../places/placePricing').assertDeliverable(workspace.id, req.body.shippingAddress);
+  // Photo answers and the billing address, checked now and saved with the order (checkoutExtras.js).
+  const extras = await require('./checkoutExtras').prepare(workspace, req);
 
   // A manual transfer (the whole order, or a COD order's deposit) is checked
   // here, before any cart work; it is not an online (gateway) payment.
   const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
   const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
   if (orderBody.paymentMethod === 'cod') paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: 'cod' });
+  // A gift card lowers what the courier collects (COD, item 189) or what the gateway charges (online, item 201).
+  if (giftCardCode) {
+    if (orderBody.paymentMethod === 'bank_transfer') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery or an online payment' }], 'Invalid body');
+    await require('../giftCards/giftCardService').assertUsable(workspaceId, giftCardCode, null);
+  }
+  // Loyalty points: only a signed-in shopper's, checked now and taken once the order exists (loyalty/, item 203).
+  let pointsOwner = null;
+  if (loyaltyPoints) {
+    if (orderBody.paymentMethod === 'bank_transfer') throw new ValidationError([{ field: 'loyaltyPoints', message: 'Points can be used with cash on delivery or an online payment' }], 'Invalid body');
+    const shopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    pointsOwner = await require('../loyalty/loyaltyService').assertCanSpend(workspace, shopper, loyaltyPoints);
+  }
+  // Store credit, also only a signed-in shopper's (storeCredit/, item 204).
+  let creditOwner = null;
+  if (useStoreCredit) {
+    if (orderBody.paymentMethod === 'bank_transfer') throw new ValidationError([{ field: 'useStoreCredit', message: 'Store credit can be used with cash on delivery or an online payment' }], 'Invalid body');
+    const shopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    creditOwner = await require('../storeCredit/storeCreditService').assertCanSpend(workspace, shopper);
+  }
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -88,6 +130,10 @@ const checkout = asyncHandler(async (req, res) => {
 
   // The ticked order bump becomes one more line of this order, built by the
   // server from the configured offer (422 when it is not that offer).
+  // With the Offers app off the store shows no add-ons, so a ticked one is stale or forged.
+  if (((orderBump && !orderBody.funnelId) || (orderBumps && orderBumps.length > 0)) && !(await require('../apps/appGate').isEnabled(workspace.id, 'offers'))) {
+    throw new AppError('ORDER_BUMP_INVALID', 'This add-on is no longer offered', 422);
+  }
   if (orderBump) {
     items = [...items, await resolveOrderBumpItem(workspace, { offerId: orderBump.offerId, funnelId: orderBody.funnelId })];
   }
@@ -98,10 +144,52 @@ const checkout = asyncHandler(async (req, res) => {
     items = [...items, ...bumpItems.filter((b) => !items.some((i) => i.offerId === b.offerId))];
   }
 
+  // A product A/B test: plain lines at the price their shopper was shown — the
+  // cart's (whoever filled it) or this visitor's for a Buy Now. Funnels price their own way.
+  const testVisitor = orderBody.funnelId ? null : (cart && cart.visitorId) || productTests.visitorOf(req);
+  items = await productTests.pinPrices(workspaceId, items, testVisitor);
+  // A signed-in wholesale customer's price lists, lower prices only (priceLists/, item 205). Funnels keep their own prices.
+  if (!orderBody.funnelId && req.headers['x-shopper-token']) {
+    const listShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    if (listShopper) items = await require('../priceLists').pinPrices(workspaceId, items, listShopper);
+  }
+  // A free trial prices its product at nothing on the first order (subscriptions/trialCheckout.js).
+  items = await require('../subscriptions/trialCheckout').pinTrialLines(workspaceId, items, orderBody.contact);
+  // Each product's min / max per order and max per customer (catalog/purchaseLimits.js, item 198).
+  await require('../catalog/purchaseLimits').assertWithin(workspaceId, items, orderBody.contact);
+  // The signed-in shopper's VIP tier: a percent off plain lines and/or free shipping (vipTiers/, item 218). Not in funnels.
+  if (!orderBody.funnelId && req.headers['x-shopper-token']) {
+    const vipShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    if (vipShopper) ({ items } = await require('../vipTiers').applyAtCheckout(workspace, items, vipShopper, orderBody));
+  }
+  // A friend's invite: their offer on a first order, never on the inviter's own phone/email/account (customerReferrals/, item 222).
+  let referral = null;
+  if (referralCode) {
+    const inviteShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    ({ items, referral } = await require('../customerReferrals').applyAtCheckout(workspace, items, referralCode, orderBody, inviteShopper));
+  }
+  // Free gifts the order earns, added by the server at no charge (freeGifts/, item 208). Funnels keep their own offers.
+  if (!orderBody.funnelId) ({ items } = await require('../freeGifts').addGifts(workspace, items));
+  // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (giftOptions, item 214).
+  const giftChoice = await require('../giftOptions').prepare(workspace, gift);
+  if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
+  // The delivery day and time slot: a place is held now and given to the order once it exists (deliverySlots/, item 221).
+  const slotBooking = await require('../deliverySlots').hold(workspace, deliverySlot);
+  await require('../clickAndCollect').assertStock(workspace, pickupLocation, items);
+
+  // The gateway takes the order's currency, or the order is not created (payments/methodCurrency.js).
+  if (isOnline) {
+    const methodCurrency = require('../payments/methodCurrency');
+    methodCurrency.assertTakes(prepared.method, await methodCurrency.itemsCurrency(workspaceId, items));
+  }
+
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
 
-  const context = { cartId: cart ? cart.id : null, checkoutSessionId: checkoutSessionId || null };
+  // A subscription or installment product needs a card that can be saved (SPEC §18.1). Its card
+  // is saved by subscriptionService.startForOrder once paid, so the shopper's own tick is not used twice.
+  const planned = await require('../subscriptions/planCheckout').assertPayable(workspaceId, items, isOnline ? prepared.method : { method: orderBody.paymentMethod });
+  const context = { cartId: cart ? cart.id : null, checkoutSessionId: checkoutSessionId || null, ...(saveCard === true && !planned ? { saveCard: true } : {}) };
   // The shopper's answers to custom fields are checked again here, required
   // ones enforced; photos must be this visitor's or in this cart.
   const customFields = {
@@ -122,9 +210,24 @@ const checkout = asyncHandler(async (req, res) => {
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
+    await require('./checkoutExtras').apply(order, extras);
+    await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
+  await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
+    await require('../giftOptions').recordOnOrder(order, giftChoice);
+    await require('../holidayMode').markOrder(workspace, order);
+    await require('../deliverySlots').attach(order, slotBooking);
+    await require('../customerReferrals').recordOnOrder(order, referral);
+    const pickup = await require('../clickAndCollect').attach(order, pickupLocation);
+    await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
+    // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
+    await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
     await afterOrderCompleted(workspaceId, order, context);
     const transferPayment = await manualCheckout.record(order, manualTransfer);
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}) });
+    const giftCard = giftCardCode ? await require('../giftCards/giftCardService').redeemOnOrder(order, giftCardCode, req) : null;
+    const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
+    const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
+    if ((giftCard && giftCard.applied) || (points && points.applied) || (credit && credit.applied)) await order.reload();
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -142,6 +245,46 @@ const checkout = asyncHandler(async (req, res) => {
   );
 
   await saveCheckoutAnswers(order, workspace, formFields);
+  await require('./checkoutExtras').apply(order, extras);
+  await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
+  await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
+  await require('../giftOptions').recordOnOrder(order, giftChoice);
+    await require('../holidayMode').markOrder(workspace, order);
+    await require('../deliverySlots').attach(order, slotBooking);
+    await require('../customerReferrals').recordOnOrder(order, referral);
+    const pickup = await require('../clickAndCollect').attach(order, pickupLocation);
+  await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
+  await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
+
+  // The card's part is held now and taken when the payment lands (giftCards/giftCardHolds.js, item 201).
+  let giftCard = giftCardCode ? await require('../giftCards/giftCardHolds').hold(order, giftCardCode).catch(() => ({ applied: false, reason: 'error' })) : null;
+  // Points too (loyalty/, item 203), held the same way.
+  let credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { held: true }) : null;
+  let points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { held: true }) : null;
+  const heldNow = (giftCard && giftCard.applied) || (points && points.applied) || (credit && credit.applied) ? await require('../payments/heldTenders').heldOn(order.id) : 0;
+  if (heldNow > 0 && heldNow >= Number(order.totalAmount) - Number(order.amountPaid)) {
+    // Nothing left for the gateway: the order goes on as cash on delivery with nothing to collect.
+    try {
+      await online.switchToCod(workspaceId, order.id, prepared.token, req);
+      const paidOrder = await require('../../db/models').Order.findByPk(order.id);
+      const { coversOrder, ...card } = giftCard || {};
+      return res.status(201).json({
+        order: { ...paidOrder.toJSON(), items: orderItems },
+        ...(giftCard ? { giftCard: { ...card, held: false } } : {}),
+        ...(credit ? { storeCredit: { ...credit, held: false } } : {}),
+        ...(points ? { loyalty: { ...points, held: false } } : {}),
+        paidByGiftCard: Boolean(giftCard && giftCard.applied),
+        paidInStore: true,
+        ...(pickup ? { pickup } : {}),
+      });
+    } catch (err) {
+      // COD not offered (or refused): the card and points go back and the gateway takes the whole order.
+      await require('../../db/models').sequelize.transaction((t) => require('../payments/heldTenders').release(order.id, t, 'cash on delivery unavailable'));
+      if (giftCard && giftCard.applied) giftCard = { applied: false, reason: 'covers_order_cod_unavailable' };
+      if (points && points.applied) points = { applied: false, reason: 'covers_order_cod_unavailable' };
+      if (credit && credit.applied) credit = { applied: false, reason: 'covers_order_cod_unavailable' };
+    }
+  }
 
   const attempt = await online.startAttempt(order, {
     provider: prepared.method.provider,
@@ -151,6 +294,7 @@ const checkout = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     order: { ...order.toJSON(), items: orderItems },
+    ...(pickup ? { pickup } : {}),
     payment: {
       id: attempt.id,
       status: attempt.status,
@@ -162,6 +306,9 @@ const checkout = asyncHandler(async (req, res) => {
       expiresAt: order.paymentExpiresAt,
     },
     paymentToken: prepared.token,
+    ...(giftCard ? { giftCard: (({ coversOrder, ...card }) => card)(giftCard) } : {}),
+    ...(credit ? { storeCredit: credit } : {}),
+    ...(points ? { loyalty: points } : {}),
   });
 });
 

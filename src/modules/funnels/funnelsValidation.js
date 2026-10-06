@@ -65,7 +65,11 @@ const createFunnel = {
 
 const updateFunnel = {
   params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required() }),
-  body: Joi.object({ name: Joi.string().min(1).max(200).optional() }).min(1),
+  body: Joi.object({
+    name: Joi.string().min(1).max(200).optional(),
+    // The funnel's link (/f/<subdomain>); a taken one is refused (409 FUNNEL_SUBDOMAIN_TAKEN).
+    subdomain: Joi.string().lowercase().min(3).max(63).pattern(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/).optional(),
+  }).min(1),
 };
 
 const funnelIdParam = {
@@ -73,9 +77,13 @@ const funnelIdParam = {
 };
 
 // `name` is optional — the service falls back to "<source name> (copy)".
+// `subdomain`: the copy's link, as on create (the funnel wizard's "Your funnels").
 const duplicateFunnel = {
   params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required() }),
-  body: Joi.object({ name: Joi.string().min(1).max(200).optional() }).default({}),
+  body: Joi.object({
+    name: Joi.string().min(1).max(200).optional(),
+    subdomain: Joi.string().lowercase().min(3).max(63).pattern(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/).optional(),
+  }).default({}),
 };
 
 const createStep = {
@@ -95,7 +103,8 @@ const createStep = {
 const updateStep = {
   params: Joi.object({ workspaceId: uuid.required(), funnelId: uuid.required(), stepId: uuid.required() }),
   body: Joi.object({
-    // `key` is immutable after create — edges reference it.
+    // `key` is fixed once created — edges reference it — except a generic page's (genericPageAddress.js).
+    key: stepKey.optional(),
     stepType: stepTypeEnum.optional(),
     name: Joi.string().min(1).max(200).optional(),
     builderData: treeData.optional(),
@@ -186,6 +195,8 @@ const advance = {
       orderId: uuid.optional(),
       // Which button was pressed, for edges drawn from a page element.
       sourceElementId: Joi.string().max(120).optional(),
+      // The variant the shopper chose for the offer (accepted_offer; offers/offerVariantChoice.js).
+      variantId: uuid.optional(),
     }).required(),
   }),
 };

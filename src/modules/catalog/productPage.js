@@ -34,6 +34,8 @@ const optionSchema = Joi.object({
 });
 
 const PAGE_SETTINGS_DEFAULTS = Object.freeze({
+  // The first in-stock variant starts chosen; off: the shopper picks every option first.
+  auto_select_variant: true,
   skip_cart: false,
   buy_now_text: null,
   sticky_buy_button: true,
@@ -49,6 +51,7 @@ const PAGE_SETTINGS_DEFAULTS = Object.freeze({
 });
 
 const pageSettingsSchema = Joi.object({
+  auto_select_variant: Joi.boolean(),
   skip_cart: Joi.boolean(),
   buy_now_text: Joi.string().trim().max(40).allow(null, ''),
   sticky_buy_button: Joi.boolean(),

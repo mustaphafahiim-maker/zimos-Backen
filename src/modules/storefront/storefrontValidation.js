@@ -65,17 +65,25 @@ module.exports = {
     body: Joi.object({
       country: Joi.string().length(2).uppercase().default('EG'),
       governorate: Joi.string().max(100).allow(null, '').optional(),
+      // The store's own places (places/storePlaces.js): city/area prices.
+      city: Joi.string().max(100).allow(null, '').optional(),
+      area: Joi.string().max(120).allow(null, '').optional(),
+      placeId: uuid.allow(null).optional(),
       items: Joi.array()
         .items(
           Joi.object({
             variantId: uuid.required(),
             offerId: uuid.optional(),
             quantity: Joi.number().integer().min(1).max(1000).default(1),
+            // The product form's custom-field answers: a priced field changes the subtotal.
+            customizations: require('../catalog/customFields').customizationsInputSchema.optional(),
           })
         )
         .min(1)
         .max(50)
         .optional(),
+      // Quoted for a funnel's checkout: the funnel's shipping group applies.
+      funnelId: uuid.optional(),
     }),
   },
   workspaceParam: { params: Joi.object({ workspaceId: workspaceIdParam }) },

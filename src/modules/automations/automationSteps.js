@@ -55,6 +55,9 @@ const requireOrder = (subject, what) => {
   return subject.order;
 };
 
+// Appended to a marketing SMS that does not already say how to stop.
+const STOP_LINE = 'للإيقاف أرسل: إيقاف';
+
 const RUNNERS = {
   async whatsapp_template(step, subject, { workspaceId }) {
     if (!subject.phone) throw new Error('no phone number');
@@ -69,10 +72,12 @@ const RUNNERS = {
     return `whatsapp_template ${step.template}`;
   },
 
-  async sms(step, subject, { workspaceId }) {
+  async sms(step, subject, { workspaceId, trigger }) {
     if (!subject.phone) throw new Error('no phone number');
-    const body = render(step.body, subject.vars).slice(0, 600);
-    const sent = await notify.sms({ recipient: subject.phone, template: 'automation_sms', data: { body }, workspaceId });
+    let body = render(step.body, subject.vars).slice(0, 600);
+    // A marketing SMS says how to stop them (SPEC §6.4); a STOP reply is honoured by marketingGuard.
+    if (require('./marketingGuard').isMarketing(trigger) && !/stop|إيقاف|ايقاف/i.test(body)) body = `${body.slice(0, 570)}\n${STOP_LINE}`;
+    const sent = await notify.sms({ recipient: subject.phone, template: 'automation_sms', data: { body }, workspaceId, orderId: subject.kind === 'order' ? subject.order.id : null });
     if (sent.status !== 'sent') throw new Error(sent.error || 'the SMS provider refused the message');
     return 'sms';
   },
@@ -84,6 +89,7 @@ const RUNNERS = {
       template: 'automation_message',
       data: { subject: render(step.subject, subject.vars).slice(0, 200), body: render(step.body, subject.vars).slice(0, 5000), storeName: subject.vars.store_name },
       workspaceId,
+      orderId: subject.kind === 'order' ? subject.order.id : null,
     });
     if (sent.status !== 'sent') throw new Error(sent.error || 'the email provider refused the message');
     return 'email';

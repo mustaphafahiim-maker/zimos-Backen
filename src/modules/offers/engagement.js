@@ -225,6 +225,8 @@ async function subscribe(workspace, body) {
   const fullName = body.fullName || null;
   const email = body.email || null;
 
+  // A new subscriber is a new lead: the plan's monthly leads limit (billing/limitGuards.js).
+  await require('../billing/limitGuards').assertLeadRoom(workspace.id, phoneNormalized);
   const existing = await db.Customer.findOne({ where: { workspaceId: workspace.id, phoneNormalized } });
   if (existing) {
     await existing.update({
@@ -234,7 +236,7 @@ async function subscribe(workspace, body) {
       tags: [...new Set([...(existing.tags || []), 'newsletter'])],
     });
   } else {
-    await db.Customer.create({
+    const lead = await db.Customer.create({
       workspaceId: workspace.id,
       phoneNormalized,
       phoneRaw: body.phone,
@@ -244,7 +246,13 @@ async function subscribe(workspace, body) {
       tags: ['newsletter'],
       source: 'newsletter',
     });
+    // A new lead (automations, webhooks).
+    await require('../../core/outbox/outbox').record(null, 'lead.created', { workspaceId: workspace.id, customerId: lead.id, source: 'newsletter' });
   }
+  // Signing up again is opting back in to marketing after an earlier STOP (whatsapp/optOut.js).
+  await db.MarketingOptOut.destroy({ where: { workspaceId: workspace.id, phoneNormalized } });
+  // …and after an unsubscribe from a marketing email (notifications/marketingUnsubscribe.js).
+  if (email) await db.MarketingOptOut.destroy({ where: { workspaceId: workspace.id, email: String(email).trim().toLowerCase() } });
   await recordAudit({
     workspaceId: workspace.id,
     actorUserId: null,

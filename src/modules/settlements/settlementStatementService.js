@@ -21,23 +21,71 @@ const settlements = require('./settlementService');
  *
  * plus the delivered orders of that courier the statement does not mention —
  * money the courier is still holding.
+ *
+ * The statement comes as the courier sends it: an Excel file (.xlsx, its first
+ * sheet) or CSV, as `fileBase64` (+ `fileName`), or as CSV text (`csv`).
+ * Couriers put a title, the account and the period above the table, so the
+ * header is the first of the top rows that names a waybill and an amount
+ * column; line numbers in the report are the file's own.
  */
 
 const MAX_ROWS = 5000;
 const HEADERS = {
-  waybill: ['waybill', 'waybill number', 'awb', 'tracking number', 'tracking', 'tracking no', 'shipment', 'barcode', 'رقم البوليصة', 'رقم الشحنة', 'البوليصة'],
-  amount: ['cod', 'cod amount', 'collected', 'collected amount', 'amount', 'cash collected', 'المبلغ', 'المبلغ المحصل', 'التحصيل'],
-  fee: ['fee', 'fees', 'shipping fee', 'shipping fees', 'courier fee', 'charges', 'الرسوم', 'رسوم الشحن'],
+  waybill: [
+    'waybill', 'waybill number', 'waybill no', 'awb', 'awb no', 'awb number', 'tracking number', 'tracking', 'tracking no',
+    'tracking code', 'shipment', 'shipment number', 'shipment no', 'barcode', 'order tracking number',
+    'رقم البوليصة', 'رقم الشحنة', 'البوليصة', 'رقم التتبع', 'كود الشحنة',
+  ],
+  amount: [
+    'cod', 'cod amount', 'cod value', 'cod collected', 'collected cod', 'collected', 'collected amount', 'amount',
+    'cash collected', 'cash on delivery', 'المبلغ', 'المبلغ المحصل', 'التحصيل', 'قيمة التحصيل', 'المحصل',
+  ],
+  fee: [
+    'fee', 'fees', 'shipping fee', 'shipping fees', 'courier fee', 'delivery fee', 'delivery fees', 'service fee', 'service fees',
+    'shipping cost', 'charges', 'الرسوم', 'رسوم الشحن', 'مصاريف الشحن', 'تكلفة الشحن',
+  ],
 };
 const norm = (v) => String(v || '').trim().toLowerCase();
+// "AWB No.", " Tracking  Number: " and "awb no" are one header.
+const headerNorm = (v) => norm(v).replace(/[.:#*]+/g, ' ').replace(/[_\s]+/g, ' ').trim();
+// The totals line couriers add under the table.
+const TOTALS = /^(total|totals|grand total|sum|الإجمالي|الاجمالي|إجمالي|اجمالي|المجموع)\b/i;
+const HEADER_SCAN = 20;
+const MAX_FILE_BYTES = 1024 * 1024;
 
-function parseStatement(csv) {
-  const table = parseCsv(csv);
+/** The statement's table: rows of strings, from an uploaded file (xlsx / csv) or CSV text. */
+function tableOf({ csv, fileBase64, fileName }) {
+  if (!fileBase64) return parseCsv(csv || '');
+  const buffer = Buffer.from(String(fileBase64), 'base64');
+  if (buffer.length === 0) throw new ValidationError([{ field: 'fileBase64', message: 'The file is empty' }], 'Nothing to match');
+  if (buffer.length > MAX_FILE_BYTES) throw new ValidationError([{ field: 'fileBase64', message: 'The file is larger than 1 MB' }], 'File too large');
+  const sheets = require('../catalog/importExport/sheetReader');
+  const isZip = buffer[0] === 0x50 && buffer[1] === 0x4b;
+  try {
+    return (isZip || /\.xlsx$/i.test(fileName || '') ? sheets.parseXlsx(buffer) : sheets.parseCsv(buffer)).map((row) => row.map((cell) => String(cell ?? '')));
+  } catch (err) {
+    if (err instanceof sheets.SheetError) throw new ValidationError([{ field: 'fileBase64', message: err.message }], 'The file cannot be read');
+    throw new ValidationError([{ field: 'fileBase64', message: 'Not an Excel (.xlsx) or CSV file' }], 'The file cannot be read');
+  }
+}
+
+function parseStatement(input) {
+  const table = tableOf(typeof input === 'string' ? { csv: input } : input);
   if (table.length < 2) throw new ValidationError([{ field: 'csv', message: 'The file has no data rows' }], 'Nothing to match');
   if (table.length - 1 > MAX_ROWS) throw new ValidationError([{ field: 'csv', message: `At most ${MAX_ROWS} rows per statement` }], 'File too large');
-  const header = table[0].map(norm);
-  const col = {};
-  for (const [field, names] of Object.entries(HEADERS)) col[field] = header.findIndex((h) => names.includes(h));
+  const columnsOf = (cells) => {
+    const header = cells.map(headerNorm);
+    const col = {};
+    for (const [field, names] of Object.entries(HEADERS)) col[field] = header.findIndex((h) => names.includes(h));
+    return col;
+  };
+  // The header: the first top row naming both a waybill and an amount column (titles above it are skipped).
+  let headerAt = table.slice(0, HEADER_SCAN).findIndex((cells) => {
+    const c = columnsOf(cells);
+    return c.waybill >= 0 && c.amount >= 0;
+  });
+  if (headerAt < 0) headerAt = 0;
+  const col = columnsOf(table[headerAt]);
   const missing = ['waybill', 'amount'].filter((f) => col[f] < 0);
   if (missing.length) {
     throw new ValidationError(
@@ -45,16 +93,27 @@ function parseStatement(csv) {
       'The statement is missing required columns'
     );
   }
-  return table.slice(1).map((row, i) => ({
-    line: i + 2,
+  return table
+    .slice(headerAt + 1)
+    .map((row, i) => ({ row, line: headerAt + i + 2 }))
+    // Blank lines and the totals line (no waybill, a "Total" label) are not shipments; any
+    // other line without a waybill stays, reported as invalid.
+    .filter(({ row }) => {
+      if (!row.some((cell) => String(cell || '').trim() !== '')) return false;
+      const waybill = String(row[col.waybill] || '').trim();
+      if (TOTALS.test(waybill)) return false;
+      return waybill !== '' || !row.some((cell) => TOTALS.test(String(cell || '').trim()));
+    })
+    .map(({ row, line }) => ({
+    line,
     waybill: String(row[col.waybill] || '').trim(),
     amount: parseSpend(row[col.amount] || '', 2),
     fee: col.fee >= 0 && String(row[col.fee] || '').trim() !== '' ? parseSpend(row[col.fee], 2) : 0,
   }));
 }
 
-async function matchStatement(workspaceId, { csv, carrierCode }) {
-  const rows = parseStatement(csv);
+async function matchStatement(workspaceId, { csv, fileBase64, fileName, carrierCode }) {
+  const rows = parseStatement({ csv, fileBase64, fileName });
   const keys = [...new Set(rows.map((r) => r.waybill).filter(Boolean))];
   const lowered = keys.map(norm);
   const [shipments, { orders: unsettled }] = await Promise.all([

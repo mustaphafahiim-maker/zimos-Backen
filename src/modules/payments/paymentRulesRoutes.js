@@ -50,10 +50,13 @@ router.put(
             }).required(),
             label: Joi.string().trim().max(100).allow('', null),
             enabled: Joi.boolean().default(true),
+            // A fixed amount's currency (the store's when unset); a percentage fits every currency.
+            currency: Joi.string().trim().uppercase().pattern(/^[A-Z]{3}$/).allow(null),
           })
         )
-        .unique('method')
-        .max(rules.METHODS.length),
+        // Per method: one percentage, and one fixed amount per currency (paymentRulesService).
+        .unique((a, b) => a.method === b.method && (a.valueType === 'percent') === (b.valueType === 'percent') && (a.valueType === 'percent' || (a.currency || null) === (b.currency || null)))
+        .max(rules.METHODS.length * 6),
       methodsByFunnel: Joi.object().pattern(uuid, Joi.array().items(Joi.string().max(100)).max(30)),
     }).min(1),
   }),
@@ -75,8 +78,8 @@ router.post(
     const order = await db.Order.findOne({ where: { id: req.params.orderId, workspaceId } });
     if (!order) throw new NotFoundError('Order');
     if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'A cancelled order cannot be paid', 409);
-    if (!['card', 'wallet'].includes(order.paymentMethod)) {
-      throw new AppError('NOT_AN_ONLINE_ORDER', 'Only an order paid by card or wallet has a payment link', 422);
+    if (!require('./methodNames').isOnline(order.paymentMethod)) {
+      throw new AppError('NOT_AN_ONLINE_ORDER', 'Only an order paid online has a payment link', 422);
     }
     if (online.PAID_STATES.includes(order.financialState)) throw new AppError('ORDER_ALREADY_PAID', 'This order is already paid', 409);
     const token = crypto.randomBytes(32).toString('base64url');

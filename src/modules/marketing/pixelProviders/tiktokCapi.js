@@ -64,8 +64,11 @@ async function call(accessToken, body) {
  * `pixelCode` is the public TikTok pixel id from
  * workspaces.settings.tracking_pixels.tiktok; `secrets.tiktokAccessToken` is
  * the workspace's own Events API access token from TikTok Ads Manager.
+ * `matching` (marketing/pixelMatching.js) adds the browser ids (_ttp, ttclid),
+ * the hashed external id and the order's lines. TikTok's name/address fields
+ * are not sent: their hashing rules could not be confirmed from its docs.
  */
-async function sendPurchase({ pixelCode, secrets, order, eventId, clientIp, userAgent, eventSourceUrl }) {
+async function sendPurchase({ pixelCode, secrets, order, eventId, clientIp, userAgent, eventSourceUrl, matching = {}, eventName = 'CompletePayment' }) {
   if (!pixelCode || !secrets || !secrets.tiktokAccessToken) {
     throw new AppError('TIKTOK_NOT_CONFIGURED', 'TikTok pixel code or access token is not configured', 422);
   }
@@ -75,7 +78,8 @@ async function sendPurchase({ pixelCode, secrets, order, eventId, clientIp, user
     event_source_id: pixelCode,
     data: [
       {
-        event: 'CompletePayment',
+        // 'SubmitForm' for a store or funnel that reports leads (marketing/conversionEvent.js).
+        event: eventName,
         event_time: Math.floor(Date.now() / 1000),
         event_id: eventId,
         user: {
@@ -83,9 +87,20 @@ async function sendPurchase({ pixelCode, secrets, order, eventId, clientIp, user
           ...(contact.phone ? { phone: sha256(normalizePhone(contact.phone)) } : {}),
           ...(clientIp ? { ip: clientIp } : {}),
           ...(userAgent ? { user_agent: userAgent } : {}),
+          ...(matching.ttp ? { ttp: matching.ttp } : {}),
+          ...(matching.ttclid ? { ttclid: matching.ttclid } : {}),
+          ...(matching.externalIds && matching.externalIds.length ? { external_id: matching.externalIds[0] } : {}),
         },
         ...(eventSourceUrl ? { page: { url: eventSourceUrl } } : {}),
-        properties: { content_type: 'product', currency: order.currency, value: Number(order.totalAmount) / 100 },
+        properties: {
+          content_type: 'product',
+          currency: order.currency,
+          value: Number(order.totalAmount) / 100,
+          order_id: order.orderNumber || order.id,
+          ...(matching.contents && matching.contents.length
+            ? { contents: matching.contents.map((c) => ({ content_id: c.id, quantity: c.quantity, price: c.price })) }
+            : {}),
+        },
       },
     ],
   };

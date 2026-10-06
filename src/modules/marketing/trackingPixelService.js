@@ -19,6 +19,7 @@ const { recordAudit } = require('../audit/auditService');
  *   google     gtag (GA4 "G-", Ads "AW-") GA4 Measurement Protocol (G- only)
  *   gtm        Tag Manager container      —
  *   clarity    Microsoft Clarity project  —
+ *   pinterest  Pinterest Tag              Conversions API (per ad account: config.adAccountId)
  *
  * The public half (platform, pixelId, scope) is served to the storefront by
  * publicPixels(); the token never leaves the server.
@@ -31,6 +32,9 @@ const PLATFORMS = Object.freeze({
   google: { idPattern: /^(G|AW|GT)-[A-Z0-9]{4,20}$/, capi: true, testEventCode: false },
   gtm: { idPattern: /^GTM-[A-Z0-9]{4,12}$/, capi: false, testEventCode: false },
   clarity: { idPattern: /^[a-z0-9]{6,20}$/, capi: false, testEventCode: false },
+  // The Pinterest Tag id: digits, about 13 of them.
+  // Its Conversions API is per ad account (config.adAccountId; pixelProviders/pinterestCapi.js).
+  pinterest: { idPattern: /^\d{10,16}$/, capi: true, testEventCode: true },
 });
 const PLATFORM_NAMES = Object.keys(PLATFORMS);
 const SCOPE_TYPES = ['all', 'funnels', 'products'];
@@ -63,6 +67,13 @@ function serialize(pixel) {
 }
 
 const fieldError = (field, message) => new ValidationError([{ field, message }], 'Invalid body');
+
+/** Pinterest's Conversions API is per ad account: its id is needed to turn it on. */
+function assertAdAccount(platform, capiEnabled, config) {
+  if (platform === 'pinterest' && capiEnabled && !(config && config.adAccountId)) {
+    throw fieldError('config.adAccountId', 'The Pinterest ad account id is needed to turn the Conversions API on');
+  }
+}
 
 function assertPixelId(platform, pixelId) {
   if (!PLATFORMS[platform].idPattern.test(pixelId)) {
@@ -102,6 +113,8 @@ async function create(workspaceId, body, req) {
     const capable = supportsCapi(body.platform, body.pixelId);
     const scope = await cleanScope(workspaceId, body.scope, transaction);
     if (body.capiEnabled && capable && !body.capiToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
+    assertAdAccount(body.platform, body.capiEnabled, body.config);
+    assertAdsLabels(body.platform, body.pixelId, body.config);
     const pixel = await db.TrackingPixel.create(
       {
         workspaceId,
@@ -156,6 +169,8 @@ async function update(workspaceId, pixelId, body, req) {
     const hasToken = patch.capiTokenSealed !== undefined ? Boolean(patch.capiTokenSealed) : Boolean(pixel.capiTokenSealed);
     const wantsCapi = body.capiEnabled !== undefined ? body.capiEnabled : pixel.capiEnabled;
     if (body.capiEnabled && capable && !hasToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
+    assertAdAccount(pixel.platform, wantsCapi, patch.config !== undefined ? patch.config : pixel.config);
+    assertAdsLabels(pixel.platform, patch.pixelId || pixel.pixelId, patch.config !== undefined ? patch.config : pixel.config);
     patch.capiEnabled = Boolean(wantsCapi && capable && hasToken);
 
     await pixel.update(patch, { transaction });
@@ -195,17 +210,47 @@ async function remove(workspaceId, pixelId, req) {
 
 /** What the storefront may know: the public IDs and where each applies. */
 async function publicPixels(workspaceId) {
+  // The store took the Tracking tools app off: no pixel loads in the shop.
+  if (!(await require('../apps/appGate').isEnabled(workspaceId, 'tracking_pixels'))) return [];
   const pixels = await db.TrackingPixel.findAll({
     where: { workspaceId, isActive: true },
     attributes: ['id', 'platform', 'pixelId', 'scopeType', 'scopeIds', 'config'],
     order: [['createdAt', 'ASC']],
   });
-  return pixels.map((p) => ({
+  // Clarity has an app of its own (apps/appCatalogue.js): taken off, its script stays out of the shop.
+  const clarityOn = !pixels.some((p) => p.platform === 'clarity') || (await require('../apps/appGate').isEnabled(workspaceId, 'clarity'));
+  return pixels.filter((p) => clarityOn || p.platform !== 'clarity').map((p) => ({
     platform: p.platform,
     pixelId: p.pixelId,
     scope: { type: p.scopeType, ids: p.scopeIds || [] },
-    ...(p.platform === 'google' && p.config && p.config.adsConversionLabel ? { adsConversionLabel: p.config.adsConversionLabel } : {}),
+    ...(p.platform === 'google' ? adsConversion(p) : {}),
   }));
+}
+
+/**
+ * Google Ads conversions (item 169): the labels of an AW- tag and the ready
+ * `send_to` values the storefront's gtag('event', 'conversion', { send_to }) takes —
+ * `purchase` for orders, `lead` when the store or funnel reports leads (conversionEvent.js).
+ */
+function adsConversion(p) {
+  const c = p.config || {};
+  if (!/^AW-/i.test(p.pixelId) || !(c.adsConversionLabel || c.adsLeadLabel)) return {};
+  return {
+    ...(c.adsConversionLabel ? { adsConversionLabel: c.adsConversionLabel } : {}),
+    ...(c.adsLeadLabel ? { adsLeadLabel: c.adsLeadLabel } : {}),
+    sendTo: {
+      ...(c.adsConversionLabel ? { purchase: `${p.pixelId}/${c.adsConversionLabel}` } : {}),
+      ...(c.adsLeadLabel ? { lead: `${p.pixelId}/${c.adsLeadLabel}` } : {}),
+    },
+  };
+}
+
+/** A conversion label only means something on a Google Ads (AW-) tag. */
+function assertAdsLabels(platform, pixelId, config) {
+  if (platform !== 'google' || /^AW-/i.test(pixelId || '')) return;
+  for (const key of ['adsConversionLabel', 'adsLeadLabel']) {
+    if (config && config[key]) throw fieldError(`config.${key}`, 'A conversion label needs a Google Ads id (AW-…)');
+  }
 }
 
 /** True when a pixel's scope covers an order (its funnel, or any of its products). */
@@ -219,6 +264,7 @@ function scopeCovers(pixel, { funnelId = null, productIds = [] }) {
 
 /** The pixels a server-side event for this order goes to, each with its opened token. */
 async function serverPixelsFor(workspaceId, context) {
+  if (!(await require('../apps/appGate').isEnabled(workspaceId, 'tracking_pixels'))) return [];
   const pixels = await db.TrackingPixel.findAll({ where: { workspaceId, isActive: true, capiEnabled: true }, order: [['createdAt', 'ASC']] });
   return pixels
     .filter((p) => p.capiTokenSealed && supportsCapi(p.platform, p.pixelId) && scopeCovers(p, context))

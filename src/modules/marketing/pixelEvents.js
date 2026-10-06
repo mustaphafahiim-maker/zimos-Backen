@@ -10,6 +10,7 @@ const metaCapi = require('./pixelProviders/metaCapi');
 const tiktokCapi = require('./pixelProviders/tiktokCapi');
 const snapchatCapi = require('./pixelProviders/snapchatCapi');
 const googleMp = require('./pixelProviders/googleMp');
+const pixelMatching = require('./pixelMatching');
 
 /**
  * Server-side ad-platform conversion events ("Meta CAPI", TikTok Events API,
@@ -47,9 +48,10 @@ const googleMp = require('./pixelProviders/googleMp');
 // is enough to debug a merchant's "my TikTok didn't get the conversion"
 // report without inventing a new audit table for four log lines a day.
 
-function eventSourceUrlFor(workspace, orderId) {
+async function eventSourceUrlFor(workspace, orderId) {
   if (!workspace || !workspace.slug) return null;
-  return `https://${workspace.slug}.${env.platformRootDomain}/thank-you?order=${orderId}`;
+  // The store's canonical address: the domain its ads point to (domains/primaryHost.js).
+  return `${await require('../domains/primaryHost').storeOriginOf(workspace)}/thank-you?order=${orderId}`;
 }
 
 /** Google Ads ("AW-"/"GT-") ids are a different product (OAuth-based
@@ -64,13 +66,15 @@ async function run(workspaceId, trigger, orderId) {
 
   const order = await db.Order.findOne({
     where: { id: orderId, workspaceId },
-    include: [{ model: db.OrderItem, as: 'items', attributes: ['productId'], required: false }],
+    include: [{ model: db.OrderItem, as: 'items', attributes: ['productId', 'variantId', 'skuSnapshot', 'quantity', 'unitPriceAmount'], required: false }],
   });
   if (!order) return [];
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug', 'settings'] });
   // The merchant chooses the moment an order counts as a Purchase (SPEC
   // §13.3, purchaseTiming.js); a test order never does. It is reported once.
   if (order.isTest || !purchaseTiming.isDue(purchaseTiming.timingOf(workspace && workspace.settings), trigger, order)) return [];
+  // The shopper did not accept ad tracking where the store asks first (cookieConsent.js).
+  if (!require('./cookieConsent').orderAllowed(workspace, order)) return [];
   if (!(await purchaseTiming.claim(order.id))) return [];
   // Since migration 211 the pixels are rows of tracking_pixels, each with its
   // own token and scope (trackingPixelService.js): the order goes to every
@@ -87,27 +91,32 @@ async function run(workspaceId, trigger, orderId) {
   // matching browser-side eventID (see apps/storefront/src/lib/track.ts) and
   // this server-side event dedup into one conversion instead of two.
   const eventId = order.id;
-  const eventSourceUrl = eventSourceUrlFor(workspace, order.id);
+  const eventSourceUrl = await eventSourceUrlFor(workspace, order.id);
 
-  // clientIp/userAgent are part of each provider's sendPurchase signature
-  // (Meta/TikTok/Snapchat all accept them for Advanced-Matching-style
-  // quality signals) but are not available here: this runs fire-and-forget
-  // from transaction.afterCommit with no HTTP request in scope, and the
-  // Order model does not persist the placing request's IP/user-agent
-  // anywhere. Left out rather than guessed — hashed email/phone from
-  // order.contactSnapshot is still sent, which is what each platform
-  // actually matches the conversion on.
+  // Who bought and what, for the platform to match the order to the ad
+  // click (pixelMatching.js): the IP and browser kept at checkout, the
+  // platforms' browser ids, hashed name / city / country, the lines.
+  const matching = pixelMatching.matchingFor(order);
+  const seen = { clientIp: matching.clientIp, userAgent: matching.userAgent, matching };
+  // Purchase, or Lead for a store or funnel that reports leads (conversionEvent.js).
+  const conversion = require('./conversionEvent');
+  const funnel = order.funnelId ? await db.Funnel.findOne({ where: { id: order.funnelId, workspaceId }, attributes: ['id', 'settings'] }) : null;
+  const kind = conversion.kindFor(workspace && workspace.settings, funnel && funnel.settings);
+  const nameFor = (platform) => conversion.eventNameFor(platform, kind);
 
   // The providers keep their original signature (a `secrets` blob with one
   // named key per platform); each pixel's own token is handed to them in that
   // shape. Several pixels of one platform get the same event id.
   const SENDERS = {
     meta: ({ pixel, token }) =>
-      metaCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { metaAccessToken: token, metaTestEventCode: pixel.testEventCode || undefined }, order, eventId, eventSourceUrl }),
-    tiktok: ({ pixel, token }) => tiktokCapi.sendPurchase({ pixelCode: pixel.pixelId, secrets: { tiktokAccessToken: token }, order, eventId, eventSourceUrl }),
-    snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl }),
+      metaCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { metaAccessToken: token, metaTestEventCode: pixel.testEventCode || undefined }, order, eventId, eventSourceUrl, ...seen, fbp: matching.fbp, fbc: matching.fbc, eventName: nameFor('meta') }),
+    tiktok: ({ pixel, token }) => tiktokCapi.sendPurchase({ pixelCode: pixel.pixelId, secrets: { tiktokAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: nameFor('tiktok') }),
+    snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: nameFor('snapchat') }),
     google: ({ pixel, token }) =>
-      isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId }) : null,
+      isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId, matching, eventName: nameFor('google') }) : null,
+    // Per ad account (pixel.config.adAccountId); sandbox until PINTEREST_CAPI_MODE=live (pinterestCapi.js).
+    pinterest: ({ pixel, token }) =>
+      require('./pixelProviders/pinterestCapi').sendPurchase({ adAccountId: (pixel.config || {}).adAccountId, secrets: { pinterestAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: nameFor('pinterest'), test: Boolean(pixel.testEventCode) }),
   };
 
   const results = [];
@@ -119,12 +128,12 @@ async function run(workspaceId, trigger, orderId) {
       const result = await SENDERS[platform](target);
       logger.info(`[pixelEvents] ${platform} purchase sent`, { workspaceId, orderId, platform, pixelId: pixel.pixelId, eventId });
       await trackingPixelService.recordSendResult(pixel, { ok: true });
-      await pixelEventLog.record({ pixel, eventName: 'purchase', eventId, orderId, ok: true });
+      await pixelEventLog.record({ pixel, eventName: kind, eventId, orderId, ok: true });
       results.push({ platform, pixelId: pixel.pixelId, ok: true, result });
     } catch (err) {
       logger.error(`[pixelEvents] ${platform} purchase failed: ${err.message}`, { workspaceId, orderId, platform, pixelId: pixel.pixelId, eventId, code: err.code });
       await trackingPixelService.recordSendResult(pixel, { ok: false, error: err.message });
-      await pixelEventLog.record({ pixel, eventName: 'purchase', eventId, orderId, ok: false, error: err.message });
+      await pixelEventLog.record({ pixel, eventName: kind, eventId, orderId, ok: false, error: err.message });
       results.push({ platform, pixelId: pixel.pixelId, ok: false, error: err.message });
     }
   }

@@ -11,9 +11,9 @@ module.exports = {
       name: 'server_pixels',
       queue: 'pixels',
       // Which of these reports the Purchase is the merchant's choice (purchaseTiming.js).
-      events: ['order.created', 'order.confirmed', 'order.delivered'],
-      // An order still waiting for its online payment is not a purchase yet,
-      // and a test order never is.
+      events: ['order.created', 'order.confirmed', 'order.delivered', 'order.paid'],
+      // An order still waiting for its online payment is not a purchase yet
+      // (it is reported on order.paid), and a test order never is.
       handle: (event) =>
         event.payload.awaitingPayment || event.payload.isTest ? null : pixelEvents.run(event.workspaceId, event.type, event.payload.orderId),
     },

@@ -2,6 +2,8 @@
 
 const db = require('../../db/models');
 const { InsufficientStockError, NotFoundError } = require('../../core/errors/AppError');
+// Records product.low_stock when a change takes a variant to its threshold.
+require('./lowStockEvent');
 
 /**
  * Every stock mutation goes through one of the functions below: open/join a
@@ -31,7 +33,8 @@ async function reserve({ workspaceId, variantId, quantity, referenceType, refere
     const variant = await lockVariant(variantId, workspaceId, transaction);
     const available = variant.stockOnHand - variant.reservedStock;
 
-    if (!variant.allowOverselling && available < quantity) {
+    // A product taking pre-orders sells beyond its stock, up to its limit (preorders/, item 195).
+    if (!variant.allowOverselling && available < quantity && !(await require('../preorders').allowsPreorder(variant, quantity, transaction))) {
       throw new InsufficientStockError(
         `Insufficient stock for variant ${variantId}: requested ${quantity}, available ${available}`
       );
@@ -103,6 +106,13 @@ async function commit({ workspaceId, variantId, quantity, referenceType, referen
   return externalTransaction ? run(externalTransaction) : db.sequelize.transaction(run);
 }
 
+// Stock the merchant adds or corrects shows in the store at once, not after
+// the storefront cache's 60 s (storefront/storefrontCache.js). Order
+// reservations do not drop it.
+function dropStoreCache(workspaceId, transaction) {
+  transaction.afterCommit(() => require('../storefront/storefrontCache').invalidate(workspaceId));
+}
+
 async function restock({ workspaceId, variantId, quantity, reason, actorUserId }, externalTransaction) {
   const run = async (transaction) => {
     const variant = await lockVariant(variantId, workspaceId, transaction);
@@ -112,6 +122,7 @@ async function restock({ workspaceId, variantId, quantity, reason, actorUserId }
       { workspaceId, variantId, type: 'restock', quantityDelta: quantity, reason, actorUserId },
       { transaction }
     );
+    dropStoreCache(workspaceId, transaction);
 
     return variant;
   };
@@ -127,6 +138,7 @@ async function returnRestock({ workspaceId, variantId, quantity, referenceType, 
       { workspaceId, variantId, type: 'return_restock', quantityDelta: quantity, referenceType, referenceId, actorUserId },
       { transaction }
     );
+    dropStoreCache(workspaceId, transaction);
     return variant;
   };
   return externalTransaction ? run(externalTransaction) : db.sequelize.transaction(run);
@@ -143,6 +155,7 @@ async function adjustStock({ workspaceId, variantId, delta, reason, actorUserId 
       { workspaceId, variantId, type: 'adjustment', quantityDelta: delta, reason, actorUserId },
       { transaction }
     );
+    dropStoreCache(workspaceId, transaction);
     return variant;
   });
 }

@@ -145,6 +145,7 @@ async function settlePendingRefunds({ olderThanMs = 5 * 60 * 1000, limit = 50, w
     } catch (err) {
       summary.errors += 1;
       logger.warn('Could not check a pending refund', { refundId: refund.id, reason: err.message });
+      if (refund.payment) require('../notifications/integrationAlerts').gateway(refund.workspaceId, refund.payment.providerCode, err);
     }
   }
   return summary;

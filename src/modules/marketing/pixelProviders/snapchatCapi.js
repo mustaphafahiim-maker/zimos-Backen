@@ -56,8 +56,12 @@ async function call(pixelId, accessToken, body) {
   return json;
 }
 
-/** `pixelId` is workspaces.settings.tracking_pixels.snapchat. */
-async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, eventSourceUrl }) {
+/**
+ * `pixelId` is workspaces.settings.tracking_pixels.snapchat. `matching`
+ * (marketing/pixelMatching.js): the click id and _scid cookie, hashed name /
+ * city / postcode / country / external id (Snap follows Meta's rules), lines.
+ */
+async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, eventSourceUrl, matching = {}, eventName = 'PURCHASE' }) {
   if (!pixelId || !secrets || !secrets.snapchatAccessToken) {
     throw new AppError('SNAPCHAT_NOT_CONFIGURED', 'Snapchat pixel id or access token is not configured', 422);
   }
@@ -65,7 +69,8 @@ async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAg
   const body = {
     data: [
       {
-        event_name: 'PURCHASE',
+        // 'SIGN_UP' for a store or funnel that reports leads (marketing/conversionEvent.js).
+        event_name: eventName,
         event_time: Math.floor(Date.now() / 1000),
         event_id: eventId,
         action_source: 'WEB',
@@ -75,8 +80,23 @@ async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAg
           ...(contact.phone ? { ph: sha256(normalizePhone(contact.phone)) } : {}),
           ...(clientIp ? { client_ip_address: clientIp } : {}),
           ...(userAgent ? { client_user_agent: userAgent } : {}),
+          ...(matching.scCid ? { sc_click_id: matching.scCid } : {}),
+          ...(matching.scid ? { sc_cookie1: matching.scid } : {}),
+          ...(matching.fn ? { fn: matching.fn } : {}),
+          ...(matching.ln ? { ln: matching.ln } : {}),
+          ...(matching.ct ? { ct: matching.ct } : {}),
+          ...(matching.zp ? { zp: matching.zp } : {}),
+          ...(matching.country ? { country: matching.country } : {}),
+          ...(matching.externalIds && matching.externalIds.length ? { external_id: matching.externalIds } : {}),
         },
-        custom_data: { currency: order.currency, value: Number(order.totalAmount) / 100 },
+        custom_data: {
+          currency: order.currency,
+          value: Number(order.totalAmount) / 100,
+          order_id: order.orderNumber || order.id,
+          ...(matching.contents && matching.contents.length
+            ? { content_ids: matching.contents.map((c) => c.id), num_items: String(matching.numItems) }
+            : {}),
+        },
       },
     ],
   };

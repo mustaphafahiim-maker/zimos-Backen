@@ -37,9 +37,11 @@ const storefrontCors = cors({
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   // X-Payment-Token: the shopper's status token for an unpaid online order.
   // X-Store-Preview: a staff preview token that unlocks test-mode payments.
+  // X-Shopper-Token: a signed-in shopper (shopperAccounts); X-Store-Gate: a
+  // store's password unlock (storeGate).
   // X-Visitor-Id: the storefront's anonymous visitor, which owns the photos it
   // uploads for custom fields (customerUploads).
-  allowedHeaders: ['Content-Type', 'X-Cart-Token', 'Idempotency-Key', 'X-Payment-Token', 'X-Store-Preview', 'X-Visitor-Id', 'X-Affiliate-Token', 'X-Student-Token', 'X-Store-Locale'],
+  allowedHeaders: ['Content-Type', 'X-Cart-Token', 'Idempotency-Key', 'X-Payment-Token', 'X-Store-Preview', 'X-Visitor-Id', 'X-Affiliate-Token', 'X-Student-Token', 'X-Store-Locale', 'X-Shopper-Token', 'X-Store-Gate'],
   // The storefront reads Retry-After on a 429 to tell the shopper when to retry.
   exposedHeaders: ['Retry-After'],
   maxAge: 7200,

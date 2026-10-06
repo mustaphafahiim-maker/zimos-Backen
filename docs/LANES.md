@@ -41,6 +41,8 @@ code was merged in, and the project owner changed some rules afterwards.
    cloaking, no fake counters/stock/reviews, no QR WhatsApp). Plans, billing
    and Fawaterak are Ziad's and already built: read limits from his plan
    features, do not rebuild or change billing.
+   Owner, 2026-10-06: every Lightfunnels feature except LightSchool is in
+   scope too (docs/progress/spec-gaps.md, fourth pass); §21 still holds.
 7. **Backend rules** (SPEC §1): routes under `/api/v1/workspaces/:workspaceId`
    go through `authenticate` → `resolveTenant` → `requirePermission`; the
    workspace only ever comes from `req.tenant.workspaceId`; money is integer
@@ -183,7 +185,7 @@ them. "(exists)" means read the code first and build only what is missing.
 6. WhatsApp quick-reply confirmation: the customer's button reply confirms or cancels the order and closes the confirmation task.
 7. Inbox (§14.3): customer side panel with orders and actions, quick replies, assignment, filters, live updates (SSE).
 8. Order emails (§14.5) on the existing email provider: templates, preview, test send.
-9. WhatsApp campaigns to consenting contacts only (§14.4).
+9. ~~WhatsApp campaigns (§14.4)~~ — removed by the owner on 2026-10-03 with every other broadcast campaign (SPEC §21). Do not rebuild.
 10. Customer tracking page polish (§14.7): stages, courier, public notes.
 
 ### Lane 5 — Store design, builder and funnels (SPEC §8, §9)

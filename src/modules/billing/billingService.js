@@ -224,6 +224,10 @@ async function attachReferralCodeInTransaction(workspaceId, input, req, transact
 
   const code = await referralCodes.findUsableCode(input, transaction);
   if (subscription.referralCodeId === code.id) return { subscription, code, attached: false };
+  // A merchant's own referral code never earns on a store they are in (referrals/merchantReferrals.js).
+  if (await db.Membership.findOne({ where: { workspaceId, userId: code.agentId }, attributes: ['id'], transaction })) {
+    throw new ConflictError('You cannot use your own referral code on your own store.', 'SELF_REFERRAL');
+  }
   if (subscription.referralCodeId) {
     throw new ConflictError('This workspace already has a referral code.', 'REFERRAL_CODE_ALREADY_SET');
   }

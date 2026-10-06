@@ -438,6 +438,9 @@ async function publishWebsite(workspaceId, websiteId, userId, note, req) {
 
     const snapshotPages = [];
     for (const p of pages) {
+      // A countdown's "N hours" becomes a fixed date the first time it goes live (countdownDeadline.js).
+      const stamped = require('./countdownDeadline').stampCountdowns(p.draftData);
+      if (stamped.changed) await p.update({ draftData: stamped.tree }, { transaction: t });
       await p.update({ publishedData: p.draftData }, { transaction: t });
       snapshotPages.push({
         id: p.id,
@@ -447,6 +450,7 @@ async function publishWebsite(workspaceId, websiteId, userId, note, req) {
         // Linked sections are frozen with the saved section's current content.
         data: await require('../savedSections/savedSectionsService').resolveLinkedSections(workspaceId, p.draftData, {
           transaction: t,
+          stampCountdowns: true,
         }),
         seo: p.seo,
       });
@@ -580,6 +584,8 @@ function buildRenderData(website, snapshot, snapPage, path) {
   const siteSeo = snapshot.seo || {};
   return {
     page: {
+      // Its translations are kept under it (translations/contentTranslations.js).
+      id: snapPage.id || null,
       path: snapPage.path,
       title: snapPage.title,
       pageType: snapPage.pageType,

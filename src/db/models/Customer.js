@@ -16,6 +16,11 @@ module.exports = (sequelize, DataTypes) => {
       alternatePhone: { type: DataTypes.STRING(32), allowNull: true, field: 'alternate_phone' },
       email: { type: DataTypes.STRING(255), allowNull: true },
       fullName: { type: DataTypes.STRING(200), allowNull: true, field: 'full_name' },
+      // Loyalty points balance and last earn/spend (migration 474, modules/loyalty).
+      loyaltyPoints: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'loyalty_points' },
+      // Store credit, minor units of the store currency (migration 475, modules/storeCredit).
+      storeCreditAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'store_credit_amount' },
+      loyaltyActivityAt: { type: DataTypes.DATE, allowNull: true, field: 'loyalty_activity_at' },
       marketingConsent: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'marketing_consent' },
       isBlacklisted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_blacklisted' },
       blacklistReason: { type: DataTypes.STRING(300), allowNull: true, field: 'blacklist_reason' },
@@ -31,6 +36,10 @@ module.exports = (sequelize, DataTypes) => {
       // confirmation/fulfillment outcomes are recorded.
       totalOrders: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'total_orders' },
       totalRejectedOrders: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'total_rejected_orders' },
+      // Shopper accounts (migration 461, modules/shopperAccounts).
+      savedAddresses: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'saved_addresses' },
+      accountVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1, field: 'account_version' },
+      lastLoginAt: { type: DataTypes.DATE, allowNull: true, field: 'last_login_at' },
     },
     {
       tableName: 'customers',

@@ -6,8 +6,8 @@ const { AppError } = require('../../core/errors/AppError');
 
 /**
  * The sandbox WhatsApp adapter (SPEC §0): the same three calls as
- * whatsappCloud.js, answered locally with no network, so messages,
- * automations and campaigns can be exercised end to end without a Meta
+ * whatsappCloud.js, answered locally with no network, so messages and
+ * automations can be exercised end to end without a Meta
  * account.
  *
  * A store uses it by connecting WhatsApp with the phone number id `sandbox`
@@ -35,8 +35,47 @@ function send(to) {
   return { waMessageId: `wamid.SBX.${crypto.randomBytes(9).toString('hex')}` };
 }
 
+/**
+ * The account's templates (whatsappTemplates.js), in the Graph API's shape:
+ * the ready automations' templates approved, one still pending and one
+ * rejected, so every status can be seen in the dashboard.
+ */
+function listTemplates() {
+  assertAllowed();
+  const { TEMPLATES } = require('../automations/automationTemplates');
+  const seen = new Set();
+  const out = [];
+  for (const t of TEMPLATES) {
+    for (const w of [t.whatsapp, ...(t.whatsappExtra || [])].filter(Boolean)) {
+      if (seen.has(w.name)) continue;
+      seen.add(w.name);
+      const components = [{ type: 'BODY', text: w.body }];
+      if (w.buttons) components.push({ type: 'BUTTONS', buttons: w.buttons.map((text) => ({ type: 'QUICK_REPLY', text })) });
+      out.push({
+        id: `sbx_${crypto.createHash('sha1').update(w.name).digest('hex').slice(0, 12)}`,
+        name: w.name,
+        language: 'ar',
+        category: t.key === 'abandoned_cart' ? 'MARKETING' : 'UTILITY',
+        status: w.name === 'cart_reminder_last' ? 'PENDING' : 'APPROVED',
+        components,
+      });
+    }
+  }
+  out.push({
+    id: 'sbx_summer_promo',
+    name: 'summer_promo',
+    language: 'ar',
+    category: 'MARKETING',
+    status: 'REJECTED',
+    rejected_reason: 'INVALID_FORMAT',
+    components: [{ type: 'BODY', text: 'خصم {{1}}% على كل المنتجات لحد {{2}}' }],
+  });
+  return out;
+}
+
 module.exports = {
   SANDBOX_ID,
+  listTemplates,
   isSandbox,
   verifyPhoneNumber,
   sendText: async (phoneNumberId, token, to) => send(to),

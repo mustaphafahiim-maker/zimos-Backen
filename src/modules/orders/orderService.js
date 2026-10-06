@@ -40,6 +40,7 @@ const orderMeta = require('./orderMetaService');
 const { applyOrderFilters } = require('./orderFilters');
 const { effectiveVariantPrice } = require('../catalog/productPage');
 const { applyBundleTiers } = require('../bundles/bundlePricing');
+const pixelMatching = require('../marketing/pixelMatching');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -52,7 +53,8 @@ function generateOrderNumber() {
 // `forSale: false` reads a line an order already holds — its variant, product
 // or offer may have been archived since — for what it weighs and how it ships
 // (recalculateOrder); the caller keeps the prices the order recorded.
-async function priceLine(workspaceId, { variantId, offerId, quantity }, transaction, { forSale = true } = {}) {
+async function priceLine(workspaceId, line, transaction, { forSale = true } = {}) {
+  const { variantId, offerId, quantity, customizations } = line;
   const active = forSale ? { status: 'active' } : {};
   const variant = await db.ProductVariant.findOne({
     where: { id: variantId, workspaceId, ...active },
@@ -61,6 +63,8 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     transaction,
   });
   if (!variant) throw new NotFoundError('ProductVariant');
+  // Priced custom fields the shopper filled in add to the unit price (catalog/customFieldPricing.js).
+  const fieldsDelta = require('../catalog/customFieldPricing').customFieldsDelta(variant.product.customFields, customizations);
 
   if (offerId) {
     const offer = await db.Offer.findOne({
@@ -83,8 +87,13 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
     });
     if (!offer) throw new NotFoundError('Offer');
 
-    const consumedLines = offer.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity * quantity }));
-    const unitPrice = offer.priceAmount;
+    // A one-line offer taken in another variant of its product (the shopper's choice,
+    // offers/offerVariantChoice.js) holds that variant's stock; a bundle keeps its own lines.
+    const consumedLines =
+      offer.lines.length === 1 && offer.lines[0].variantId !== variant.id
+        ? [{ variantId: variant.id, quantity: offer.lines[0].quantity * quantity }]
+        : offer.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity * quantity }));
+    const unitPrice = fieldsDelta ? Number(offer.priceAmount) + fieldsDelta : offer.priceAmount;
     const lineTotal = unitPrice * quantity;
 
     return {
@@ -112,7 +121,10 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
   }
 
   // A countdown offer that has ended sells at the full price (catalog/productPage.js).
-  const unitPriceAmount = effectiveVariantPrice(variant, variant.product).priceAmount;
+  // A product A/B test's price for this shopper, pinned by the server (catalog/productTests.js).
+  const testPrice = require('../catalog/productTests').testPriceOf(line);
+  const listUnit = testPrice !== undefined ? testPrice : effectiveVariantPrice(variant, variant.product).priceAmount;
+  const unitPriceAmount = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
   const lineTotal = unitPriceAmount * quantity;
   return {
     productId: variant.productId,
@@ -138,7 +150,7 @@ async function priceLine(workspaceId, { variantId, offerId, quantity }, transact
 // The product's shipping mode for shippingRules.productShipping: `units` is
 // how many units of it the line ships.
 function productShippingRule(product, units) {
-  return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units };
+  return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units, profileId: product.shippingProfileId || null };
 }
 
 // One component of a line's unit, for shippingWeight.summarizeWeight.
@@ -245,7 +257,9 @@ async function createOrder(
     throw new ValidationError([{ field: 'items', message: 'At least one item is required' }]);
   }
 
-  const evaluateFraudRules = !req.user && !skipFraudRules;
+  // The store's own fraud rules run only while it has the protection app (the platform blocklist always runs).
+  const evaluateFraudRules =
+    !req.user && !skipFraudRules && (await require('../apps/appGate').isEnabled(workspaceId, 'fraud_protection', { transaction: outerTransaction }));
   // SPEC §4.2: where the order came from, and whether it is the merchant
   // trying their own store (kept out of sales figures and ad pixels).
   const orderSource = source || orderMeta.sourceFor(req, { funnelId });
@@ -314,7 +328,7 @@ async function createOrder(
           { contact, shippingAddress },
           {
             workspaceId,
-            country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale'], transaction })),
+            country: fraudRules.storeCountry(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'defaultLocale', 'settings'], transaction })),
             visitor,
             secondsOnPage: req && typeof req.secondsOnPage === 'number' ? req.secondsOnPage : null,
             network,
@@ -397,9 +411,16 @@ async function createOrder(
       }
     }
 
+    // A funnel with a currency of its own takes orders in it only (funnels/funnelCurrency.js).
+    await require('../funnels/funnelCurrency').assertOrderCurrency(workspaceId, funnelId, pricedLines[0] && pricedLines[0].currency, transaction);
+
     // Quantity bundles (modules/bundles): lowers the totals of the lines they
     // cover, before anything else looks at the subtotal.
     const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
+    // A VIP tier with free shipping (vipTiers/, item 218) sets this on the checkout's payload: every line ships free.
+    if (payload[Symbol.for('zimos.freeShipping')]) {
+      for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+    }
 
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     const productIds = pricedLines.map((l) => l.productId);
@@ -417,6 +438,7 @@ async function createOrder(
         productIds,
         customerId: customer.id,
         funnelId,
+        transaction,
       });
       discountAmount = evaluation.amount;
       discountRecord = evaluation.discount;
@@ -443,24 +465,29 @@ async function createOrder(
     const shipping = await calculateShippingAmount(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
+      address: shippingAddress || null,
       subtotal,
       totalQuantity,
       offerShippingOverride,
       weightLines: pricedLines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
       productLines: pricedLines.map((l) => l.shippingRule),
+      funnelId: payload.funnelId || null,
       transaction,
     });
-    const shippingAmount = shipping.amount;
+    // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
+    const chosenShipping = await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
+    const shippingAmount = chosenShipping ? chosenShipping.amount : shipping.amount;
 
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
       lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
       shippingAmount,
+      transaction,
     });
 
     // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
-    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction);
+    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction, pricedLines[0].currency);
     const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
 
     // (after the row exists, below) a moderate order may get the AI text check — risk/aiOrderCheck.
@@ -490,6 +517,7 @@ async function createOrder(
         ipAddress: visitorIp,
         ipCountry: visitor.ipCountry,
         deviceId,
+        adMatch: pixelMatching.fromCheckout(req),
         riskScore: risk ? risk.score : null,
         riskLevel: risk ? risk.level : null,
         riskReasons: risk ? risk.reasons : [],
@@ -503,7 +531,8 @@ async function createOrder(
         totalWeightGrams: shipping.weightGrams,
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
-        shippingSnapshot: shippingSnapshot(shipping),
+        // With the option the shopper picked, when not the standard one.
+        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}) },
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,
@@ -702,11 +731,13 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   const shipping = await calculateShippingAmount(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
+    address,
     subtotal,
     totalQuantity,
     offerShippingOverride,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
+    funnelId: order.funnelId || null,
     transaction,
   });
   const { taxAmount } = await calculateTax(workspaceId, {
@@ -714,8 +745,9 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
     shippingAmount: shipping.amount,
+    transaction,
   });
-  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction);
+  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction, order.currency);
   const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;
 
   const item = await db.OrderItem.create(
@@ -776,6 +808,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   }
 
   order.items = items;
+  // A product joined an order that was already placed (an upsell, a merged offer).
+  await outbox.record(transaction, 'order.item_added', { workspaceId, orderId: order.id, itemId: item.id, isUpsell });
   return { order, item, before };
 }
 
@@ -812,6 +846,10 @@ async function getOrder(workspaceId, orderId) {
   const json = order.toJSON();
   // Shoppers' photos are shown through short-lived signed links, made per read.
   await presentOrderItems(workspaceId, json.items);
+  // Photos the shopper gave in the checkout form (checkout/checkoutExtras.js).
+  json.checkoutFields = require('../checkout/checkoutExtras').presentCheckoutFields(json.checkoutFields);
+  // Each line's product picture and the funnel's name (orderListDecor.js).
+  await require('./orderListDecor').decorateOne(workspaceId, json);
   // A funnel offer the shopper took after this order had left its offer
   // window is an order of its own: both ends name the other.
   const linkedOrders = await db.Order.findAll({
@@ -881,7 +919,7 @@ const escapeLike = (value) => value.replace(/[\\%_]/g, (char) => `\\${char}`);
  * here (see platformAdmin/overviewMetricsService) is UTC. Making this one
  * endpoint local time would be the odd one out, not the fix.
  */
-function applySearchAndDates(conditions, bind, { q, from, to }) {
+function applySearchAndDates(conditions, bind, { q, from, to, tz }) {
   if (q) {
     const term = q.trim();
     const arms = [];
@@ -893,27 +931,40 @@ function applySearchAndDates(conditions, bind, { q, from, to }) {
     arms.push("zimos_normalize_search(o.contact_snapshot->>'fullName') LIKE zimos_normalize_search($qText)");
     arms.push("zimos_normalize_search(o.contact_snapshot->>'email') LIKE zimos_normalize_search($qText)");
 
+    // A courier's waybill number, exactly (any case): the store's shipments only.
+    bind.qWaybill = term;
+    arms.push(
+      'o.id IN (SELECT ws.order_id FROM shipments ws WHERE ws.workspace_id = $workspaceId AND lower(ws.waybill_number) = lower($qWaybill))'
+    );
+
     const digits = term.replace(/\D/g, '');
     if (digits.length >= 10) {
       bind.qPhone = normalizePhone(term).slice(-10);
       arms.push(
         "right(regexp_replace(coalesce(o.contact_snapshot->>'phone', ''), '[^0-9]', '', 'g'), 10) = $qPhone"
       );
+    } else if (digits.length >= 4 && /^[\d\s+\-()]+$/.test(term)) {
+      // The last digits read off a waybill or a caller ID (4–9): the phone or the second phone ends with them.
+      bind.qPhoneTail = `%${digits}`;
+      arms.push(
+        "regexp_replace(coalesce(o.contact_snapshot->>'phone', ''), '[^0-9]', '', 'g') LIKE $qPhoneTail",
+        "regexp_replace(coalesce(o.contact_snapshot->>'alternatePhone', ''), '[^0-9]', '', 'g') LIKE $qPhoneTail"
+      );
     }
 
     conditions.push(`(${arms.join(' OR ')})`);
   }
 
-  if (from) {
+  // A date is a whole day (in `tz` when given, else UTC); an exact instant is used as is,
+  // `to` exclusive (orderDateRange.js).
+  const { fromInstant, toExclusive } = require('./orderDateRange').resolveRange({ from, to, tz });
+  if (fromInstant) {
     conditions.push('o.created_at >= $from::timestamptz');
-    bind.from = new Date(from).toISOString();
+    bind.from = fromInstant;
   }
-  if (to) {
-    const day = new Date(to);
+  if (toExclusive) {
     conditions.push('o.created_at < $toExclusive::timestamptz');
-    bind.toExclusive = new Date(
-      Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + 1)
-    ).toISOString();
+    bind.toExclusive = toExclusive;
   }
 }
 
@@ -953,14 +1004,32 @@ async function hydrateOrders(page) {
     include: [{ model: db.OrderItem, as: 'items' }],
   });
   const providers = await paymentProviders(rows);
+  const shipments = await latestShipments(rows.map((row) => row.id));
   const byId = new Map(rows.map((row) => [row.id, row]));
-  return page
+  const orders = page
     .filter((row) => byId.has(row.id))
     .map((row) => ({
       ...byId.get(row.id).toJSON(),
       stage: row.stage,
       paymentProvider: providers.get(row.id) || null,
+      // The list's shipping column: the latest shipment that is not cancelled.
+      shipment: shipments.get(row.id) || null,
     }));
+  // Line pictures, the funnel's name and "New customer" (orderListDecor.js).
+  return orders.length ? require('./orderListDecor').decorateList(orders[0].workspaceId, orders) : orders;
+}
+
+/** Each order's latest shipment that is not cancelled: courier, waybill and status. One query for the page. */
+async function latestShipments(orderIds) {
+  if (orderIds.length === 0) return new Map();
+  const rows = await db.sequelize.query(
+    `SELECT DISTINCT ON (order_id) order_id, carrier_code, waybill_number, status
+       FROM shipments
+      WHERE order_id IN (:ids) AND status <> 'cancelled'
+      ORDER BY order_id, created_at DESC, id DESC`,
+    { replacements: { ids: orderIds }, type: QueryTypes.SELECT }
+  );
+  return new Map(rows.map((r) => [r.order_id, { carrierCode: r.carrier_code, waybillNumber: r.waybill_number, status: r.status }]));
 }
 
 /**
@@ -969,7 +1038,7 @@ async function hydrateOrders(page) {
  * to COD) has none. One query for the page.
  */
 async function paymentProviders(orders) {
-  const online = orders.filter((o) => o.paymentMethod === 'card' || o.paymentMethod === 'wallet').map((o) => o.id);
+  const online = orders.filter((o) => require('../payments/methodNames').isOnline(o.paymentMethod)).map((o) => o.id);
   if (online.length === 0) return new Map();
   const rows = await db.sequelize.query(
     `SELECT DISTINCT ON (order_id) order_id, provider_code
@@ -1028,7 +1097,7 @@ async function listOrders(
     conditions.push(`${STAGE_SQL} = $stage`);
     bind.stage = stage;
   }
-  applySearchAndDates(conditions, bind, { q, from, to });
+  applySearchAndDates(conditions, bind, { q, from, to, tz: filters.tz });
 
   if (cursor) {
     const anchor = await resolveCursor(workspaceId, cursor);
@@ -1069,7 +1138,7 @@ async function orderPipeline(workspaceId, { q, from, to, ...filters } = {}) {
   const conditions = ['o.workspace_id = $workspaceId'];
   const bind = { workspaceId };
   applyOrderFilters(conditions, bind, filters);
-  applySearchAndDates(conditions, bind, { q, from, to });
+  applySearchAndDates(conditions, bind, { q, from, to, tz: filters.tz });
 
   const rows = await db.sequelize.query(
     `SELECT ${STAGE_SQL} AS stage, COUNT(*)::int AS count
@@ -1085,7 +1154,22 @@ async function orderPipeline(workspaceId, { q, from, to, ...filters } = {}) {
     stages[row.stage] = row.count;
     total += row.count;
   }
-  return { stages, total };
+  return { stages, total, risk: await riskCounts(workspaceId, { q, from, to, ...filters }) };
+}
+
+/** The risk tabs' counts: every other filter applies, the risk tab itself does not. */
+async function riskCounts(workspaceId, { q, from, to, riskLevel, ...filters }) {
+  const conditions = ['o.workspace_id = $workspaceId'];
+  const bind = { workspaceId };
+  applyOrderFilters(conditions, bind, filters);
+  applySearchAndDates(conditions, bind, { q, from, to, tz: filters.tz });
+  const rows = await db.sequelize.query(
+    `SELECT o.risk_level AS level, COUNT(*)::int AS count FROM orders o WHERE ${conditions.join(' AND ')} GROUP BY 1`,
+    { bind, type: QueryTypes.SELECT }
+  );
+  const risk = { high: 0, moderate: 0, low: 0 };
+  for (const row of rows) if (row.level in risk) risk[row.level] = row.count;
+  return risk;
 }
 
 /**
@@ -1094,7 +1178,7 @@ async function orderPipeline(workspaceId, { q, from, to, ...filters } = {}) {
  * uncollected shipment, closes open confirmation tasks and records the
  * reason. Refused once a parcel has shipped — use a return after that.
  */
-async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false }, req) {
+async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false, notifyCustomer }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({
       where: { id: orderId, workspaceId },
@@ -1106,7 +1190,11 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       throw new AppError('ORDER_ALREADY_CANCELLED', 'This order is already cancelled', 409);
     }
     await assertNotShipped(order, transaction);
-    await outbox.record(transaction, 'order.cancelled', { workspaceId, orderId: order.id });
+    await outbox.record(transaction, 'order.cancelled', {
+      workspaceId,
+      orderId: order.id,
+      ...(notifyCustomer !== undefined ? { notifyCustomer } : {}),
+    });
 
     // Whatever the order still holds: nothing more if a rejection already gave it back.
     await orderStock.releaseOrderStock(
@@ -1160,7 +1248,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
 
 /**
  * The only fields a merchant may edit on an existing order: the shipping
- * address snapshot and the internal notes. Totals, line items and pricing are
+ * address snapshot, the customer's contact details and the internal notes. Totals, line items and pricing are
  * never touched here. Refused once the order has shipped.
  */
 async function updateOrderLimited(workspaceId, orderId, data, req) {
@@ -1170,9 +1258,10 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
     if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
     await assertNotShipped(order, transaction);
 
-    const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, notes: order.notes };
+    const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes };
     const updates = {};
     if (data.shippingAddress !== undefined) updates.shippingAddressSnapshot = data.shippingAddress;
+    if (data.contact !== undefined) updates.contactSnapshot = { ...(order.contactSnapshot || {}), ...data.contact };
     if (data.notes !== undefined) updates.notes = data.notes;
     await order.update(updates, { transaction });
 
@@ -1183,7 +1272,7 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
       entityType: 'Order',
       entityId: order.id,
       before,
-      after: { shippingAddressSnapshot: order.shippingAddressSnapshot, notes: order.notes },
+      after: { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes },
       req,
       transaction,
     });

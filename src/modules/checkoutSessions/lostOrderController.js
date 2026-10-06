@@ -1,4 +1,5 @@
 'use strict';
+const { forViewer } = require('../../core/utils/phoneMask');
 const asyncHandler = require('express-async-handler');
 const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
@@ -24,6 +25,9 @@ const address = Joi.object({
   province: Joi.string().max(100).allow(null, '').optional(),
   city: Joi.string().max(100).required(),
   addressLine: Joi.string().max(500).required(),
+  // The third level of the store's places, and the place picked from its list (places/storePlaces.js).
+  area: Joi.string().max(120).allow(null, '').optional(),
+  placeId: Joi.string().uuid().allow(null).optional(),
   postalCode: Joi.string().max(20).allow(null, '').optional(),
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
@@ -55,8 +59,10 @@ const schemas = {
         email: joiEmail().allow(null, '').optional(),
       }).optional(),
       shippingAddress: address.optional(),
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').optional(),
+      paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).optional(),
       notes: Joi.string().max(2000).allow('').optional(),
+      // The shopper's coupon is kept unless this replaces it (null drops it).
+      discountCode: Joi.string().trim().max(100).allow(null).optional(),
       items: Joi.array()
         .items(Joi.object({ variantId: uuid.required(), offerId: uuid.optional(), quantity: Joi.number().integer().min(1).max(100).required() }))
         .min(1)
@@ -67,7 +73,8 @@ const schemas = {
   exportCsv: { params: Joi.object({ workspaceId: uuid.required() }), body: Joi.object(filters).default({}) },
 };
 
-const list = asyncHandler(async (req, res) => res.json(await service.list(req.tenant.workspaceId, req.query)));
+// Phones are masked for roles without customers.reveal_sensitive (lostOrderPhones.js).
+const list = asyncHandler(async (req, res) => res.json(forViewer(req, await service.list(req.tenant.workspaceId, req.query))));
 const stats = asyncHandler(async (req, res) => res.json(await service.stats(req.tenant.workspaceId, req.query)));
 const update = asyncHandler(async (req, res) =>
   res.json({ session: await service.update(req.tenant.workspaceId, req.params.sessionId, req.body, req) })
@@ -78,7 +85,8 @@ const convert = asyncHandler(async (req, res) =>
 const remove = asyncHandler(async (req, res) => res.json(await service.remove(req.tenant.workspaceId, req.params.sessionId, req)));
 const exportCsv = asyncHandler(async (req, res) => {
   // JSON rather than a file download: the dashboard builds the file from `csv`.
-  const { csv, count } = await service.exportCsv(req.tenant.workspaceId, req.body || {});
+  const maskPhones = !req.tenant.hasPermission('customers.reveal_sensitive');
+  const { csv, count } = await service.exportCsv(req.tenant.workspaceId, req.body || {}, { maskPhones });
   res.json({ csv, count, filename: `lost-orders-${new Date().toISOString().slice(0, 10)}.csv` });
 });
 // Public: GET /store/:workspaceId/recover/:token

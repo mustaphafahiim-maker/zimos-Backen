@@ -65,7 +65,8 @@ async function allMethods(workspace, accounts = null) {
     const adapter = gateways.getAdapter(account.providerCode);
     if (!adapter) continue;
     for (const method of adapter.availableMethods(account.settings || {})) {
-      available.set(methodId(account.providerCode, method), { provider: account.providerCode, method, mode: account.mode });
+      const express = typeof adapter.expressFor === 'function' ? adapter.expressFor(method, account.settings || {}) : null;
+      available.set(methodId(account.providerCode, method), { provider: account.providerCode, method, mode: account.mode, ...(express ? { express } : {}) });
     }
   }
 
@@ -83,12 +84,13 @@ async function allMethods(workspace, accounts = null) {
       enabled: entry.enabled !== false,
       available: Boolean(info),
       mode: info ? info.mode : null,
+      ...(info && info.express ? { express: info.express } : {}),
     });
   }
   for (const [id, info] of available) {
     if (seen.has(id)) continue;
     const taken = info.method !== COD && out.some((m) => m.method === info.method && m.enabled);
-    out.push({ id, provider: info.provider, method: info.method, enabled: !taken, available: true, mode: info.mode });
+    out.push({ id, provider: info.provider, method: info.method, enabled: !taken, available: true, mode: info.mode, ...(info.express ? { express: info.express } : {}) });
   }
   return out;
 }
@@ -96,13 +98,16 @@ async function allMethods(workspace, accounts = null) {
 /**
  * The methods a shopper sees at checkout.
  * @param {boolean} preview  a valid staff preview token came with the request
+ * @param {string} [currency]  the checkout's currency: a gateway that cannot
+ *   take it is left out (methodCurrency.js)
  */
-async function storefrontMethods(workspace, { preview = false } = {}) {
+async function storefrontMethods(workspace, { preview = false, currency = null } = {}) {
   const codOnly = [{ id: COD, provider: null, method: COD, mode: 'live' }];
   if (!env.payments.onlineEnabled) return codOnly;
   const list = [];
   for (const m of await allMethods(workspace)) {
     if (!m.enabled || !m.available) continue;
+    if (!require('./methodCurrency').takes(m.provider, currency)) continue;
     // The merchant's chosen gateway for this method; a test-mode one is not
     // replaced by another gateway for real shoppers.
     if (list.some((x) => x.method === m.method)) continue;
@@ -110,7 +115,8 @@ async function storefrontMethods(workspace, { preview = false } = {}) {
       list.push({ id: m.id, provider: m.provider, method: m.method, mode: m.mode, hidden: true });
       continue;
     }
-    list.push({ id: m.id, provider: m.provider, method: m.method, mode: m.mode });
+    // `express`: shown as wallet buttons (Apple Pay, Google Pay, PayPal) at the top of checkout (item 183).
+    list.push({ id: m.id, provider: m.provider, method: m.method, mode: m.mode, ...(m.express ? { express: m.express } : {}) });
   }
   const shown = list.filter((m) => !m.hidden);
   return shown.length > 0 ? shown : codOnly;
@@ -125,8 +131,8 @@ async function codOffered(workspace, { preview = false } = {}) {
  * The storefront method for `paymentMethod` (+ optional provider), or a 422
  * PAYMENT_METHOD_UNAVAILABLE.
  */
-async function resolveStorefrontMethod(workspace, { paymentMethod, paymentProvider }, { preview = false } = {}) {
-  const offered = await storefrontMethods(workspace, { preview });
+async function resolveStorefrontMethod(workspace, { paymentMethod, paymentProvider }, { preview = false, currency = null } = {}) {
+  const offered = await storefrontMethods(workspace, { preview, currency });
   const match = offered.find(
     (m) => m.method === paymentMethod && (!paymentProvider || m.provider === paymentProvider || m.id === COD)
   );

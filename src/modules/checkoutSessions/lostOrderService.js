@@ -73,10 +73,37 @@ const STATUS_SQL = `CASE
 const SELECT = `
   SELECT cs.id, ${STATUS_SQL} AS status, cs.recovery_status, cs.review_status, cs.lost_reason, cs.contact_fields,
          cs.phone_normalized, cs.items, cs.subtotal_amount, cs.currency, cs.source, cs.last_activity_at, cs.contacted_at,
-         cs.created_at, cs.recovery_token, cs.ip_address, cs.ip_country, cs.checkout_payload,
+         cs.created_at, cs.recovery_token, cs.ip_address, cs.ip_country, cs.checkout_payload, cs.attribution,
          o.id AS order_id, o.order_number
     FROM checkout_sessions cs
     LEFT JOIN orders o ON o.id = cs.converted_order_id AND o.workspace_id = cs.workspace_id`;
+
+/**
+ * Where the shopper came from (SPEC §6.1 attribution): the last touch the
+ * storefront kept (lib/touches.ts), else the first — source, medium,
+ * campaign, the ad id and the referring site. Null for a direct visit, or a
+ * session saved before touches were sent.
+ */
+function trafficSourceOf(attribution) {
+  const a = attribution || {};
+  const touch = (a.last && Object.keys(a.last).length ? a.last : null) || (a.first && Object.keys(a.first).length ? a.first : null);
+  if (!touch) return null;
+  let referrerHost = null;
+  try {
+    referrerHost = touch.referrer ? new URL(touch.referrer).hostname : null;
+  } catch {
+    referrerHost = null;
+  }
+  const clickSource = touch.fbclid ? 'facebook' : touch.ttclid ? 'tiktok' : touch.gclid ? 'google' : touch.scCid ? 'snapchat' : null;
+  return {
+    source: touch.source || clickSource || referrerHost || null,
+    medium: touch.medium || (clickSource ? 'paid' : null),
+    campaign: touch.campaign || null,
+    adId: touch.adId || null,
+    referrer: referrerHost,
+    landingPage: touch.landingPage || null,
+  };
+}
 
 function serialize(row) {
   const contact = row.contact_fields || {};
@@ -99,6 +126,9 @@ function serialize(row) {
     source: row.source,
     ipAddress: row.ip_address,
     ipCountry: row.ip_country,
+    // How the shopper came (trafficSourceOf), and the touches as the storefront sent them.
+    trafficSource: trafficSourceOf(row.attribution),
+    attribution: row.attribution && Object.keys(row.attribution).length ? row.attribution : null,
     // The storefront path of the recovery link; the dashboard puts the store's address in front.
     recoveryPath: row.recovery_token ? `/r/${row.recovery_token}` : null,
     lastActivityAt: row.last_activity_at,
@@ -316,13 +346,14 @@ async function update(workspaceId, sessionId, { recoveryStatus, reviewStatus }, 
 async function convert(workspaceId, sessionId, body, req) {
   const session = await db.CheckoutSession.findOne({ where: { id: sessionId, workspaceId } });
   if (!session) throw new NotFoundError('CheckoutSession');
-  if (session.status === 'converted') {
-    throw new AppError('CHECKOUT_SESSION_CONVERTED', 'This checkout already became an order', 409);
-  }
+  const converted = () => new AppError('CHECKOUT_SESSION_CONVERTED', 'This checkout already became an order', 409);
+  if (session.status === 'converted') throw converted();
   const payload = session.checkoutPayload || {};
   const stored = session.contactFields || {};
 
   const contact = { ...(payload.contact || {}), ...stored, ...(body.contact || {}) };
+  // The list showed a masked number (lostOrderPhones.js): sent back unchanged, it means the captured one.
+  if (require('./lostOrderPhones').isMasked(contact.phone)) contact.phone = require('./lostOrderPhones').phoneOf(session);
   if (!contact.fullName) throw new ValidationError([{ field: 'contact.fullName', message: 'The customer name is required' }]);
   if (!contact.phone) throw new ValidationError([{ field: 'contact.phone', message: 'The phone number is required' }]);
   const shippingAddress = body.shippingAddress || payload.shippingAddress || null;
@@ -335,25 +366,61 @@ async function convert(workspaceId, sessionId, body, req) {
     (session.items || []).map((line) => ({ variantId: line.variantId, quantity: line.quantity }));
   if (!items || items.length === 0) throw new ValidationError([{ field: 'items', message: 'This checkout has no items' }]);
 
+  // One order per checkout, whatever two clicks or two teammates do: the
+  // session is claimed (status flipped) before the order is created, by a
+  // single conditional update, and given back if the order cannot be made.
+  const previous = session.status;
+  const [claimed] = await db.CheckoutSession.update(
+    { status: 'converted' },
+    { where: { id: sessionId, workspaceId, status: { [db.Sequelize.Op.ne]: 'converted' } } }
+  );
+  if (!claimed) throw converted();
+
   // eslint-disable-next-line global-require
   const orderService = require('../orders/orderService');
-  const { order } = await orderService.createOrder(
-    workspaceId,
-    {
-      items: items.map((i) => ({ variantId: i.variantId, ...(i.offerId ? { offerId: i.offerId } : {}), quantity: i.quantity })),
-      contact: {
-        fullName: contact.fullName,
-        phone: contact.phone,
-        ...(contact.alternatePhone ? { alternatePhone: contact.alternatePhone } : {}),
-        ...(contact.email ? { email: contact.email } : {}),
+  // The coupon the shopper entered (`discountCode: null` in the body drops it), and the funnel it came from.
+  const discountCode = body.discountCode !== undefined ? body.discountCode : payload.discountCode || null;
+  let order;
+  try {
+    ({ order } = await orderService.createOrder(
+      workspaceId,
+      {
+        // The lines keep their custom-field answers when they were not edited here.
+        items: items.map((i) => ({
+          variantId: i.variantId,
+          ...(i.offerId ? { offerId: i.offerId } : {}),
+          quantity: i.quantity,
+          ...(i.customizations ? { customizations: i.customizations } : {}),
+        })),
+        contact: {
+          fullName: contact.fullName,
+          phone: contact.phone,
+          ...(contact.alternatePhone ? { alternatePhone: contact.alternatePhone } : {}),
+          ...(contact.email ? { email: contact.email } : {}),
+        },
+        shippingAddress,
+        paymentMethod: body.paymentMethod || 'cod',
+        ...(body.notes || payload.notes ? { notes: body.notes || payload.notes } : {}),
+        ...(discountCode ? { discountCode } : {}),
+        ...(payload.funnelId ? { funnelId: payload.funnelId } : {}),
       },
-      shippingAddress,
-      paymentMethod: body.paymentMethod || 'cod',
-      ...(body.notes || payload.notes ? { notes: body.notes || payload.notes } : {}),
-    },
-    req,
-    { source: 'manual' }
-  );
+      req,
+      // The shopper's photos belong to their visitor id (customerUploads).
+      { source: 'manual', customFields: { visitorId: session.visitorId || null } }
+    ));
+  } catch (err) {
+    await db.CheckoutSession.update({ status: previous }, { where: { id: sessionId, workspaceId, status: 'converted', convertedOrderId: null } });
+    throw err;
+  }
+  // The order keeps where the shopper came from, for the reports by source and campaign (analytics/orderTouch.js).
+  if (session.attribution && Object.keys(session.attribution).length && !(order.attribution && Object.keys(order.attribution).length)) {
+    await order.update({ attribution: session.attribution });
+  }
+  // The checkout form's extra answers, as the checkout saves them.
+  if (payload.formFields) {
+    const workspace = await db.Workspace.findByPk(workspaceId);
+    await require('../checkout/checkoutForm').saveCheckoutAnswers(order, workspace, payload.formFields);
+  }
 
   await db.sequelize.transaction(async (transaction) => {
     await db.CheckoutSession.update(
@@ -412,7 +479,7 @@ function csvCell(value) {
 }
 
 /** POST /checkout-sessions/export — the filtered list as CSV (UTF-8 with BOM, opens in Excel). */
-async function exportCsv(workspaceId, filters = {}) {
+async function exportCsv(workspaceId, filters = {}, opts = {}) {
   const minutes = await abandonMinutes(workspaceId);
   const { conditions, bind } = buildFilters(workspaceId, minutes, filters);
   bind.limit = EXPORT_MAX_ROWS;
@@ -423,7 +490,7 @@ async function exportCsv(workspaceId, filters = {}) {
       LIMIT $limit`,
     { bind, type: QueryTypes.SELECT }
   );
-  const header = ['Date', 'Status', 'Reason', 'Name', 'Phone', 'Email', 'City', 'Address', 'Products', 'Total', 'Currency', 'Recovery', 'Review', 'Source', 'Order'];
+  const header = ['Date', 'Status', 'Reason', 'Name', 'Phone', 'Email', 'City', 'Address', 'Products', 'Total', 'Currency', 'Recovery', 'Review', 'Source', 'Order', 'Traffic source', 'Campaign'];
   const lines = [header.join(',')];
   for (const row of rows) {
     const s = serialize(row);
@@ -434,7 +501,7 @@ async function exportCsv(workspaceId, filters = {}) {
         s.status,
         s.lostReason || '',
         s.customerName,
-        s.phone,
+        opts.maskPhones ? require('../../core/utils/phoneMask').maskPhone(s.phone) : s.phone,
         s.email,
         address.city,
         address.addressLine,
@@ -445,6 +512,8 @@ async function exportCsv(workspaceId, filters = {}) {
         s.reviewStatus,
         s.source,
         s.convertedOrder ? s.convertedOrder.orderNumber : '',
+        s.trafficSource ? s.trafficSource.source : '',
+        s.trafficSource ? s.trafficSource.campaign : '',
       ]
         .map(csvCell)
         .join(',')
@@ -507,9 +576,16 @@ async function fileRefusal(req, refusal) {
         where: { workspaceId: workspace.id, guestToken: cartToken, status: 'active' },
         include: [{ model: db.CartItem, as: 'items' }],
       });
-      if (cart && cart.items) items = cart.items.map((i) => ({ variantId: i.variantId, offerId: i.offerId || undefined, quantity: i.quantity }));
+      if (cart && cart.items) {
+        items = cart.items.map((i) => ({ variantId: i.variantId, offerId: i.offerId || undefined, quantity: i.quantity, customizations: i.customizations || undefined }));
+      }
     }
-    if (items.length === 0 && body.item) items = [{ variantId: body.item.variantId, offerId: body.item.offerId, quantity: body.item.quantity || 1 }];
+    // A "Buy now" and the lines added beside it; each keeps the shopper's custom-field answers for "Convert to order".
+    if (items.length === 0 && body.item) {
+      items = [body.item, ...(Array.isArray(body.extraItems) ? body.extraItems : [])]
+        .filter((line) => line && line.variantId)
+        .map((line) => ({ variantId: line.variantId, offerId: line.offerId, quantity: line.quantity || 1, customizations: line.customizations || undefined }));
+    }
 
     // eslint-disable-next-line global-require
     const { priceLine } = require('../orders/orderService');
@@ -551,6 +627,8 @@ async function fileRefusal(req, refusal) {
         notes: body.notes || null,
         discountCode: body.discountCode || null,
         funnelId: body.funnelId || null,
+        // The checkout form's extra answers (checkout/checkoutForm.js), saved on the converted order.
+        formFields: body.formFields || null,
       },
       ipAddress: visitor.ip,
       ipCountry: visitor.ipCountry,

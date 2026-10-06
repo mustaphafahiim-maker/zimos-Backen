@@ -64,7 +64,8 @@ function assertRequiredCheckoutFields(workspace, body) {
   if (settings.email === 'required' && isBlank(body.contact && body.contact.email)) {
     problems.push({ field: 'contact.email', message: '"email" is required' });
   }
-  if (settings.postal_code === 'required' && isBlank(address.postalCode)) {
+  // A pickup order has no delivery address (clickAndCollect, item 225).
+  if (settings.postal_code === 'required' && !body.pickupLocationId && isBlank(address.postalCode)) {
     problems.push({ field: 'shippingAddress.postalCode', message: '"postalCode" is required' });
   }
 

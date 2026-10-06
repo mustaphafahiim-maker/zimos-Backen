@@ -37,6 +37,7 @@ async function main() {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled promise rejection in worker', { reason: reason && reason.message ? reason.message : reason });
+    require('./core/errors/errorReporter').report(reason, { source: 'unhandledRejection' });
   });
 }
 

@@ -1,0 +1,2613 @@
+# Backend → frontend handoff
+
+The backend chat appends one section per item it builds. The frontend chat
+builds every screen, api-client call and storefront change described here and
+ticks its own file (`docs/ux/backend-requests.md` in zimos-front). "UI:
+pending" means the backend is done and the screens are not.
+
+All staff paths are under `/api/v1`, need `Authorization: Bearer <token>`,
+and answer errors as `{ "error": { "code", "message", "details?" } }`.
+
+---
+
+## 160. Editable storefront texts per language — UI: pending
+
+The merchant rewords the storefront's own labels (buttons, form errors, cart,
+checkout, bundle wording) per language. Only the overrides are stored; the
+defaults stay in `apps/storefront/src/lib/i18n.ts`.
+
+### Endpoints
+
+**GET `/workspaces/:workspaceId/storefront-texts`** — permission `website.edit`
+
+```json
+{
+  "texts": { "ar": { "checkout.placeOrder": "اطلب دلوقتي" }, "en": { "checkout.placeOrder": "Order now" } },
+  "limits": { "maxKeysPerLocale": 400, "maxText": 500, "locales": ["ar", "en", "fr", "es", "it", "de"] }
+}
+```
+
+**PUT `/workspaces/:workspaceId/storefront-texts`** — permission `website.edit`.
+Replaces every override (send the whole object). Answers like GET.
+
+```json
+{ "texts": { "ar": { "checkout.placeOrder": "اطلب دلوقتي", "form.errors.summary": "صحح {n} خانة" }, "en": {} } }
+```
+
+Validation (422 `VALIDATION_ERROR`, `details: [{ path, message }]`, one entry per problem,
+path like `"ar.checkout.placeOrder"`):
+- language: one of `limits.locales`;
+- key: the dictionary path, `section.key` with 2–4 dot parts, letters/digits
+  (regex `^[a-z][A-Za-z0-9]{0,39}(\.[A-Za-z][A-Za-z0-9_]{0,39}){1,3}$`);
+- text: a string, trimmed, control characters removed, at most 500 characters;
+  a blank text (or `null`) drops the override, so the default shows again;
+- at most 400 texts per language.
+
+Texts are plain text — render them as text, never as HTML. `{name}`-style
+placeholders are kept as written: for dictionary entries that are functions
+(`cart.cartWithCount(n)`, `product.youSave(amount)`, `form.errors.summary(n)`),
+the storefront fills the placeholder named after the function's argument
+(`{n}`, `{amount}`, `{price}`, `{pct}`, `{name}`).
+
+**GET `/store/:workspaceId`** (public) — `store.storefrontTexts` now holds the
+same object (`{}` when none). Cached for at most 60 s, dropped on save.
+
+### Storefront
+- In `StoreContext.build()` (and `getDictionary` for server components), deep-
+  merge `store.storefrontTexts[locale]` over the dictionary: for each
+  `"a.b.c": text`, replace `dict.a.b.c`; when the default is a function, wrap
+  it as `(...args) => text with {argName} replaced`. Unknown keys are ignored.
+
+### Dashboard screen — Website → Store texts (`website.edit`)
+- Language tabs (the store's languages from the translations settings; ar and
+  en always).
+- Grouped list by dictionary section (Buttons & common, Product, Form & errors,
+  Order bump, Cart, Checkout, Upsell, Thank you, Tracking, Footer). Each row:
+  the default text (read-only, from the dashboard's copy of the storefront
+  dictionary keys), an input for the override, a "Reset" link when overridden.
+  Show the placeholders a row accepts (`{n}`) under the input.
+- Search box over keys and default texts; "Show changed only" toggle.
+- Save button (PUT the whole object), toast on success, field errors from
+  `details[].path` shown on the matching row.
+- States: loading, error (retry), no permission, empty (nothing changed yet:
+  "All texts use the default wording").
+
+Wording:
+| en | ar |
+|---|---|
+| Store texts | نصوص المتجر |
+| Change the words shoppers see on buttons, forms, cart and checkout. | غيّر الكلام اللي العميل بيشوفه على الأزرار والفورم والسلة وصفحة الطلب. |
+| Default | النص الافتراضي |
+| Your text | النص بتاعك |
+| Reset | رجّع الافتراضي |
+| Show changed only | اعرض المتغيّر بس |
+| All texts use the default wording | كل النصوص على الكلام الافتراضي |
+| Saved | اتحفظ |
+| Placeholders: {n} | المتغيرات: {n} |
+
+---
+
+## 161. Store scripts by position and page type — UI: pending
+
+Named snippets of the merchant's own code, each placed in `<head>`, right
+after `<body>` opens, or before `</body>`, and run only on the page types it
+names. Same safety rules as the existing custom code: `website.publish` to read
+or write, every change audited, never served to a staff preview, run only on
+the store's own host and never on the card payment pages.
+
+### Endpoints (permission `website.publish`)
+
+**GET `/workspaces/:workspaceId/custom-code/store-scripts`**
+
+```json
+{
+  "scripts": [
+    { "id": "025235b84454", "name": "Hotjar", "position": "head", "pages": ["all"], "code": "<script>…</script>",
+      "isActive": true, "sortOrder": 1, "updatedAt": "2026-10-06T18:16:29.230Z", "updatedBy": "<userId>" }
+  ],
+  "options": { "positions": ["head", "body_start", "body_end"],
+    "pageTypes": ["all", "home", "collection", "product", "page", "funnel", "cart", "checkout", "thank_you"],
+    "maxScripts": 30, "maxCodeLength": 50000 }
+}
+```
+
+**POST `/workspaces/:workspaceId/custom-code/store-scripts`** → 201 `{ "script": {…} }`
+
+```json
+{ "name": "Chat widget", "position": "body_end", "pages": ["product", "checkout"], "code": "<script>…</script>", "isActive": true }
+```
+- `name` 1–60 chars (required); `position` one of `options.positions` (required);
+  `pages` non-empty unique subset of `options.pageTypes` (default `["all"]`;
+  `"all"` with others collapses to `["all"]`); `code` ≤ 50 000 chars, stored
+  as typed (required, may be `""`); `isActive` (default true); `sortOrder`
+  0–10000 (default: after the last).
+- 422 `VALIDATION_ERROR` "A store keeps at most 30 scripts".
+
+**PATCH `/workspaces/:workspaceId/custom-code/store-scripts/:id`** — any of the
+fields above (at least one) → `{ "script": {…} }`. 404 `NOT_FOUND` when unknown.
+
+**DELETE `/workspaces/:workspaceId/custom-code/store-scripts/:id`** → `{ "deleted": true, "id": "…" }`
+
+**GET `/store/:workspaceId/custom-code`** (public) now also returns
+`scripts: [{ id, position, pages, code }]` — active, non-empty, in order;
+`[]` in a preview.
+
+### Storefront
+- Where the store's custom code is injected today, also inject each script
+  whose `pages` contains `"all"` or the current page type: `home` (store home),
+  `collection`, `product`, `page` (merchant's custom pages), `funnel` (funnel
+  steps), `cart`, `checkout`, `thank_you` (store or funnel thank-you).
+- `head` → in `<head>`; `body_start` → first thing in `<body>`; `body_end` →
+  before `</body>`. Run inline scripts the same way the existing `head`/`js`
+  slots are run (re-created `<script>` elements so they execute). Same host
+  and payment-page guards as the existing custom code.
+
+### Dashboard screen — Settings → Custom code → "Scripts" tab (`website.publish`)
+- Table: name, position, pages (chips), active toggle, updated date; row
+  actions edit / delete (confirm). "Add script" button (disabled at 30 with
+  the reason). Up/down to reorder (PATCH `sortOrder`).
+- Drawer/modal form: name, position (radio: Head / Body start / Body end),
+  pages (checkbox list with "All pages" that disables the others), code
+  (monospace textarea, counter vs 50 000), active switch.
+- Warning banner: code runs on the live store only, not in preview.
+- States: loading, error, empty ("No scripts yet"), no permission.
+
+Wording:
+| en | ar |
+|---|---|
+| Scripts | السكريبتات |
+| Add your own code to the store and choose where and on which pages it runs. | ضيف كود بتاعك للمتجر واختار مكانه والصفحات اللي يشتغل فيها. |
+| Add script | إضافة سكريبت |
+| Position | المكان |
+| Head | داخل head |
+| Body start | أول الـ body |
+| Body end | آخر الـ body |
+| Pages | الصفحات |
+| All pages / Home / Collection / Product / Custom pages / Funnel steps / Cart / Checkout / Thank you | كل الصفحات / الرئيسية / المجموعة / المنتج / الصفحات الخاصة / خطوات الفانل / السلة / إتمام الطلب / صفحة الشكر |
+| Code runs only on your live store, not in the editor preview. | الكود بيشتغل على المتجر الحقيقي بس، مش في المعاينة. |
+| No scripts yet | مفيش سكريبتات لسه |
+| A store keeps at most 30 scripts | المتجر ياخد ٣٠ سكريبت بالكتير |
+
+---
+
+## 162. Smart collections by tags, and an "All products" collection — UI: pending
+
+A collection with `rules` fills itself; membership is kept as normal collection
+links, so the store's collection pages, filters and counts need **no change**.
+
+### Rules (on the existing collection endpoints)
+
+`POST /workspaces/:ws/catalog/collections` and `PATCH /workspaces/:ws/catalog/collections/:id`
+(permission `products.manage`) now validate `rules`:
+
+```json
+{ "rules": { "type": "tags", "match": "any", "tags": ["summer", "sale"] } }
+{ "rules": { "type": "all_products" } }
+{ "rules": null }
+```
+- `match`: `any` (default) or `all`; `tags`: 1–20 strings, 1–100 chars each, matched case-insensitively against product tags.
+- `null` makes it a manual collection again (current links stay, editable by hand).
+- Saving rules re-fills the collection at once; creating a product or changing its tags updates its smart collections at once.
+- 422 `VALIDATION_ERROR` (`field: "rules"`) on a bad shape.
+- Adding/removing a product by hand on a smart collection (single or bulk edit) → 409 `SMART_COLLECTION`. Reordering still works.
+
+### New endpoints (permission `products.manage`)
+
+**POST `/workspaces/:ws/smart-collections/all-products`** body `{ "name": "All products" }` (optional, default "All products").
+Creates the store's "All products" collection (slug `all`, rules `all_products`) once;
+→ 201 `{ "collection": {…}, "created": true }`, or 200 `{ "collection": {…}, "created": false }` when it exists.
+
+**POST `/workspaces/:ws/smart-collections/:collectionId/sync`** → `{ "id": "…", "added": 2, "removed": 0 }`.
+Re-fills one smart collection by hand. 409 `NOT_SMART_COLLECTION` for a manual one.
+
+### Dashboard — Products → Collections
+- Collection form: a "Collection type" choice: **Manual** / **Automatic (by tags)** / **All products**.
+  Automatic shows: a tag input (chips, from the store's existing tags if available), and
+  "Products must match: any tag / all tags".
+- Collection list: a badge "Automatic" on smart collections; product count as today.
+- Collection page: for a smart collection, hide "Add products" and the per-product remove,
+  show a note with the rule ("Products tagged summer or sale") and a "Refresh" button (sync).
+- Empty state of the collections list: a button "Create 'All products' collection" (POST all-products).
+- Map 409 `SMART_COLLECTION` to a toast.
+
+Wording:
+| en | ar |
+|---|---|
+| Collection type | نوع المجموعة |
+| Manual | يدوي |
+| Automatic (by tags) | تلقائي (بالتاجز) |
+| All products | كل المنتجات |
+| Products must match | المنتجات لازم تطابق |
+| any tag / all tags | أي تاج / كل التاجز |
+| Automatic | تلقائي |
+| Products tagged {tags} join this collection by themselves. | المنتجات اللي عليها {tags} بتدخل المجموعة لوحدها. |
+| Refresh | تحديث |
+| Create "All products" collection | اعمل مجموعة "كل المنتجات" |
+| This collection fills itself from its rules. | المجموعة دي بتتملى لوحدها من الشروط بتاعتها. |
+
+---
+
+## 163. The store's own places: regions → cities → areas — UI: pending
+
+A store keeps its own three-level place list per country (typed, imported from
+a sheet, or copied from the platform's governorates and cities), and the
+checkout picks the address from it in three dropdowns.
+
+### Staff endpoints (permission `shipping.manage`)
+
+**GET `/workspaces/:ws/store-places?country=EG`** (country defaults to the store's)
+
+```json
+{ "country": "EG", "counts": { "region": 2, "city": 2, "area": 3 }, "max": 5000,
+  "places": [ { "id": "…", "level": "region", "parentId": null, "nameAr": "القاهرة", "nameEn": "Cairo", "geoCode": "cairo",
+               "sortOrder": 1, "hidden": false,
+               "children": [ { "id": "…", "level": "city", "nameAr": "مدينة نصر", "nameEn": "Nasr City", "geoCode": "cairo.nasr-city",
+                               "children": [ { "id": "…", "level": "area", "nameAr": "الحي العاشر", "nameEn": "10th District", "geoCode": null } ] } ] } ] }
+```
+Areas have no `children` key.
+
+**POST `/workspaces/:ws/store-places`** → 201 `{ "place": {…} }`
+```json
+{ "country": "EG", "level": "area", "parentId": "<city id>", "nameAr": "مكرم عبيد", "nameEn": "Makram Ebeid", "hidden": false }
+```
+- `level` region|city|area; a city needs a region `parentId`, an area a city `parentId` (422 / 404 otherwise);
+- names 1–120 chars, `nameEn` defaults to `nameAr`; at most 5000 places per country.
+- `geoCode` is filled by the server when the platform's list knows the region/city name (keeps governorate prices and courier maps working).
+
+**PATCH `/workspaces/:ws/store-places/:id`** `{ nameAr?, nameEn?, hidden?, sortOrder? }` → `{ "place": {…} }`.
+Hidden places (and everything under them) disappear from the checkout.
+
+**DELETE `/workspaces/:ws/store-places/:id`** → `{ "deleted": true, "id": "…" }` — deletes its children too (confirm in UI).
+
+**POST `/workspaces/:ws/store-places/import`** — multipart: `file` (CSV or .xlsx, ≤ 2MB, ≤ 5000 rows),
+`country` (EG), `mode` (`merge` default — adds, reusing names already there; `replace` — clears the country first).
+Columns (first row): `region_ar, region_en, city_ar, city_en, area_ar, area_en`; a row may stop at region or city.
+→ `{ "country": "EG", "mode": "merge", "created": 6, "total": 6, "errors": [ { "row": 5, "message": "An area needs its city" } ] }`
+(422 `INVALID_FILE` for an unreadable file or missing header.)
+
+**POST `/workspaces/:ws/store-places/copy-platform`** `{ "country": "EG" }` → same answer as import.
+Copies the platform's governorates and cities (Egypt 28 + 344 cities; Saudi regions); then the merchant adds areas.
+
+### Public (storefront)
+
+**GET `/store/:ws/places?country=EG`**
+```json
+{ "country": "EG", "source": "store",
+  "places": [ { "id": "…", "ar": "القاهرة", "en": "Cairo", "code": "cairo",
+               "children": [ { "id": "…", "ar": "مدينة نصر", "en": "Nasr City", "code": "cairo.nasr-city",
+                               "children": [ { "id": "…", "ar": "الحي العاشر", "en": "10th District", "code": null } ] } ] } ] }
+```
+With no own list: `source: "platform"`, governorates → cities (ids `null`, no areas), minus the store's hidden places.
+
+### Checkout address
+The checkout, lost-order and staff order address now also take `area` (≤ 120) and `placeId` (uuid of
+the deepest place picked from the store's list). Send `province` = region name, `city` = city name,
+`area` = area name, `placeId` = the area's (or city's) id. Item 164 prices shipping from `placeId`.
+
+### Screens
+- **Dashboard → Shipping → Places** (`shipping.manage`): country select; a three-column
+  browser (Regions | Cities | Areas) or an expandable tree; add / rename / hide / delete at
+  each level; counts; buttons "Import sheet" (file + merge/replace + downloadable sample CSV with the
+  six columns) and "Start from the platform list". Import result: created count and the row errors table.
+  States: loading, empty ("No places yet — import a sheet or start from the platform list"), error, no permission.
+- **Storefront checkout**: when `source = "store"`, three dependent selects Region → City → Area
+  (Area only when the chosen city has areas); fill province/city/area/placeId. With `source = "platform"`,
+  keep today's governorate + city behaviour.
+
+Wording:
+| en | ar |
+|---|---|
+| Places | المناطق |
+| Region / City / Area | المحافظة / المدينة / المنطقة |
+| Add region / Add city / Add area | إضافة محافظة / إضافة مدينة / إضافة منطقة |
+| Import sheet | استيراد شيت |
+| Add to the list / Replace the list | إضافة للقائمة / استبدال القائمة |
+| Start from the platform list | ابدأ من قائمة المنصة |
+| Hidden from checkout | مخفية من صفحة الطلب |
+| Deleting a region deletes its cities and areas. | حذف المحافظة بيحذف مدنها ومناطقها. |
+| No places yet — import a sheet or start from the platform list. | مفيش مناطق لسه — استورد شيت أو ابدأ من قائمة المنصة. |
+| Choose your area | اختار منطقتك |
+
+---
+
+## 164. Shipping prices per city and area — UI: pending
+
+Each place of the store's own list (item 163) can carry a shipping price. The
+deepest priced place of the shopper's address wins (area → city → region); with
+none, the store's governorate prices and zones apply as before. Only in the
+"rates" pricing mode (weight tiers keep their own table).
+
+### Data
+`shippingAmount` (integer minor units, or `null` = not priced here) is now on every
+place in `GET /workspaces/:ws/store-places` and accepted by POST and PATCH there
+(0 … 100 000 000; `null` clears).
+
+### Endpoints (permission `shipping.manage`)
+
+**PUT `/workspaces/:ws/store-places/prices`** — save the prices table in one go
+```json
+{ "prices": [ { "id": "<place id>", "shippingAmount": 4500 }, { "id": "<place id>", "shippingAmount": null } ] }
+```
+→ `{ "changed": 2 }`. 422 when an id is not the store's. Up to 5000 rows, unique ids.
+
+**POST `/workspaces/:ws/store-places/import`** — the sheet may add a `shipping` column (also read as
+`shipping_price` or `price`): the price of the row's deepest place, **in major units** of the store's
+currency (`45`, `45.50`, Arabic digits accepted; empty = leave as is). Answer adds `"priced": 3`;
+a non-number gives a row error "The shipping price is not a number".
+
+### Storefront
+- **POST `/store/:ws/shipping-quote`** now also takes `city`, `area` and `placeId` (besides `country`,
+  `governorate`). Send them as soon as the shopper picks, and re-quote on every change. The quote's
+  rule is `"store_place_rate"` when a place price applied.
+- Checkout: send `shippingAddress.placeId` (deepest picked place) plus the names in
+  `province` / `city` / `area`. A hidden place → 422 `SHIPPING_PLACE_UNAVAILABLE`
+  (field `shippingAddress.placeId`); an id not in the list → 422 `VALIDATION_ERROR`. Show the
+  message under the pickers.
+- Without `placeId`, the server matches the names (Arabic or English, case-insensitive), so
+  staff orders and older forms are priced too.
+
+### Dashboard — Shipping → Places (from item 163)
+- A "Shipping price" column on every row (money input in the store's currency; empty = "uses
+  {parent}'s price" / "uses the governorate price"), saved with PUT `/prices` (Save button,
+  dirty-state warning). Show the effective price in grey when inherited.
+- Import dialog: mention the optional `shipping` column; the sample CSV gets it.
+- Order page: the shipping line shows "City/area price" when `shippingSnapshot.rule = "store_place_rate"`.
+
+Wording:
+| en | ar |
+|---|---|
+| Shipping price | سعر الشحن |
+| Uses {name}'s price | بياخد سعر {name} |
+| Uses the governorate price | بياخد سعر المحافظة |
+| City/area price | سعر المدينة/المنطقة |
+| Prices saved | الأسعار اتحفظت |
+| The store does not deliver to this area | المتجر مش بيوصل للمنطقة دي |
+
+---
+
+## 165. Checkout file field and optional billing address — UI: pending
+
+### Settings (existing endpoint `PATCH /workspaces/:ws`, `settings.checkout_settings`)
+- A custom field (`custom_1` … `custom_5`) may now have `"type": "file"` (besides `text`, `choice`):
+  ```json
+  { "settings": { "checkout_settings": { "fields": [ { "key": "custom_1", "enabled": true, "required": true, "type": "file",
+      "label": { "ar": "صورة البطاقة", "en": "ID photo" } } ], "billing_address": "on" } } }
+  ```
+- `billing_address`: `"off"` (default) | `"on"`.
+- `GET /store/:ws` → `store.checkout.fields[]` carries `type: "file"`, and `store.checkout.billing_address`.
+
+### Storefront checkout
+**File field** (photos only: JPEG, PNG, WebP; up to 15MB raw):
+1. On pick, `POST /store/:ws/uploads` (multipart `file`, header `X-Visitor-Id: <the visitor id the storefront already keeps>`)
+   → `{ "upload": { "uploadId": "…", "mime": "image/jpeg", "width": 20, "height": 20, "expiresAt": "…" } }`.
+   Show a thumbnail (from the local file) and "Change"/"Remove".
+2. Send the id as the answer: `formFields: { "custom_1": "<uploadId>" }`, and send the **same `X-Visitor-Id` header on the checkout request**.
+- Errors: 422 `formFields.custom_1` "\"custom_1\" is required" (required and empty); "The photo is missing or has expired — upload it again"
+  (wrong visitor, expired after 48h, or unknown id); upload 415 `UNSUPPORTED_MEDIA_TYPE`, 429 `TOO_MANY_PENDING_UPLOADS`.
+
+**Billing address** (when `billing_address = "on"`): a checkbox "Billing address same as shipping", ticked by default.
+Unticked → a billing block: full name (optional), country, region, city, area, address line, postal code; send
+```json
+{ "billingSameAsShipping": false,
+  "billingAddress": { "fullName": "Co LLC", "country": "EG", "province": "الجيزة", "city": "الدقي", "addressLine": "12 Tahrir", "postalCode": "" } }
+```
+`country`, `city`, `addressLine` are required when unticked (422 fields `billingAddress.city` etc.). Ticked: send nothing (or `true`).
+
+### Dashboard
+- **Settings → Checkout form**: the custom-field type select gains "Photo upload"; a switch
+  "Ask for a billing address" (`billing_address` on/off).
+- **Order page**: `order.checkoutFields[]` entries with `type: "file"` carry `url` (signed, short-lived) and
+  `urlExpiresAt` — show a thumbnail that opens the photo; `value` is "📎" (also in the order note line).
+  `order.billingAddressSnapshot` (null = same as shipping) → a "Billing address" card under the shipping one;
+  when null show "Same as shipping" only if the store has billing on.
+
+Wording:
+| en | ar |
+|---|---|
+| Photo upload | رفع صورة |
+| Upload a photo | ارفع صورة |
+| Change / Remove | تغيير / حذف |
+| The photo is missing or has expired — upload it again | الصورة مش موجودة أو انتهت صلاحيتها — ارفعها تاني |
+| Ask for a billing address | اطلب عنوان الفاتورة |
+| Billing address same as shipping | عنوان الفاتورة نفس عنوان الشحن |
+| Billing address | عنوان الفاتورة |
+| Same as shipping | نفس عنوان الشحن |
+
+---
+
+## Frontend request — order search by the last digits of a phone — done
+
+From `docs/ux/backend-requests.md` (audit U-35).
+
+**GET `/workspaces/:ws/orders?q=5678`** (permission `orders.view`, unchanged endpoint and answer).
+`q` made only of 4–9 digits (spaces, `+`, `-`, brackets allowed) now also matches orders whose phone **or second phone**
+ends with those digits. 10+ digits keep the exact "last ten digits" match; 1–3 digits only match order numbers.
+Names/emails/order numbers/waybills still match as before (any of them).
+The ⌘K search (`GET /workspaces/:ws/search`) already matched 4+ digits anywhere in the phone; unchanged.
+
+UI: nothing new needed — the Orders list and ⌘K just send the digits. Suggested placeholder:
+"Order #, name, phone or its last 4 digits" / «رقم الطلب أو الاسم أو التليفون أو آخر ٤ أرقام».
+
+---
+
+## Frontend request — the Fulfillment role can book couriers — done
+
+From `docs/ux/backend-requests.md`. Decision: booking and following couriers accepts **`orders.manage` or
+`shipping.manage`** (the Fulfillment role has `shipping.manage`; no new permission, no role change).
+
+Now open to `shipping.manage`:
+- `POST /workspaces/:ws/orders/:orderId/shipments` (book / record a shipment)
+- `PATCH /workspaces/:ws/orders/:orderId/shipments/:shipmentId`
+- `POST /workspaces/:ws/orders/:orderId/shipments/:shipmentId/sync`, `GET …/label`
+- `PUT/DELETE` the shipping card's draft (`shipmentDraft`)
+- `POST /workspaces/:ws/orders/bulk` **only when `action: "ship"`** (every other bulk action still needs `orders.manage`)
+- everything under `/workspaces/:ws/shipment-batches` (bulk ship preview, start, list, retry)
+- `POST /workspaces/:ws/orders/import-tracking`
+
+Unchanged: editing, cancelling, tagging and confirming orders still need `orders.manage` / `orders.confirm`.
+A COD order must still be confirmed before booking (409 `ORDER_NOT_CONFIRMED`).
+Analytics: the Fulfillment role has no `analytics.view` on the backend (matches the frontend's intended rule).
+
+UI: show "Book courier" (order page and the list's bulk bar) to users with `orders.manage` **or** `shipping.manage`;
+keep the other bulk actions behind `orders.manage`.
+
+---
+
+## Frontend request — "postponed" with a callback time — done
+
+From `docs/ux/backend-requests.md` (U-31). «كلّمني بكرة الساعة ٥» is kept and drives when the order is due again.
+
+**POST `/workspaces/:ws/confirmation-tasks/:taskId/outcome`** (permission `orders.confirm`, agent holding the task):
+```json
+{ "outcome": "postponed", "notes": "كلمني بكرة الساعة ٥", "callbackAt": "2026-10-07T14:00:00.000Z" }
+```
+- `callbackAt`: ISO date-time, in the future, at most 60 days ahead; allowed with `postponed` and `unreachable` only
+  (422 `"callbackAt" is not allowed` with confirmed/rejected; `must be greater than "now"`; `must be within 60 days`).
+- The task is due again exactly then: `nextRetryAt = callbackAt` (the queue already sorts and counts by it;
+  "due now" excludes it until then). Without `callbackAt` the defaults stay (postponed +24h, unreachable +4h).
+- Answer/task objects (queue list, task, `order.confirmationTask`) now carry **`callbackAt`** (null when none).
+  The `order.postponed` / `order.unreachable` event payload carries `callbackAt` too (for reminders/automations).
+
+**PATCH `/workspaces/:ws/orders/:orderId/status`** `{ "status": "needs_follow_up", "followUp": "postponed", "callbackAt": "…" }`
+— the same from the order page.
+
+UI:
+- Queue outcome "Postponed" (and "No answer"): a "Call back at" picker — quick chips (In 1 hour, Tonight 8 pm,
+  Tomorrow 10 am, Tomorrow 5 pm) plus date + time; send in UTC ISO; show in the store's local time.
+- Queue rows and the order's confirmation card: "Call back {relative time}" badge when `callbackAt` is set; highlight
+  when due (`callbackAt <= now`).
+
+Wording:
+| en | ar |
+|---|---|
+| Call back at | يتكلم تاني الساعة |
+| In 1 hour / Tonight 8 pm / Tomorrow 10 am / Tomorrow 5 pm | بعد ساعة / النهارده ٨ بالليل / بكرة ١٠ الصبح / بكرة ٥ العصر |
+| Call back {time} | يتكلم تاني {time} |
+| Callback due | معاد المكالمة جه |
+
+---
+
+## Frontend request — error messages in the reader's language — done
+
+From `docs/ux/backend-requests.md` (U-02, U-03). Every API answer with `{ error: { code, message } }` now
+returns `message` in **Arabic or French** when the request asks for it, for ~60 codes a shopper or a
+signing-in merchant meets (validation, sign-in/OTP, rate limits, cart, stock, payment method, delivery area,
+discount codes, minimum order, offers/upsells, refused order, uploads, unexpected error).
+
+- Language: `X-Store-Locale` header first (the storefront already sends it), else the first `Accept-Language`
+  tag (browsers send it; the dashboard can set it from the user's language). `ar` / `fr` translate; anything else
+  is unchanged English.
+- `code` and `details` never change. When translated, the English original is kept as `error.messageEn`
+  (useful for logs/support; `VALIDATION_ERROR`'s translated message is generic — show `details` per field).
+- Codes not in the list keep their English message — keep mapping the ones the UI knows.
+- The list lives in `src/core/errors/errorMessages.js` (`MESSAGES`); ask for more codes in backend-requests.md.
+
+Example (`Accept-Language: ar-EG`): `{"error":{"code":"INVALID_CREDENTIALS","message":"البريد أو كلمة المرور غير صحيحة.","messageEn":"Invalid email or password","requestId":"…"}}`
+
+UI: send `Accept-Language` (dashboard: the user's UI language) on every API call; storefront: nothing to do
+(X-Store-Locale is already sent). Show `error.message` for unmapped codes.
+
+---
+
+## 166. Bulk actions on funnels — UI: pending
+
+**POST `/workspaces/:ws/funnels/bulk`**
+```json
+{ "action": "pause", "funnelIds": ["…", "…"], "note": "optional, publish only" }
+```
+- `action`: `publish` | `pause` | `resume` | `duplicate` | `delete`; `funnelIds`: 1–50 uuids (duplicates ignored).
+- Permission per action, as the single buttons: publish/pause/resume → `funnels.publish` (publish and resume also
+  need a live store, 402/403 from the subscription guard); duplicate/delete → `funnels.manage` (duplicate is refused
+  on a restricted store and counts against the plan's funnels a month, per copy).
+- Always 200 when the request is valid; each funnel is done on its own:
+```json
+{ "action": "duplicate", "total": 2, "succeeded": 1, "failed": 1,
+  "results": [
+    { "funnelId": "…", "name": "Summer offer", "ok": true, "newFunnelId": "…" },
+    { "funnelId": "…", "name": "Old", "ok": false, "error": { "code": "FUNNEL_NOT_PUBLISHED", "message": "Publish this funnel before pausing or resuming it" } }
+  ] }
+```
+  Typical per-funnel errors: `VALIDATION_ERROR` with `details` (publish: "A funnel needs at least one step"),
+  `FUNNEL_NOT_PUBLISHED` (pause/resume a draft), `PLAN_LIMIT_REACHED` (duplicate), `PRODUCT_IN_FUNNEL`-style
+  refusals from delete, `NOT_FOUND`.
+
+### Dashboard — Funnels list
+- Row checkboxes + "select all on this page"; a bulk bar with: Publish, Pause, Resume, Duplicate, Delete
+  (Delete asks to confirm with the count). Hide buttons the user's permissions don't allow.
+- After the call: toast "{succeeded} done, {failed} failed"; when some failed, a small dialog listing each failed
+  funnel's name and `error.message`; refresh the list; keep failed ones selected.
+- Max 50 selected (disable with a hint past that).
+
+Wording:
+| en | ar |
+|---|---|
+| {n} selected | {n} متحدد |
+| Publish / Pause / Resume / Duplicate / Delete | نشر / إيقاف / تشغيل / نسخ / حذف |
+| Delete {n} funnels? This can't be undone. | حذف {n} فانل؟ مش هتقدر ترجعهم. |
+| {ok} done, {failed} failed | {ok} اتعملوا، {failed} ماتعملوش |
+| These funnels were not changed | الفانلز دي ماتغيرتش |
+| Up to 50 at a time | لحد ٥٠ مرة واحدة |
+
+---
+
+## 167. "Send Lead instead of Purchase" per store and funnel — UI: pending
+
+An order's conversion can be reported as a **Lead** instead of a Purchase (COD stores optimising on leads).
+Same moment (purchase timing), same value, same event id (browser + server still dedup), sent once.
+
+### Store setting (permission `workspace.manage`, existing endpoint)
+**GET `/workspaces/:ws/tracking-pixels/settings`** →
+```json
+{ "purchaseEventTiming": "on_order", "options": ["on_order", "on_confirmed", "on_delivered"],
+  "conversionEvent": "purchase", "conversionEvents": ["purchase", "lead"] }
+```
+**PUT `/workspaces/:ws/tracking-pixels/settings`** — now any of `{ "purchaseEventTiming"?, "conversionEvent"? }` (at least one) → same shape.
+
+### Funnel override (permission `funnels.manage`, existing endpoint)
+**PATCH `/workspaces/:ws/funnels/:funnelId/settings`** `{ "conversionEvent": "lead" | "purchase" | null }`
+(`null`/`""` = use the store's). Returned in `settings.conversionEvent`, also in the public funnel payload's `settings`.
+
+### Event names per platform (browser pixels must use the same)
+| kind | Meta | TikTok | Snapchat | Google (GA4) | Pinterest |
+|---|---|---|---|---|---|
+| purchase | `Purchase` | `CompletePayment` | `PURCHASE` | `purchase` | `checkout` |
+| lead | `Lead` | `SubmitForm` | `SIGN_UP` | `generate_lead` | `lead` |
+Keep value, currency, `content_ids` and the order id as event id in both cases.
+
+### Storefront
+- `GET /store/:ws` → `store.conversionEvent` (`purchase` | `lead`); a funnel's public payload `settings.conversionEvent`
+  overrides it when not null. In `lib/track.ts`, where the order's Purchase fires (only with `purchaseEventTiming = on_order`),
+  fire the "lead" names above instead when the effective kind is `lead`.
+
+### Dashboard
+- **Marketing → Pixels → Settings**: a radio "Report orders as: Purchase / Lead" under the existing timing choice,
+  with the hint "Lead suits cash-on-delivery stores that optimise ads on orders placed."
+- **Funnel → Settings → Tracking**: select "Report orders as: Store default ({current}) / Purchase / Lead".
+- Pixel event log: the event name column shows `lead` for these.
+
+Wording:
+| en | ar |
+|---|---|
+| Report orders as | سجّل الطلبات كـ |
+| Purchase / Lead | شراء (Purchase) / عميل محتمل (Lead) |
+| Store default ({value}) | زي المتجر ({value}) |
+| Lead suits cash-on-delivery stores that optimise ads on orders placed. | الـ Lead مناسب لمتاجر الدفع عند الاستلام اللي بتحسّن الإعلانات على الطلبات. |
+
+---
+
+## Frontend request — time-zone aware date range on orders — done
+
+From `docs/ux/backend-requests.md` (U-09). Applies to **GET `/workspaces/:ws/orders`**, **`/orders/pipeline`** (tab
+counts and risk counts) and **`/orders/export`** (same query), permission `orders.view`.
+
+- `to` with a time (`2026-10-06T21:00:00.000Z`) is now an **exact exclusive instant** (send the next local midnight).
+- `to` / `from` as a date (`2026-10-06`) plus **`tz`** (IANA, e.g. `Africa/Cairo`, `Asia/Riyadh`) = that whole day
+  in the zone (Cairo's summer/winter clock handled). Without `tz`, a date is still the UTC day (unchanged).
+- `from` with a time is used as is (unchanged).
+- 422 `"tz" must be an IANA time zone, e.g. Africa/Cairo` for an unknown zone.
+
+Either way works; the simplest for the dashboard: `from=YYYY-MM-DD&to=YYYY-MM-DD&tz=<store or browser zone>`
+for the picker and its shortcuts (Today, Yesterday, Last 7 days…).
+
+---
+
+## 168. Pinterest Conversions API — UI: pending
+
+A `pinterest` tracking pixel can now send its conversions from the server too (like Meta/TikTok/Snapchat),
+using the merchant's **ad account id** and **conversion access token**. Contract and modes:
+`src/modules/marketing/pixelProviders/README-pinterest.md`. Default mode is **sandbox** (nothing leaves the
+server) until the owner sets `PINTEREST_CAPI_MODE=live`.
+
+### Endpoints (existing, permission `workspace.manage`)
+**POST `/workspaces/:ws/tracking-pixels`** / **PATCH `/workspaces/:ws/tracking-pixels/:pixelId`**
+```json
+{ "platform": "pinterest", "pixelId": "2612345678901", "capiEnabled": true, "capiToken": "pina_…",
+  "testEventCode": "on", "config": { "adAccountId": "549755885175" } }
+```
+- `config.adAccountId`: 6–20 digits; **required when `capiEnabled` is true** for Pinterest
+  (422 field `config.adAccountId`: "The Pinterest ad account id is needed to turn the Conversions API on").
+- `capiToken` is sealed and never returned (`capiTokenSet`, `capiTokenMask` as for other platforms).
+- `testEventCode`: for Pinterest any non-empty value means "send as test events" (`?test=true`).
+- `GET /tracking-pixels` → `platforms[]` now lists `{ "name": "pinterest", "capi": true, "testEventCode": true }`.
+- `POST /tracking-pixels/:pixelId/test` works for Pinterest (sends a test page visit).
+
+Events sent: order → `checkout` (or `lead`, item 167); relayed browser events → `page_visit` (page view, view content),
+`add_to_cart`, `lead`. Pinterest has no checkout-start/payment-info events, so those are not sent to it.
+The event id is the order id, as the browser tag's, so Pinterest dedups.
+
+### Dashboard — Marketing → Pixels → Pinterest
+- Same form as Meta's server-side section: switch "Send events from the server (Conversions API)", fields
+  "Ad account id" and "Conversion access token" (password field, shows mask when set), switch "Send as test events".
+- Help text linking to Pinterest Ads Manager → Conversions → "Generate access token".
+- Show `lastSentAt` / `lastError` like the other platforms; the event log lists Pinterest rows.
+
+Wording:
+| en | ar |
+|---|---|
+| Send events from the server (Conversions API) | ابعت الأحداث من السيرفر (Conversions API) |
+| Ad account id | رقم الحساب الإعلاني |
+| Conversion access token | توكن التحويلات |
+| Send as test events | ابعتها كأحداث تجريبية |
+| The Pinterest ad account id is needed to turn the Conversions API on | محتاج رقم الحساب الإعلاني في بنترست علشان تشغّل الـ Conversions API |
+
+---
+
+## 169. Google Ads conversions with a conversion label — UI: pending (mostly built in item 132)
+
+Item 132 already stores `config.adsConversionLabel` on a Google pixel and serves it to the storefront. Added now:
+
+- **`config.adsLeadLabel`** — the label of the Ads conversion action for leads, used when the store or funnel
+  reports orders as leads (item 167). Same rule as the purchase label: 4–60 of `A–Z a–z 0–9 _ -`.
+- Labels are refused on a non-Ads tag: 422 field `config.adsConversionLabel` / `config.adsLeadLabel`
+  "A conversion label needs a Google Ads id (AW-…)" (create, and update when the id changes).
+- **`GET /store/:ws` → `store.trackingPixels[]`** for an `AW-` pixel with labels now also carries a ready **`sendTo`**:
+```json
+{ "platform": "google", "pixelId": "AW-123456789", "scope": { "type": "all", "ids": [] },
+  "adsConversionLabel": "AbC-D_efG", "adsLeadLabel": "LeadLbl_1",
+  "sendTo": { "purchase": "AW-123456789/AbC-D_efG", "lead": "AW-123456789/LeadLbl_1" } }
+```
+
+### Storefront (`lib/adPixels.ts` / `lib/track.ts`)
+On the order's conversion (with `purchaseEventTiming = on_order`), for each in-scope AW- pixel:
+`gtag('event', 'conversion', { send_to: sendTo[kind], value, currency, transaction_id: <order id> })`, where
+`kind` is the effective conversion event (`purchase` or `lead`, item 167); skip when that key is missing.
+`transaction_id` = the order id keeps a reload of the thank-you page from counting twice.
+
+### Dashboard — Marketing → Pixels → Google (AW- id)
+- Existing "Conversion label" field → rename "Purchase conversion label"; add "Lead conversion label"
+  (shown only for AW- ids, like the first). Hint: "Google Ads → Goals → Conversions → your action → Tag setup →
+  the part after the slash in send_to".
+
+Wording:
+| en | ar |
+|---|---|
+| Purchase conversion label | ليبل تحويل الشراء |
+| Lead conversion label | ليبل تحويل العميل المحتمل |
+| A conversion label needs a Google Ads id (AW-…) | الليبل محتاج رقم إعلانات جوجل (AW-…) |
+
+Not built: sending Google Ads conversions from the server (offline conversion upload). It needs a Google Ads
+developer token and OAuth app — the integrations team's work with the owner's account (noted in spec-gaps).
+
+---
+
+## 170. Google Tag Manager: a ready-made container and the dataLayer events — UI: pending
+
+### Endpoints (permission `workspace.manage`, under the tracking-pixels router)
+**GET `/workspaces/:ws/tracking-pixels/gtm/events`** — the reference list to show the merchant:
+```json
+{ "events": [ { "event": "view_item", "when": "A product page or a funnel product step opens" }, …,
+              { "event": "purchase", "when": "…" }, { "event": "generate_lead", "when": "…" } ],
+  "fields": [ { "name": "ecommerce.value", "type": "number", "note": "major units (e.g. 450.5)" }, … , { "name": "event_id", … } ] }
+```
+**GET `/workspaces/:ws/tracking-pixels/gtm/container[?download=true]`** — a GTM export (format v2) to import
+(GTM → Admin → Import container → choose the file → Merge). Optional query: `ga4=G-…`, `ads=AW-…`,
+`purchaseLabel=…`, `leadLabel=…`; without them the store's own Google pixels are used (first G- tag; first AW-
+tag with its labels from item 169). `download=true` adds `Content-Disposition: attachment; filename="zimos-gtm-container.json"`.
+Contents: 5 dataLayer variables, 6 Custom Event triggers (one per event), a Google tag + 6 GA4 event tags (when a
+G- id is known), a conversion linker + Google Ads conversion tags for purchase/lead (when an AW- id and labels are known).
+Meta/TikTok/Snapchat are deliberately left out (the store already loads them; GTM copies would double count).
+
+### Storefront (`lib/adPixels.ts`) — small changes so the container gets everything
+- Push `{ ecommerce: null }` before each ecommerce push (GA4's documented reset), then
+  `{ event, event_id: dedupeId, ecommerce: { value, currency, transaction_id, items: [{ item_id }] } }`.
+- When the order is reported as a lead (item 167), push `generate_lead` instead of `purchase`.
+
+### Dashboard — Marketing → Pixels → Google Tag Manager
+- On a GTM pixel: a card "Ready-made container": button "Download container" (GET …/gtm/container?download=true),
+  three steps text (Download → GTM Admin → Import → Merge), and the events table from `/gtm/events`.
+- If the store has no Google pixel: optional inputs GA4 id / Ads id / labels passed as query.
+
+Wording:
+| en | ar |
+|---|---|
+| Ready-made container | كونتينر جاهز |
+| Download container | نزّل الكونتينر |
+| In Google Tag Manager: Admin → Import container → choose the file → Merge. | في Google Tag Manager: الإدارة ← استيراد كونتينر ← اختار الملف ← دمج. |
+| Events sent to the dataLayer | الأحداث اللي بتتبعت للـ dataLayer |
+| Meta, TikTok and Snapchat stay in Zimos so nothing is counted twice. | فيسبوك وتيك توك وسناب بيفضلوا في زيموس علشان مفيش حاجة تتحسب مرتين. |
+
+---
+
+## 171. Live View on a world map — UI: pending
+
+**GET `/workspaces/:ws/analytics/web/live-map?minutes=10[&funnelId=…]`** — permission `analytics.view`.
+`minutes` 1–60 (default 10). Poll every 10–15 s (or on each realtime-stream tick).
+```json
+{ "minutes": 10, "since": "2026-10-06T18:55:09.677Z",
+  "totals": { "visitors": 3, "checkouts": 1, "orders": 1 },
+  "countries": [ { "country": "EG", "visitors": 2, "checkouts": 1, "orders": 1 },
+                 { "country": "SA", "visitors": 1, "checkouts": 0, "orders": 0 } ],
+  "places": [ { "country": "EG", "region": "Cairo", "city": null, "code": "cairo", "visitors": 1, "checkouts": 0, "orders": 1 },
+              { "country": "EG", "region": "الجيزة", "city": null, "code": "giza", "visitors": 0, "checkouts": 1, "orders": 0 },
+              { "country": "SA", "region": "Riyadh Region", "city": null, "code": "sa-riyadh", "visitors": 1, "checkouts": 0, "orders": 0 } ] }
+```
+- `country`: ISO-3166 alpha-2 (`ZZ` = unknown). Visitors are located by their session's IP lookup; checkouts by IP
+  country and the governorate typed; orders by the shipping address.
+- `places[].code` is the platform place code (`geo_regions`) for Egypt's governorates and Saudi regions — the same codes
+  as `lib/places.ts`; null elsewhere (then `region`/`city` are the names as received). Sorted by activity, max 300.
+
+### Dashboard — Analytics → Live (beside the realtime page)
+- A world map (SVG, coloured by `countries[]` activity; no external tiles needed) with a zoomable Egypt/Saudi inset
+  where `places[]` with a `code` get dots sized by activity (orders > checkouts > visitors; three colours).
+- Top strip: "Visitors now", "Checking out", "Orders" from `totals`, plus the window selector (5 / 10 / 30 / 60 min)
+  and the funnel filter.
+- A side list of the top places. States: loading, empty ("Nobody on the store in the last {n} minutes"), error,
+  no permission.
+
+Wording:
+| en | ar |
+|---|---|
+| Live view | المشاهدة المباشرة |
+| Visitors now / Checking out / Orders | زوار دلوقتي / بيكملوا الطلب / طلبات |
+| Last {n} minutes | آخر {n} دقيقة |
+| Nobody on the store in the last {n} minutes | مفيش حد في المتجر آخر {n} دقيقة |
+| Unknown location | مكان غير معروف |
+
+---
+
+## 172. Dashboard home: filter by product and by store — UI: pending
+
+**GET `/workspaces/:ws/analytics/overview`** (permission `analytics.view`, existing) now also takes:
+- `productId` — only orders with a line of that product (sales, orders, AOV, confirmation/delivery rates, series,
+  top lists) and abandoned checkouts holding it. Visits/carts/checkouts can't be split by product, so they stay the
+  whole store's: the answer says `"eventScope": "store"`.
+- `websiteId` — one website (store) of the workspace: its orders, its visits/events, its checkouts (`eventScope: "filtered"`).
+- Combinable with `funnelId`, `from`/`to`, `compare`, `currency`. 422 `unknown product` / `unknown website` when not the store's.
+- With any of the three filters, net profit is the quick estimate (the full P&L has no product/site split), as with funnels.
+- The answer echoes `productId`, `websiteId`, `eventScope`.
+```json
+{ "overview": { "funnelId": null, "productId": "db50…", "websiteId": null, "eventScope": "store",
+                "metrics": { "orders": { "value": 1, "previous": 0 }, "sales": { "value": 25000, "previous": 0 } }, … } }
+```
+
+### Dashboard — Home
+- Beside the funnel filter: a **Product** picker (search over `GET /catalog/products?q=`) and a **Store** picker
+  (`GET /websites`; hide when the workspace has one website). Keep the choice with the remembered period (item 156).
+- When `eventScope = "store"`, show a small note on the visits/conversion cards: "Visits are for the whole store".
+- "Clear filters" chip.
+
+Wording:
+| en | ar |
+|---|---|
+| All products / All stores | كل المنتجات / كل المتاجر |
+| Product / Store | المنتج / المتجر |
+| Visits are for the whole store | الزيارات للمتجر كله |
+| Clear filters | امسح الفلاتر |
+
+---
+
+## 173. A sending domain for customer emails — UI: pending
+
+The store sends its customer emails from its own domain (`orders@mystore.com`) once DNS records are added and verified.
+Contract and adapters: `src/modules/emailDomains/README.md` (sandbox by default: real DNS checks, nothing registered;
+`.test`/`.example` domains always verify).
+
+### Endpoints (permission `workspace.manage`, under the order-emails router)
+**GET `/workspaces/:ws/order-emails/sending-domain`** → `{ "sendingDomain": null | {…} }`
+```json
+{ "sendingDomain": { "domain": "mystore.com", "localPart": "orders", "fromAddress": "orders@mystore.com",
+  "status": "pending", "provider": "sandbox", "lastCheckedAt": null, "verifiedAt": null,
+  "records": [
+    { "purpose": "spf", "type": "TXT", "name": "mystore.com", "value": "v=spf1 include:spf.mail.zimos.example ~all" },
+    { "purpose": "dkim", "type": "TXT", "name": "zimos._domainkey.mystore.com", "value": "v=DKIM1; k=rsa; p=…" },
+    { "purpose": "return_path", "type": "CNAME", "name": "bounces.mystore.com", "value": "bounces.mail.zimos.example" },
+    { "purpose": "dmarc", "type": "TXT", "name": "_dmarc.mystore.com", "value": "v=DMARC1; p=none" } ] } }
+```
+**PUT `…/sending-domain`** `{ "domain": "mystore.com", "localPart": "orders" }` — adds (or replaces) the domain → status `pending`.
+422 "Enter a domain like mystore.com"; 409 `EMAIL_DOMAIN_TAKEN` when another store uses it. `localPart`: letters, digits, `.` `_` `-` (default `orders`).
+**PATCH `…/sending-domain`** `{ "localPart": "shop" }` — changes the address only.
+**POST `…/sending-domain/verify`** — checks DNS now; each record gets `ok: true|false`; status → `verified` when SPF, DKIM and
+return-path are found (DMARC is advised only); a verified domain that later fails a check → `failed` (emails go back to the platform address).
+**DELETE `…/sending-domain`** → `{ "sendingDomain": null }`.
+
+Once `verified`, order emails and cart-recovery emails go out From `<localPart>@<domain>` with the store's sender name
+(the existing sender name / Reply-To settings stay).
+
+### Dashboard — Settings → Emails → "Sending domain"
+- Empty: input "Your domain" + "Email address" (localPart + "@domain" preview) + "Add domain".
+- Pending/failed: table of records (Type, Name/Host, Value with copy buttons, status tick/cross per record after a check),
+  "Verify" button with last-checked time, note "DNS changes can take up to 48 hours", "Remove domain".
+- Verified: green badge, "Customer emails are sent from {fromAddress}", change address, remove.
+
+Wording:
+| en | ar |
+|---|---|
+| Sending domain | دومين الإرسال |
+| Send customer emails from your own domain | ابعت إيميلات العملاء من الدومين بتاعك |
+| Add these records at your domain provider | ضيف السجلات دي عند مزوّد الدومين |
+| Verify | تحقق |
+| Pending / Verified / Failed | في الانتظار / متأكد / فشل |
+| DNS changes can take up to 48 hours | تغييرات الـ DNS ممكن تاخد لحد ٤٨ ساعة |
+| Customer emails are sent from {address} | إيميلات العملاء بتتبعت من {address} |
+| Another store already sends from this domain | متجر تاني بيبعت من الدومين ده |
+
+---
+
+## 174. Block email designer for order emails and cart recovery — UI: pending
+
+Any order email template (`order_confirmation`, `order_shipped`, …, `abandoned_cart`) can be built from blocks instead of
+the plain body. The server renders and escapes them (no raw HTML from the merchant).
+
+### Blocks (JSON, 1–40 per email)
+| type | fields |
+|---|---|
+| `heading` | `text` (≤5000, `{{variables}}`), `size?`: `lg`\|`md`, `align?` |
+| `text` | `text` (blank line = new paragraph), `align?` |
+| `button` | `label` (≤80), `url` (https://… or a variable like `{{order_link}}`, `{{recovery_link}}`, `{{tracking_url}}`), `color?` `#RRGGBB`, `align?` |
+| `image` | `url` (https), `alt?`, `link?` (https or variable), `width?` 40–600, `align?` |
+| `order_table` | — (the order's lines × qty with totals, shipping and total; for cart recovery the cart's lines) |
+| `divider` | — |
+`align`: `start` \| `center` \| `end` (the email is RTL). Unknown fields per type → 422 (`"blocks[0].text" is not allowed`);
+bad link → 422 "Use a link starting with https:// or a link variable such as order_link".
+
+### Endpoints (existing, permission `workspace.manage`)
+- **PUT `/workspaces/:ws/order-emails/:key`** — now also `{ "blocks": [...] | null }` (null/[] = back to the plain body).
+  The template answer has `blocks` (null when not used); `isCustomised` is true when blocks are set.
+- **POST `…/:key/preview`** and **POST `…/:key/test`** accept unsaved `blocks` too (preview uses sample lines:
+  two products, shipping, total).
+```json
+{ "blocks": [
+  { "type": "heading", "text": "شكرًا {{customer_name}}", "align": "center" },
+  { "type": "text", "text": "طلبك {{order_number}} وصلنا.\n\nهنكلمك قريب." },
+  { "type": "order_table" },
+  { "type": "button", "label": "تابع طلبك", "url": "{{order_link}}" },
+  { "type": "divider" } ] }
+```
+The store logo/colour header, sender name, sending domain (item 173) and the unsubscribe line (cart recovery) stay as today.
+
+### Dashboard — Settings → Emails → (template) → "Design"
+- Two modes per template: "Simple text" (today's subject + body) and "Designer" (blocks). Switching to Designer seeds
+  heading + text from the current body; switching back sends `blocks: null`.
+- Designer: block list with drag to reorder, add-block menu (Heading, Text, Button, Image, Order table, Divider), a side
+  form per block (fields above; variable chips from `tokens`), image from the media library.
+- Live preview pane (POST preview with the unsaved blocks, debounced), mobile/desktop width toggle, "Send test".
+
+Wording:
+| en | ar |
+|---|---|
+| Simple text / Designer | نص بسيط / مصمم |
+| Add block | ضيف بلوك |
+| Heading / Text / Button / Image / Order table / Divider | عنوان / نص / زرار / صورة / جدول الطلب / فاصل |
+| Button link | لينك الزرار |
+| Send test | ابعت تجربة |
+
+---
+
+## 175. Order emails per funnel or website — UI: pending
+
+Every order-email endpoint (permission `workspace.manage`) now takes an optional **`?funnelId=`** or **`?websiteId=`**
+(not both: 422). Without it you edit the store's set, exactly as before.
+
+- **GET `/workspaces/:ws/order-emails?funnelId=…`** → `{ "scope": "funnel:<id>", "templates": [ { …template, "overridden": true|false } ], "tokens": [...] }`
+  — each template as it applies to that funnel: its own version where `overridden`, else the store's.
+- **PUT `/workspaces/:ws/order-emails/:key?funnelId=…`** `{ isEnabled?, subject?, body?, blocks? }` — creates/updates the funnel's
+  override. A new override starts with the store's on/off; empty subject/body/blocks fall back to the store's version.
+  Answer: the merged template with `"overridden": true`.
+- **DELETE `/workspaces/:ws/order-emails/:key?funnelId=…`** — removes the override (the funnel uses the store's email again);
+  404 when there is none; 422 without a scope.
+- **POST `…/:key/preview?funnelId=…`** and **`…/:key/test?funnelId=…`** — preview / test that funnel's version.
+- Unknown funnel or website → 404.
+
+Sending: an order uses its **funnel's** override, else its **website's**, else the store's. An override switched off sends
+nothing for that funnel even when the store's is on. Cart recovery reads the funnel/website from the checkout's attribution.
+
+### Dashboard
+- **Funnel → Settings → Emails** tab: the same templates list as Settings → Emails, loaded with `?funnelId=`, each row showing
+  "Store default" or "Custom for this funnel"; editing saves an override; "Use store email" (DELETE) on custom rows.
+- Same for a website (Website → Settings → Emails) with `?websiteId=` when the store has more than one website.
+
+Wording:
+| en | ar |
+|---|---|
+| Store default | زي إيميلات المتجر |
+| Custom for this funnel | مخصص للفانل ده |
+| Use store email | استخدم إيميل المتجر |
+| Off for this funnel | مقفول للفانل ده |
+
+---
+
+## 176. Buy a domain in the dashboard — UI: pending
+
+Search → buy → the store is connected with DNS set automatically → auto-renewal. Registrar is an interface with a
+**sandbox** adapter (nothing is bought, no money moves); contract in `src/modules/domains/registrar/README.md`.
+Prices come only from the registrar (sandbox: `DOMAIN_SANDBOX_PRICES` env), never from code; charging the merchant is
+the billing team's (not here).
+
+### Endpoints (permission `domain.manage`, under `/workspaces/:ws/domains`)
+**GET `/search?q=my store`** →
+```json
+{ "query": "my store", "results": [
+  { "domain": "my-store.com", "available": true, "price": { "amount": 55000, "currency": "EGP" }, "renewalPrice": { "amount": 55000, "currency": "EGP" } },
+  { "domain": "my-store.net", "available": false, "price": null, "renewalPrice": null } ] }
+```
+The exact name (when the query has a TLD) plus the label on .com .net .store .shop .online .co. `price` may be null
+(registrar gave none). 422 for a query without letters/digits.
+
+**POST `/purchases`** (live store; plan's domain limit applies) `{ "domain": "my-store.com", "years": 1, "autoRenew": true, "acceptPrice": { "amount": 55000, "currency": "EGP" } }`
+(`acceptPrice: null` when the price shown was null) → 201
+```json
+{ "purchase": { "id": "…", "hostname": "my-store.com", "status": "active", "registrar": "sandbox", "years": 1,
+  "price": { "amount": 55000, "currency": "EGP" }, "autoRenew": true, "expiresAt": "2027-10-06T…", "domainId": "…" } }
+```
+Errors: 409 `DOMAIN_PRICE_CHANGED` (`details.price` = new quote → show and re-confirm); 409 `DOMAIN_UNAVAILABLE`;
+502 `DOMAIN_PURCHASE_FAILED` ("nothing was charged"); plan-limit and draft-store errors as for connecting a domain.
+The domain then appears in the normal domains list as **verified** (DNS set by us).
+
+**GET `/purchases`** → `{ "purchases": [ … ] }` (status `pending|active|failed|expired`, `lastError`).
+**PATCH `/purchases/:purchaseId`** `{ "autoRenew": false }` · **POST `/purchases/:purchaseId/renew`** `{ "years": 1-10 }` → `{ "purchase": … }`.
+Daily job `domains.renew_due` renews auto-renew domains in their last 30 days.
+
+### Dashboard — Settings → Domains → "Buy a domain"
+- Search box → results list (domain, availability badge, price/year or "Price on request", Buy button).
+- Buy dialog: years select (1–5), auto-renew switch, the price × years, confirm. On 409 price change: show new price, ask again.
+- After purchase: success state "Your store is live on {domain}" (SSL may take a few minutes).
+- "Bought domains" table: domain, expires, auto-renew switch, "Renew now", status/last error.
+
+Wording:
+| en | ar |
+|---|---|
+| Buy a domain | اشتري دومين |
+| Search for a name | دوّر على اسم |
+| Available / Taken | متاح / محجوز |
+| {price} / year | {price} في السنة |
+| Renews automatically | بيتجدد لوحده |
+| Renew now | جدّد دلوقتي |
+| The price changed — check it and confirm again | السعر اتغير — راجعه وأكّد تاني |
+| Your store is live on {domain} | متجرك شغال على {domain} |
+
+---
+
+## 177. "Redirect to the primary domain" per domain — UI: pending
+
+Until now every other domain of a store always sent visitors to the primary domain. Now each domain has a switch.
+
+- **PATCH `/workspaces/:ws/domains/:domainId`** (permission `domain.manage`, existing) also takes `{ "redirectToPrimary": false }`
+  (default `true` for every domain, old and new — nothing changes until a merchant turns it off).
+- **GET `/workspaces/:ws/domains/overview`** — each domain has `redirectToPrimary`.
+- **GET `/store/resolve-host?host=…`** (public, the storefront proxy) — for a domain with the switch off, `primaryHost` is
+  `null` and `redirectToPrimary: false`, so the proxy serves the store on that domain. **The current proxy needs no change**
+  (it only redirects when `primaryHost` is set and differs from the host).
+- The platform subdomain (`<slug>.zimos…`) still always moves to the primary domain; the www/root counterpart setting is unchanged.
+
+### Dashboard — Settings → Domains (each non-primary domain)
+- A switch "Redirect visitors to the primary domain" (on by default), with the hint
+  "Off: the store opens on this domain too (useful for a domain dedicated to a funnel)". Hidden on the primary domain.
+
+Wording:
+| en | ar |
+|---|---|
+| Redirect visitors to the primary domain | حوّل الزوار للدومين الأساسي |
+| Off: the store opens on this domain too | لو مقفول: المتجر بيفتح على الدومين ده كمان |
+
+---
+
+## 178. Webhooks: custom headers per endpoint, and new topics — UI: pending
+
+### Custom headers (permission as today for webhooks)
+**POST `/workspaces/:ws/webhooks`** and **PATCH `/workspaces/:ws/webhooks/:endpointId`** take
+```json
+{ "customHeaders": [ { "name": "Authorization", "value": "Bearer abc" }, { "name": "X-Api-Key", "keep": true } ] }
+```
+- Up to 10; `name` is an HTTP header token (≤64), `value` ≤1000 chars, no line breaks; names unique (case-insensitive).
+- PATCH replaces the whole list; `{ "name": …, "keep": true }` keeps the value already stored under that name (so the UI
+  never needs to know it). 422 for `keep` without a stored value.
+- Not allowed (422 "… is set by Zimos and cannot be changed"): `X-Zimos-*`, `Content-Type`, `Content-Length`, `User-Agent`,
+  `Host`, `Connection`, `Transfer-Encoding`, `Proxy-*` and other transport headers.
+- Values are sealed and never returned: endpoints show `"customHeaders": [{ "name": "Authorization", "valueMask": "••••-123" }]`.
+- Sent with every delivery and with "Send test"; Zimos' own headers always win.
+
+### New topics (subscribe like the others; `GET /webhooks/events` lists them)
+| topic | when | `data` |
+|---|---|---|
+| `funnel.created` | a funnel is created (also by duplicate/import) | `{ funnel: { id, name, subdomain, status } }` |
+| `funnel.updated` | a funnel is saved (name, settings, status, map) | same |
+| `funnel.deleted` | a funnel is deleted | `{ funnel: { id, name, subdomain, deleted: true } }` |
+| `payment.paid` | a payment reaches "captured" (online, accepted transfer, COD collected) | `{ payment: { id, orderId, method, provider, status, amount, currency, paidAt }, order: {…} }` |
+| `contact.updated` | a contact's name, phone, email, tags or marketing consent change | `{ contact: {…} }` |
+Funnel and payment topics respect the endpoint's funnel/product filter like order topics.
+Fixed on the way: `funnel.published` (and so the new funnel topics) failed to build its payload; it delivers now.
+
+### Dashboard — Settings → Developers → Webhooks (endpoint form)
+- "Custom headers" repeater: name + value (password field) rows, add/remove, max 10. Existing rows show the mask and
+  "Change" (send a new value) or keep (send `keep: true`).
+- Topics checklist gains the five new topics (group "Funnels", "Payments", "Contacts").
+
+Wording:
+| en | ar |
+|---|---|
+| Custom headers | Headers إضافية |
+| Header name / Value | اسم الـ header / القيمة |
+| Sent with every delivery to this endpoint | بتتبعت مع كل إرسال للعنوان ده |
+| Funnel created / updated / deleted | فانل اتعمل / اتعدل / اتمسح |
+| Payment received | دفعة وصلت |
+| Contact updated | جهة اتصال اتعدلت |
+
+---
+
+## 179. An MCP server for the store (Claude, ChatGPT, any MCP client) — UI: pending
+
+**POST `/api/public/v1/mcp`** with `Authorization: Bearer <store API key>` — MCP over HTTP (JSON-RPC 2.0, the
+"Streamable HTTP" transport answered as plain JSON; GET → 405). Protocol versions 2025-06-18 / 2025-03-26 / 2024-11-05.
+Methods: `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`.
+
+| tool | does | needs the key's scope |
+|---|---|---|
+| `list_products` `{ query?, status?, limit? }` | products with variants, prices (minor units, strings), stock | `products:read` (or `products:update`) |
+| `list_orders` `{ query?, from?, to?, limit? }` | recent orders (same JSON as the public REST API) | `orders:read` / `orders:write` / `orders:update` |
+| `get_order` `{ orderId? \| orderNumber? }` | one order in full | same |
+| `check_pages` `{ funnelId? }` | each funnel's problems (fatal + warnings) before publishing | `funnels:read` or `funnels:write` (new) |
+| `create_draft_funnel` `{ name }` | a draft funnel the merchant publishes later | `funnels:write` (new) |
+The key's creator's role must also allow it (same rule as the REST API). A refusal or a store error comes back as a tool
+result with `isError: true` and a readable message; a bad key is HTTP 401.
+
+New API-key scopes: **`funnels:read`**, **`funnels:write`** (in `GET /workspaces/:ws/api-keys` → `scopes`).
+
+Example `.mcp.json` / Claude Desktop entry the dashboard can show:
+```json
+{ "mcpServers": { "my-store": { "type": "http", "url": "https://api.<platform>/api/public/v1/mcp",
+  "headers": { "Authorization": "Bearer <API key>" } } } }
+```
+
+### Dashboard — Settings → Developers → "AI assistants (MCP)"
+- Short explanation, the server URL with a copy button, "Create a key for AI" (preset scopes: products:read, orders:read,
+  funnels:read, funnels:write — editable), and copy-ready config for Claude (Desktop / Code) and ChatGPT connectors.
+- The tools table above (name + what it does), and a note that funnels it creates stay drafts.
+
+Wording:
+| en | ar |
+|---|---|
+| AI assistants (MCP) | مساعدين الذكاء الاصطناعي (MCP) |
+| Let Claude, ChatGPT or another assistant work with your store using an API key. | خلي Claude أو ChatGPT أو أي مساعد يشتغل على متجرك بمفتاح API. |
+| Server URL | رابط السيرفر |
+| Create a key for AI | اعمل مفتاح للذكاء الاصطناعي |
+| Funnels it creates stay drafts until you publish them. | الفانلز اللي بيعملها بتفضل مسودة لحد ما تنشرها انت. |
+
+---
+
+## 180. Import products and reviews from AliExpress, Etsy, CJ and YouCan links — UI: pending
+
+**POST `/workspaces/:ws/catalog/products/import`** (existing endpoint, permission `products.manage`) with `{ "url": "…" }`
+now accepts product links from **AliExpress, Etsy, CJ Dropshipping and YouCan** besides Shopify. → 202
+`{ "import": { "id", "kind": "aliexpress_link" | "etsy_link" | "cj_link" | "youcan_link" | "shopify_link", "status": "queued", … } }`;
+poll **GET `/workspaces/:ws/catalog/imports/:importId`** as today (status `done`, `createdCount`, `errors[]`).
+
+- The product (name, description, pictures, price, SKU) is read from the page's public structured data and created as a
+  **draft with stock 0**. The page's price is kept as minor units of the **page's currency**, and the description ends with
+  "(Imported price: 24.5 USD)" — the merchant checks price/currency before publishing. A missing price imports as 0.
+- The **reviews the page publishes** (up to 50) are imported with `source: "import"`, **`status: "pending"`** — they show
+  only after approval in Reviews. None are ever invented.
+- Errors: 422 `IMPORT_SOURCE_UNREACHABLE` with the reason ("The page answered 403", "That page does not publish its product
+  details; download them as a sheet and import the file instead"); 422 for a non-https link.
+- `PRODUCT_IMPORT_MODE=sandbox` (server env) imports a "Sample product from X (sandbox)" with no reviews, for demos.
+- Contract and the official-API adapters to add: `src/modules/catalog/importExport/importers/README.md`.
+
+### Dashboard — Products → Import
+- The "Import from a link" field's hint lists the sources (Shopify, AliExpress, Etsy, CJ, YouCan) with small logos/badges
+  detected from the pasted link.
+- After the import: "Imported as a draft — check the price ({currency}) and stock", and "{n} reviews waiting for approval"
+  linking to Reviews filtered to pending + source import.
+- Reviews list: a source badge "Imported" for `source = "import"`.
+
+Wording:
+| en | ar |
+|---|---|
+| Import from a link (Shopify, AliExpress, Etsy, CJ, YouCan) | استورد من لينك (شوبيفاي، علي إكسبريس، إتسي، CJ، يوكان) |
+| Imported as a draft — check the price and stock | اتضاف كمسودة — راجع السعر والمخزون |
+| {n} reviews waiting for your approval | {n} تقييم مستني موافقتك |
+| Imported | مستورد |
+| That page does not publish its product details | الصفحة دي مش بتعرض بيانات المنتج |
+
+## 181. Send orders to a Shopify or WooCommerce store, and bring back fulfilment — UI: pending
+
+Two new providers on the **existing dropship screens** (Apps → Dropshipping; permission `apps.manage`; order page Supplier
+card: `orders.view` / `orders.manage`). No new endpoint: the existing ones take `code` = `shopify` or `woocommerce`.
+
+**GET `/workspaces/:ws/dropship/providers`** now lists them (also in production):
+```json
+{ "providers": [
+  { "code": "shopify", "name": "Shopify store", "isTest": false, "connected": false, "accountName": null, "followsStatus": true,
+    "credentialFields": [
+      { "key": "storeUrl", "label": { "en": "Store address (mystore.myshopify.com)", "ar": "عنوان المتجر (mystore.myshopify.com)" }, "secret": false, "required": true },
+      { "key": "accessToken", "label": { "en": "Admin API access token", "ar": "توكن Admin API" }, "secret": true, "required": true } ] },
+  { "code": "woocommerce", "name": "WooCommerce store", "credentialFields": [ "storeUrl", "consumerKey (secret)", "consumerSecret (secret)" ], "…": "…" }
+] }
+```
+
+- **PUT `/dropship/providers/shopify`** `{ "credentials": { "storeUrl": "mystore.myshopify.com", "accessToken": "shpat_…" } }`
+  → `{ "code": "shopify", "connected": true, "accountName": "My Shop" }`. The address may omit `https://`; it must be https.
+  Errors 422 `DROPSHIP_INVALID_CREDENTIALS` ("The store refused the credentials", "The store address must start with https://").
+  Secrets are sealed and never returned.
+- **PUT `/dropship/providers/woocommerce`** `{ "credentials": { "storeUrl": "https://mystore.com", "consumerKey": "ck_…", "consumerSecret": "cs_…" } }`.
+- **POST `/dropship/providers/:code/import`** `{ "code": "123456" }` (the product id in that store) → 201 `{ product }`, a draft.
+  Variant SKUs become the other store's ids (Shopify variant id; Woo `30` or `30:31`) — **the UI should warn not to edit
+  these SKUs**, they link the lines. 404 `DROPSHIP_PRODUCT_NOT_FOUND`, 409 `DROPSHIP_ALREADY_IMPORTED`.
+- **POST `/dropship/providers/:code/orders/:orderId/push`** (or the order page's `/orders/:orderId/dropship/:code/push`)
+  → `{ "externalOrderId": "5000", "externalStatus": "open", "suggestedStage": null }`. Pushing again returns the same order.
+  WooCommerce refuses an order with a line that is not one of its products: 409 `DROPSHIP_ORDER_REJECTED`
+  ("\"Demo T-Shirt\" is not a product of the WooCommerce store"). Shopify sends such a line as a custom line.
+- **POST `/orders/:orderId/dropship/refresh`** and the follow job bring the status back: Shopify `open|partial|fulfilled|delivered|cancelled`,
+  Woo `pending|processing|on-hold|completed|cancelled|refunded|failed`; `suggestedStage` = shipped / delivered / cancelled /
+  returned, applied by itself when the provider's "apply status" setting is on (existing PATCH `/providers/:code/settings`).
+
+### Screens
+- Dropshipping page: two cards "Shopify store" and "WooCommerce store" in a group **"Your other store"** (separate from the
+  suppliers), with the credential form generated from `credentialFields` and a help link on where to get the token/keys.
+- Import dialog: field "Product id in your store".
+- Order page Supplier card: unchanged; shows the provider name, its order number and status.
+
+Wording:
+| en | ar |
+|---|---|
+| Your other store | متجرك التاني |
+| Send orders to your Shopify or WooCommerce store and get the shipping status back | ابعت الأوردرات لمتجرك على شوبيفاي أو ووكومرس وارجع بحالة الشحن |
+| Product id in your store | رقم المنتج في متجرك |
+| Don't change these SKUs: they link the product to your store | متغيرش الـ SKU دي: هي اللي بتربط المنتج بمتجرك |
+| Sent to your store as order #{id} | اتبعت لمتجرك كأوردر رقم {id} |
+| This product isn't in your WooCommerce store | المنتج ده مش موجود في متجر ووكومرس بتاعك |
+
+## 182. Send contacts to Mailchimp or Klaviyo — UI: pending
+
+App-store apps **Mailchimp** and **Klaviyo** (`/apps`, now "available", not "coming soon"; open path `/apps/email-marketing`).
+They must be installed (POST `/workspaces/:ws/apps/:key/install`) before connecting, or 403 `APP_NOT_INSTALLED`.
+A test provider `sandbox` ("Test email list", `isTest: true`) exists outside production and needs no install.
+All routes: `/workspaces/:ws/email-marketing/...`, permission **`apps.manage`**.
+
+Only contacts **with an email, who agreed to marketing (`marketingConsent`) and are not blocked** are ever sent. A contact who
+withdraws consent is unsubscribed there. New or changed contacts (checkout, forms, funnel opt-ins, newsletter, added by hand,
+edited) go by themselves within seconds; "Sync now" sends everyone already in the store (up to 20,000 per run).
+
+**GET `/providers`** →
+```json
+{ "providers": [ { "code": "mailchimp", "name": "Mailchimp", "isTest": false,
+  "credentialFields": [ { "key": "apiKey", "label": { "en": "API key", "ar": "مفتاح API" }, "secret": true, "required": true } ],
+  "connected": true, "accountName": "My Brand", "listId": "ab12cd", "listName": "Newsletter",
+  "tags": ["zimos"], "sources": ["leads", "buyers"], "lastSyncAt": "2026-10-06T19:55:44.023Z", "syncedCount": 120,
+  "syncing": false, "lastError": null } ] }
+```
+- **PUT `/providers/:code`** `{ "credentials": { "apiKey": "…-us21" } }` → the provider view. Key 6–200 chars. 422
+  `EMAIL_MARKETING_INVALID_CREDENTIALS` ("The service refused the API key"; Mailchimp: "A Mailchimp API key ends in its data centre,
+  like \"-us21\""). Reconnecting keeps the list and tags. The key is never returned.
+- **DELETE `/providers/:code`** → `{ "code", "connected": false }`.
+- **GET `/providers/:code/lists`** → `{ "lists": [ { "id": "ab12cd", "name": "Newsletter", "memberCount": 5 } ] }` (Klaviyo: `memberCount: null`).
+  409 `EMAIL_MARKETING_NOT_CONNECTED`.
+- **PATCH `/providers/:code/settings`** `{ "listId"?, "tags"?: [≤10 × ≤60 chars], "sources"?: ["leads"|"buyers", 1–2] }` (at least one)
+  → the provider view. A list not in the account: 404 `EMAIL_MARKETING_LIST_NOT_FOUND`. `leads` = contacts with no order yet,
+  `buyers` = contacts with an order. Mailchimp tags = these tags + the contact's own tags; Klaviyo gets them as the profile
+  property `zimos_tags`.
+- **POST `/providers/:code/sync`** → 202 `{ "queued": true }`; `syncing` turns true until done, then `lastSyncAt`, `syncedCount`.
+  409 `EMAIL_MARKETING_NO_LIST` before a list is picked.
+- `lastError` (string|null): the last refusal (key revoked, list deleted…), cleared on the next success.
+
+### Screen — Apps → Email marketing (`/apps/email-marketing`)
+- One card per provider: logo, name, "Test" badge for `isTest`, status (Not connected / Connected as {accountName}).
+- Not connected: the key field from `credentialFields` (password input) + "Connect"; for Mailchimp a help line on where to find the key.
+- Connected: list picker (GET lists), tags input (chips), checkboxes "Leads (no order yet)" / "Buyers", "Save";
+  "Sync now" with "Last synced {time} — {n} contacts" or a spinner while `syncing`; red banner with `lastError`; "Disconnect".
+- Note under the card: "Only contacts who agreed to marketing are sent."
+
+Wording:
+| en | ar |
+|---|---|
+| Email marketing | التسويق بالإيميل |
+| Send contacts who agreed to marketing to your list | ابعت العملاء اللي وافقوا على التسويق لقائمتك |
+| API key | مفتاح API |
+| Connected as {name} | متوصل باسم {name} |
+| List | القائمة |
+| Tags added to each contact | تاجات تتحط على كل عميل |
+| Leads (no order yet) | عملاء محتملين (لسه ماطلبوش) |
+| Buyers | اللي اشتروا |
+| Sync now | زامن دلوقتي |
+| Last synced {time} — {n} contacts | آخر مزامنة {time} — {n} عميل |
+| Only contacts who agreed to marketing are sent. | بنبعت بس العملاء اللي وافقوا على التسويق. |
+| Pick a list first | اختار قائمة الأول |
+
+## 183. Express checkout buttons (Apple Pay, Google Pay, PayPal), Stripe and PayPal — UI: pending
+
+Two new gateways on the **existing Payments screen** (`/workspaces/:ws/payments/gateways`, permission `workspace.manage`); the
+connect form is rendered from the adapter's fields as for Paymob/Kashier — **no new endpoint**.
+
+**PUT `/workspaces/:ws/payments/gateways/stripe`**
+`{ "credentials": { "secretKey": "sk_live_…", "webhookSecret": "whsec_…" }, "settings": { "expressWallets": true } }`
+- `secretKey` must start `sk_test_`/`sk_live_` (or `rk_`) — 422 "A Stripe secret key starts with sk_test_ or sk_live_";
+  refused key → 422 `GATEWAY_AUTH_FAILED`. Mode comes from the key (sk_test_ = test, shown only in the store preview).
+- `webhookSecret` optional (whsec_…). Show the account's `webhookUrl` with "add it in Stripe → Developers → Webhooks for
+  the checkout.session events". Without it, payments are still confirmed when the shopper comes back.
+- Setting `expressWallets` (boolean, default true): "Show Apple Pay and Google Pay buttons".
+
+**PUT `/workspaces/:ws/payments/gateways/paypal`** `{ "credentials": { "clientId": "…", "clientSecret": "…" } }`
+- Sandbox or live is detected (the account's `mode` is `test` for sandbox keys). Currencies: USD, EUR, GBP, CAD, AUD only.
+
+**New payment method `paypal`** (orders.payment_method; order lists/exports/invoices show "PayPal" / "باي بال"). Filters and
+badges that list methods should add it.
+
+### Storefront — express buttons
+**GET `/store/:ws/payment-methods?currency=USD`** — methods may now carry `express`:
+```json
+{ "methods": [
+  { "id": "cod", "provider": null, "method": "cod", "mode": "live" },
+  { "id": "stripe:card", "provider": "stripe", "method": "card", "mode": "live", "express": { "wallets": ["apple_pay", "google_pay"] } },
+  { "id": "paypal:paypal", "provider": "paypal", "method": "paypal", "mode": "live", "express": { "wallets": ["paypal"] } }
+], "currency": "USD" }
+```
+- At the **top of checkout**, for each method with `express`, show its buttons: "Apple Pay" (only where
+  `window.ApplePaySession` exists), "Google Pay", "PayPal" (yellow PayPal button). Below: "Or pay another way".
+- A button submits the normal checkout (same contact/address fields, validated first) with
+  `paymentMethod` = the method (`card` for Apple/Google Pay, `paypal` for PayPal), `paymentProvider` = its provider and
+  `returnUrl`; then redirect to `payment.redirectUrl` exactly as for card today. Stripe's page shows Apple Pay /
+  Google Pay on capable devices; PayPal's page asks the shopper to approve.
+- Coming back: call the existing `POST /store/:ws/orders/:orderId/payment/return` (the payment is confirmed by asking the
+  gateway; status `paid`). PayPal is collected at that moment.
+- PayPal is not offered for EGP/SAR/AED/MAD orders (the list already leaves it out).
+- The sandbox gateway offers `card` and `paypal` with `express` too, to try in the store preview.
+
+### Dashboard
+- Payments → connect cards "Stripe" and "PayPal" (logos), with setup steps and help links from the adapter.
+- Payment methods list: show the wallet badges from `express` next to "Card (Stripe)" and "PayPal".
+
+Wording:
+| en | ar |
+|---|---|
+| Express checkout | دفع سريع |
+| Or pay another way | أو ادفع بطريقة تانية |
+| Pay with PayPal | ادفع بـ PayPal |
+| Show Apple Pay and Google Pay buttons | اعرض أزرار Apple Pay وGoogle Pay |
+| PayPal | باي بال |
+| PayPal isn't available in this currency | PayPal مش متاح بالعملة دي |
+
+## 184. Address autocomplete at checkout — UI: pending
+
+### Storefront (public, no auth; storefront rate limit)
+- **GET `/store/:ws/address/config`** → `{ "enabled": true, "provider": "builtin" | "google" | null, "attribution": "google" | null }`
+  (cached 60 s). Show the autocomplete only when `enabled`; with `attribution: "google"` show "Powered by Google" under the list.
+- **GET `/store/:ws/address/suggest?q=…&country=EG&lang=ar&session=…`** — `q` 2–120 chars (send after 2 chars, debounce ~250 ms);
+  `country` optional (store's country); `lang` ar|en|fr; `session` optional, 8–64 chars `[A-Za-z0-9_-]` — generate one per
+  checkout visit and reuse it for suggest and details (groups Google billing).
+  → `{ "enabled": true, "suggestions": [ { "id": "p:52bf…", "text": "الحي العاشر", "secondaryText": "مدينة نصر، القاهرة", "level": "area" } ] }`
+  (at most 8; `level`: region|city|area|address). Off → `{ "enabled": false, "suggestions": [] }`.
+- **GET `/store/:ws/address/details?id=…&session=…`** →
+```json
+{ "address": { "country": "EG", "province": "القاهرة", "city": "مدينة نصر", "area": "الحي العاشر",
+  "addressLine": "12 Abbas El Akkad", "postalCode": null, "placeId": "52bf…", "location": { "lat": 30.05, "lng": 31.34 } } }
+```
+  Fill the checkout fields with the non-null values: province/city/area pickers (names are the store list's names, so they
+  select the right entries), `placeId` → the address `placeId` (delivery price), `addressLine` → street field (Google only;
+  the store list gives no street, so focus the street field next). 404 `ADDRESS_NOT_FOUND`.
+
+### Checkout UI
+- One field "Search your address" above the address fields (or the area field), dropdown of suggestions: `text` bold,
+  `secondaryText` grey; keyboard up/down/enter; "No matches — fill the address below" when empty. Manual entry always stays possible.
+
+### Dashboard — Settings → Shipping → Places (permission `shipping.manage`)
+- **GET `/workspaces/:ws/address-autocomplete`** →
+  `{ "provider": "builtin", "providers": [ { "code": "builtin", "name": { "en": "Your places list", "ar": "قائمة أماكنك" }, "needsKey": false }, { "code": "google", "name": { "en": "Google Maps", "ar": "خرائط جوجل" }, "needsKey": true } ], "hasKey": false, "lastError": null }`
+- **PUT** same path `{ "provider": "off" | "builtin" | "google", "apiKey"?: "AIza…" (20–200) }` → same shape.
+  Google without a key: 422 `ADDRESS_LOOKUP_KEY_REQUIRED`; a refused key: 422 `ADDRESS_LOOKUP_INVALID_KEY` ("is the Places API
+  enabled for it?"). The key is never returned (`hasKey` only). `lastError` shows when Google later refuses the key — shoppers
+  then get suggestions from the places list meanwhile.
+- Card "Address suggestions at checkout": radio Off / Your places list / Google Maps; key field (password) when Google;
+  note "Google bills your Google Cloud account for these lookups."
+
+Wording:
+| en | ar |
+|---|---|
+| Search your address | دوّر على عنوانك |
+| No matches — fill the address below | مفيش نتايج — اكتب العنوان تحت |
+| Powered by Google | Powered by Google |
+| Address suggestions at checkout | اقتراحات العنوان في صفحة الدفع |
+| Your places list | قائمة أماكنك |
+| Google Maps | خرائط جوجل |
+| Google API key | مفتاح Google API |
+| Google bills your Google Cloud account for these lookups. | جوجل بتحاسب حساب Google Cloud بتاعك على عمليات البحث دي. |
+
+## 185. Shopper accounts: sign in with a code, orders, saved addresses, reorder — UI: pending
+
+### Dashboard — Store settings → Customer accounts (permission `website.edit`)
+- **GET `/workspaces/:ws/shopper-accounts`** → `{ "enabled": false, "channels": ["sms"] }`
+- **PUT** same `{ "enabled": true, "channels": ["sms", "email"] }` (channels: sms|email, at least one, unique) → same shape.
+- Card: switch "Let customers sign in to see their orders"; checkboxes "Phone (SMS code)" / "Email code".
+  Note: "SMS codes are sent through your SMS provider."
+
+### Storefront — all under `/store/:ws/account`, token in header **`X-Shopper-Token`**
+- **GET `/config`** → `{ "enabled": true, "channels": ["sms","email"] }`. Hide every account link when `enabled` is false
+  (all other routes then answer 404 `SHOPPER_ACCOUNTS_OFF`).
+- **POST `/code`** `{ "phone": "010…" }` or `{ "email": "…" }` (exactly one) + optional `"locale": "ar"|"en"` →
+  `{ "sent": true, "channel": "sms", "target": "01******003", "expiresInSeconds": 600, "resendAfterSeconds": 60 }`.
+  Same answer whether the address is known or not (an unknown email simply gets no code). Errors: 429 `TOO_MANY_CODES`
+  `details.retryAfterSeconds` (60 s between codes, 5/hour, 10/day per address, 20/hour per IP); 422 `INVALID_PHONE`;
+  422 `SHOPPER_CHANNEL_OFF` ("Sign in with your phone/email").
+- **POST `/verify`** `{ "phone"|"email", "code": "123456" }` →
+  `{ "token": "…", "expiresInSeconds": 2592000, "customer": { "id", "fullName", "phone", "email", "marketingConsent", "ordersCount" }, "addresses": [...] }`.
+  Errors 422 `INVALID_CODE` (`details.attemptsLeft`), 422 `CODE_EXPIRED`, 429 `TOO_MANY_ATTEMPTS` (5 wrong → ask again).
+  A phone that never ordered becomes a contact on first sign-in. Keep the token (30 days) in localStorage; any 401
+  `SHOPPER_NOT_SIGNED_IN` → drop it and show sign in.
+- **GET `/me`** → `{ customer, addresses }`. **PATCH `/me`** `{ fullName?, email?, marketingConsent? }` → same.
+- **POST `/sign-out-everywhere`** → `{ "signedOut": true }` (all devices). Plain "Sign out" = forget the token locally.
+- **GET `/orders?before=<ISO date>`** → `{ "orders": [ { "id", "orderNumber", "createdAt", "stage": 0, "totalAmount": "50000", "currency": "EGP", "itemsCount": 2, "firstItemName": "Demo T-Shirt" } ], "nextBefore": null }`
+  (20 per page; `stage` as the tracking page: 0 placed, 1 confirmed, 2 shipped, 3 delivered).
+- **GET `/orders/:orderId`** → `{ "order": { "id", "createdAt", "paymentMethod", "shippingAddress", …everything the tracking page shows (stage, steps, items, amounts, courier, waybill, downloads, notes) } }`.
+- **POST `/orders/:orderId/reorder`** →
+  `{ "lines": [ { "variantId", "productId", "name", "quantity": 2, "unitPrice": "25000", "available": true, "reason": null } ] }`
+  `reason`: null | `low_stock` (quantity lowered to what is left) | `out_of_stock` | `unavailable`. Put the available lines in the
+  cart and open it; list the others as "No longer available".
+- **Addresses**: **GET `/addresses`**; **POST `/addresses`** `{ label?, fullName?, phone?, country (2 letters, required), province?, city (required), area?, addressLine (required), postalCode?, placeId?, isDefault? }` → 201 `{ addresses }`;
+  **PATCH `/addresses/:id`** (any field) → `{ addresses }`; **DELETE `/addresses/:id`** → `{ addresses }`. Max 10 (422
+  `TOO_MANY_ADDRESSES`); exactly one `isDefault`.
+
+### Storefront screens
+- Header: "Sign in" / account icon when `enabled`.
+- Sign in: phone (or email tab when allowed) → "Send code" → 6-digit code input with resend countdown → signed in.
+- Account: tabs "My orders" (list → order page with the tracking timeline and "Order again"), "Addresses" (list, add/edit form,
+  set default, delete), "Profile" (name, email, marketing checkbox, "Sign out", "Sign out of all devices").
+- Checkout when signed in: prefill contact from `/me`, address picker of saved addresses (default selected), "Save this address".
+
+Wording:
+| en | ar |
+|---|---|
+| Sign in | تسجيل الدخول |
+| We'll send you a code | هنبعتلك كود |
+| Send code | ابعت الكود |
+| Enter the 6-digit code sent to {target} | اكتب الكود اللي اتبعت على {target} |
+| Resend in {s}s | إعادة الإرسال بعد {s} ث |
+| My orders | طلباتي |
+| Order again | اطلب تاني |
+| No longer available | مبقاش متاح |
+| Addresses | العناوين |
+| Default | الافتراضي |
+| Sign out of all devices | الخروج من كل الأجهزة |
+| Let customers sign in to see their orders | خلّي العملاء يدخلوا يشوفوا طلباتهم |
+
+## Frontend requests (2026-10-06, docs/ux/backend-requests.md) — done
+
+### Domain purchase order of checks (money) — done
+`POST /workspaces/:ws/domains/purchases` now checks **before** registering: not a platform subdomain (422), store set up with a
+website and a slug (409 `STORE_NOT_SET_UP`), the www/root not connected to another store (409 `DOMAIN_UNAVAILABLE`), plan
+limit, availability, price (409 `DOMAIN_PRICE_CHANGED`). Nothing is registered when any fails. If something fails *after*
+the registrar registered it: 502 **`DOMAIN_CONNECT_FAILED`** "The domain was bought but could not be connected yet — support
+will finish it" (the purchase shows `status: "failed"` with `lastError`); `DOMAIN_PURCHASE_FAILED` ("nothing was charged")
+is only for failures before that. Suggested UI: on `DOMAIN_CONNECT_FAILED` show a warning (not "nothing charged").
+
+### Root domain purchase and www — done
+Buying a root domain now creates the **www record too** (CNAME/ALIAS to the store, purpose `redirect`) with the others, and
+the domain's `counterpart` carries **`dnsManaged: true`** (GET `/domains/overview` → `domains[].counterpart.dnsManaged`).
+UI: when `counterpart.dnsManaged` is true, don't ask the merchant to add the www record ("We set this up for you" /
+"جهزناه لك").
+
+### Renewal price quote — done
+- **GET `/workspaces/:ws/domains/purchases/:purchaseId/renew-quote?years=1`** (domain.manage; years 1–10) →
+  `{ "hostname": "mystore.com", "years": 2, "price": { "amount": 110000, "currency": "EGP" } | null, "expiresAt": "2029-10-06T…" }`
+  (`expiresAt` = the new expiry). 409 `DOMAIN_NOT_ACTIVE` for a purchase that isn't active/expired.
+- **POST `/purchases/:purchaseId/renew`** now takes optional **`acceptPrice`** (`{ amount, currency }` or null, as shown by the
+  quote); a different current price → 409 `DOMAIN_PRICE_CHANGED` with `details.price`. Without `acceptPrice` it behaves as before.
+- Renew dialog: years select → quote → "Renew for {price} until {date}" → confirm with `acceptPrice`.
+
+### Funnel/website email override in simple text — done
+On an override (`?funnelId=` / `?websiteId=`), **`PUT /order-emails/:key` with `"blocks": null`** now means "this override
+uses its own plain subject + body": it is stored as such and the store's blocks no longer come back (preview, test and real
+sends). An override that never sends `blocks` still inherits the store's blocks. On the store itself `blocks: null` is
+unchanged (plain body). Lists/GET show `blocks: null` for a plain override with `overridden: true`. UI: the "Plain text"
+toggle on a funnel/website email sends `blocks: null`.
+
+## 186. Shopper returns from the tracking page (and the account) — UI: pending
+
+### Dashboard — Orders → Returns settings (permission `orders.manage`)
+- **GET `/workspaces/:ws/shopper-returns`** → `{ "enabled": false, "windowDays": 14, "photoRequiredFor": ["damaged", "defective"] }`
+- **PUT** same `{ "enabled": true, "windowDays": 7 (1–365), "photoRequiredFor": [reason codes] }` → same shape.
+- Card "Let customers ask for a return": switch, "Days after delivery" number, checkboxes "Photo required for" per reason.
+- Returns list/order page (existing `GET /workspaces/:ws/returns`, `GET /orders/:id/returns`): each return now has
+  **`source`** (`merchant` | `shopper`) and **`photos`** `[{ uploadId, url, expiresAt }]` (signed links). Show a "From customer"
+  badge and the photo thumbnails; approve/reject/restock as today. A new shopper return records the event `return.requested`.
+
+### Storefront — `/store/:ws/returns` (public)
+The order is named either by the tracking page's token (`token`, the `t` of the tracking link) or, for a signed-in shopper,
+by `orderId` + header `X-Shopper-Token` (item 185).
+- **GET `/eligibility?token=…`** (or `?orderId=…`) →
+```json
+{ "eligible": true, "reason": null, "deadline": "2026-10-13T20:23:57Z", "windowDays": 7,
+  "reasons": ["damaged","defective","wrong_item","not_as_described","no_longer_wanted","arrived_late","other"],
+  "photoRequiredFor": ["damaged","defective"],
+  "items": [ { "orderItemId": "…", "name": "Demo T-Shirt", "variantOptions": { "Size": "M" }, "quantity": 3, "returnable": 3 } ],
+  "returns": [ { "id", "status": "requested", "reason": "damaged: cracked", "items": [...], "source": "shopper", "createdAt" } ] }
+```
+  `reason` when not eligible: `off` (hide the button), `cancelled`, `not_delivered`, `window_closed`, `already_requested`.
+  404 for an unknown token/order; 401 `SHOPPER_NOT_SIGNED_IN` for a bad shopper token.
+- **POST `/`** `{ "token"|"orderId", "reasonCode", "reasonDetail"? (≤280), "items": [ { "orderItemId", "quantity" } ] (1–50, unique), "photoUploadIds"? [≤4] }`
+  → 201 `{ "return": { "id", "status": "requested", "reason", "items", "source": "shopper", "createdAt" } }`.
+  Photos: upload first with the existing `POST /store/:ws/uploads` (multipart `file`, header `X-Visitor-Id`), send the
+  `upload.uploadId`s here **with the same `X-Visitor-Id`**. Errors: 409 `RETURN_NOT_POSSIBLE` (`details.reason` as above);
+  422 with `items.N.quantity` "At most N can be returned", `photoUploadIds` "Add a photo of the problem" / "A photo is
+  missing or has expired — upload it again".
+
+### Storefront screens
+- Tracking page (and account order page): "Return items" button when `eligible`, with "until {deadline}"; past returns listed
+  with their status (Requested / Approved / Rejected / Received / Refunded).
+- Return form: lines with quantity steppers up to `returnable`, reason select, details textarea, photo picker (required when
+  the reason is in `photoRequiredFor`), "Send request" → "We got your request — the store will contact you".
+
+Wording:
+| en | ar |
+|---|---|
+| Return items | ارجع منتجات |
+| Returns possible until {date} | المرتجع متاح لحد {date} |
+| Why are you returning it? | ليه عايز ترجعه؟ |
+| Damaged / Defective / Wrong item / Not as described / No longer wanted / Arrived late / Other | وصل متكسر / فيه عيب / منتج غلط / مش زي الوصف / مبقتش عايزه / وصل متأخر / سبب تاني |
+| Add a photo of the problem | ضيف صورة للمشكلة |
+| Send request | ابعت الطلب |
+| We got your request — the store will contact you | وصلنا طلبك — المتجر هيتواصل معاك |
+| Returns are closed for this order | المرتجع اتقفل للطلب ده |
+| From customer | من العميل |
+| Let customers ask for a return | خلّي العملاء يطلبوا مرتجع |
+| Days after delivery | عدد الأيام بعد الاستلام |
+
+## 187. Import contacts from CSV / Excel, with tags and marketing consent — UI: pending
+
+Permission `customers.manage`.
+- **GET `/workspaces/:ws/contacts/import/template`** → a CSV file (UTF-8 with BOM): `phone,name,email,tags,marketing_consent`
+  and one example row. Link "Download the template".
+- **POST `/workspaces/:ws/contacts/import`** — multipart: `file` (.csv or .xlsx, ≤5MB, ≤5000 rows), `mode` = `update` (default:
+  a phone already in the store gets the sheet's name/email/consent and the tags added) | `skip` (left alone), `tags` (optional,
+  comma-separated, added to every imported contact, e.g. "imported-oct"), `dryRun` = `true` to check without saving.
+  →
+```json
+{ "total": 5, "created": 3, "updated": 0, "skipped": 0, "unchanged": 0, "invalid": 1, "dryRun": true,
+  "columns": { "phone": "الموبايل", "fullName": "الاسم", "email": "البريد", "tags": "التاجات", "consent": "موافقة_التسويق" },
+  "errors": [ { "row": 4, "field": "phone", "message": "\"not-a-phone\" is not a phone number" },
+              { "row": 3, "field": "email", "message": "\"bad-email\" is not an email (the row is imported without it)" } ],
+  "moreErrors": 0 }
+```
+  Columns are matched by name, English or Arabic: phone (phone, mobile, الموبايل, الهاتف…, **required**), name (name, full_name,
+  الاسم), email (email, البريد, الإيميل), tags (tags, التاجات — separated by `,` `;` `|` `،`), marketing consent
+  (marketing_consent, accepts_marketing, consent, موافقة_التسويق — yes/no, نعم/لا, true/false, 1/0). `columns` shows which column
+  was used for each field (null = not found). Only `field: "phone"` errors skip the row; other errors import the row without
+  that value. The same phone twice: one contact, later values win, tags add up.
+  422 `INVALID_FILE` (no phone column / unreadable), 413 `FILE_TOO_LARGE`, 422 `NO_FILE`.
+- **Marketing consent is never turned on for everyone**: only a row saying yes turns it on (no means off, empty leaves it).
+  New contacts get `source: "import"`, and sync to email lists (182) and webhooks like any new contact.
+
+### Screen — Contacts → Import
+1. Upload the file, choose "Update existing contacts" / "Skip existing contacts", optional "Add these tags", then
+   "Check file" (dryRun) → summary: "{created} new, {updated} updated, {skipped} skipped, {invalid} rows without a valid phone"
+   with the matched columns and the errors table (row, field, message).
+2. "Import" (same file, dryRun false) → same summary as done.
+- A note: "Only mark marketing consent yes for people who agreed to receive your offers."
+
+Wording:
+| en | ar |
+|---|---|
+| Import contacts | استيراد العملاء |
+| Download the template | نزّل النموذج |
+| Update existing contacts | حدّث العملاء الموجودين |
+| Skip existing contacts | سيب العملاء الموجودين زي ما هم |
+| Add these tags to everyone | ضيف التاجات دي للكل |
+| Check file | راجع الملف |
+| {n} new, {m} updated, {s} skipped | {n} جديد، {m} اتحدّث، {s} اتساب |
+| {i} rows without a valid phone | {i} صف من غير رقم صحيح |
+| Only mark marketing consent yes for people who agreed to receive your offers. | علّم موافقة التسويق بـ"نعم" بس للناس اللي وافقوا يستقبلوا عروضك. |
+
+## 188. Wishlist for signed-in shoppers — UI: pending
+
+Works when the store has shopper accounts on (185); otherwise 404 `SHOPPER_ACCOUNTS_OFF`. Header `X-Shopper-Token` (401
+`SHOPPER_NOT_SIGNED_IN` without a valid one).
+- **GET `/store/:ws/account/wishlist`** →
+```json
+{ "items": [ { "id": "d5da…", "productId": "db50…", "variantId": null, "addedAt": "2026-10-06T20:30:12Z",
+  "product": { "name": "Demo T-Shirt", "slug": "demo-t-shirt", "imageUrl": null },
+  "price": { "amount": "25000", "compareAt": null, "currency": "EGP" }, "available": true } ], "count": 1 }
+```
+  Newest first. `available: false` = archived, out of stock or no longer for sale (keep showing it greyed, "Unavailable").
+- **POST `/store/:ws/account/wishlist`** `{ "productId", "variantId"? }` → 201 + the list. Adding the same product (and
+  variant) again is a no-op. 404 for a product not for sale; 422 `WISHLIST_FULL` (200 items).
+- **DELETE `/store/:ws/account/wishlist/:itemId`** → the list (404 if not theirs).
+- **POST `/store/:ws/account/wishlist/merge`** `{ "items": [ { "productId", "variantId"? } ] }` → the list. For guests:
+  keep hearts in localStorage, send them here right after sign-in, then clear them; products no longer for sale are ignored.
+- Merchant: **GET `/workspaces/:ws/wishlists/top?limit=20`** (products.view) →
+  `{ "products": [ { "productId", "name", "slug", "status", "shoppers": 12, "lastAddedAt" } ] }`.
+
+### Screens
+- Storefront: heart button on product cards and the product page (filled when on the list; a guest's tap fills it locally
+  and offers "Sign in to keep your wishlist"); account tab "Wishlist" with add-to-cart and remove.
+- Dashboard: Products → a "Most wished" card/list (product, shoppers count).
+
+Wording:
+| en | ar |
+|---|---|
+| Wishlist | المفضلة |
+| Add to wishlist | ضيف للمفضلة |
+| Remove from wishlist | شيل من المفضلة |
+| Sign in to keep your wishlist | سجّل دخول عشان تحفظ مفضلتك |
+| Unavailable | مش متاح |
+| Most wished | الأكتر في المفضلة |
+| {n} shoppers | {n} عميل |
+
+### Shipping quote `configured` with only place prices — done
+`POST /store/:ws/shipping-quote` → `quote.configured` is now **true** when any visible place of the store's own list
+(regions/cities/areas, item 163/164) has a price, even with no governorate rates, default rate, free threshold or zones.
+Before an address is picked such a store answers `rule: "no_rate"`, `amount: 0`, `configured: true` → the storefront can show
+"Calculated once you pick your area" / «بيتحسب بعد ما تختار منطقتك».
+
+### Cart quote with "<ar> (<en>)" governorate — done
+The place-name matching (`placePricing.placesOf`, used by the quote and checkout when no `placeId` is sent) now accepts the
+storefront's "القاهرة (Cairo)" spelling (either half matches), the plain Arabic or English name, and the region/city's
+platform code (`geoCode`, e.g. "cairo"). Verified: a Cairo region price of 65.00 applies to "القاهرة (Cairo)", "القاهرة",
+"Cairo" and "cairo".
+
+## 189. Gift cards: issue, sell as a product, redeem at checkout, check the balance — UI: pending
+
+### Dashboard — Marketing → Gift cards (permission `discounts.manage`), `/workspaces/:ws/gift-cards`
+- **GET `/?state=active|empty|expired|disabled&q=…&before=…&limit=50`** → `{ "giftCards": [ view ], "nextBefore": null }`;
+  `q` = a full code, its last 4, or part of the recipient's email. A view:
+```json
+{ "id": "fe86…", "last4": "T6FK", "initialAmount": "50000", "balanceAmount": "25000", "currency": "EGP", "state": "active",
+  "status": "active", "expiresAt": null, "source": "manual", "orderId": null, "customerId": null,
+  "recipientName": "Hala", "recipientEmail": "hala@example.com", "message": "Happy birthday", "note": null, "createdAt": "…" }
+```
+  `state`: active | empty | expired | disabled. `source`: manual | order.
+- **POST `/`** `{ "amount": 50000 (minor units, ≥1), "currency": "EGP", "expiresAt"?: future ISO|null, "recipientName"?, "recipientEmail"?, "message"? (≤500), "note"? (≤500, staff only), "sendEmail"?: true }`
+  → 201 `{ "giftCard": view, "code": "9KVF-TKVD-7GWL-T6FK" }` — **show the code once** with a copy button ("Save it now").
+- **GET `/:id`** → `{ giftCard, transactions: [ { id, kind: issue|redeem|refund|adjust, amount: "-25000", balanceAfter, orderId, note, createdAt } ] }`.
+- **PATCH `/:id`** `{ status?: active|disabled, expiresAt?, note?, recipientName?, recipientEmail?, adjustBy?: ±minor (not 0), adjustNote? }` → same as GET.
+  422 if an adjustment would go below zero.
+- **POST `/:id/code`** `{ "resend": false }` → `{ "code", "sent": false }` (reveal); `resend: true` emails it to the recipient
+  (422 `GIFT_CARD_NO_EMAIL`).
+- **GET/PUT `/settings`** `{ "productIds": [uuid ≤50], "validityDays": 1–3650 | null }` — products sold as gift cards.
+
+Screens: list with state chips and search; "Issue gift card" dialog; detail drawer with balance, history, disable,
+adjust balance, reveal/resend; Settings card "Products sold as gift cards" (product picker) + "Valid for {n} days".
+
+### Storefront
+- **POST `/store/:ws/gift-cards/check`** `{ "code" }` (any spacing/case) → `{ "giftCard": { "last4", "balanceAmount": "25000", "currency": "EGP", "state": "active", "expiresAt": null } }`;
+  404 `GIFT_CARD_NOT_FOUND`. Rate-limited like order tracking. A "Check your gift card balance" page/modal.
+- **Checkout** (`POST /store/:ws/checkout`): new optional **`giftCardCode`**, **with `paymentMethod: "cod"` only** (other methods:
+  422 `giftCardCode` "A gift card can be used with cash on delivery"). Checked before the order: 422 `GIFT_CARD_NOT_FOUND` /
+  `GIFT_CARD_UNUSABLE` ("has expired", "no balance left", "is no longer valid", "is in USD") on field `giftCardCode`.
+  The 201 answer adds `giftCard: { "applied": true, "amount": "25000", "last4", "balanceAmount": "0", "currency" }` and the
+  order's `amountPaid` / `financialState` (`paid` when the card covered everything, else `partially_paid`).
+  UI: a "Gift card" field under the totals with "Apply" (calls `/check` to preview: "−{min(balance, total)}"), then
+  "Pay on delivery: {total − card}". Thank-you page: "Paid with gift card ••••{last4}: {amount}".
+- Order page (dashboard): the card shows as a payment "Gift card •••• T6FK". Refunding it (existing refund action) returns
+  the amount to the card; cancelling the order returns it by itself.
+- Bought gift cards are emailed to the buyer (email template `gift_card`, the store's name and the value).
+
+Wording:
+| en | ar |
+|---|---|
+| Gift cards | كروت الهدايا |
+| Issue gift card | اعمل كارت هدية |
+| Save this code now — it won't be shown in full again | احفظ الكود ده دلوقتي — مش هيظهر كامل تاني |
+| Balance | الرصيد |
+| Gift card code | كود كارت الهدية |
+| Apply | طبّق |
+| Check your gift card balance | اعرف رصيد كارت الهدية |
+| Paid with gift card | اتدفع بكارت هدية |
+| Pay on delivery | تدفع عند الاستلام |
+| A gift card can be used with cash on delivery | كارت الهدية بيتستخدم مع الدفع عند الاستلام |
+| Products sold as gift cards | منتجات بتتباع ككروت هدايا |
+| Adjust balance | عدّل الرصيد |
+| Resend to recipient | ابعته تاني للمستلم |
+
+## 190. Blog: posts, categories, a posts index and the latest posts on the home page — UI: pending
+
+### Dashboard — Store → Blog (permission `website.edit`), `/workspaces/:ws/blog`
+- **Categories**: `GET /categories` → `{ categories: [ { id, name, slug, description, position, postsCount } ] }`;
+  `POST /categories` `{ name (1–120), slug?, description? (≤500), position? }` → 201 `{ category }`; `PATCH /categories/:id`;
+  `DELETE /categories/:id` (its posts stay, uncategorised). Slugs keep Arabic letters ("نصائح-العناية"); 409 `SLUG_TAKEN`.
+- **Posts**: `GET /posts?state=draft|published|scheduled&categoryId&q&page&limit` → `{ posts: [summary + state + updatedAt], total, page, limit }`;
+  `POST /posts`, `GET /posts/:id`, `PATCH /posts/:id`, `DELETE /posts/:id`. Body:
+```json
+{ "title": "أفضل نصائح العناية بالبشرة", "slug": "", "excerpt": "…", "coverUrl": "https://…", "authorName": "Mona",
+  "tags": ["skin"], "categoryId": "…", "status": "draft" | "published", "publishedAt": "2026-10-10T08:00:00Z" | null,
+  "seo": { "title": "", "description": "", "noindex": false },
+  "blocks": [
+    { "type": "heading", "text": "مقدمة", "level": 2 },
+    { "type": "paragraph", "text": "…" },
+    { "type": "image", "url": "https://…", "alt": "", "caption": "" },
+    { "type": "list", "items": ["…", "…"], "ordered": false },
+    { "type": "quote", "text": "…", "cite": "" },
+    { "type": "product", "productId": "…" },
+    { "type": "button", "label": "تسوق", "url": "/products" },
+    { "type": "divider" } ] }
+```
+  → `{ post: { id, title, slug, excerpt, coverUrl, authorName, tags, category, publishedAt, readingMinutes, state, status, blocks, seo, updatedAt } }`.
+  Rules: ≤200 blocks; image/cover URLs https only; button URLs https or a store path starting with "/"; product blocks must be
+  this store's products; no HTML anywhere (text is shown as text). `status: "published"` without `publishedAt` publishes now;
+  a future `publishedAt` = **scheduled** (goes live by itself). `state` = draft | published | scheduled.
+- Screens: Blog list (tabs Drafts / Published / Scheduled, search, category filter), post editor (title, link, cover,
+  excerpt, category, tags, author, block editor with the 8 block types, SEO, "Save draft" / "Publish" / "Schedule"),
+  Categories manager.
+
+### Storefront — `/store/:ws/blog` (public, cached 60 s)
+- `GET /posts?category=<slug>&tag=&page=&limit=12` → `{ posts: [ { id, title, slug, excerpt, coverUrl, authorName, tags, category, publishedAt, readingMinutes } ], total, page, limit, category }` (404 unknown category).
+- `GET /posts/:slug` → `{ post: { …summary, blocks, seo }, related: [3 summaries] }`. Product blocks come filled:
+  `{ "type": "product", "productId", "product": { "name", "slug", "imageUrl", "price": { "amount", "compareAt", "currency" } } }`
+  (a product no longer for sale is dropped). Drafts and scheduled posts: 404.
+- `GET /categories` (with `postsCount`), `GET /latest?limit=3` (home page section "From our blog").
+- Pages: `/blog` (index with category chips, pagination), `/blog/<slug>` (cover, title, date, reading time, blocks, product
+  cards with add to cart, related posts), `/blog?category=<slug>`. The sitemap now lists `/blog` and `/blog/<slug>`.
+- Home page section "Latest posts" (3 cards) for themes that want it.
+
+Wording:
+| en | ar |
+|---|---|
+| Blog | المدونة |
+| New post | مقال جديد |
+| Draft / Published / Scheduled | مسودة / منشور / مجدول |
+| Publish / Schedule / Save draft | انشر / جدوِل / احفظ مسودة |
+| {n} min read | قراءة {n} دقيقة |
+| Related posts | مقالات ذات صلة |
+| From our blog | من مدونتنا |
+| Read more | اقرأ أكتر |
+| Categories | التصنيفات |
+
+## 191. Element display rules: between dates, by device, country or UTM source — UI: pending
+
+Stored on any builder element (store pages and funnel steps), beside its style — no new endpoint for saving, it goes with
+the page/step tree as today:
+```json
+"settings": { "visibility": {
+  "from": "2026-11-20T00:00:00Z", "until": "2026-11-30T23:59:59Z",
+  "devices": ["mobile", "tablet"],
+  "countries": { "mode": "include", "list": ["EG", "SA"] },
+  "utm": { "source": ["facebook", "tiktok"], "campaign": ["black-friday"] } } }
+```
+Validation (422 on save, field `…settings.visibility.*`): only these keys; dates valid and `until` after `from`; devices from
+mobile/tablet/desktop; countries `{ mode: include|exclude, list: ["EG", …] }` (upper-case 2 letters, ≤250); utm keys
+source/medium/campaign, each a list of ≤20 values. All rules present must pass (AND); within a list, any value matches.
+
+How it applies:
+- **Dates — enforced by the backend**: public store pages (`/store/:ws/pages…`) and funnel steps (session step, generic
+  pages) are sent **without** elements whose window is closed (before `from`, or after `until`). Pages are cached ~60 s, so
+  a window opens/closes within a minute.
+- **Device, country, UTM — applied by the storefront** (the page is the same for everyone in the cache):
+  **GET `/store/:ws/visitor-context`** (public, not cached) → `{ "country": "EG" | null, "device": "mobile" | "tablet" | "desktop", "now": "…" }`.
+  Device from the browser's own width is fine too. UTM from the landing URL's `utm_source/medium/campaign` (keep the first
+  ones of the visit in sessionStorage, as the attribution code does). Reference logic (backend `pages/displayRules.evaluate`):
+  devices must include the visitor's; `include` needs a known country in the list; `exclude` hides listed countries (an
+  unknown country passes); each utm key must equal one value, case-insensitive. Render nothing (no gap) for a hidden element.
+  In the builder preview, show every element with a small "Rules" badge.
+
+### Builder UI — element panel → "Display" tab
+- "Show between" two date-time pickers (store time zone), "Devices" three toggles, "Countries" include/exclude + multi-select,
+  "Only for visitors from" UTM source / medium / campaign tag inputs, "Clear rules".
+
+Wording:
+| en | ar |
+|---|---|
+| Display rules | شروط الظهور |
+| Show between | يظهر في الفترة من |
+| and | لحد |
+| Devices | الأجهزة |
+| Mobile / Tablet / Desktop | موبايل / تابلت / كمبيوتر |
+| Only in these countries / Everywhere except | في البلاد دي بس / في كل مكان ماعدا |
+| Only for visitors from (UTM source) | للزوار اللي جايين من (UTM source) |
+| Rules | شروط |
+| Clear rules | امسح الشروط |
+
+## 192. Template marketplace: merchants submit funnel templates, the platform reviews, others use them — UI: pending
+
+Free templates only (no price anywhere). Built on the funnel share code's copy: products, offers and bumps are taken out.
+
+### Merchant — `/workspaces/:ws/marketplace` (permission `funnels.manage`)
+- **Browse**: `GET /templates?category=&q=&language=ar|en|fr&sort=popular|new&page=&limit=24` →
+  `{ templates: [ { id, name, description, category, tags, thumbnailUrl, authorName, language, stepCount, usesCount, createdAt } ], total, page, limit, categories: ["ecommerce","lead_generation","webinar","digital_product","course","service","event","other"] }`.
+- **Detail / preview**: `GET /templates/:id` → `{ template: { …card, steps: [ { key, stepType, name } ], pages: [ { key, name, builderData } ] } }`
+  (render `builderData` with the page renderer for the preview).
+- **Use**: `POST /templates/:id/use` `{ name? }` → 201 `{ funnel: { id, name, status: "draft" }, stepCount }` — open the new funnel's
+  editor; its issues list says which pages need a product/offer. Counts against the plan like any new funnel.
+- **Submit**: `POST /submissions` `{ funnelId, name (3–120), category, description?, tags? (≤10, lower-cased), thumbnailUrl? (https), authorName? (default: store name), language? }`
+  → 201 `{ submission: { …card, status: "pending", reviewNote: null, reviewedAt: null, funnelId, updatedAt } }`.
+  422 "The funnel has no pages yet"; 409 `ALREADY_SUBMITTED` (that funnel is pending or listed). The pages are copied
+  **at submission**: later edits to the funnel don't change the template until "Resubmit".
+- **Mine**: `GET /submissions` → `{ submissions: [...] }` with `status` pending | approved | rejected | withdrawn and the
+  reviewer's `reviewNote`. `PATCH /submissions/:id` `{ …card fields, resubmit?: true }` — `resubmit` takes a fresh copy of the
+  funnel and goes back to pending; editing a listed card also goes back to review. `DELETE /submissions/:id` → withdrawn
+  (removed from the marketplace; funnels already copied stay).
+
+### Platform console — `/admin/marketplace` (platform permission `templates.view` / `templates.manage`)
+- `GET /admin/marketplace?status=pending|approved|rejected|withdrawn` → `{ templates: [ …own view + workspaceId ], total }` (oldest first).
+- `GET /admin/marketplace/:id` → with `steps`, `pages` (builderData) and `edges` for the review preview.
+- `POST /admin/marketplace/:id/review` `{ action: "approve" | "reject" | "unlist", note? }` — reject needs a note (422).
+
+### Screens
+- Funnels → "Template marketplace" tab: category chips, search, sort, cards (picture, name, author, pages, uses), preview
+  modal with page tabs, "Use this template" (name prompt).
+- Funnel editor → "Share to marketplace" (form: name, category, description, tags, picture, author name, language), and
+  Funnels → "My submissions" with status badges and the reviewer's note, Edit / Resubmit / Withdraw.
+- Platform console → "Marketplace review" queue with preview, Approve / Reject (note) / Unlist.
+
+Wording:
+| en | ar |
+|---|---|
+| Template marketplace | سوق القوالب |
+| Use this template | استخدم القالب ده |
+| Share to marketplace | شارك في سوق القوالب |
+| Pending review / Listed / Needs changes / Withdrawn | مستني المراجعة / منشور / محتاج تعديل / اتسحب |
+| Resubmit | ابعته تاني |
+| Withdraw | اسحبه |
+| {n} pages · used {m} times | {n} صفحات · اتستخدم {m} مرة |
+| Products and offers are not copied — pick yours after | المنتجات والعروض مش بتتنقل — اختار بتوعك بعدين |
+
+## 193. Zapier and Make — UI: pending
+
+Connection is an API key (existing Settings → Developers → API keys) on the public API; the mapping to enter in Zapier's /
+Make's developer consoles is in `src/modules/publicApi/integrations/README.md`.
+- **GET `/api/public/v1/me`** now also returns `store: { id, name, currency }` (the connection label).
+- **GET `/api/public/v1/webhooks/samples/:event?limit=3`** (scope `webhooks:write`) → an array of the store's latest real
+  payloads of that event, newest first, in the exact delivery shape `{ id, type, createdAt, workspaceId, data }`; with none
+  yet, one marked `sample: true`. 404 for an unknown event. Works for every event of `GET /webhooks/events`, including
+  `order.created` and `order.status_changed`.
+- Subscribe / unsubscribe are the existing `POST /webhooks` `{ url, events }` and `DELETE /webhooks/:id`. A store can now hold
+  **25** webhook subscriptions (was 10), since every trigger is one.
+- App store: **Zapier** and **Make** cards (category Orders, available to every store) open Settings → Developers.
+
+### Dashboard
+- App cards Zapier / Make → a short guide page: "1. Create an API key with the Webhooks scope (and Orders read for order
+  fields). 2. In Zapier/Make, search Zimos and paste the key." with a "Create API key" button preselecting the scopes
+  `webhooks:write`, `orders:read`.
+- Settings → Developers → Webhooks: endpoints whose URL is on hooks.zapier.com or hook.*.make.com get a "Zapier"/"Make" badge.
+
+Wording:
+| en | ar |
+|---|---|
+| Connect Zapier | اربط زابير |
+| Connect Make | اربط ميك |
+| Create an API key with the Webhooks scope, then paste it in Zapier | اعمل مفتاح API بصلاحية الـ Webhooks، وبعدين الصقه في زابير |
+| Your automations | الأتمتة بتاعتك |
+
+## 194. Back-in-stock alerts — UI: pending
+
+### Storefront
+- **POST `/store/:ws/stock-alerts`** `{ "variantId", "email" | "phone" (exactly one), "locale"?: ar|en|fr }` → 201
+  `{ "subscribed": true, "channel": "email" | "sms" }`. Asking twice is fine (one alert per variant and address).
+  409 `IN_STOCK` when the variant can be bought (refresh the page state); 404 for a product not for sale; 422
+  `INVALID_PHONE`; 429 after 20 alerts an hour from one visitor.
+- Product page / quick view: when the selected variant is sold out (and no overselling), replace "Add to cart" with
+  "Notify me when it's back" → email (or phone) field → "Notify me" → "We'll tell you once when it's back".
+- The shopper gets one email ("{product} is back in stock", "Order now" button to the product page) or SMS when the
+  variant's stock goes from 0 to available. Nothing else is sent to that address.
+
+### Dashboard — Products (permission `products.view`)
+- **GET `/workspaces/:ws/stock-alerts`** → `{ "variants": [ { "productId", "productName", "variantId", "sku", "optionValues": { "Size": "M" }, "waiting": 2, "notified": 0, "lastRequestAt" } ] }`
+  (most waited first, 200 rows).
+- A "Waiting for restock" card on Products/Inventory and a badge "{n} waiting" next to sold-out variants; restocking
+  (any stock edit, import or return that makes the variant available) sends the alerts by itself.
+
+Wording:
+| en | ar |
+|---|---|
+| Notify me when it's back | بلغني لما يرجع |
+| We'll tell you once when it's back | هنبلغك مرة واحدة لما يرجع |
+| Waiting for restock | مستنيين يرجع |
+| {n} waiting | {n} مستني |
+
+## 195. Pre-orders — UI: pending
+
+### Dashboard — product page → "Pre-orders" card (view `products.view`, save `products.manage`)
+- **GET `/workspaces/:ws/preorders/:productId`** →
+```json
+{ "productId": "…", "name": "Demo T-Shirt",
+  "preorder": { "enabled": true, "shipsAt": "2026-11-15", "limit": 3, "message": "Ships mid-November" },
+  "variants": [ { "id": "…", "sku": "DEMO-TSHIRT-M", "optionValues": { "Size": "M" }, "available": -2, "preordered": 2 } ] }
+```
+- **PUT `/workspaces/:ws/preorders/:productId`** `{ "enabled": true, "shipsAt"?: "YYYY-MM-DD" | null, "limit"?: 1–1000000 | null (no limit), "message"?: ≤200 }` → same shape.
+- **GET `/workspaces/:ws/preorders`** → `{ products: [ { productId, name, shipsAt, limit, preordered } ] }` (products taking pre-orders).
+- Card: switch "Take pre-orders when sold out", "Expected ship date", "Limit per variant (units beyond stock)", "Message on
+  the product page". Variants table shows "Pre-ordered: n".
+
+How it works: when a variant runs out, checkout keeps selling it until `limit` units beyond stock (per variant; no limit
+when null) — otherwise 409 `INSUFFICIENT_STOCK` as before. Cancelling orders or adding stock frees room. A line sold beyond
+stock gets **`preorderShipsAt`** (on the order's items) and the order gets the tag **`preorder`** (filter orders by tag).
+
+### Storefront
+- Product payload (`GET /store/:ws/products/:id` → `product.preorder`): `{ "shipsAt": "2026-11-15", "message": "…", "limited": true }`
+  or null. When the selected variant is sold out and `preorder` is set: button "Pre-order", note "Ships by {date}" + message;
+  otherwise "Sold out" (and the back-in-stock form, 194).
+- Order tracking / thank-you: show "Pre-order — ships by {date}" for items with `preorderShipsAt`.
+
+Wording:
+| en | ar |
+|---|---|
+| Pre-order | اطلبه مسبقًا |
+| Ships by {date} | هيتشحن قبل {date} |
+| Take pre-orders when sold out | استقبل طلبات مسبقة لما المنتج يخلص |
+| Expected ship date | معاد الشحن المتوقع |
+| Limit per variant | الحد لكل نوع |
+| Pre-ordered | اتطلب مسبقًا |
+
+## 196. Cookie consent — UI: pending
+
+### Dashboard — Store settings → Privacy (permission `website.edit`)
+- **GET `/workspaces/:ws/cookie-consent`** → `{ "mode": "off", "countries": null, "policyUrl": null, "texts": {} }`
+- **PUT** same `{ "mode": "off" | "notice" | "opt_in", "countries"?: ["DE","FR"] | null, "policyUrl"?: "https://…" | "/pages/privacy" | null, "texts"?: { "ar": { "message", "accept", "reject" }, "en": {…}, "fr": {…} } }`
+  (message ≤500, buttons ≤40). Off (default) = no banner, as today. Notice = a banner that informs; tracking runs.
+  **Ask first (opt_in)** = nothing tracks until the shopper accepts; `countries` limits who is asked (empty = everyone; an
+  unknown country is asked).
+- Card: radio Off / Notice only / Ask first, countries multi-select ("Ask only visitors from…"), policy link, texts per language.
+
+### Storefront
+- `GET /store/:ws` → `store.cookieConsent`: `{ "mode": "off" }` or `{ mode, countries, policyUrl, texts }`.
+- Banner (bottom, both buttons equal): show for `notice` (one "OK" button) and for `opt_in` ("Accept" / "Reject"; when
+  `countries` is set, only for visitors whose `GET /store/:ws/visitor-context` country is listed or unknown). Remember the
+  choice (localStorage, 6 months) and offer "Cookie settings" in the footer to change it.
+- With `opt_in` and no "Accept": **don't load the browser pixels / GTM / Clarity**, and send the choice to the backend:
+  - event batches (`POST /store/:ws/events`): add `"consent": { "marketing": true | false }` — without `true` the server
+    sends nothing to the ad platforms for that batch;
+  - checkout (`POST /store/:ws/checkout`): add `"trackingConsent": true | false` — kept on the order; without `true` the
+    order's server-side purchase event is not sent.
+  Analytics inside Zimos (visits, funnels) are first-party and keep working.
+
+Wording:
+| en | ar |
+|---|---|
+| We use cookies to improve your visit and measure our ads. | بنستخدم الكوكيز عشان نحسّن زيارتك ونقيس إعلاناتنا. |
+| Accept | موافق |
+| Reject | لا شكرًا |
+| Cookie settings | إعدادات الكوكيز |
+| Privacy policy | سياسة الخصوصية |
+| Off / Notice only / Ask first | مقفول / إشعار بس / اسأل الأول |
+| Ask only visitors from | اسأل بس الزوار من |
+
+## 197. Store gates: password, coming soon, age check — UI: pending
+
+### Dashboard — Store settings → Store access (permission `website.publish`)
+- **GET `/workspaces/:ws/store-gate`** → `{ "mode": "off" | "password" | "coming_soon", "hasPassword": true, "message": "Private sale", "opensAt": null, "lockFunnels": false, "ageCheck": { "enabled": true, "minAge": 18, "message": null } }` (the password is never returned).
+- **PUT** same `{ "mode", "password"? (4–100; required the first time for password mode), "message"? (≤500), "opensAt"? ISO|null, "lockFunnels"?, "ageCheck"?: { "enabled", "minAge" 13–25, "message"? } }`.
+  Changing the password signs every visitor out.
+- **GET `/workspaces/:ws/store-gate/signups`** → `{ signups: [ { email, locale, createdAt, notifiedAt } ], total }` (export as CSV
+  client-side; "Email them when you open" can use the email campaigns of item 200).
+- Card: radio Open / Password / Coming soon; password field; message; opening date; "Also lock funnels" switch;
+  Age check switch + minimum age + message; "Sign-ups ({n})" link.
+
+### Storefront
+- `GET /store/:ws` → `store.gate`: `{ mode, message, opensAt, ageCheck }`. When `mode` ≠ off, every store route except the
+  gate's answers **423 `STORE_LOCKED`** with `details.gate` — show the gate page instead of the store:
+  - password: message + password field → **POST `/store/:ws/gate/unlock`** `{ password }` → `{ token, expiresInSeconds }` (30 days);
+    send it as header **`X-Store-Gate`** on every store call (localStorage). 422 `WRONG_PASSWORD`.
+  - coming soon: message, countdown to `opensAt` if set, and the email form.
+  - both: **POST `/store/:ws/gate/signup`** `{ email, locale? }` → 201 `{ signedUp: true }` (same email twice is fine).
+- Still open while locked: order tracking and payment returns, downloads, courses, subscriptions, affiliate portal,
+  analytics events, fonts, visitor context — and funnels unless `lockFunnels`. Staff previews (X-Store-Preview) pass.
+- Age check (`ageCheck.enabled`): a full-screen "Are you {minAge} or older?" before entering (Yes → remember for the
+  session; No → a "Sorry" screen). It is the shopper's own answer, not a lock.
+
+Wording:
+| en | ar |
+|---|---|
+| This store is password protected | المتجر ده محمي بباسورد |
+| Enter password | اكتب الباسورد |
+| Opening soon | هنفتح قريب |
+| Tell me when you open | بلغني لما تفتحوا |
+| Are you {n} or older? | عندك {n} سنة أو أكتر؟ |
+| Yes / No | أيوه / لأ |
+| Store access | الدخول للمتجر |
+| Open / Password / Coming soon | مفتوح / بباسورد / قريبًا |
+| Also lock funnels | اقفل الفانلز كمان |
+
+## 198. Purchase limits per product — UI: pending
+
+### Dashboard — product page → "Purchase limits" (view `products.view`, save `products.manage`)
+- **GET `/workspaces/:ws/purchase-limits/:productId`** → `{ "productId", "limits": { "min": 2, "max": 3, "maxPerCustomer": 4 } }` (nulls = no limit).
+- **PUT** same `{ "min"?, "max"?, "maxPerCustomer"? }` (1–100000 or null; min ≤ max; maxPerCustomer ≥ max). `{}` clears them.
+- Fields: "Minimum per order", "Maximum per order", "Maximum per customer (all orders)". Units count every variant and
+  offer of the product together. Staff-created orders are not limited.
+
+### Storefront
+- Product payload: `product.purchaseLimits` = `{ min, max, maxPerCustomer }` or null — set the quantity picker's min/max and
+  show "Max {n} per order" / "Min {n}".
+- Cart (`POST /store/:ws/cart/items`, `PATCH /cart/items/:id`): 422 when the product's units in the cart would pass `max`,
+  `details: [{ field: "quantity", message: "At most 3 of \"…\" per order", productId, max }]`.
+- Checkout (`POST /store/:ws/checkout`): 422 with `details: [{ field: "items", message, productId, min | max | maxPerCustomer, left? }]` —
+  messages "Order at least 2 of …", "At most 3 of … per order", "You can buy 1 more of …" / "You already bought the most …
+  one customer can" (per customer = earlier orders by the same phone that were not cancelled). Show the message on the
+  product's line.
+
+Wording:
+| en | ar |
+|---|---|
+| Purchase limits | حدود الشراء |
+| Minimum per order | أقل كمية في الطلب |
+| Maximum per order | أكبر كمية في الطلب |
+| Maximum per customer | أكبر كمية للعميل الواحد |
+| Max {n} per order | بحد أقصى {n} في الطلب |
+| You can buy {n} more | تقدر تشتري {n} كمان |
+
+## 199. Estimated delivery dates — UI: pending
+
+### Dashboard — Shipping → Delivery times (permission `shipping.manage`)
+- **GET `/workspaces/:ws/delivery-estimates`** →
+```json
+{ "enabled": true, "default": { "minDays": 2, "maxDays": 4 }, "regions": { "cairo": { "minDays": 1, "maxDays": 2 } },
+  "places": { "<store place id>": { "minDays": 1, "maxDays": 1 } }, "cutoffHour": 14, "skipDays": [5] }
+```
+- **PUT** same shape (`enabled` required; days 0–90 / 0–120, min ≤ max; `regions` keyed by the platform governorate codes of
+  `/geo` lists, ≤100; `places` keyed by store place ids (item 163), ≤2000; `cutoffHour` 0–23 or null; `skipDays` 0=Sunday…6).
+- Screen: switch; default min–max days; a table of governorates (and, when the store has its own places, cities/areas)
+  with min–max; "Orders after {hour} ship the next day"; "Days we don't deliver" (weekday chips).
+
+### Storefront
+- **GET `/store/:ws/delivery-estimate?province=&city=&area=&placeId=&country=`** (public, cached 5 min) →
+  `{ "estimate": { "minDays": 1, "maxDays": 2, "from": "2026-10-08", "to": "2026-10-10", "source": "place:area" | "region" | "default" } }`
+  or `{ "estimate": null }` (off). Working days in the store's time zone, after the cutoff, skipping `skipDays`.
+- Product page: "Get it {from} – {to}" (with the visitor's saved/selected governorate, else the default). Cart and checkout:
+  the shipping quote (`POST /store/:ws/shipping-quote`) now returns `quote.deliveryEstimate` for the address.
+- The window is kept on the order (`shippingSnapshot.deliveryEstimate`) and shown on tracking (`result.deliveryEstimate`)
+  and the thank-you page: "Expected {from} – {to}".
+
+Wording:
+| en | ar |
+|---|---|
+| Get it {from} – {to} | هيوصلك من {from} لـ {to} |
+| Expected delivery | التوصيل المتوقع |
+| Delivery times | مواعيد التوصيل |
+| Orders after {hour} ship the next day | الطلبات بعد الساعة {hour} بتتشحن تاني يوم |
+| Days we don't deliver | أيام مفيش فيها توصيل |
+
+## Frontend requests (2026-10-06, second batch, docs/ux/backend-requests.md) — done
+
+### CORS: `X-Shopper-Token` — done
+The store API (`/api/v1/store/...`) preflight now allows **`X-Shopper-Token`** (signed-in shopper, 185/186) and
+**`X-Store-Gate`** (password-unlocked store, 197). Nothing to change in the UI.
+
+### App store: Shopify and WooCommerce — done
+`GET /workspaces/:ws/apps`: `shopify` and `woocommerce` are now `availability: "available"` with
+**`openPath: "/apps/dropshipping"`** (they open the dropship page's «متجرك التاني» section, 181).
+
+### Product link import report (180) — done
+`GET /workspaces/:ws/catalog/imports/:importId` (and the list) now also return, once the import has run:
+```json
+{ "import": { "id": "…", "kind": "etsy_link", "status": "done", "total": 1, "createdCount": 1, "failedCount": 0, "errors": [],
+  "productIds": ["aec481c7-…"],
+  "results": [{ "row": 1, "productId": "aec481c7-…", "name": "Wooden lamp", "sourceCurrency": "USD", "reviewsImported": 12 }],
+  "reviewsImported": 12 } }
+```
+`sourceCurrency` is the page's price currency (null when the page gives none, or for files and Shopify links); `reviewsImported`
+counts the imported reviews held as `pending`. Imports from before this change have empty `results`/`productIds`. UI: open the
+new draft by `productIds[0]` and show «السعر بعملة الصفحة: USD — راجعه قبل النشر» / "Price is in USD — check it before
+publishing" and «اتنقل 12 تقييم مستنيين موافقتك» / "12 reviews imported, waiting for your approval".
+
+### Own error codes for link refusals (180) — done
+`POST /workspaces/:ws/catalog/products/import` with `{ url }` answers 422 with its own `code` for each refusal (store and
+Shopify links alike; `details[0].field` stays `url`):
+
+| code | when | en | ar |
+|---|---|---|---|
+| `LINK_INVALID` | not a full link | Paste the full product link, starting with https:// | الصق لينك المنتج كامل، بيبدأ بـ https:// |
+| `LINK_NOT_HTTPS` | http, ftp… | The link must start with https:// | اللينك لازم يبدأ بـ https:// |
+| `LINK_HAS_CREDENTIALS` | user:pass@ in the link | The link must not contain a username or password | اللينك ميكونش فيه اسم مستخدم أو باسورد |
+| `LINK_NOT_PRODUCT` | not a product link of AliExpress, Etsy, CJ, YouCan or a Shopify store (/products/…) | This is not a product link we can import | ده مش لينك منتج نقدر نستورده |
+| `LINK_NO_PRODUCT_DATA` | the page publishes no product data / the Shopify link returned no product | That page does not show its product details — import a sheet instead | الصفحة دي مش بتنشر بيانات المنتج — استورده من شيت |
+| `IMPORT_SOURCE_UNREACHABLE` | the page could not be read (timeout, 404…) | We could not reach that page — try again later | مقدرناش نوصل للصفحة — جرب تاني بعدين |
+
+## 200. Email campaigns — WITHDRAWN, do not build
+
+The email campaigns backend (`/workspaces/:ws/email-campaigns`, `/email-campaigns/open`) was removed again: SPEC §21
+forbids campaigns of any kind, email blasts included (owner, 2026-10-03). If any screen, api-client call or menu entry
+for it was started, please remove it. Nothing else changes: the abandoned-cart email's unsubscribe page works as before,
+and it now also works while a store is locked by a store gate.
+
+## 201. Gift cards with online payments — UI: pending
+
+`POST /store/:ws/checkout` now takes **`giftCardCode` with online payments** too (card / wallet / any gateway method), not
+only cash on delivery. Bank transfer still refuses it (422 on `giftCardCode`: "A gift card can be used with cash on delivery
+or an online payment").
+
+- The card's part is **held** at checkout and the gateway is asked only for the rest. The response's `giftCard`:
+  `{ "applied": true, "held": true, "amount": "5000", "last4": "LFDM", "balanceAmount": "0", "currency": "EGP" }`
+  (`applied: false` + `reason`: `unusable` | `nothing_due` | `error` | `covers_order_cod_unavailable` — then the gateway charges the
+  full total). `payment.redirectUrl` charges total − card.
+- Paid at the gateway → the order shows two payments (gateway + `gift_card`), `amountPaid = totalAmount`, `paid`.
+- Expired unpaid or cancelled → the hold goes back to the card (card ledger: `hold_released` + `release`).
+- **Switch to cash on delivery** → the card pays its part now; the courier collects the rest.
+- **Card covers the whole order** → no gateway at all: 201 with **`paidByGiftCard: true`**, `order.paymentMethod: "cod"`,
+  `financialState: "paid"`, no `payment` object. (If the store has cash on delivery off, the hold is undone and the gateway
+  charges the full total; `giftCard.reason: "covers_order_cod_unavailable"`.)
+
+Shopper payment status (`GET /store/:ws/orders/:id/payment`) has two new fields: **`giftCardHeld`** (the held amount) and
+**`amountDue`** (total − paid − held). A cash-on-delivery order partly paid by a card or deposit now reads `status: "cod"`
+(it read `paid` before).
+
+Card ledger (`GET /workspaces/:ws/gift-cards/:id` → `transactions[].kind`) has new kinds: `hold` (held for an unpaid online
+order), `hold_released`, `release` (given back). A captured hold reads `redeem` as before.
+
+### Storefront
+- Checkout: show the gift card field for every payment method except bank transfer; after it's applied show
+  «كارت الهدية هيدفع 50 ج.م — هتدفع الباقي 200 ج.م أونلاين» / "Your gift card pays EGP 50 — pay the remaining EGP 200 online".
+- When the response has `paidByGiftCard: true`, go straight to the thank-you page: «كارت الهدية دفع الطلب كله» / "Your gift
+  card paid for the whole order".
+- Payment page / retry: show `amountDue` as the amount to pay and, when `giftCardHeld > 0`, a line «من كارت الهدية: 50 ج.م» /
+  "From gift card: EGP 50".
+- Expired order page: «رجعنا رصيد كارت الهدية» / "Your gift card balance was returned".
+
+### Dashboard
+- Gift card detail ledger: labels for the new kinds — hold «محجوز لطلب» / "Held for an order", release «رجع للكارت» /
+  "Returned to card", hold_released «اتفك الحجز» / "Hold released".
+
+## 202. Scheduled summary reports — UI: pending
+
+A daily and/or weekly summary email to chosen team members, with the dashboard home's numbers against the period before:
+sales, orders, average order, confirmation rate, delivery rate, new customers, lost orders, net profit, and the top 5
+products. Sent at the chosen hour in the store's time zone, once per period, in each member's dashboard language.
+
+### Endpoints — `/api/v1/workspaces/:ws/scheduled-reports`
+- `GET /` (`analytics.view`) →
+```json
+{ "daily": { "enabled": true, "hour": 9 }, "weekly": { "enabled": false, "weekday": 6, "hour": 9 },
+  "recipientUserIds": ["…"], "timeZone": "Africa/Cairo",
+  "members": [{ "userId": "…", "email": "sara@store.com", "fullName": "Sara", "locale": "ar" }],
+  "lastSent": [{ "kind": "daily", "periodKey": "2026-10-07", "sentCount": 2, "sentAt": "…" }] }
+```
+  `members` = active members who can see analytics (the only ones who can be chosen).
+- `PUT /` (`workspace.manage`) `{ daily: { enabled, hour 0–23 }, weekly: { enabled, weekday 0–6 (0 Sunday … 6 Saturday), hour }, recipientUserIds: [≤50] }`
+  → same as GET. 422 on `recipientUserIds`: "Only active team members who can see analytics can get reports" / "Choose who gets the report" (a report on with nobody chosen).
+- `GET /preview?kind=daily|weekly` (`analytics.view`) → `{ report, email: { subject, html, text } }`; `report` =
+  `{ kind, fromDay, lastDay, currency, metrics: [{ key, type: money|count|rate, label: { en, ar }, value, previous, changePercent, changePoints }], topProducts: [{ productId, name, quantity, sales }] }`
+  (money in minor units; rates in %, their change in points).
+- `POST /send-test` `{ kind }` (`analytics.view`) → `{ sent: true, email }`: the report now, to the signed-in member only.
+
+Daily covers yesterday (store time); weekly covers the 7 days before the send day.
+
+### Screen — Settings → Notifications → "Summary reports" (or Analytics → "Email reports")
+- Two cards: «تقرير يومي» / "Daily report" (toggle + hour) and «تقرير أسبوعي» / "Weekly report" (toggle + day + hour),
+  hours shown in the store's time zone «بتوقيت المتجر (القاهرة)» / "Store time (Cairo)".
+- «مين يستلم التقرير» / "Who gets it": checkboxes from `members` (name + email).
+- Buttons: «معاينة» / "Preview" (render `email.html` in a frame) and «ابعتهولي دلوقتي» / "Send it to me now".
+- Footer: last sent from `lastSent` «آخر تقرير اتبعت: …» / "Last sent: …".
+- Hint when no member has analytics access: «مفيش حد في الفريق يقدر يشوف التحليلات» / "No team member can see analytics".
+
+## 203. Loyalty points — UI: pending
+
+Customers earn points on delivered orders and spend them at checkout. Spending needs a **signed-in shopper**
+(`X-Shopper-Token`, shopper accounts from 185 must be on). The merchant sets every number; with no earn rate or point
+value the programme stays off.
+
+### Settings — `/api/v1/workspaces/:ws/loyalty`
+- `GET /` (`customers.view`) → `{ settings: { enabled, earnPointsPerUnit, pointValue, minRedeemPoints, maxRedeemPercent, expiryDays }, active, currency, customersWithPoints, outstandingPoints, outstandingWorth }`
+  (`active` = enabled and fully set; `outstandingWorth` in minor units).
+- `PUT /` (`discounts.manage`) `{ enabled, earnPointsPerUnit (0.01–1000, points per 1 unit of the store currency), pointValue (int minor units per point, e.g. 10 = EGP 0.10), minRedeemPoints (≥1, default 1), maxRedeemPercent (1–100, default 100), expiryDays (30–1825 or null) }` — `earnPointsPerUnit` and `pointValue` required when `enabled`.
+- `GET /customers/:customerId` (`customers.view`) → `{ balance, worth, currency, expiresAt, history: [{ kind, points, balanceAfter, amount, currency, orderId, note, createdAt }] }`
+- `POST /customers/:customerId/adjust` (`customers.manage`) `{ points: ±int (not 0), note (1–200) }` → `{ balance, applied }` (never below 0).
+
+History `kind`s: `earn`, `redeem`, `hold` (for an unpaid online order), `release` (given back), `refund` (refund of a points payment), `reverse` (taken back: return/cancel), `expire`, `adjust`.
+
+### Storefront
+- `GET /store/:ws/loyalty` → `{ program: { earnPointsPerUnit, pointValue, minRedeemPoints, maxRedeemPercent, expiryDays, currency } | null }` (5-min cache).
+- `GET /store/:ws/account/loyalty` (X-Shopper-Token) → `{ program, balance, worth, currency, expiresAt, history }`.
+- Checkout `POST /store/:ws/checkout` takes **`loyaltyPoints`** (int) with `X-Shopper-Token`, with COD or online (not bank transfer).
+  Errors (on `loyaltyPoints`): 401 `SHOPPER_NOT_SIGNED_IN`, 422 `LOYALTY_OFF`, `LOYALTY_TOO_FEW`, `LOYALTY_NOT_ENOUGH`.
+  Response `loyalty`: `{ applied: true, held: false|true, points: 1000, amount: "10000", balance: 2000, currency: "EGP" }`. Fewer points than asked may be used: at most `maxRedeemPercent` of the total and what's still due.
+  COD: paid at once (order `partially_paid`). Online: held, and the gateway charges the rest. The hold is taken when paid, or on a switch to COD, and returned on expiry or cancel (same as gift cards, 201).
+  Points (plus any gift card) covering the whole order → COD with nothing to collect: `paidInStore: true` (and `paidByGiftCard` when a card took part).
+- Shopper payment status adds **`pointsHeld`** (beside `giftCardHeld` and `amountDue`).
+
+### Screens
+- Dashboard → Customers → **Loyalty programme**: toggle, «كل 1 ج.م = X نقطة» / "Points per EGP 1", «قيمة النقطة» / "Value of a point" (show "100 points = EGP 10"), min points, max % of an order, expiry «النقط بتنتهي بعد X يوم من غير شرا» / "Points expire after X days without activity". Summary: customers with points, outstanding points and their worth.
+- Customer page: balance card + history + «إضافة/خصم نقط» / "Add or take points" (points, note).
+- Storefront product page: «هتكسب 250 نقطة» / "Earn 250 points" (price ÷ 100 × earnPointsPerUnit, rounded down).
+- Checkout (signed in): «استخدم نقطك (عندك 2000 = 200 ج.م)» / "Use your points (2000 = EGP 200)" with an amount field; not signed in: «سجّل دخول عشان تستخدم نقطك» / "Sign in to use your points".
+- Account → «نقطي» / "My points": balance, worth, expiry date, history.
+- Refunds: the merchant can refund a gift-card or points payment by its `paymentId` too (it goes back to the card or the points). Before this, only gateway payments could be named.
+
+## 204. Store credit — UI: pending
+
+Money a customer holds at the store (store currency, minor units). Staff give it, or refund an order to store credit
+instead of money. A **signed-in shopper** (`X-Shopper-Token`) spends it at checkout, with COD or online (not bank
+transfer), exactly like gift cards and points.
+
+### Staff — `/api/v1/workspaces/:ws/store-credit`
+- `GET /` (`customers.view`) → `{ spendingEnabled, customers: [{ customerId, fullName, phone, email, balance }], outstanding, currency }` (holders, biggest first, 500 max).
+- `PUT /settings` (`discounts.manage`) `{ enabled }` — whether shoppers may spend credit at checkout (default on).
+- `GET /customers/:customerId` (`customers.view`) → `{ balance, currency, history: [{ kind, amount, balanceAfter, currency, orderId, note, createdAt }] }`.
+  Kinds: `grant`, `adjust` (taken off), `refund_credit` (an order refunded as credit), `redeem`, `hold`, `release`, `refund` (refund of a credit payment).
+- `POST /customers/:customerId/adjust` (`refunds.manage`) `{ amount: ±int minor units (not 0), note }` → `{ balance, applied }`; taking more than the balance → 422 `STORE_CREDIT_NOT_ENOUGH`.
+- `POST /orders/:orderId/refund` (`refunds.manage`) `{ amount, reason }` → 201 `{ refund: { id, amount, status: "processed", reason: "Store credit: …" }, balance }`.
+  A normal refund of the order (counted in `amountRefunded`, with a credit note), paid onto the customer's credit. At most
+  what was paid and not refunded (422 `REFUND_EXCEEDS_ELIGIBLE_AMOUNT`). 422 `ORDER_HAS_NO_CUSTOMER` / `STORE_CREDIT_CURRENCY` (other currency).
+- The normal refund endpoint can name a `store_credit` payment by `paymentId` (puts it back on the balance), like gift cards and points.
+
+### Storefront
+- Checkout `useStoreCredit: true` (+ `X-Shopper-Token`): uses as much credit as the order takes. Response `storeCredit`: `{ applied, held, amount, balance, currency }`.
+  Errors on `useStoreCredit`: 401 `SHOPPER_NOT_SIGNED_IN`, 422 `STORE_CREDIT_EMPTY`, `STORE_CREDIT_OFF`.
+- Online: held, and the gateway charges the rest; taken on payment, returned on expiry or cancel. Shopper payment status adds `storeCreditHeld`. Covering the whole order → `paidInStore: true`.
+- `GET /store/:ws/account/store-credit` (X-Shopper-Token) → `{ spendingEnabled, balance, currency, history }`.
+
+### Screens
+- Customer page: «رصيد المتجر» / "Store credit" card with balance and history; «إضافة رصيد» / "Add credit" and «خصم رصيد» / "Take credit" (amount + note).
+- Order page → Refund: a choice «ترجيع فلوس» / "Refund money" or «ترجيع كرصيد في المتجر» / "Refund as store credit" (the second calls `/store-credit/orders/:id/refund`).
+- Customers → «أرصدة العملاء» / "Store credit balances": list + total outstanding; toggle «العملاء يقدروا يستخدموا رصيدهم في الدفع» / "Customers can spend credit at checkout".
+- Checkout (signed in, balance > 0): checkbox «استخدم رصيدك (150 ج.م)» / "Use your store credit (EGP 150)".
+- Account: «رصيدي» / "My credit" with the history.
+
+## 205. Wholesale price lists — UI: pending
+
+Prices for customers with a tag (e.g. `wholesale`), applied only when they are **signed in** (`X-Shopper-Token`). A list
+is either a **percent** off (every product or chosen products) or **fixed** prices per variant with minimum quantities
+(tiers). A line gets the lowest price among its normal price and every list that matches it. Offer bundles and funnels keep
+their own prices.
+
+### Staff — `/api/v1/workspaces/:ws/price-lists` (read `products.view`, change `products.manage`)
+- `GET /` → `{ priceLists: [PriceList] }`; `GET /:id`; `DELETE /:id` → 204.
+- `POST /` (201) and `PUT /:id` (full replace):
+```json
+{ "name": "Wholesale", "customerTags": ["wholesale"], "kind": "fixed",
+  "prices": [{ "variantId": "…", "minQuantity": 1, "priceAmount": 20000 }, { "variantId": "…", "minQuantity": 5, "priceAmount": 18000 }],
+  "isActive": true }
+{ "name": "VIP", "customerTags": ["vip"], "kind": "percent", "percent": 30, "productIds": ["…"] }   // productIds null/[] = all products
+```
+  Rules: name 1–120; 1–20 tags (stored lower-case, matched to the contact's tags); percent 1–90; fixed: 1–2000 rows, one per
+  variant + minQuantity, priceAmount ≥ 0 minor units; every variant/product must be the store's (422 otherwise).
+  PriceList = the body plus `id`, `createdAt`, `updatedAt` (`prices[].priceAmount` as strings).
+
+### Storefront
+- `GET /store/:ws/price-list?variantIds=a,b,c` (≤100, with `X-Shopper-Token`) → `{ priceList: "Wholesale" | null, prices: [{ variantId, basePrice, tiers: [{ minQuantity, priceAmount }] }] }`
+  — only variants with a lower price for this shopper; empty when not signed in or not tagged.
+- Cart (`/store/:ws/cart…`): send `X-Shopper-Token` too and `items[].currentUnitPrice` / `subtotal` include the list price for the line's quantity.
+- Checkout: send `X-Shopper-Token` — the order is priced with it (server-side).
+
+### Screens
+- Products → «قوايم الأسعار» / "Price lists": list (name, tags, type, active), editor with tags, type switch
+  «نسبة خصم» / "Percent off" (percent + product picker «كل المنتجات» / "All products") or «أسعار ثابتة» / "Fixed prices"
+  (variant picker → rows of «من كمية» / "From quantity" + «السعر» / "Price").
+- Customer page: hint that the tag gives wholesale prices «العميل ده بياخد أسعار: Wholesale» / "This customer gets: Wholesale prices".
+- Storefront product page (signed-in, tiers present): «سعرك: 200 ج.م بدل 250» / "Your price: EGP 200 instead of 250" and the tier table
+  «من 5 قطع: 180 ج.م» / "From 5 pieces: EGP 180"; cart lines show the reduced price.
+
+## 206. Multiple stock locations — UI: pending
+
+Warehouses / shops with their own stock. The store's sellable stock is unchanged (the variant's total). Locations split
+it: each non-default location keeps its own count; **the default location holds the rest**. A second location needs the
+plan feature `multi_warehouse` (403 `FEATURE_NOT_IN_PLAN`). The first one is free and becomes the default.
+
+### Endpoints — `/api/v1/workspaces/:ws/stock-locations` (read `inventory.view`, change `inventory.manage`)
+- `GET /` → `{ locations: [{ id, name, address, isDefault, priority, isActive, totals: { units }, createdAt }], multiWarehouse }`
+- `POST /` `{ name (1–120), address? (≤300), priority? (0–1000, lower ships first) }` → 201 location (max 50).
+- `PATCH /:id` `{ name?, address?, priority?, isActive?, isDefault: true? }` — making a location the default re-splits the counts so every location keeps its units. The default cannot be switched off.
+- `DELETE /:id` → 204; 409 `LOCATION_HAS_STOCK` (transfer it first), 409 `LOCATION_IS_DEFAULT` (make another the default first).
+- `GET /:id/stock?productId=&q=` → `{ location, variants: [{ variantId, productId, productName, sku, optionValues, onHand, reserved, available }] }` (500 max).
+- `GET /by-variant?variantIds=a,b` → `{ variants: [{ variantId, locations: [{ locationId, name, isDefault, onHand, reserved, available }] }] }` — for the product page.
+- `POST /:id/adjust` `{ variantId, delta (±, not 0), reason (1–200) }` → the variant's by-variant view. Receiving or writing off stock at a location: the store total moves with it (a stock movement named "<location>: <reason>"). 422 `INSUFFICIENT_STOCK` below 0.
+- `POST /transfers` `{ fromLocationId, toLocationId, lines: [{ variantId, quantity }] (≤500), note? }` → 201 `{ transfer }`; at most what is free (on hand − reserved) at the source, else 422 `INSUFFICIENT_STOCK` with `details[0].available`. The store total doesn't change.
+- `GET /transfers` → `{ transfers: [{ id, fromLocationId, toLocationId, lines, note, actorUserId, createdAt }] }` (200 latest).
+- `PUT /orders/:orderId` (`orders.manage`) `{ locationId }` → `{ orderId, location }`: where the order ships from.
+
+Orders: `order.stockLocationId` (null = the default). A new order is assigned automatically to the first active location by
+`priority` that has every line free; otherwise the default.
+
+### Screens
+- Settings → «المخازن» / "Locations": list with units, add/edit (name, address, priority «الأولوية في الشحن» / "Shipping priority"), «اجعله الأساسي» / "Make default", active toggle; upgrade prompt when `multiWarehouse` is false and one exists.
+- Location page: stock table (on hand / reserved / available) with search, «استلام / خصم» / "Receive / write off" (delta + reason).
+- «نقل مخزون» / "Transfer stock": from → to, variant lines with quantities (show available at source), note; transfers history.
+- Product page (dashboard): stock per location under each variant.
+- Order page: «بيتشحن من» / "Ships from" select (PUT /orders/:id); print it on the packing slip.
+- Negative `available` at a location = more reserved there than on hand: show a warning «محتاج نقل مخزون» / "Needs a transfer".
+
+## 207. Suppliers, purchase orders and stock counts — UI: pending
+
+All under `/api/v1/workspaces/:ws/purchasing` — read `inventory.view`, change `inventory.manage`. Money in minor units.
+
+### Suppliers
+- `GET /suppliers` → `{ suppliers: [{ id, name, contactName, phone, email, address, notes, createdAt }] }`
+- `POST /suppliers` `{ name (1–160), contactName?, phone?, email?, address?, notes? }` → 201; `PATCH /suppliers/:id`; `DELETE /suppliers/:id` → 204 (409 `SUPPLIER_IN_USE` when it has purchase orders).
+
+### Purchase orders
+- `GET /purchase-orders?status=&supplierId=` → `{ purchaseOrders: [{ id, number: "PO-0001", status, supplier: { id, name }, locationId, currency, expectedAt, totalAmount, unitsOrdered, unitsReceived, lineCount, … }] }`
+- `POST /purchase-orders` / `PUT /purchase-orders/:id` (draft only, else 409 `PO_LOCKED`):
+  `{ supplierId, locationId? (stock location, item 206), expectedAt?, note?, lines: [{ variantId, quantity, unitCost }] (1–500, one per variant) }`
+- `GET /purchase-orders/:id` → `{ …, lines: [{ id, variantId, sku, productName, optionValues, quantity, receivedQuantity, unitCost, lineTotal }], totalAmount, unitsOrdered, unitsReceived }`
+- `POST /:id/order` (draft → ordered), `POST /:id/cancel` (draft/ordered with nothing received) — else 409 `PO_STATUS`.
+- `POST /:id/receive` `{ lines: [{ lineId, quantity }], updateCost?: true }` → the order with status `partially_received` / `received`.
+  Adds the units to stock (at the order's location) and sets the variant cost to the weighted average of the stock it had and the units received (unless `updateCost: false`). 422 `PO_OVER_RECEIVED` with `details[0].left`; 409 `PO_STATUS` before it is ordered.
+
+### Stock counts
+- `POST /stock-counts` `{ locationId?, productId? | variantIds? (≤2000), note? }` → 201 count. No ids = every variant (2000 max). `expected` = on hand now, at the location or the whole store.
+- `GET /stock-counts` (list), `GET /stock-counts/:id` → `{ id, locationId, status: open|applied|cancelled, note, lines: [{ variantId, sku, productName, expected, counted, difference, appliedDelta }], counted, total }`
+- `PATCH /stock-counts/:id` `{ lines: [{ variantId, counted (≥0 or null) }] }` — save as you go.
+- `POST /stock-counts/:id/apply` → each counted line is adjusted by counted − on hand **at that moment** (`appliedDelta`); `POST /:id/cancel`. 409 `COUNT_CLOSED` after.
+
+### Screens
+- Inventory → «الموردين» / "Suppliers" (list + form).
+- Inventory → «أوامر الشراء» / "Purchase orders": list with status chips (مسودة Draft · اتطلب Ordered · استلام جزئي Partly received · اتسلّم Received · ملغي Cancelled); editor (supplier, location, expected date, lines with variant picker, quantity, unit cost, total); «اطلب» / "Mark as ordered"; «استلام» / "Receive" with quantity per line (default = what's left) and «حدّث التكلفة» / "Update cost" checkbox.
+- Inventory → «الجرد» / "Stock counts": start (location, product or all), a counting table (expected, counted input, difference coloured), «اعتمد الجرد» / "Apply count" with a confirm «هيعدّل المخزون بالفرق» / "Stock will be adjusted by the differences".
+
+## 208. Free gift with purchase — UI: pending
+
+### Rules — `/api/v1/workspaces/:ws/free-gifts` (read `products.view`, save `discounts.manage`)
+- `GET /` → `{ rules: [Rule] }`
+- `PUT /` `{ rules: [Rule] }` (≤20, replaces all) → `{ rules }` (ids added to new rules — send them back on later saves):
+```json
+{ "id": "…", "name": "Spend 400, get a tote", "giftVariantId": "…", "quantity": 1,
+  "minSubtotal": 40000, "productIds": null, "startsAt": null, "endsAt": null, "active": true }
+```
+  At least one of `minSubtotal` (minor units) and `productIds` (any of them in the cart); both set = both must hold. quantity 1–10.
+  422 when a variant/product isn't the store's or a rule ends before it starts.
+
+### Storefront
+- Cart responses carry **`freeGifts`**: `[{ ruleId, name, gift: { variantId, productName, optionValues, quantity }, eligible, outOfStock, missingAmount, needsProduct }]`.
+- The checkout adds earned gifts itself (a line at price 0, only while the gift is in stock; one per gift variant). The shopper never adds them, and they drop out by themselves when the cart stops qualifying. Funnel checkouts get no gifts.
+- Order lines at 0 are the gifts.
+
+### Screens
+- Marketing → «هدايا مع الطلب» / "Free gifts": rule list + editor (gift product/variant picker, quantity, «لما الطلب يوصل لـ» / "When the order reaches" amount, and/or «لما يكون في السلة» / "When the cart has" product picker, dates, active).
+- Cart / cart drawer: eligible → «🎁 هدية مجانية: Gift tote bag» / "Free gift: Gift tote bag" as a line at 0; not yet → progress «زوّد 150 ج.م وخد Gift tote bag هدية» / "Add EGP 150 more to get a Gift tote bag free"; out of stock → hide.
+- Order page: badge «هدية» / "Gift" on lines priced 0.
+
+## 209. Notes and follow-ups on customers — UI: pending
+
+All under `/api/v1/workspaces/:ws/customer-notes` (`customers.view` unless noted).
+
+- `GET /customers/:customerId` → `{ notes: [Note], followups: [Followup] }` (pinned notes first; open follow-ups first).
+- `POST /customers/:customerId/notes` `{ body (1–5000), isPinned? }` → 201 Note. `PATCH /notes/:id` `{ body?, isPinned? }`, `DELETE /notes/:id` → 204 — the author only, or someone with `customers.manage` (else 403).
+  Note = `{ id, customerId, body, isPinned, author: { id, fullName }, createdAt, updatedAt }`.
+- `POST /customers/:customerId/followups` `{ title (1–200), dueAt (ISO), assigneeUserId? (default: me; null = whole team) }` → 201 Followup. The assignee must be an active teammate who can see customers (422).
+- `PATCH /followups/:id` `{ title?, dueAt?, assigneeUserId?, done? }` (a new time or assignee is reminded again); `DELETE /followups/:id` (`customers.manage`).
+- `GET /followups?all=true&dueBefore=` → `{ followups: [Followup + customer { id, fullName, phone }], overdue }`: open ones, mine by default, soonest first.
+  Followup = `{ id, customerId, title, dueAt, doneAt, overdue, assignee: { id, fullName } | null, createdBy, createdAt }`.
+- When a follow-up falls due, its assignee gets the merchant notification **`customer.followup`** once (bell and email by default; it shows in the notification preferences): title «متابعة: …» / "Follow-up: …", link `/customers/:id`, `data: { followupId, customerId, customerName, title }`.
+
+### Screens
+- Customer page: «ملاحظات» / "Notes" (add box, pin toggle, edit/delete own), «متابعات» / "Follow-ups" (add: title, date/time, assignee; tick done; overdue in red «متأخرة» / "Overdue").
+- Dashboard home / Customers: «متابعاتي» / "My follow-ups" list with the overdue count badge; «كل الفريق» / "Whole team" toggle (`all=true`).
+- Notification preferences: the new type «متابعة عميل» / "Customer follow-up".
+
+## 210. Size charts — UI: pending
+
+### Staff — `/api/v1/workspaces/:ws/size-charts` (read `products.view`, change `products.manage`)
+- `GET /` → `{ sizeCharts: [Chart] }`; `GET /:id`; `POST /` (201); `PUT /:id` (full); `DELETE /:id` → 204.
+```json
+{ "name": "T-shirts", "unit": "cm",
+  "columns": [{ "ar": "المقاس", "en": "Size" }, { "ar": "الصدر", "en": "Chest" }, { "ar": "الطول", "en": "Length" }],
+  "rows": [["S", "96", "68"], ["M", "102", "70"]],
+  "note": { "ar": "المقاسات بالسنتيمتر", "en": "Sizes in cm" }, "imageUrl": "https://…/how-to-measure.jpg",
+  "productIds": ["…"], "collectionIds": ["…"] }
+```
+  Rules: 1–12 columns (ar and/or en, ≤60), 1–40 rows, every row one cell per column (cells text ≤40), unit `cm`|`inch`, https image, products/collections must be the store's (422 otherwise).
+
+### Storefront
+- `GET /store/:ws/size-chart?productId=` → `{ sizeChart: { id, name, unit, columns, rows, note, imageUrl } | null }` (5-min cache).
+  A chart attached to the product wins; else the newest chart on one of its collections.
+
+### Screens
+- Products → «جداول المقاسات» / "Size charts": list + editor (a grid: add/remove rows and columns, headings in ar/en, unit, note, picture, attach to products and/or collections).
+- Product page (dashboard): which chart applies, «من مجموعة Tops» / "from collection Tops".
+- Storefront product page: link «دليل المقاسات» / "Size guide" opening a sheet with the table in the shopper's language, a cm/inch switch (convert numeric cells ×/÷ 2.54, one decimal; leave text cells as they are), the note and picture.
+
+## 211. Storefront search analytics and synonyms — UI: pending
+
+### Storefront
+- `GET /store/:ws/products?search=…` (first page) now also returns **`searchId`** (null on later pages) and, when the words
+  found nothing but a synonym did, **`servedAs`** (the term searched instead).
+- `POST /store/:ws/search/click` `{ searchId, productId }` → 204 — call when the shopper opens a result (first click counts, within an hour). Send `X-Visitor-Id` on the search to count searchers.
+- When `servedAs` is set, show «نتايج عن "t-shirt"» / "Showing results for "t-shirt"".
+
+### Staff — `/api/v1/workspaces/:ws/search-insights`
+- `GET /?from=&to=` (`analytics.view`, default last 30 days) →
+```json
+{ "range": { "from": "…", "to": "…" },
+  "totals": { "searches": 5, "searchers": 3, "noResults": 2, "clicks": 1, "clickRate": 33.3 },
+  "topSearches": [{ "query": "shirt", "searches": 2, "avgResults": 1, "clicks": 1, "clickRate": 50, "servedAs": null }],
+  "noResults": [{ "query": "jeans", "searches": 1, "lastAt": "…" }],
+  "topClickedProducts": [{ "productId": "…", "name": "Demo T-Shirt", "clicks": 1 }] }
+```
+  (`clickRate` = clicks ÷ searches that had results, %.) Searches are kept 180 days.
+- `GET /synonyms` (`products.view`) → `{ groups: [["تيشيرت", "t-shirt", "tee"]] }`; `PUT /synonyms` (`products.manage`) `{ groups }` — 2–10 terms per group (≤60 chars), ≤200 groups, a term in only one group (422).
+
+### Screens
+- Analytics → «البحث في المتجر» / "Store search": totals cards, top searches table (searches, results, clicks, rate), «بحث من غير نتايج» / "Searches with no results" with a quick «أضف مرادف» / "Add a synonym" action, top clicked products.
+- Products → «مرادفات البحث» / "Search synonyms": groups of words as chips; hint «لو حد دوّر على كلمة ومالقاش، بنجرّب مرادفاتها» / "When a word finds nothing, we try its synonyms".
+
+## Frontend request (2026-10-06): wishlist `available` for a whole product — done
+
+`GET/POST /store/:ws/account/wishlist` → `items[].available` for an item saved **without** a variant is now true when **any**
+active variant of the product can be bought (in stock, overselling, or inventory not tracked). An item saved with a variant
+still reflects that variant only. The per-item product request can go.
+
+## 212. Product questions and answers — UI: pending
+
+### Storefront — `/api/v1/store/:ws/products/:productId/questions`
+- `GET ?limit=20&offset=0` → `{ questions: [{ id, question, askerName, answer, answeredAt, createdAt }], total }` — published only, newest answers first (2-min cache).
+- `POST` `{ question (5–1000), name?, email? (private, only to tell them about the answer), locale? }` → 201 `{ received: true, status: "pending" }`.
+  429 after 5 questions an hour from one address. Nothing is shown before the store answers it.
+
+### Dashboard — `/api/v1/workspaces/:ws/product-questions`
+- `GET ?status=pending|published|hidden&productId=&limit=&offset=` (`products.view`) → `{ questions: [{ …, productId, productName, askerEmail, status, locale, answeredBy }], total, pending }`
+- `PATCH /:id` (`products.manage`) `{ answer?, status? }` — an answer publishes by default; publishing without an answer → 422 `ANSWER_REQUIRED`. The first published answer emails the asker once (template `question_answered`, in their language).
+- `DELETE /:id` → 204.
+- New merchant notification type **`product.question`** (products.manage, bell on, email off by default): «سؤال جديد على …» / "New question on …", link `/products/:id?tab=questions`.
+
+### Screens
+- Product page (storefront): «أسئلة وأجوبة» / "Questions & answers" list + «اسأل سؤال» / "Ask a question" form (question, name, email optional «هنبلغك لما نرد» / "We'll tell you when we answer"); after sending: «وصلنا سؤالك، هيظهر بعد ما نرد عليه» / "Got it — it will appear once we answer".
+- Dashboard: «الأسئلة» / "Questions" inbox (pending count badge, filters), answer box with «انشر» / "Publish" / «اخفي» / "Hide"; a «أسئلة» tab on the product page.
+
+## 213. Licence keys for digital products — UI: pending (only the alert is new)
+
+Already in the code from SPEC §18.2 (`modules/digital`): delivery type `license_codes`, pasting codes
+(`POST /workspaces/:ws/digital/products/:id/codes`), listing and stock (`GET …/codes`), one code per unit drawn when an order is paid,
+codes filled in later for paid orders that were waiting, and the codes on the download page and in the delivery email.
+
+New:
+- `GET /workspaces/:ws/digital/code-alerts` (`products.view`) → `{ lowAt: 5 }`; `PUT` (`products.manage`) `{ lowAt: 0–100000 }`.
+- After a paid order draws codes, the team gets a `stock.low` notification (once a day per product): «طلبات مستنية أكواد: …» / "Orders waiting for codes: …" (`data.waitingCodes`) when the pool ran out, else «الأكواد قربت تخلص: …» / "Codes running low: …" when at most `lowAt` are left. Link `/catalog/:productId?tab=digital`.
+
+Screen: digital product → Codes tab: «نبّهني لما يفضل» / "Warn me when … codes are left" (lowAt), and a red banner when `waitingCodes > 0` «في طلبات مستنية أكواد — أضف أكواد» / "Orders are waiting for codes — add codes".
+
+## 214. Gift wrap and gift message — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/gift-options` (read `products.view`, save `products.manage`)
+- `GET` / `PUT` `{ enabled, wrapVariantId: uuid | null, messageMaxLength: 20–500 (default 300) }`.
+  The wrap is a normal product the merchant creates and prices (e.g. "Gift wrap"), picked here; null = message only.
+
+### Storefront
+- `GET /store/:ws` → `store.giftOptions`: `null` when off, else `{ messageMaxLength, wrap: { variantId, name, priceAmount, currency, imageUrl } | null }`.
+- Checkout body **`gift`**: `{ wrap?: true, message?: "…", hidePrices?: true }`. Wrap adds one line of the wrap product at its price (it shows in `order.items` and the total).
+  422 on `gift`: "This store does not offer gift options" / on `gift.wrap`: not offered / not available / on `gift.message`: "At most N characters".
+- The order keeps **`order.giftOptions`** `{ wrapped, message, hidePrices }` (null when not a gift).
+
+### Screens
+- Checkout: «ده هدية؟» / "Is this a gift?" toggle → «غلّفها كهدية (+20 ج.م)» / "Gift-wrap it (+EGP 20)", message box with counter «رسالة الإهداء» / "Gift message", «اخفي الأسعار في الشحنة» / "Hide prices in the parcel".
+- Dashboard order page: a «هدية» / "Gift" badge, the message, and a "hide prices" note for whoever packs. The waybill prints "GIFT / هدية" and the message.
+- Settings → «خيارات الهدايا» / "Gift options": toggle, wrap product picker, message length.
+
+## 215. Mix-and-match box — UI: pending
+
+Built on the existing quantity bundles (SPEC §10.1). A bundle now has **`mixAndMatch`**: when true, all the products attached
+to it are priced **together** ("any 3 of these for EGP 400"), instead of each product on its own.
+
+- `POST /workspaces/:ws/bundles` and `PATCH /:bundleId` accept `mixAndMatch: boolean` (default false). Responses include it. Products are attached as before (`PUT /:bundleId/products`).
+  Use any tier type; "any N for a set price" = tier `{ quantity: N, discountType: "fixed_price", discountValue: <price> }`.
+- Storefront: `GET /store/:ws/bundles/:bundleId/products` → `{ bundle: { id, name, displayStyle, mixAndMatch: true, tiers: [...] }, products: [{ id, name, slug, imageUrl, variants: [{ id, optionValues, priceAmount, currency, available }] }] }` (404 unless active and mix-and-match).
+  The product payload's `bundle.mixAndMatch` says when a product belongs to such a box.
+- The shopper adds the pieces as ordinary cart lines (or `item` + `extraItems` at checkout). The cart (`bundleDiscount`) and the order price them together. The order's discount snapshot entry has `mixAndMatch: true, productIds: [...]`.
+
+### Screens
+- Bundles editor: «اخلط واختار» / "Mix and match" toggle with the hint «المنتجات دي بتتحسب مع بعض: أي 3 منهم بسعر واحد» / "These products count together: any 3 of them for one price".
+- Storefront: on a product in a box, a «كوّن البوكس بتاعك» / "Build your box" entry → box page listing the products (from the endpoint), slots «اختار 3» / "Pick 3" with a counter, «ضيف البوكس للسلة» / "Add box to cart" (adds the chosen variants as lines). Cart shows the box discount.
+
+## 216. Holiday mode — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/holiday-mode`
+- `GET` (`orders.view`) → `{ enabled, mode: "pause"|"delay", from, until, shipsFrom, message: { ar, en } | null, activeNow }`
+- `PUT` (`workspace.manage`) `{ enabled, mode, from?, until?, shipsFrom?, message? }` — dates ISO (null `from` = from now, null `until` = until switched off); `until` after `from` (422).
+
+### Storefront
+- `GET /store/:ws` → `store.holiday`: `null` normally, else `{ mode, until, shipsFrom, message }` while the holiday is on.
+- **pause**: checkout answers **423 `STORE_ON_HOLIDAY`** with `error.details.holiday` (same object). The store, cart and pages keep working.
+- **delay**: orders go through; the order gets the tag `holiday` and `shippingSnapshot.holiday = { shipsFrom, message }`.
+- Orders entered in the dashboard are never blocked.
+
+### Screens
+- Settings → «وضع الإجازة» / "Holiday mode": toggle, choice «وقّف الطلبات» / "Pause orders" vs «اقبل الطلبات واشحن بعدين» / "Take orders, ship later", from/until dates, ships-from date (delay), message ar/en. Show «شغال دلوقتي» / "On now" when `activeNow`.
+- Storefront: a banner with the message and date «المتجر في إجازة لحد 11 أكتوبر» / "We're on holiday until 11 October". Pause: disable checkout buttons «الطلبات موقوفة مؤقتًا» / "Orders are paused for now". Delay: on the product page, cart and checkout «الطلبات هتتشحن من 11 أكتوبر» / "Orders ship from 11 October".
+- Dashboard order list: the `holiday` tag as a chip.
+
+## 217. Sign in with Google (shopper accounts) — UI: pending
+
+Uses Google's own "Sign in with Google" button (Google Identity Services); the button gives the browser an **ID token**.
+
+### Storefront — `/api/v1/store/:ws/account/google`
+- `GET` → `{ enabled, clientId }`: show the button only when `enabled` (shopper accounts on + Google on), and initialise it with `clientId`.
+- `POST` `{ idToken }` → `{ token, expiresInSeconds, customer: { id, fullName, email } }`: the same `X-Shopper-Token` as a code sign-in.
+  Errors: 404 `GOOGLE_SIGN_IN_OFF`; 401 `GOOGLE_TOKEN_INVALID` «تسجيل الدخول بجوجل منجحش — جرّب تاني» / "Google sign-in did not work — try again";
+  422 `GOOGLE_EMAIL_UNVERIFIED`; 404 `ACCOUNT_NOT_FOUND` «مفيش حساب بالإيميل ده لسه — اطلب أو ادخل برقم موبايلك الأول» / "No account with this email yet — place an order or sign in with your phone first".
+  It signs in to the store's existing contact with that (verified) email; it does not create one (a contact needs a phone).
+
+### Dashboard — `/api/v1/workspaces/:ws/shopper-accounts/google` (`workspace.manage`)
+- `GET` → `{ enabled, clientId, platformClientAvailable }`; `PUT` `{ enabled, clientId? }` — the store's own web client id (`…apps.googleusercontent.com`), needed for a custom domain. Empty = the platform's, when `platformClientAvailable`.
+
+### Screens
+- Settings → Customer accounts: «الدخول بحساب جوجل» / "Sign in with Google" toggle + client id field with a short guide link, and a note when the platform has none.
+- Storefront sign-in sheet: the Google button above the phone/email code form.
+
+## 218. VIP tiers — UI: pending
+
+Customers move up by what they spent — or how many orders they placed — on **delivered** orders, over a window or ever.
+Perks apply to **signed-in** shoppers (`X-Shopper-Token`) at checkout.
+
+### Settings — `/api/v1/workspaces/:ws/vip-tiers`
+- `GET` (`customers.view`) / `PUT` (`discounts.manage`):
+```json
+{ "enabled": true, "basis": "spent", "windowDays": 365,
+  "tiers": [{ "id": "…", "name": { "ar": "ذهبي", "en": "Gold" }, "threshold": 500000, "percentOff": 10, "freeShipping": true, "pointsMultiplier": 2 }] }
+```
+  basis `spent` (threshold in minor units, net of refunds) or `orders` (count); windowDays 30–1825 or null (ever); ≤6 tiers with different thresholds; percentOff 0–50; pointsMultiplier 1–5. Enabled with no tiers → 422.
+- `GET /customers/:customerId` (`customers.view`) → `{ tier | null, next: { id, name, missing } | null, standing: { basis, value, spent, orders } }`.
+
+### Storefront
+- `GET /store/:ws/account/vip` (X-Shopper-Token) → `{ enabled, basis, tier, next: { id, name, missing }, standing: { value }, tiers: [{ id, name, threshold, percentOff, freeShipping, pointsMultiplier }] }`.
+- Checkout with `X-Shopper-Token`: plain lines priced `percentOff` lower (the lowest of normal, price list, VIP), free shipping when the tier has it, loyalty points × multiplier on delivery. Funnel checkouts keep their own prices. The shipping quote endpoint doesn't know the tier: show «شحن مجاني لعملاء VIP» / "Free shipping for VIP" from `/account/vip` instead.
+
+### Screens
+- Customers → «مستويات VIP» / "VIP tiers": basis switch «حسب المبلغ» / "By amount spent" / «حسب عدد الطلبات» / "By number of orders", window, tier rows (name ar/en, threshold, % off, free shipping, points ×).
+- Customer page: tier badge + «فاضل 3 طلبات لـ Platinum» / "3 more orders to Platinum".
+- Storefront account: «مستواك: ذهبي» / "Your level: Gold" with perks and progress to the next; checkout line «خصم VIP ‎10%» / "VIP 10% off".
+
+## 219. Quote requests (B2B) — UI: pending
+
+### Storefront — `/api/v1/store/:ws/quotes`
+- `POST` `{ contact: { fullName, phone, email?, company? }, lines: [{ variantId, quantity (1–100000), note? }] (1–50), message? }` → 201 `{ quoteId, number: "Q-0001", token, status: "new" }`.
+  **Keep `token`** (shown once): it opens the quote. Send `X-Shopper-Token` too when signed in (links the quote to the account). 429 after 5 an hour.
+- `GET /:quoteId?token=` → `{ quote: { id, number, status: new|quoted|accepted|declined|cancelled|expired, contact: { fullName, company }, lines: [{ variantId, productName, sku, optionValues, quantity, requestedQuantity, note, listPrice, unitPrice, lineTotal }], message, quotedNote, totalAmount, currency, validUntil, orderId } }` (404 for a wrong token).
+- `POST /:quoteId/accept` `{ token, shippingAddress: { country?, province, city, area?, addressLine, placeId? }, notes? }` → 201 `{ quote, orderId, orderNumber, totalAmount }`: a cash-on-delivery order at exactly the quoted prices (stock, shipping and fraud rules apply as usual).
+  409 `QUOTE_EXPIRED` «عرض السعر انتهى — اطلب واحد جديد» / "This quote has expired — ask for a new one", 409 `QUOTE_NOT_OPEN`.
+- `POST /:quoteId/decline` `{ token }`.
+
+### Dashboard — `/api/v1/workspaces/:ws/quotes` (read `orders.view`, change `orders.manage`)
+- `GET ?status=` → `{ quotes: [{ id, number, status, contact, lineCount, validUntil, orderId, createdAt }], newCount }`; `GET /:id` → `{ quote }` with the full contact.
+- `PUT /:id/answer` `{ lines: [{ variantId, quantity, unitPrice }], note?, validUntil (future) }` → quoted; only requested products (422). The first answer emails the shopper a link «عرض السعر جاهز» / "Your quote is ready" pointing at `/quotes/:id` on the store (the page asks for the token kept by the shopper's browser, or the shopper signs in).
+- `POST /:id/cancel`.
+- New merchant notification type **`quote.request`** (orders.view, bell + email).
+- Accepted orders carry the tag `quote` and the note "Quote Q-0001". For online payment, the team sends the existing payment link from the order.
+
+### Screens
+- Product page / cart: «اطلب عرض سعر» / "Request a quote" (quantities per variant, company, message). After sending: «وصلنا طلبك، هنرد عليك بعرض سعر» / "We got it — we'll send you a quote".
+- Storefront `/quotes/:id`: status, the store's prices vs list prices, total, validity «صالح لحد …» / "Valid until …", buttons «موافق — اطلب» / "Accept and order" (address form) and «رفض» / "Decline".
+- Dashboard → Orders → «عروض الأسعار» / "Quotes": inbox with the new count, editor to set the unit price/quantity per line, note and validity, «ابعت العرض» / "Send quote"; link to the order once accepted.
+
+## 220. Shopper self-service on orders — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/order-self-service` (`orders.manage`)
+- `GET` / `PUT` `{ cancel: { enabled, minutes: 5–10080 | null }, address: { enabled, minutes | null } }` — minutes after placing the order (null = until it ships).
+
+### Storefront — `/api/v1/store/:ws/orders/:orderId/self-service`
+Proof of ownership: `X-Shopper-Token` of the order's customer, **or** the order's tracking token (`?token=` on GET, `token` in the body on POST — the same token as the tracking link).
+- `GET` → `{ canCancel, canChangeAddress, cancelUntil, addressUntil }`.
+- `POST /cancel` `{ token?, reason? }` → `{ cancelled: true }` — goes through the store's normal cancellation (stock released, courier booking cancelled). Allowed while not shipped, not cancelled, not paid online, and not yet confirmed by the store; else 409 `CANCEL_NOT_ALLOWED` «مينفعش تلغي الطلب من هنا دلوقتي — كلّم المتجر» / "This order can no longer be cancelled here — contact the store".
+- `POST /address` `{ token?, address: { province, city, area?, addressLine, placeId?, country? } }` → `{ shippingAddress, note }` — while not shipped or cancelled; places the store doesn't deliver to are refused as at checkout. 409 `ADDRESS_CHANGE_NOT_ALLOWED`. The shipping price is not recalculated (the store confirms any difference).
+- The team gets a notification for each (type `order.new`, `data.by: "customer"`).
+
+### Screens
+- Settings → Orders: «العميل يقدر يلغي الطلب» / "Customers can cancel" + minutes; «العميل يقدر يغيّر العنوان» / "Customers can change the address" + minutes.
+- Tracking page / account order page: buttons «إلغاء الطلب» / "Cancel order" (reason, confirm) and «تغيير العنوان» / "Change address" (address form), shown from `canCancel` / `canChangeAddress`, with «متاح لحد 3:15 م» / "Available until 3:15 PM" from the `…Until` fields.
+
+## 221. Delivery date and time slots — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/delivery-slots` (read `orders.view`, save `workspace.manage`)
+- `GET` / `PUT` body:
+  ```json
+  { "enabled": true, "required": true, "leadDays": 1, "cutoffTime": "18:00", "sameDayNoticeMinutes": 120, "horizonDays": 7,
+    "weekly": { "0": [{ "id": "morning", "from": "10:00", "to": "14:00", "capacity": 20 }, { "from": "16:00", "to": "20:00", "capacity": null }], "5": [] },
+    "closedDates": ["2026-10-08"], "note": { "ar": "التوصيل من 10 الصبح", "en": "Delivery from 10am" } }
+  ```
+- `weekly` keys `"0"`–`"6"` (0 = Sunday), up to 12 slots a day; `from`/`to` `HH:MM` store time, `to` after `from` (422 `weekly.<day>.<i>.to`); `capacity` 1–10000 or null (unlimited). A slot without `id` gets one (send it back unchanged on later saves, so booked orders keep pointing at it). `leadDays` 0–30 (0 = same day), `cutoffTime` `HH:MM` or null (after it, the earliest day moves one day later), `sameDayNoticeMinutes` 0–1440, `horizonDays` 1–60, `closedDates` `YYYY-MM-DD` list.
+- `GET /schedule?from=YYYY-MM-DD&to=YYYY-MM-DD` (≤ 62 days) → `{ days: [{ date, slots: [{ slotId, from, to, orders: [{ id, orderNumber, totalAmount, currency, customerName }] }] }] }` — cancelled orders left out.
+- `PUT /orders/:orderId` (`orders.manage`) `{ date, slotId, force? }` moves an order; `{ date: null }` removes its slot. 409 `DELIVERY_SLOT_FULL` unless `force: true` → `{ deliverySlot }`.
+
+### Storefront
+- `GET /api/v1/store/:ws/delivery-slots` → 404 when off, else
+  `{ required, note, timezone, days: [{ date: "2026-10-09", weekday: 5, slots: [{ id, from, to, available }] }] }` (only days with slots; full slots come back `available: false` — show them disabled).
+- Checkout body: `deliverySlot: { date, slotId }`. Errors: 422 `deliverySlot` «اختار يوم وميعاد التوصيل» / "Choose a delivery day and time" (when `required`); 409 `DELIVERY_SLOT_UNAVAILABLE` «الميعاد ده مش متاح — اختار ميعاد تاني» / "This delivery time isn't offered — choose another"; 409 `DELIVERY_SLOT_FULL` «الميعاد ده اتحجز بالكامل — اختار ميعاد تاني» / "This delivery time is fully booked — choose another" (reload the slots).
+- The order carries `shippingSnapshot.deliverySlot = { date, slotId, from, to }`; the waybill prints «DELIVER ON / التوصيل: 2026-10-09 10:00-14:00».
+
+### Screens
+- Settings → Shipping → «مواعيد التوصيل» / "Delivery times": on/off, required, earliest day («أقرب يوم: بكرة» / "Earliest: tomorrow"), cutoff time, days ahead, a weekly grid of slots with capacity («عدد الطلبات في الميعاد» / "Orders per slot", empty = unlimited), closed days calendar, note (ar/en).
+- Checkout: day chips («الخميس 9 أكتوبر») then slot chips («10:00 – 14:00»), full ones disabled «محجوز» / "Full"; the note under them.
+- Order page: «ميعاد التوصيل» / "Delivery time" with «تغيير» / "Change" (day + slot, confirm «الميعاد مليان — احجز برضه؟» / "This slot is full — book anyway?" → `force`).
+- Orders → «جدول التوصيل» / "Delivery schedule": per day and slot, the orders booked, count vs capacity.
+- Thank-you page / tracking page: «هيوصلك يوم الخميس 9 أكتوبر بين 10:00 و 14:00» / "Arriving Thursday 9 October, 10:00–14:00".
+
+## 222. Customer referral program (invite a friend) — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/customer-referrals` (read `customers.view`, save `discounts.manage`)
+- `GET` / `PUT`:
+  ```json
+  { "enabled": true, "friend": { "percentOff": 10, "freeShipping": false },
+    "referrer": { "type": "store_credit", "amount": 5000 }, "minOrderAmount": null, "maxRewardsPerReferrer": 20 }
+  ```
+  `percentOff` 0–50; when enabled the friend needs a percent off or free shipping (422 `friend`). `referrer.type` `store_credit` (amount in minor units) or `points` (needs loyalty on, else 422 `referrer.type`). `minOrderAmount` minor units or null; `maxRewardsPerReferrer` 1–1000 or null.
+- `GET /list?status=pending|rewarded|void&customerId=&limit=&offset=` → `{ referrals: [{ id, status, voidReason, reward, rewardedAt, createdAt, order: { id, orderNumber, totalAmount, currency }, referrer: { id, name }, friend: { id, name } }], total }`. `voidReason`: `cancelled`, `returned`, `below_minimum`, `limit_reached`, `program_off`.
+
+### Storefront
+- `GET /api/v1/store/:ws/account/referral` (X-Shopper-Token; 401 `SHOPPER_NOT_SIGNED_IN`) → `{ enabled: false }` or
+  `{ enabled: true, code: "Y45IFBG", path: "/?ref=Y45IFBG", offer: { friend, referrer, minOrderAmount }, stats: { pending, rewarded }, referrals: [{ id, status, reward, rewardedAt, createdAt }] }` (friends are not named to the inviter).
+- `GET /api/v1/store/:ws/referrals/:code` → `{ valid: true, code, friend: { percentOff, freeShipping } }` or `{ valid: false }` — for the banner when a visitor lands with `?ref=`. Keep the code (e.g. localStorage) and send it at checkout.
+- Checkout body: `referralCode: "Y45IFBG"`. Refusals are 422 on `referralCode`: «كود الدعوة مش صحيح» / "This invite code is not valid"; «مينفعش تستخدم دعوتك لنفسك» / "You can't use your own invite"; «الدعوة لأول طلب بس في المتجر» / "Invites are for a first order in this store"; «المتجر مفيهوش برنامج دعوات» / "This store has no invite program". On a refusal, offer to place the order without the code.
+- The friend's percent off is applied to plain lines' prices (like VIP), free shipping on the order. The order gets the tag `referral`. The inviter is rewarded when the friend's order is delivered; a cancelled or returned order cancels the invite.
+
+### Screens
+- Marketing → «ادعي صاحبك» / "Refer a friend": on/off, friend's offer (percent / free shipping), inviter's reward (store credit amount or points), minimum order, max rewards per customer; a table of invites with status chips «مستني التوصيل» / "Waiting for delivery", «اتكافئ» / "Rewarded", «اتلغى» / "Cancelled".
+- Customer page: their invites (`list?customerId=`).
+- Storefront account → «ادعي صحابك» / "Invite friends": the link to copy/share (WhatsApp share link by the shopper themself), «صاحبك ياخد خصم 10% على أول طلب، وانت تاخد 50 جنيه رصيد لما يوصله» / "Your friend gets 10% off their first order; you get EGP 50 credit once it's delivered", counts and list.
+- Landing banner on `?ref=`: «معاك دعوة! خصم 10% على أول طلب» / "You've been invited! 10% off your first order".
+- Checkout: show the invite as applied, with its error messages.
+
+## 223. Frequently bought together — UI: pending
+
+The storefront strip already exists: `GET /api/v1/store/:ws/cross-sell?productIds=a,b&placement=` → `{ source: "rule" | "bought_together" | null, ruleId, products: [public products] }`. New in this item:
+- **`placement=product`** for the product page (send the page's product id). Merchant rules (Offers → Cross-sell, `POST/PATCH /workspaces/:ws/offers/cross-sell`) accept `placement: "product"` too — those are the merchant's **pins**: a matching rule wins over the computed list.
+- The computed list now comes from pairs worked out **nightly** (and right after a settings save), with a minimum number of shared orders and the merchant's **exclusions**.
+
+### Settings — `/api/v1/workspaces/:ws/bought-together` (read `products.view`, change `products.manage`)
+- `GET` → `{ enabled, windowDays, minOrders, excludedProductIds, pairs, computedAt }`.
+- `PUT` `{ enabled, windowDays: 30–1095 (365), minOrders: 1–100 (1), excludedProductIds: [uuid] (≤ 500, this store's; else 422) }` → settings + `pairs` (recomputed at once). `enabled: false` = the computed list is off (merchant rules still show).
+- `POST /recompute` → `{ pairs }`.
+- `GET /products/:productId` → `{ products: [{ productId, name, orders, excluded }] }` — what this product is bought with and in how many orders.
+
+### Screens
+- Product page (storefront): «بيتشروا مع بعض» / "Frequently bought together" strip from `placement=product`, add-to-cart per product (or all), hidden when `products` is empty.
+- Cart: the existing strip (placement `cart`) now honours the exclusions.
+- Dashboard product page → «بيتشري مع» / "Bought with": the list with order counts («في 12 طلب» / "in 12 orders"), a toggle «متقترحوش» / "Don't suggest" (adds to `excludedProductIds`), and a link «ثبّت منتجات» / "Pin products" to a cross-sell rule with placement "product".
+- Settings → Offers → «بيتشروا مع بعض» / "Bought together": on/off, «آخر كام يوم» / "Look back (days)", «أقل عدد طلبات مشتركة» / "Minimum shared orders", excluded products, «آخر تحديث» / "Last updated" (`computedAt`) and «حدّث دلوقتي» / "Update now".
+
+## 224. Stock forecast — UI: pending
+
+### `/api/v1/workspaces/:ws/stock-forecast` (read `inventory.view`, change `inventory.manage`)
+- `GET ?status=out|reorder_now|soon|ok|no_sales|needs_order&productId=&limit=` (limit ≤ 1000, default 200) →
+  ```json
+  { "settings": { "windowDays": 30, "leadTimeDays": 7, "coverDays": 30, "safetyDays": 7 },
+    "counts": { "reorder_now": 3, "ok": 40, "no_sales": 12 }, "total": 3,
+    "variants": [{ "variantId": "…", "productId": "…", "productName": "ZZ Mug", "sku": "ZZMUG", "optionValues": {},
+      "available": 6, "incoming": 0, "soldInWindow": 6, "perDay": 0.2, "daysLeft": 30,
+      "runsOutOn": "2026-11-05", "reorderBy": "2026-10-22", "suggested": 3, "unitCost": "4000", "status": "ok" }] }
+  ```
+  Most urgent first. `needs_order` = `suggested > 0`. `daysLeft`, `runsOutOn` and `reorderBy` are null without sales. Only stock-tracked, non-archived products.
+- `PUT /settings` `{ windowDays 7–180, leadTimeDays 0–180, coverDays 1–365, safetyDays 0–90 }` (all required).
+- `POST /purchase-order` `{ supplierId, locationId?, expectedAt?, note?, lines: [{ variantId, quantity?, unitCost? }] }` → 201 the draft purchase order (same shape as `GET /purchasing/purchase-orders/:id`). A line without `quantity` takes `suggested`, and without `unitCost` takes the variant's cost. 422 `lines.N.quantity` «مفيش حاجة تتطلب للصنف ده — اكتب كمية» / "Nothing to order for this one — type a quantity"; 422 `lines.N.variantId` for a product that isn't stock-tracked or isn't this store's.
+
+### Screens
+- Inventory → «توقّع المخزون» / "Stock forecast":
+  - Filter chips with counts: «خلص» / "Out", «اطلب دلوقتي» / "Reorder now", «قرّب يخلص» / "Running low", «تمام» / "OK", «مفيش مبيعات» / "No sales", «محتاج طلب» / "Needs ordering".
+  - Table columns: product/variant, available, incoming «جاي في الطريق», per day «بيتباع في اليوم», days left «يكفي كام يوم», «هيخلص يوم», «اطلب قبل», suggested quantity (editable).
+  - Row checkboxes, then «اعمل أمر شراء» / "Create purchase order": pick the supplier (and location), then open the new draft PO.
+- Settings dialog: «احسب المبيعات من آخر … يوم» / "Sales over the last … days", «المورّد بيوصّل في … يوم» / "Supplier lead time (days)", «عايز المخزون يكفي … يوم» / "Stock to cover (days)", «هامش أمان … يوم» / "Safety margin (days)".
+- Product page in the dashboard: a small card from `?productId=` («يكفي 30 يوم — اطلب قبل 22 أكتوبر» / "30 days left — reorder by 22 Oct").
+
+## 225. Click and collect — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/click-and-collect` (read `orders.view`, save `shipping.manage`)
+- `GET` / `PUT` `{ enabled, locations: { "<stockLocationId>": { enabled, instructions: { ar, en } | null, hours: { ar, en } | null } } }` — texts ≤ 300; locations must be this store's (Inventory → Locations, item 206); when enabled at least one location must be on (422 `locations`).
+
+### Orders — same base
+- `GET /orders?status=pending|ready|collected|cancelled&locationId=&limit=&offset=` → `{ total, pickups: [{ orderId, status, location: { id, name, address, instructions, hours }, readyAt, collectedAt, order: { id, orderNumber, totalAmount, currency, customerName, phone, paymentMethod, financialState, createdAt } }] }`.
+- `POST /orders/:orderId/ready` (`orders.manage`) → `{ pickup, emailed }` — emails the shopper «طلبك … جاهز للاستلام» with the place and the code (when the order has an email). 409 `PICKUP_NOT_PENDING`, `ORDER_CANCELLED`.
+- `POST /orders/:orderId/collect` `{ code: "713997" }` → `{ pickup }` — the order becomes delivered (fulfilled; loyalty, referrals, gift cards and automations run as for a delivery). 422 `PICKUP_CODE_WRONG` «الكود غلط» / "Wrong code"; 409 `PICKUP_NOT_OPEN`.
+
+### Storefront
+- `GET /api/v1/store/:ws/pickup/locations?variantIds=a,b` → 404 when off, else `{ locations: [{ id, name, address, instructions, hours, available }] }` (`available` = every given variant has a free unit there; null without `variantIds`).
+- Checkout body: `pickupLocationId` instead of `shippingAddress` (any address sent is dropped; address fields of the checkout form aren't required; shipping is 0; `shippingOption` ignored). Errors: 422 `pickupLocationId` «الاستلام مش متاح من المكان ده — اختار مكان تاني» / "Pickup isn't offered at this place — choose another"; 409 `PICKUP_OUT_OF_STOCK` `{ variantIds }` «في منتجات مش موجودة في الفرع ده — اختار فرع تاني أو التوصيل» / "Some items aren't available at this place — choose another place or delivery".
+- The 201 checkout response carries `pickup: { code, location }`. The order has the tag `pickup` and `shippingSnapshot.pickup = { locationId, name, address }`.
+- `GET /api/v1/store/:ws/pickup/orders/:orderId?token=<tracking token>` (or `X-Shopper-Token`) → `{ pickup: { orderId, status, location, readyAt, collectedAt, code } }` (`code` null once collected or cancelled).
+
+### Screens
+- Settings → Shipping → «الاستلام من الفرع» / "Store pickup": on/off, per location a toggle, instructions and opening hours (ar/en).
+- Checkout: a choice «توصيل» / "Delivery" vs «استلام من الفرع» / "Pick up in store"; for pickup a list of places (address, hours, unavailable ones disabled «مش متوفر هنا» / "Not available here") and no address form; shipping shows «مجانًا» / "Free".
+- Thank-you / tracking page: «كود الاستلام: 713997» / "Pickup code: 713997" big, the place, hours and instructions, status «بنجهّز طلبك» / "Preparing" → «جاهز للاستلام» / "Ready for pickup" → «اتسلّم» / "Collected".
+- Dashboard → Orders → «طلبات الاستلام» / "Pickups": tabs by status and a location filter; «جاهز» / "Mark ready"; «تسليم» / "Hand over" opens a code field (6 digits) and confirms. The order page shows the pickup block instead of the address.
+
+## Frontend request (2026-10-07): `lockFunnels` in the public gate view — done
+
+- `GET /api/v1/store/:ws` → `store.gate` now carries `lockFunnels: boolean`: `{ mode, message, opensAt, lockFunnels, ageCheck }`. The 423 `STORE_LOCKED` error's `details.gate` has it too (same view).
+- Storefront: on funnel pages, show the gate only when `gate.mode !== 'off' && gate.lockFunnels`; no extra funnel request needed.
+
+## 226. Pick list — UI: pending
+
+### `POST /api/v1/workspaces/:ws/orders/documents/pick-list?as=json|pdf|base64` (`orders.view`)
+- Body: either `{ orderIds: [uuid] }` (1–500, cancelled ones skipped) **or** `{ readyToShip: true }` (every order at stage `ready_to_ship`, oldest first, up to 500); optional `locationId` keeps only the orders that location ships. Sending both or neither → 422. Nothing to pick → 422 `NO_ORDERS_SELECTED`.
+- `as=json` (default) →
+  ```json
+  { "orderCount": 3, "unitCount": 6,
+    "locations": [{ "locationId": null, "name": null,
+      "lines": [{ "variantId": "…", "productId": "…", "name": "ZZ Pick Socks", "options": {}, "sku": "ZZ-SOCK", "imageUrl": null,
+                  "quantity": 3, "orders": [{ "orderId": "…", "orderNumber": "ORD-…", "quantity": 2 }] }] }] }
+  ```
+  Locations as the orders are assigned (item 206); `locationId: null` = the store's main stock when it has no locations. Lines sorted by SKU, then name.
+- `as=pdf` → `application/pdf` (A4: tick box, quantity, name — options, SKU, the orders); `as=base64` → `{ filename, contentType, base64, orderCount }` for the dashboard's request helper.
+
+### Screens
+- Orders list: in the bulk actions next to «طباعة البوالص» / "Print waybills", add «قائمة التجهيز» / "Pick list" for the selected orders. In the "Ready to ship" tab add a button «جهّز كل الجاهز للشحن» / "Pick everything ready to ship".
+- A pick-list view (or the PDF): per location «المخزن الرئيسي» / "Main stock", rows «3 × ZZ Pick Socks — ZZ-SOCK» with the order numbers under each, checkboxes, and «اطبع» / "Print".

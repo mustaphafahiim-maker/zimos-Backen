@@ -59,6 +59,8 @@ async function connect(workspaceId, { phoneNumberId, accessToken, businessAccoun
   const fields = { workspaceId, provider: PROVIDER, status: 'connected', config, secretsSealed, lastVerifiedAt: new Date(), lastError: null };
   const integration = existing ? await existing.update(fields) : await db.WorkspaceIntegration.create(fields);
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'integration.whatsapp.connect', entityType: 'WorkspaceIntegration', entityId: integration.id, after: { phoneNumberId, displayPhoneNumber: details.displayPhoneNumber }, req });
+  // The account's templates and their status, for the pickers (whatsappTemplates.js).
+  void require('./whatsappTemplates').syncQuietly(workspaceId);
   return integration;
 }
 
@@ -99,6 +101,8 @@ async function upsertConversation(workspaceId, phoneNormalized, { customerName, 
  * as failed and re-thrown so the caller sees the WhatsApp error).
  */
 async function sendMessage(workspaceId, { to, text, template, orderId = null }, req) {
+  // The store took the WhatsApp app off: nothing is sent from its number (logins and codes use the platform's).
+  await require('../apps/appGate').assertEnabled(workspaceId, 'whatsapp');
   const integration = await requireConnected(workspaceId);
   const phoneNormalized = normalizePhone(to);
   if (!phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
@@ -110,6 +114,9 @@ async function sendMessage(workspaceId, { to, text, template, orderId = null }, 
       throw new AppError('WHATSAPP_WINDOW_CLOSED', 'The customer has not messaged in the last 24 hours — send an approved template instead', 422);
     }
   }
+
+  // A template Meta has not approved is refused here, with its status (whatsappTemplates.js).
+  if (template) await require('./whatsappTemplates').assertSendable(workspaceId, template);
 
   const { accessToken } = secretsOf(integration);
   const { phoneNumberId } = integration.config;
@@ -129,12 +136,14 @@ async function sendMessage(workspaceId, { to, text, template, orderId = null }, 
       ? await cloud.sendTemplate(phoneNumberId, accessToken, phoneNormalized, template)
       : await cloud.sendText(phoneNumberId, accessToken, phoneNormalized, text);
     const message = await db.WhatsappMessage.create({ ...record, waMessageId: sent.waMessageId, status: 'sent' });
-    await conversation.update({ lastMessageAt: new Date(), lastMessagePreview: (record.body || '').slice(0, 300) });
+    // A teammate typing in the conversation takes it over from the bot.
+    await conversation.update({ lastMessageAt: new Date(), lastMessagePreview: (record.body || '').slice(0, 300), ...(record.sentByUserId && !template ? { botPausedAt: new Date() } : {}) });
     inboxEvents.publish(workspaceId, { conversationId: conversation.id, reason: 'message_out' });
     return message;
   } catch (err) {
     await db.WhatsappMessage.create({ ...record, status: 'failed', error: String(err.message).slice(0, 500) });
     if (err.code === 'WHATSAPP_AUTH_FAILED') await integration.update({ status: 'error', lastError: String(err.message).slice(0, 500) });
+    require('../notifications/integrationAlerts').whatsapp(workspaceId, err);
     throw err;
   }
 }
@@ -175,7 +184,7 @@ async function listMessages(workspaceId, conversationId, { limit = 100, before }
   const rows = await db.WhatsappMessage.findAll({ where, order: [['createdAt', 'DESC']], limit });
   if (conversation.unreadCount) await conversation.update({ unreadCount: 0 });
   return {
-    messages: rows.reverse().map((m) => ({ id: m.id, direction: m.direction, type: m.type, body: m.body, templateName: m.templateName, status: m.status, error: m.error, createdAt: m.createdAt })),
+    messages: rows.reverse().map((m) => ({ id: m.id, direction: m.direction, type: m.type, body: m.body, templateName: m.templateName, status: m.status, error: m.error, sentByBot: m.sentByBot, createdAt: m.createdAt })),
     nextCursor: rows.length === limit ? rows[0].createdAt.toISOString() : null,
   };
 }
@@ -217,6 +226,11 @@ async function handleWebhook(workspaceId, payload) {
   for (const entry of (payload && payload.entry) || []) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
+      // A template approved, rejected or paused in Meta (whatsappTemplates.js).
+      if (change.field === 'message_template_status_update') {
+        await require('./whatsappTemplates').onStatusUpdate(workspaceId, value);
+        continue;
+      }
       const names = Object.fromEntries((value.contacts || []).map((c) => [c.wa_id, c.profile && c.profile.name]));
 
       for (const msg of value.messages || []) {
@@ -226,7 +240,7 @@ async function handleWebhook(workspaceId, payload) {
         const conversation = await upsertConversation(workspaceId, phoneNormalized, { customerName: names[msg.from] });
         const body = msg.type === 'text' ? msg.text && msg.text.body : msg.type === 'button' ? msg.button && msg.button.text : msg.type === 'interactive' ? JSON.stringify(msg.interactive) : `[${msg.type}]`;
         const at = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date();
-        await db.WhatsappMessage.create({ workspaceId, conversationId: conversation.id, direction: 'in', waMessageId: msg.id || null, type: ['text', 'button', 'interactive'].includes(msg.type) ? 'text' : msg.type || 'other', body, status: 'received' });
+        const inbound = await db.WhatsappMessage.create({ workspaceId, conversationId: conversation.id, direction: 'in', waMessageId: msg.id || null, type: ['text', 'button', 'interactive'].includes(msg.type) ? 'text' : msg.type || 'other', body, status: 'received' });
         await conversation.update({
           lastMessageAt: at,
           lastInboundAt: at,
@@ -236,8 +250,10 @@ async function handleWebhook(workspaceId, payload) {
         });
         // A tap on "Confirm order" / "Cancel" confirms or cancels the order (quickReplyConfirmation.js).
         await require('./quickReplyConfirmation').enqueue(workspaceId, msg, phoneNormalized);
-        // A reply to a campaign is counted, and STOP withdraws marketing consent (campaignService.js).
-        await require('./campaignService').handleInbound(workspaceId, msg, phoneNormalized);
+        // STOP withdraws marketing consent (optOut.js).
+        await require('./optOut').handleInbound(workspaceId, msg, phoneNormalized);
+        // A typed message gets the customer service bot's answer when the store has it on (bot/botService.js).
+        if (msg.type === 'text') await require('./bot/botService').enqueue(workspaceId, conversation.id, inbound.id);
         inboxEvents.publish(workspaceId, { conversationId: conversation.id, reason: 'message_in' });
         result.messages += 1;
       }

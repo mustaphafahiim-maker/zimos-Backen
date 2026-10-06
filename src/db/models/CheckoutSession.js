@@ -12,7 +12,8 @@ module.exports = (sequelize, DataTypes) => {
       cartId: { type: DataTypes.UUID, allowNull: true, field: 'cart_id' },
       visitorId: { type: DataTypes.STRING(64), allowNull: true, field: 'visitor_id' },
       contactFields: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'contact_fields' },
-      phoneNormalized: { type: DataTypes.STRING(32), allowNull: false, field: 'phone_normalized' },
+      // Null while the shopper has typed only a name (migration 406).
+      phoneNormalized: { type: DataTypes.STRING(32), allowNull: true, field: 'phone_normalized' },
       items: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
       subtotalAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'subtotal_amount' },
       currency: { type: DataTypes.STRING(3), allowNull: false, defaultValue: 'EGP' },

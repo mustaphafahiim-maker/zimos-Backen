@@ -123,7 +123,9 @@ function allocate(discount, amounts) {
  * Applies bundle tiers to priced order lines, in place. A line counts when it
  * is a plain variant line (no offer, not an order bump) of a product with an
  * active bundle; all such lines of one product are priced together, so one
- * red and one blue of the same product are "2 units".
+ * red and one blue of the same product are "2 units". A mix-and-match bundle
+ * (item 215) prices all its products' lines together: one shirt and two caps
+ * are "3 units" of the box.
  *
  * Each discounted line gets `lineDiscountAmount` and a lower
  * `lineTotalAmount`; a tier with free shipping makes its lines ship free.
@@ -140,9 +142,17 @@ async function applyBundleTiers(workspaceId, lines, transaction) {
   );
   if (bundles.size === 0) return [];
 
-  const snapshots = [];
+  // One group per product, or per bundle when it mixes and matches.
+  const groups = new Map();
   for (const [productId, bundle] of bundles) {
-    const group = eligible.filter((line) => line.productId === productId);
+    const key = bundle.mixAndMatch ? `bundle:${bundle.id}` : productId;
+    if (!groups.has(key)) groups.set(key, { bundle, productIds: [] });
+    groups.get(key).productIds.push(productId);
+  }
+  const snapshots = [];
+  for (const { bundle, productIds } of groups.values()) {
+    const productId = productIds.length === 1 ? productIds[0] : null;
+    const group = eligible.filter((line) => productIds.includes(line.productId));
     const unitCount = group.reduce((sum, line) => sum + line.quantity, 0);
     if (unitCount > MAX_UNITS) continue;
     const units = group.flatMap((line) => Array(line.quantity).fill(Number(line.unitPriceAmount)));
@@ -163,6 +173,7 @@ async function applyBundleTiers(workspaceId, lines, transaction) {
       bundleId: bundle.id,
       name: bundle.name,
       productId,
+      ...(bundle.mixAndMatch ? { mixAndMatch: true, productIds } : {}),
       amount: priced.discount,
       freeShipping: priced.freeShipping,
       tiers: priced.tiers,
@@ -178,6 +189,7 @@ function presentBundle(bundle, variants) {
     id: bundle.id,
     name: bundle.name,
     displayStyle: bundle.displayStyle,
+    mixAndMatch: Boolean(bundle.mixAndMatch),
     tiers: tiers.map((tier) => ({
       id: tier.id,
       title: tier.title,

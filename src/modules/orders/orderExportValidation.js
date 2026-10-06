@@ -31,6 +31,8 @@ module.exports = {
       rowPer: Joi.string().valid('order', 'item').default('order'),
       format: Joi.string().valid('csv', 'xlsx').default('csv'),
       lang: Joi.string().valid('en', 'ar').default('en'),
+      // A courier's layout (exportPresets.js): its titles, order and rows instead of `columns` / `rowPer`.
+      preset: uuid.optional(),
     }),
   },
 };

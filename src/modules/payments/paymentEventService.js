@@ -159,11 +159,13 @@ async function acceptWebhook(code, token, req) {
   const account = await accounts.findByWebhookToken(code, token);
   if (!account) throw new NotFoundError('Webhook');
 
-  const parsed = adapter.parseWebhook({ query: req.query || {}, body: req.body, headers: req.headers || {} }, account.credentials);
+  const parsed = adapter.parseWebhook({ query: req.query || {}, body: req.body, headers: req.headers || {}, rawBody: req.rawBody }, account.credentials);
   if (!parsed) return { statusCode: 200, body: { received: true, ignored: true } };
   if (!parsed.valid) {
     // Never log the received or expected signature.
     logger.warn('Payment webhook with an invalid signature', { workspaceId: account.workspaceId, providerCode: code });
+    // A wrong webhook secret looks the same as a forged call: say it once a day.
+    require('../notifications/integrationAlerts').badSignature(account.workspaceId, { kind: 'gateway', code, name: adapter.name || code, link: '/payments' });
     throw new AppError('WEBHOOK_SIGNATURE_INVALID', 'Signature does not match', 401);
   }
 

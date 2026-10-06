@@ -80,6 +80,8 @@ async function overview(workspaceId) {
       }
     }
   }
+  // The live pages' and funnels' texts (contentTranslations.js).
+  for (const key of await require('./contentTranslations').wantedFields(workspaceId)) wanted.add(key);
   const rows = await db.Translation.findAll({
     where: { workspaceId, locale: languages },
     attributes: ['entityType', 'entityId', 'locale', 'field'],
@@ -204,7 +206,11 @@ async function overlay(workspaceId, locale, entityType, items) {
 async function localizeProducts(req, products) {
   try {
     const locale = await shopperLocale(req);
-    if (locale) await overlay(req.tenant.workspaceId, locale, 'product', products);
+    if (locale) {
+      await overlay(req.tenant.workspaceId, locale, 'product', products);
+      // Offers, options, the special-offer line and the page content (moreTexts.js).
+      await require('./moreTexts').localizeProductDetails(req.tenant.workspaceId, locale, products);
+    }
   } catch (err) {
     logger.warn('Products could not be localized', { error: err.message });
   }
@@ -256,6 +262,10 @@ router.get(
   validate(schemas.list),
   asyncHandler(async (req, res) => res.json({ items: await listItems(req.tenant.workspaceId, req.query) }))
 );
+// Pages and funnels: GET/PUT /content (contentTranslations.js).
+router.use(require('./contentTranslations').router);
+// "Translate what's missing with AI": POST /ai and /ai/apply (aiFill.js).
+router.use(require('./aiFill').router);
 router.put(
   '/',
   validate(schemas.save),
@@ -268,6 +278,7 @@ module.exports = {
   storeLanguagesSchema,
   languagesOf,
   overview,
+  listItems,
   localizeProducts,
   localizeCollections,
 };

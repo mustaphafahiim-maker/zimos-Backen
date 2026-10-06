@@ -74,6 +74,7 @@ const LABELS = {
     cod: ['Cash on delivery', 'الدفع عند الاستلام'],
     card: ['Card', 'بطاقة'],
     wallet: ['Wallet', 'محفظة إلكترونية'],
+    paypal: ['PayPal', 'باي بال'],
     bank_transfer: ['Bank transfer', 'تحويل بنكي'],
   },
   source: {
@@ -144,6 +145,13 @@ const COLUMNS = [
   },
   { key: 'city', en: 'City', ar: 'المدينة', value: (o) => address(o).city },
   { key: 'address', en: 'Address', ar: 'العنوان', value: (o) => address(o).addressLine },
+  // One cell for couriers that take the address whole: street, area/city, governorate.
+  {
+    key: 'fullAddress',
+    en: 'Full address',
+    ar: 'العنوان كامل',
+    value: (o, i, x) => [address(o).addressLine, address(o).city, byKey.get('region').value(o, i, x)].filter((v) => v && String(v).trim()).join('، '),
+  },
   { key: 'addressNotes', en: 'Address notes', ar: 'ملاحظات العنوان', value: (o) => address(o).notes },
   { key: 'paymentMethod', en: 'Payment method', ar: 'طريقة الدفع', value: (o, i, x) => x.label('payment', o.paymentMethod) },
   { key: 'currency', en: 'Currency', ar: 'العملة', value: (o) => o.currency },
@@ -152,6 +160,13 @@ const COLUMNS = [
   { key: 'shipping', en: 'Shipping', ar: 'الشحن', value: (o) => money(o.shippingAmount) },
   { key: 'tax', en: 'Tax', ar: 'الضريبة', value: (o) => money(o.taxAmount) },
   { key: 'total', en: 'Total', ar: 'الإجمالي', value: (o) => money(o.totalAmount) },
+  // What the courier collects at the door: the unpaid part of a cash-on-delivery order, else nothing.
+  {
+    key: 'codAmount',
+    en: 'Amount to collect',
+    ar: 'المبلغ المطلوب تحصيله',
+    value: (o) => money(o.paymentMethod === 'cod' ? Math.max(0, Number(o.totalAmount || 0) - Number(o.amountPaid || 0)) : 0),
+  },
   { key: 'amountPaid', en: 'Paid', ar: 'المدفوع', value: (o) => money(o.amountPaid) },
   { key: 'amountRefunded', en: 'Refunded', ar: 'المسترد', value: (o) => money(o.amountRefunded) },
   {
@@ -271,7 +286,29 @@ async function shipmentsFor(workspaceId, orderIds) {
   return byOrder;
 }
 
-function resolveColumns(requested, rowPer) {
+/**
+ * A courier's own layout (exportPresets.js): its column titles in its order,
+ * each one of the columns above or a fixed value the courier asks for.
+ */
+function layoutColumns(layout) {
+  return layout.map((entry) => {
+    const header = String(entry.header || '');
+    // A checkout form field's answer ('field:custom_1'), as the order kept it (checkout/checkoutForm.js).
+    if (typeof entry.key === 'string' && entry.key.startsWith('field:')) {
+      const fieldKey = entry.key.slice(6);
+      return { key: entry.key, en: header, ar: header, value: (o) => ((o.checkoutFields || []).find((a) => a && a.key === fieldKey) || {}).value || '' };
+    }
+    if (entry.key && byKey.has(entry.key)) {
+      const column = byKey.get(entry.key);
+      return { ...column, en: header, ar: header };
+    }
+    const fixed = entry.fixed === undefined || entry.fixed === null ? '' : String(entry.fixed);
+    return { key: 'fixed', en: header, ar: header, value: () => fixed };
+  });
+}
+
+function resolveColumns(requested, rowPer, layout) {
+  if (Array.isArray(layout) && layout.length > 0) return layoutColumns(layout);
   const keys = requested && requested.length > 0 ? requested : rowPer === 'item' ? DEFAULT_ITEM_COLUMNS : DEFAULT_ORDER_COLUMNS;
   return keys.map((key) => byKey.get(key)).filter(Boolean);
 }
@@ -282,10 +319,19 @@ function resolveColumns(requested, rowPer) {
  *
  * @param {string} workspaceId
  * @param {object} filters   the orders list query: q, from, to, stage, sort, the three states
- * @param {object} options   { columns: string[], rowPer: 'order' | 'item', lang: 'en' | 'ar', timezone }
+ * @param {object} options   { columns: string[], rowPer: 'order' | 'item', lang: 'en' | 'ar', timezone, maskPhones }
+ *
+ * `maskPhones`: every phone written partly hidden (010****665), as the orders
+ * list shows them to a teammate without customers.reveal_sensitive (SPEC §3.4 #8).
  */
-async function* csvChunks(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone } = {}) {
-  const columns = resolveColumns(requested, rowPer);
+/** The order as written to the file: phones masked when the teammate may not see them. */
+function phoneShape(maskPhones) {
+  return maskPhones ? require('../../core/utils/phoneMask').maskPhonesDeep : (row) => row;
+}
+
+async function* csvChunks(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone, maskPhones = false, layout } = {}) {
+  const columns = resolveColumns(requested, rowPer, layout);
+  const shape = phoneShape(maskPhones);
   const x = exportContext({ lang, timezone });
   yield `﻿${line(columns.map((c) => (lang === 'ar' ? c.ar : c.en)))}`;
 
@@ -301,7 +347,7 @@ async function* csvChunks(workspaceId, filters, { columns: requested, rowPer = '
     );
     let chunk = '';
     for (const order of page.orders) {
-      const row = { ...order, shipment: shipments.get(order.id) || null };
+      const row = shape({ ...order, shipment: shipments.get(order.id) || null });
       const items = rowPer === 'item' && row.items && row.items.length > 0 ? row.items : [null];
       for (const item of items) chunk += line(columns.map((c) => c.value(row, item, x)));
     }
@@ -321,6 +367,7 @@ const NUMERIC_COLUMNS = new Set([
   'shipping',
   'tax',
   'total',
+  'codAmount',
   'amountPaid',
   'amountRefunded',
   'itemsCount',
@@ -334,8 +381,9 @@ const NUMERIC_COLUMNS = new Set([
  * format. Built in memory: the spreadsheet is one zipped document, so there
  * is nothing to stream; MAX_ORDERS bounds it as it bounds the CSV.
  */
-async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone } = {}) {
-  const columns = resolveColumns(requested, rowPer);
+async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'order', lang = 'en', timezone, maskPhones = false, layout } = {}) {
+  const columns = resolveColumns(requested, rowPer, layout);
+  const shape = phoneShape(maskPhones);
   const x = exportContext({ lang, timezone });
   const rows = [columns.map((c) => (lang === 'ar' ? c.ar : c.en))];
   const asCell = (column, value) => {
@@ -355,7 +403,7 @@ async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'o
       page.orders.map((o) => o.id)
     );
     for (const order of page.orders) {
-      const row = { ...order, shipment: shipments.get(order.id) || null };
+      const row = shape({ ...order, shipment: shipments.get(order.id) || null });
       const items = rowPer === 'item' && row.items && row.items.length > 0 ? row.items : [null];
       for (const item of items) rows.push(columns.map((c) => asCell(c, c.value(row, item, x))));
     }
@@ -366,4 +414,23 @@ async function tableRows(workspaceId, filters, { columns: requested, rowPer = 'o
   return rows;
 }
 
-module.exports = { csvChunks, tableRows, columnCatalogue, COLUMN_KEYS, MAX_ORDERS };
+/**
+ * One order as rows of cells in a layout — what the Google Sheets sync writes
+ * (modules/sheets): the same columns and words as the export, numbers as
+ * numbers. `order` is shaped as the list shows it (with `stage` and its
+ * latest `shipment`).
+ */
+function rowsForOrder(order, { layout, rowPer = 'order', lang = 'en', timezone, maskPhones = false } = {}) {
+  const columns = resolveColumns(undefined, rowPer, layout);
+  const x = exportContext({ lang, timezone });
+  const row = phoneShape(maskPhones)(order);
+  const asCell = (column, value) => {
+    if (value === null || value === undefined) return '';
+    if (NUMERIC_COLUMNS.has(column.key) && /^-?\d+(\.\d+)?$/.test(String(value))) return Number(value);
+    return String(value);
+  };
+  const items = rowPer === 'item' && row.items && row.items.length > 0 ? row.items : [null];
+  return items.map((item) => columns.map((c) => asCell(c, c.value(row, item, x))));
+}
+
+module.exports = { csvChunks, tableRows, rowsForOrder, columnCatalogue, COLUMN_KEYS, MAX_ORDERS };

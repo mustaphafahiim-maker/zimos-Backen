@@ -6,6 +6,7 @@ const db = require('../../db/models');
 const emailTemplates = require('./emailTemplates');
 const brevoEmailProvider = require('./brevoEmailProvider');
 const twilioSmsProvider = require('./twilioSmsProvider');
+const platformWhatsapp = require('./platformWhatsapp');
 
 // Minimal SMS bodies. OTP flows pass { code } (and, for the sign-up code,
 // { minutes, locale }); anything else falls back to a terse template-name +
@@ -41,11 +42,16 @@ function loggable(data) {
   return { ...data, code: '[REDACTED]' };
 }
 
-async function persist({ workspaceId, channel, provider, recipient, template, status, error, attempts }) {
-  await db.NotificationLog.create({ workspaceId, channel, provider, recipient, template, status, error, attempts });
+// `orderId`: a message to a customer about an order — logged with it and its line, for the order's timeline.
+async function persist({ workspaceId, channel, provider, recipient, template, status, error, attempts, orderId = null, subject = null }) {
+  await db.NotificationLog.create({
+    workspaceId, channel, provider, recipient, template, status, error, attempts,
+    orderId: orderId || null,
+    subject: orderId && subject ? String(subject).replace(/\s+/g, ' ').trim().slice(0, 300) : null,
+  });
 }
 
-async function sendEmail({ recipient, template, data, workspaceId = null }) {
+async function sendEmail({ recipient, template, data, workspaceId = null, orderId = null }) {
   const provider = env.notifications.emailProvider;
   const { subject, html, text } = emailTemplates.render(template, data);
 
@@ -56,7 +62,7 @@ async function sendEmail({ recipient, template, data, workspaceId = null }) {
     if (provider === 'console') {
       logger.info(`[notification:email] ${template} -> ${recipient} :: ${subject}`, { data: loggable(data) });
     } else if (provider === 'brevo') {
-      const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text, fromName: data && data.fromName ? String(data.fromName).slice(0, 100) : undefined });
+      const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text, fromName: data && data.fromName ? String(data.fromName).slice(0, 100) : undefined, replyTo: data && data.replyTo ? String(data.replyTo) : undefined, fromAddress: data && data.fromAddress ? String(data.fromAddress) : undefined });
       attempts = sent.attempts || attempts;
     } else {
       throw new Error(`Email provider "${provider}" is not configured`);
@@ -68,18 +74,24 @@ async function sendEmail({ recipient, template, data, workspaceId = null }) {
     logger.error(`[notification:email] ${template} -> ${recipient} failed after ${attempts} attempt(s): ${err.message}`);
   }
 
-  await persist({ workspaceId, channel: 'email', provider, recipient, template, status, error, attempts });
+  await persist({ workspaceId, channel: 'email', provider, recipient, template, status, error, attempts, orderId, subject });
   return { status, error, subject, attempts };
 }
 
-async function sendChannel(channel, provider, { recipient, template, data, workspaceId = null }) {
+async function sendChannel(channel, provider, { recipient, template, data, workspaceId = null, orderId = null }) {
   let status = 'sent';
   let error = null;
   let attempts = 1;
   try {
     if (provider === 'console') {
-      // WhatsApp is logged exactly as before.
-      logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: channel === 'whatsapp' ? data : loggable(data) });
+      // Nothing leaves the server. Fine while developing; in production it is
+      // "not configured", so callers fall back (WhatsApp → SMS → email) instead
+      // of believing a code was delivered.
+      if (env.isProduction) throw new Error(`No ${channel} provider is configured (${channel.toUpperCase()}_PROVIDER=console)`);
+      logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: loggable(data) });
+    } else if (channel === 'whatsapp' && provider === 'cloud') {
+      // ZIMOS's own number (PLATFORM_WHATSAPP.md).
+      await platformWhatsapp.send({ to: recipient, template, data });
     } else if (channel === 'sms' && provider === 'twilio') {
       const sent = await twilioSmsProvider.sendSms({ to: recipient, body: smsBody(template, data) });
       attempts = sent.attempts || attempts;
@@ -93,7 +105,7 @@ async function sendChannel(channel, provider, { recipient, template, data, works
     logger.error(`[notification:${channel}] ${template} -> ${recipient} failed after ${attempts} attempt(s): ${err.message}`);
   }
 
-  await persist({ workspaceId, channel, provider, recipient, template, status, error, attempts });
+  await persist({ workspaceId, channel, provider, recipient, template, status, error, attempts, orderId, subject: orderId ? smsBody(template, data) : null });
   return { status, error, attempts };
 }
 

@@ -4,7 +4,6 @@ const { Router } = require('express');
 const Joi = require('joi');
 const asyncHandler = require('express-async-handler');
 const db = require('../../db/models');
-const env = require('../../config/env');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { effectiveVariantPrice } = require('../catalog/productPage');
@@ -17,7 +16,8 @@ const { resolveStoreInfo, publicLegalIndex } = require('../storefront/storeInfo'
  *   GET /api/v1/feeds/:workspaceSlug/:channel.xml   (or .csv)
  *   channel: meta | google | tiktok | snapchat
  *
- * One item per sellable variant, grouped by product (`item_group_id`), in the
+ * One item per sellable variant, grouped by product (`item_group_id`) and
+ * linking to that variant (`?variant=<id>`, preselected by the storefront), in the
  * Google Merchant RSS 2.0 shape, which all four platforms read. Hidden,
  * draft and archived products never appear; sold-out ones are left out unless
  * the merchant keeps them. The feed is built on request and kept for
@@ -56,7 +56,8 @@ function readFeedSettings(settings) {
   };
 }
 
-const storeBase = (workspace) => `https://${workspace.slug}.${env.platformRootDomain}`;
+// The store's canonical address: its primary domain when it has one (domains/primaryHost.js).
+const storeBase = (workspace) => require('../domains/primaryHost').storeOriginOf(workspace);
 
 /** "250.00 EGP" — the feed's price format. */
 const price = (minor, currency) => `${(Number(minor) / 100).toFixed(2)} ${currency}`;
@@ -94,7 +95,7 @@ async function buildItems(workspace) {
     ],
   });
 
-  const base = storeBase(workspace);
+  const base = await storeBase(workspace);
   const brand = config.brand || workspace.name;
   const items = [];
   for (const product of products) {
@@ -102,7 +103,8 @@ async function buildItems(workspace) {
       .filter((m) => m && typeof m.url === 'string' && /^https?:\/\//i.test(m.url) && (!m.mimeType || String(m.mimeType).startsWith('image/')))
       .map((m) => m.url);
     if (images.length === 0) continue; // every platform refuses an item without a picture
-    const description = plain(product.description).slice(0, 5000) || product.name;
+    // Without its formatting marks (catalog/richDescription.js).
+    const description = plain(require('../catalog/richDescription').plainDescription(product.description)).slice(0, 5000) || product.name;
     for (const variant of product.variants) {
       const inStock = variant.allowOverselling || variant.stockOnHand - variant.reservedStock > 0;
       if (!inStock && config.excludeOutOfStock) continue;
@@ -115,9 +117,12 @@ async function buildItems(workspace) {
         item_group_id: product.productCode || product.id,
         title: [product.name, ...options].join(' - ').slice(0, 150),
         description,
-        link: `${base}/products/${product.slug}`,
-        image_link: images[0],
-        additional_image_link: images.slice(1, 11),
+        // Each item lands on its own variant (the storefront reads ?variant=): the price,
+        // picture and availability the ad showed are the ones the shopper sees.
+        link: product.variants.length > 1 ? `${base}/products/${product.slug}?variant=${variant.id}` : `${base}/products/${product.slug}`,
+        // A variant's own picture leads (SPEC §7.2); the product's follow.
+        image_link: variant.imageUrl || images[0],
+        additional_image_link: (variant.imageUrl ? images : images.slice(1)).slice(0, 10),
         price: price(regular, variant.currency),
         sale_price: regular > current ? price(current, variant.currency) : '',
         availability: inStock ? 'in stock' : 'out of stock',
@@ -139,7 +144,7 @@ const xmlEscape = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 
-function toXml(workspace, items) {
+function toXml(workspace, items, base) {
   const tag = (name, value) => (value === '' || value === null || value === undefined ? '' : `      <g:${name}>${xmlEscape(value)}</g:${name}>\n`);
   const body = items
     .map(
@@ -149,7 +154,7 @@ function toXml(workspace, items) {
           .join('')}${tag('price', item.price)}${tag('sale_price', item.sale_price)}${tag('availability', item.availability)}${tag('brand', item.brand)}${tag('condition', item.condition)}${tag('google_product_category', item.google_product_category)}    </item>\n`
     )
     .join('');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">\n  <channel>\n    <title>${xmlEscape(workspace.name)}</title>\n    <link>${xmlEscape(storeBase(workspace))}</link>\n    <description>${xmlEscape(workspace.name)}</description>\n${body}  </channel>\n</rss>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">\n  <channel>\n    <title>${xmlEscape(workspace.name)}</title>\n    <link>${xmlEscape(base)}</link>\n    <description>${xmlEscape(workspace.name)}</description>\n${body}  </channel>\n</rss>\n`;
 }
 
 const CSV_COLUMNS = ['id', 'item_group_id', 'title', 'description', 'link', 'image_link', 'additional_image_link', 'price', 'sale_price', 'availability', 'brand', 'condition', 'google_product_category'];
@@ -169,7 +174,7 @@ async function renderFeed(workspace, format) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit;
   const items = await buildItems(workspace);
-  const entry = { at: Date.now(), count: items.length, body: format === 'csv' ? toCsv(items) : toXml(workspace, items) };
+  const entry = { at: Date.now(), count: items.length, body: format === 'csv' ? toCsv(items) : toXml(workspace, items, await storeBase(workspace)) };
   cache.set(key, entry);
   return entry;
 }
@@ -294,6 +299,8 @@ publicRouter.get(
       attributes: ['id', 'name', 'slug', 'settings'],
     });
     if (!workspace || !readFeedSettings(workspace.settings).enabled) throw new NotFoundError('Feed');
+    // The Google feed is the Google Merchant app (apps/appCatalogue.js): taken off, Google gets nothing.
+    if (match[1] === 'google' && !(await require('../apps/appGate').isEnabled(workspace.id, 'google_merchant'))) throw new NotFoundError('Feed');
     const feed = await renderFeed(workspace, match[2]);
     res.set('Content-Type', match[2] === 'csv' ? 'text/csv; charset=utf-8' : 'application/xml; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=600');

@@ -37,7 +37,8 @@ function wantsListing(query) {
  * relies on; anything from LISTING_PARAMS goes to productSearch.
  */
 async function listProducts(workspaceId, query = {}) {
-  if (wantsListing(query)) return productSearch.searchProducts(workspaceId, query);
+  // A search that finds nothing tries the merchant's synonyms (searchInsights/, item 211).
+  if (wantsListing(query)) return require('../searchInsights').searchWithSynonyms(workspaceId, query, (q) => productSearch.searchProducts(workspaceId, q));
 
   const { collectionId, tag, limit = 24, cursor } = query;
   // A hidden product opens by its link only (page_settings.hidden).
@@ -73,7 +74,17 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
   const bundle = (await bundlePricing.bundlesForProducts(workspaceId, [product.id])).get(product.id);
   return {
     ...publicProduct,
+    // The website page the merchant built as this product's page (page settings → landing page), or null.
+    landingPagePath: await require('../catalog/productLanding').landingPathFor(workspaceId, product.pageSettings),
+    // For the "similar products" section: products sharing a collection.
+    collectionIds: (await db.ProductCollection.findAll({ where: { productId: product.id }, attributes: ['collectionId'] })).map((r) => r.collectionId),
     bundle: bundle ? bundlePricing.presentBundle(bundle, publicProduct.variants) : null,
+    // A running A/B test: the page asks for this visitor's prices and pictures (catalog/productTests.js).
+    abTest: await require('../catalog/productTests').hasRunningTest(workspaceId, product.id),
+    // Sold beyond stock as a pre-order: { shipsAt, message, limited } or null (preorders/, item 195).
+    preorder: require('../preorders').publicView(product),
+    // { min, max, maxPerCustomer } or null (catalog/purchaseLimits.js, item 198).
+    purchaseLimits: require('../catalog/purchaseLimits').limitsOf(product),
     rating,
     reviews,
   };
@@ -92,14 +103,20 @@ async function getStorefront(workspaceId) {
     id: w.id,
     name: w.name,
     slug: w.slug,
+    // The store's canonical host when it has a primary domain that can be served (domains/primaryHost.js).
+    primaryHost: await require('../domains/primaryHost').primaryHostOf(w.id),
     logoUrl: w.logoUrl,
     tagline: w.tagline,
     themeSettings: w.themeSettings || {},
     currency: w.defaultCurrency,
+    // The store's currency format (dashboard → currencies): symbol position and decimals.
+    currencyFormat: (({ symbolPosition = 'auto', decimals = 'auto' }) => ({ symbolPosition, decimals }))((w.settings && w.settings.currencies) || {}),
     // Which optional fields the checkout form should show or demand. Always
     // fully populated — an unconfigured store gets the defaults, which are
     // what the checkout already enforced before this existed.
     checkout: resolveCheckoutSettings(w),
+    // The places the store does not deliver to: left out of the checkout's list (shipping/shippingPlaces.js).
+    hiddenPlaces: require('../shipping/shippingPlaces').hiddenOf(w.settings),
     // What the thank-you page shows after an order (settings.thank_you_page).
     thankYou: resolveThankYouPage(w.settings),
     // Contact details and trust cards (null while switched off), which legal
@@ -121,7 +138,9 @@ async function getStorefront(workspaceId) {
     catalog: resolveCatalogSettings(w.settings),
     // The "add to your order" card the store's checkout offers, or null
     // (none set, or its offer is archived / out of stock).
-    orderBump: await presentStoreBump(w),
+    orderBump: (await require('../apps/appGate').isEnabled(w.id, 'offers')) ? await presentStoreBump(w) : null,
+    // The store as an installable app for its shoppers, or null (storeApp.js).
+    storeApp: require('./storeApp').publicStoreApp(w),
     // The browser ad-pixel IDs; the rest of settings stays private.
     ...(await publicTracking(w.id)),
   };
@@ -142,7 +161,10 @@ async function publicTracking(workspaceId) {
   // Purchase itself with on_order (marketing/purchaseTiming.js).
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['settings'] });
   const purchaseEventTiming = require('../marketing/purchaseTiming').timingOf(workspace && workspace.settings);
-  return { tracking, trackingPixels, purchaseEventTiming };
+  // purchase | lead: which event the store's browser pixels send for an order (marketing/conversionEvent.js);
+  // a funnel's own choice is in its settings.conversionEvent.
+  const conversionEvent = require('../marketing/conversionEvent').storeKindOf(workspace && workspace.settings);
+  return { tracking, trackingPixels, purchaseEventTiming, conversionEvent };
 }
 
 const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl', 'showInHeader'];
@@ -299,6 +321,8 @@ async function presentTrackedOrder(workspaceId, order) {
       quantity: item.quantity,
       lineTotalAmount: String(item.lineTotalAmount),
     })),
+    // The delivery window promised at checkout (shipping/deliveryEstimates.js, item 199).
+    deliveryEstimate: (order.shippingSnapshot && order.shippingSnapshot.deliveryEstimate) || null,
     subtotalAmount: String(order.subtotalAmount),
     discountAmount: String(order.discountAmount),
     shippingAmount: String(order.shippingAmount),
@@ -311,6 +335,10 @@ async function presentTrackedOrder(workspaceId, order) {
     notes: await require('../orders/orderMetaService').publicNotes(order.id),
     // Download links of the digital products in a paid order (modules/digital).
     downloads: await require('../digital/digitalService').publicGrantsForOrder(workspaceId, order.id),
+    // A transfer under review, or rejected and ready to be sent again (payments/transferResubmit.js).
+    transfer: await require('../payments/transferResubmit').stateFor(order),
+    // The subscriptions this order started, with the link to manage them (subscriptions/subscriptionLinks.js).
+    subscriptions: await require('../subscriptions/subscriptionLinks').forTrackedOrder(workspaceId, order.id),
   };
 }
 
@@ -323,5 +351,8 @@ module.exports = {
   suggestProducts,
   trackOrder,
   trackOrderByToken,
+  // Shopper accounts (shopperAccounts/, item 185) show their orders the same way.
+  presentTrackedOrder,
+  trackingStage,
   toPublicVariant,
 };

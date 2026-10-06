@@ -43,6 +43,10 @@ async function addDomain(workspaceId, { hostname }, req) {
     throw new ConflictError('Set up your store (add a product) before connecting a domain', 'STORE_NOT_SET_UP');
   }
 
+  // www and the root are one address: the other one is sent here unless it is connected itself (rootDomains.js).
+  const other = require('./rootDomains').counterpartOf(host);
+  const otherTaken = other ? await db.Domain.count({ where: { hostname: other } }) : 0;
+
   let domain;
   try {
     domain = await db.Domain.create({
@@ -51,6 +55,7 @@ async function addDomain(workspaceId, { hostname }, req) {
       hostname: host,
       verificationToken: crypto.randomBytes(16).toString('hex'),
       status: 'pending_verification',
+      counterpart: other && !otherTaken ? { redirect: true, sslStatus: 'none' } : null,
     });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') {
@@ -132,6 +137,9 @@ async function deleteDomain(workspaceId, domainId, req) {
   const before = domain.toJSON();
   await require('./domainSettings').revokeCertificate(domain);
   await domain.destroy();
+  // It may have been the store's canonical address (primaryHost.js).
+  require('./primaryHost').forget(workspaceId);
+  require('../storefront/storefrontCache').invalidate(workspaceId);
 
   await recordAudit({
     workspaceId,

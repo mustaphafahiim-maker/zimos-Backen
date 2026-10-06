@@ -264,20 +264,6 @@ function fetchPublicJson(url, { timeoutMs = 10000, maxBytes = 2 * 1024 * 1024 } 
   });
 }
 
-const stripHtml = (html) =>
-  String(html || '')
-    .replace(/<\s*(br|\/p|\/div|\/li|\/h[1-6])\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
 /** Shopify's public `/products/<handle>.json` → one transfer product, as a draft. */
 function mapShopifyProduct(shopify) {
   const options = (shopify.options || []).filter((o) => o && o.name && o.name !== 'Title');
@@ -287,7 +273,8 @@ function mapShopifyProduct(shopify) {
   return {
     __row: 1,
     name: String(shopify.title || '').slice(0, 300),
-    description: stripHtml(shopify.body_html).slice(0, 20000),
+    // Its formatting kept as marks, everything else dropped (catalog/richDescription.js).
+    description: require('../richDescription').normalizeDescription(shopify.body_html || ''),
     productType: 'physical',
     status: 'draft',
     tags: tags.map((tag) => String(tag).trim()).filter(Boolean).slice(0, 50),
@@ -315,17 +302,17 @@ function mapShopifyProduct(shopify) {
 
 /** A Shopify product page link → the address of its public JSON, or a 422 saying what is wrong. */
 function shopifyJsonUrl(link) {
-  const invalid = (message) => new ValidationError([{ field: 'url', message }]);
+  // Each refusal has its own code (importers/index.js linkError).
+  const { linkError, parseLink } = require('./importers');
   let url;
   try {
-    url = new URL(String(link).trim());
+    url = parseLink(link);
   } catch (err) {
-    throw invalid('Paste the full product link, like https://store.com/products/my-product');
+    if (err.code === 'LINK_INVALID') throw linkError('LINK_INVALID', 'Paste the full product link, like https://store.com/products/my-product');
+    throw err;
   }
-  if (url.protocol !== 'https:') throw invalid('The link must start with https://');
-  if (url.username || url.password) throw invalid('The link must not contain a username or password');
   const match = url.pathname.match(/\/products\/([^/?#]+?)(?:\.json)?\/?$/);
-  if (!match) throw invalid('This is not a Shopify product link: it must contain /products/<name>');
+  if (!match) throw linkError('LINK_NOT_PRODUCT', 'This is not a Shopify product link: it must contain /products/<name>');
   return `${url.origin}/products/${match[1]}.json`;
 }
 
@@ -340,9 +327,7 @@ async function fromShopifyLink(link) {
     ]);
   }
   if (!body || !body.product || !body.product.title) {
-    throw new AppError('IMPORT_SOURCE_UNREACHABLE', 'That link did not return a Shopify product', 422, [
-      { field: 'url', message: 'Not a Shopify product' },
-    ]);
+    throw require('./importers').linkError('LINK_NO_PRODUCT_DATA', 'That link did not return a Shopify product', 'Not a Shopify product');
   }
   return [mapShopifyProduct(body.product)];
 }
@@ -374,6 +359,10 @@ function publicImport(row) {
     createdCount: row.createdCount,
     failedCount: row.failedCount,
     errors: row.errors,
+    // The products created: their ids, the price currency of the page they came from, and the reviews brought with them.
+    productIds: (row.results || []).map((x) => x.productId),
+    results: row.results || [],
+    reviewsImported: (row.results || []).reduce((n, x) => n + (x.reviewsImported || 0), 0),
     createdAt: row.createdAt,
     finishedAt: row.finishedAt,
   };
@@ -447,6 +436,8 @@ async function importOne(workspaceId, source, req, collectionCache) {
     throw err;
   }
   const product = created.product;
+  // The reviews the source page published (importers/): real ones, held for the merchant's approval.
+  const reviewsImported = await require('./importers/reviews').saveImported(workspaceId, product.id, source.reviews, req);
   // What createProduct's first variant does not take.
   const firstExtras = pick(first, ['barcode', 'optionValues', 'costAmount', 'lowStockThreshold', 'currency']);
   if (Object.keys(firstExtras).length > 0) await created.variant.update(firstExtras);
@@ -487,7 +478,7 @@ async function importOne(workspaceId, source, req, collectionCache) {
     if (err.name === 'SequelizeUniqueConstraintError') throw new Error('A SKU in this product is already used by another variant');
     throw err;
   }
-  return product;
+  return { product, reviewsImported };
 }
 
 /** The `io` job: creates the products of one import and writes its report. Safe to run twice. */
@@ -498,12 +489,14 @@ async function runImport(importId) {
   const req = { user: { id: row.createdBy }, ip: null, headers: {} };
   const errors = [];
   let createdCount = 0;
+  const results = [];
   const collectionCache = new Map();
   try {
     for (const source of row.payload) {
       try {
-        await importOne(row.workspaceId, source, req, collectionCache);
+        const made = await importOne(row.workspaceId, source, req, collectionCache);
         createdCount += 1;
+        results.push({ row: source.__row || null, productId: made.product.id, name: made.product.name, sourceCurrency: source.sourceCurrency || null, reviewsImported: made.reviewsImported });
       } catch (err) {
         errors.push({
           row: source.__row || null,
@@ -512,13 +505,14 @@ async function runImport(importId) {
         });
       }
     }
-    await row.update({ status: 'done', createdCount, failedCount: errors.length, errors, payload: [], finishedAt: new Date() });
+    await row.update({ status: 'done', createdCount, failedCount: errors.length, errors, results, payload: [], finishedAt: new Date() });
   } catch (err) {
     logger.error('Catalog import failed', { importId, error: err.message });
     await row.update({
       status: 'failed',
       createdCount,
       failedCount: row.total - createdCount,
+      results,
       errors: [...errors, { row: null, name: '', message: 'The import stopped unexpectedly. Products created so far were kept.' }],
       payload: [],
       finishedAt: new Date(),

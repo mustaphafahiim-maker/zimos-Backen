@@ -30,7 +30,13 @@ async function invoicePdf(workspaceId, orderId) {
   const chunks = [];
   doc.on('data', (c) => chunks.push(c));
   const done = new Promise((resolve) => doc.on('end', () => resolve({ pdf: Buffer.concat(chunks), invoiceNumber: invoice.invoiceNumber })));
+  drawInvoice(doc, { order, invoice, workspace });
+  doc.end();
+  return done;
+}
 
+/** One invoice, from the top of the current page (several share a document: orderInvoicesPdf.js). */
+function drawInvoice(doc, { order, invoice, workspace }) {
   const left = doc.page.margins.left;
   const width = doc.page.width - left * 2;
   const right = left + width;
@@ -38,6 +44,12 @@ async function invoicePdf(workspaceId, orderId) {
 
   // ---- header
   let y = drawText(doc, (workspace && workspace.name) || 'Store', { x: left, y: 40, width: width / 2, size: 18, bold: true, align: 'left' });
+  // The business on the invoice (account settings: workspaces/accountSettings.js).
+  const legal = workspace ? require('../workspaces/accountSettings').accountOf(workspace).legal : null;
+  if (legal) {
+    const lines = [legal.company || legal.name, legal.address, [legal.phone, legal.country].filter(Boolean).join(' · ')].filter(Boolean);
+    for (const line of lines) y = drawText(doc, line, { x: left, y, width: width / 2, size: 9, align: 'left' });
+  }
   doc.font('Helvetica-Bold').fontSize(20).fillColor('#222').text('INVOICE', left + width / 2, 40, { width: width / 2, align: 'right', lineBreak: false });
   doc.font('Helvetica').fontSize(9).fillColor('#555');
   doc.text(`No. ${invoice.invoiceNumber}`, left + width / 2, 66, { width: width / 2, align: 'right', lineBreak: false });
@@ -131,11 +143,9 @@ async function invoicePdf(workspaceId, orderId) {
 
   y += 8;
   doc.font('Helvetica').fontSize(9).fillColor('#555');
-  const method = { cod: 'Cash on delivery', card: 'Card', wallet: 'Wallet', bank_transfer: 'Bank transfer' }[order.paymentMethod] || order.paymentMethod;
+  const method = { cod: 'Cash on delivery', card: 'Card', wallet: 'Wallet', paypal: 'PayPal', bank_transfer: 'Bank transfer' }[order.paymentMethod] || order.paymentMethod;
   doc.text(`Payment method: ${method}`, left, y, { lineBreak: false });
-
-  doc.end();
-  return done;
+  doc.fillColor('#000');
 }
 
-module.exports = { invoicePdf };
+module.exports = { invoicePdf, drawInvoice };

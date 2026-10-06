@@ -66,6 +66,8 @@ const schemas = {
             stockOnHand: Joi.number().integer().min(0).max(100000000),
             allowOverselling: Joi.boolean(),
             status: Joi.string().valid('active', 'archived'),
+            // The variant's own picture (SPEC §7.2).
+            imageUrl: Joi.string().trim().uri({ scheme: ['http', 'https'] }).max(1000).allow('', null),
           }).min(2)
         )
         .min(1)

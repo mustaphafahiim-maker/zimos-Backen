@@ -12,6 +12,10 @@ module.exports = (sequelize, DataTypes) => {
       externalOrderId: { type: DataTypes.STRING(120), allowNull: false, field: 'external_order_id' },
       externalStatus: { type: DataTypes.STRING(60), allowNull: true, field: 'external_status' },
       pushedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'pushed_at' },
+      // Following it at the supplier (dropshipOrders.js, migration 437).
+      checkedAt: { type: DataTypes.DATE, allowNull: true, field: 'checked_at' },
+      lastError: { type: DataTypes.STRING(500), allowNull: true, field: 'last_error' },
+      forwardedBy: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'manual', field: 'forwarded_by' },
     },
     { tableName: 'dropship_order_refs' }
   );

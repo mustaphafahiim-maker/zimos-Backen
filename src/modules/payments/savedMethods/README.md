@@ -34,6 +34,37 @@ module.exports = {
 };
 ```
 
+## Saving a card without a payment (optional)
+
+A subscription's card update from the customer's portal and a free trial with
+nothing to pay now (SPEC §18.1) need a card saved with no charge. A gateway
+that can do it adds both functions; without them the portal says the store
+cannot take a new card yet, and a trial must have something to pay (shipping).
+
+```js
+module.exports = {
+  // ...
+  // Where to send the customer to give a card. `reference` is ours (unique);
+  // the gateway sends the customer back to `returnUrl` with its answer in the
+  // query string, signed like a payment redirect.
+  async createCardSetup(creds, { workspaceId, reference, returnUrl, webhookUrl, settings })
+      -> { redirectUrl },
+
+  // The answer that came back: the saved card's token, or null when the
+  // customer cancelled or the query is not a valid answer for `reference`.
+  async completeCardSetup(creds, { workspaceId, reference, query, settings })
+      -> null | { token, brand?, last4?, expiresAt? },
+};
+```
+
+`cardSetup.js` calls them and stores the card like any other (its
+`source_payment_id` is null, or the trial's payment of 0). The sandbox's page
+is `/api/v1/sandbox-pay/setup/:workspaceId/:reference`, with Save card and
+Cancel (`../gateways/sandboxCardSetup.js`, `../sandboxSetupRoutes.js`).
+
+Codes: `CARD_SETUP_NOT_SUPPORTED` (422), `CARD_SETUP_FAILED` (424),
+`CARD_NOT_SAVED` (422).
+
 ## Storage
 
 `payment_methods_saved`: `workspace_id`, `customer_id`, `provider_code`,

@@ -46,14 +46,14 @@ function tidy(normalized) {
   return s.trim();
 }
 
-/** Normalises many strings in one round trip. */
-async function normalizeAll(values) {
+/** Normalises many strings in one round trip (inside `transaction` when given). */
+async function normalizeAll(values, { transaction } = {}) {
   if (values.length === 0) return [];
   const rows = await db.sequelize.query(
     `SELECT zimos_normalize_search(t.v) AS n
        FROM unnest($values::text[]) WITH ORDINALITY AS t(v, i)
       ORDER BY t.i`,
-    { bind: { values: values.map((v) => (v == null ? '' : String(v))) }, type: QueryTypes.SELECT }
+    { bind: { values: values.map((v) => (v == null ? '' : String(v))) }, type: QueryTypes.SELECT, transaction }
   );
   return rows.map((row) => tidy(row.n));
 }
@@ -292,11 +292,12 @@ function explicitPath(index, levels, path) {
  * @param {Array}  index            buildIndex() of the carrier's tree
  * @param {object} shippingAddress  the order's address snapshot
  * @param {object} [explicit]       carrierAddress: { cityId, districtId } or { path: [...] }
+ * @param {object} [options]        { transaction }: the booking's, so the lookup uses its connection
  * @returns {{ path: [{ id, name, nameAr, level, meta }], cityId?, cityName?, districtId?, zoneId? }}
  * @throws 422 CARRIER_ADDRESS_UNMATCHED, or 422 VALIDATION_ERROR for explicit
  *         ids that aren't in the carrier's list
  */
-async function matchAddress(adapter, index, shippingAddress, explicit) {
+async function matchAddress(adapter, index, shippingAddress, explicit, { transaction } = {}) {
   const levels = adapter.capabilities.addressLevels;
 
   if (explicit && Array.isArray(explicit.path)) return explicitPath(index, levels, explicit.path);
@@ -310,7 +311,7 @@ async function matchAddress(adapter, index, shippingAddress, explicit) {
   const orderAddress = { province: address.province || null, city: address.city || null };
   const provinceVariants = nameVariants(address.province);
   const areaVariants = nameVariants(address.city);
-  const [area, ...rest] = await normalizeAll([address.city || '', ...provinceVariants, ...areaVariants]);
+  const [area, ...rest] = await normalizeAll([address.city || '', ...provinceVariants, ...areaVariants], { transaction });
   const provinceNames = rest.slice(0, provinceVariants.length);
   const areaNames = rest.slice(provinceVariants.length);
   const tops = index.filter(deliverable);

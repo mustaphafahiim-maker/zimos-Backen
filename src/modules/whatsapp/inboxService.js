@@ -30,6 +30,8 @@ function conversationView(c, assignees) {
     lastMessageAt: c.lastMessageAt,
     lastMessagePreview: c.lastMessagePreview,
     canReply: Boolean(c.lastInboundAt && Date.now() - new Date(c.lastInboundAt).getTime() < WINDOW_MS),
+    // The customer service bot is quiet here: a teammate took over, or it handed the conversation over.
+    botPaused: Boolean(c.botPausedAt),
     assignedTo: c.assignedToUserId ? userView(assignees.get(c.assignedToUserId)) || { id: c.assignedToUserId, fullName: null } : null,
   };
 }

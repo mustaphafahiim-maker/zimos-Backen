@@ -18,7 +18,8 @@ const Joi = require('joi');
  * A store that has saved nothing gets DEFAULT_CATALOG_SETTINGS.
  */
 
-const CATALOG_SORTS = ['newest', 'price_asc', 'price_desc', 'name', 'position'];
+// featured / best_selling: the builder's product list sources (productSearch.js), also a shop's possible default.
+const CATALOG_SORTS = ['newest', 'price_asc', 'price_desc', 'name', 'position', 'featured', 'best_selling'];
 const FILTER_KEYS = ['collections', 'price', 'tags', 'options', 'option'];
 const MAX_FILTERS = 30;
 

@@ -3,66 +3,9 @@
 const { fn, col } = require('sequelize');
 const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
-const { AppError, NotFoundError } = require('../../core/errors/AppError');
-const { normalizePhone } = require('../../core/utils/phone');
 const { recordAudit } = require('../audit/auditService');
 
-/**
- * True when the customer has at least one delivered order that contained
- * `productId`. "Delivered" = the order's fulfillmentState is 'fulfilled', or
- * it has a shipment marked 'delivered'.
- */
-async function hasDeliveredPurchase(workspaceId, customerId, productId) {
-  const orders = await db.Order.findAll({
-    where: { workspaceId, customerId },
-    include: [
-      { model: db.OrderItem, as: 'items', where: { productId }, required: true, attributes: ['id'] },
-      { model: db.Shipment, as: 'shipments', required: false, attributes: ['status'] },
-    ],
-  });
-  return orders.find(
-    (o) => o.fulfillmentState === 'fulfilled' || (o.shipments || []).some((s) => s.status === 'delivered')
-  );
-}
-
-async function submitReview(workspaceId, productId, { phone, rating, comment }) {
-  const product = await db.Product.findOne({ where: { id: productId, workspaceId, status: 'active' } });
-  if (!product) throw new NotFoundError('Product');
-
-  const phoneNormalized = normalizePhone(phone);
-  const customer = phoneNormalized
-    ? await db.Customer.findOne({ where: { workspaceId, phoneNormalized } })
-    : null;
-  if (!customer) {
-    throw new AppError('NO_DELIVERED_PURCHASE', 'Only a customer who received this product can review it', 403);
-  }
-
-  const order = await hasDeliveredPurchase(workspaceId, customer.id, productId);
-  if (!order) {
-    throw new AppError('NO_DELIVERED_PURCHASE', 'Only a customer who received this product can review it', 403);
-  }
-
-  // One review per (workspace, product, customer) — resubmitting updates it
-  // and sends it back to moderation.
-  const [review, created] = await db.Review.findOrCreate({
-    where: { workspaceId, productId, customerId: customer.id },
-    defaults: { workspaceId, productId, customerId: customer.id, orderId: order.id, rating, comment: comment || null, status: 'pending' },
-  });
-  if (!created) {
-    await review.update({ rating, comment: comment || null, status: 'pending', orderId: order.id });
-  }
-
-  await recordAudit({
-    workspaceId,
-    actorUserId: null,
-    action: created ? 'review.submit' : 'review.resubmit',
-    entityType: 'Review',
-    entityId: review.id,
-    after: { rating, status: 'pending' },
-  });
-
-  return { id: review.id, rating: review.rating, comment: review.comment, status: review.status, created };
-}
+// The storefront's review form lives in shopperReviews.js (order number + phone).
 
 async function listReviews(workspaceId, { status } = {}) {
   const where = { workspaceId };
@@ -125,4 +68,4 @@ async function publicRatingFor(workspaceId, productId) {
   };
 }
 
-module.exports = { submitReview, listReviews, moderateReview, publicRatingFor };
+module.exports = { listReviews, moderateReview, publicRatingFor };

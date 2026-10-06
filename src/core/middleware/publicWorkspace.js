@@ -31,12 +31,17 @@ const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
   // lower-cased and hostnames are case-insensitive, so the lookup matches
   // however the shopper happened to type it.
   const ref = req.params.workspaceId;
-  const workspace = await db.Workspace.findOne({
+  let workspace = await db.Workspace.findOne({
     where: {
       status: ['active', 'suspended'],
       ...(isUuid(ref) ? { id: ref } : { slug: normalizeSlug(ref) }),
     },
   });
+  // A store that changed its address is still found at a previous one (workspaces/slugHistory.js).
+  if (!workspace && !isUuid(ref)) {
+    const formerId = await require('../../modules/workspaces/slugHistory').ownerOf(normalizeSlug(ref));
+    if (formerId) workspace = await db.Workspace.findOne({ where: { id: formerId, status: ['active', 'suspended'] } });
+  }
 
   if (!workspace) {
     throw new NotFoundError('Workspace');
@@ -61,8 +66,12 @@ const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
   // A visitor the store has blocked (their IP, or their country) sees the
   // same "unavailable" answer — modules/risk/visitorGate.
   await require('../../modules/risk/visitorGate').refuseBlockedVisitor(req, workspace);
+  // A store locked with a password or "coming soon" serves only its gate (modules/storeGate, item 197).
+  require('../../modules/storeGate').enforce(req, workspace);
 
   req.publicWorkspace = workspace;
+  // The store's country for the rest of the request: local phone numbers are read in it (core/utils/storeCountry.js).
+  require('../utils/storeCountry').bind(require('../utils/storeCountry').countryOf(workspace));
   req.tenant = { workspaceId: workspace.id, hasPermission: () => false };
   next();
 });

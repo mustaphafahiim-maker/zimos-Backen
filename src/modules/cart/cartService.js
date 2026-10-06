@@ -7,6 +7,8 @@ const db = require('../../db/models');
 const { NotFoundError, AppError } = require('../../core/errors/AppError');
 const { toPublicVariant } = require('../storefront/storefrontService');
 const { resolveCustomizations, sameCustomizations, snapshotToInput, bindUploadsToCart } = require('../catalog/customFields');
+const { customFieldsDelta } = require('../catalog/customFieldPricing');
+const productTests = require('../catalog/productTests');
 
 function generateGuestToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -27,7 +29,7 @@ async function getOrCreateCart(workspaceId, guestToken) {
   return db.Cart.create({ workspaceId, guestToken: token, status: 'active' });
 }
 
-async function getCart(workspaceId, cartId) {
+async function getCart(workspaceId, cartId, { shopperToken = null } = {}) {
   const cart = await db.Cart.findOne({
     where: { id: cartId, workspaceId },
     include: [
@@ -36,15 +38,22 @@ async function getCart(workspaceId, cartId) {
         as: 'items',
         include: [
           // The product rides along for its countdown offer (catalog/productPage.js).
-          { model: db.ProductVariant, as: 'variant', include: [{ model: db.Product, as: 'product', attributes: ['id', 'pageSettings'] }] },
+          { model: db.ProductVariant, as: 'variant', include: [{ model: db.Product, as: 'product', attributes: ['id', 'pageSettings', 'customFields'] }] },
           { model: db.Offer, as: 'offer' },
         ],
       },
     ],
   });
   if (!cart) throw new NotFoundError('Cart');
+  // A product A/B test prices plain lines for whoever filled the cart (catalog/productTests.js).
+  let testPrices = await productTests.visitorPrices(workspaceId, (cart.items || []).filter((i) => !i.offerId).map((i) => i.variantId), cart.visitorId);
+  // A signed-in wholesale customer's price lists (priceLists/, item 205), as the checkout will pin them.
+  if (shopperToken) testPrices = await require('../priceLists').cartPrices(workspaceId, cart, shopperToken, testPrices);
   // Quantity bundles lower the lines they cover, as they will on the order.
-  return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart));
+  const view = await require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart, testPrices));
+  // Free gifts the cart earns, or how far it is from them (freeGifts/, item 208); added by the checkout.
+  view.freeGifts = await require('../freeGifts').forCart(workspaceId, view).catch(() => []);
+  return view;
 }
 
 /**
@@ -54,11 +63,16 @@ async function getCart(workspaceId, cartId) {
  * The authoritative price is always resolved again at checkout time inside
  * orderService, exactly like every other entry point into order creation.
  */
-function withComputedTotals(cart) {
+function withComputedTotals(cart, testPrices = new Map()) {
   const items = (cart.items || []).map((item) => {
-    const currentUnitPrice = item.offer
+    const listUnit = item.offer
       ? item.offer.priceAmount
-      : effectiveVariantPrice(item.variant, item.variant.product).priceAmount;
+      : testPrices.has(item.variantId)
+        ? testPrices.get(item.variantId)
+        : effectiveVariantPrice(item.variant, item.variant.product).priceAmount;
+    // Priced custom fields (catalog/customFieldPricing.js), as the order will charge them.
+    const fieldsDelta = customFieldsDelta(item.variant && item.variant.product && item.variant.product.customFields, item.customizations);
+    const currentUnitPrice = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
     return {
       id: item.id,
       variantId: item.variantId,
@@ -102,17 +116,24 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
     enforceRequired: true,
   });
 
-  let unitPrice = variant.priceAmount;
+  // The cart is priced for whoever last added to it (catalog/productTests.js).
+  if (visitorId) await db.Cart.update({ visitorId }, { where: { id: cartId, workspaceId } });
+  const testPrice = offerId ? undefined : (await productTests.visitorPrices(workspaceId, [variantId], visitorId)).get(variantId);
+  let unitPrice = testPrice !== undefined ? testPrice : variant.priceAmount;
   if (offerId) {
     const offer = await db.Offer.findOne({ where: { id: offerId, workspaceId, productId: variant.productId, status: 'active' } });
     if (!offer) throw new NotFoundError('Offer');
     unitPrice = offer.priceAmount;
   }
+  const fieldsDelta = customFieldsDelta(variant.product.customFields, snapshot);
+  if (fieldsDelta) unitPrice = Number(unitPrice) + fieldsDelta;
 
   // The same product with different answers ("Ahmed" / "Sara" engraved) is a
   // line of its own; only identical ones add up.
   const candidates = await db.CartItem.findAll({ where: { cartId, variantId, offerId: offerId || null } });
   const existing = candidates.find((line) => sameCustomizations(line.customizations, snapshot));
+  // The product's maximum per order (catalog/purchaseLimits.js, item 198).
+  await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, variantId, (existing ? existing.quantity : 0) + quantity, existing ? existing.id : null);
   if (existing) {
     await existing.update({ quantity: existing.quantity + quantity, unitPriceSnapshot: unitPrice });
   } else {
@@ -136,6 +157,7 @@ async function updateItemQuantity(workspaceId, cartId, itemId, quantity) {
   if (quantity <= 0) {
     await item.destroy();
   } else {
+    await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, item.variantId, quantity, item.id);
     await item.update({ quantity });
   }
   return getCart(workspaceId, cartId);

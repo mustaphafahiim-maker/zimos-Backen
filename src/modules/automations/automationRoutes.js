@@ -48,7 +48,7 @@ const ruleBody = {
   trigger: Joi.string().valid(...TRIGGERS),
   isActive: Joi.boolean(),
   conditions: Joi.object({
-    paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').allow(null),
+    paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).allow(null),
     minTotalAmount: Joi.number().integer().min(0).allow(null),
     productIds: Joi.array().items(uuid).max(50),
     governorates: Joi.array().items(Joi.string().trim().max(100)).max(40),
@@ -57,6 +57,9 @@ const ruleBody = {
     riskLevel: Joi.array().items(Joi.string().valid('low', 'medium', 'high')).max(3),
     isFirstOrder: Joi.boolean().allow(null),
     tags: Joi.array().items(Joi.string().trim().max(40)).max(20),
+    // Only contacts in this segment / never contacts in that one (segmentCondition.js).
+    segmentId: uuid.allow(null),
+    excludeSegmentId: uuid.allow(null),
     // Stop a waiting sequence when the order's status changed meanwhile (default true).
     stopOnStatusChange: Joi.boolean(),
     // review.request: days after delivery (default 3).
@@ -162,12 +165,13 @@ const enableTemplate = asyncHandler(async (req, res) => {
   if (!template) throw new NotFoundError('AutomationTemplate');
   const existing = await db.AutomationRule.findOne({ where: { workspaceId, templateKey: template.key } });
   if (existing) return res.json({ rule: view(existing), created: false });
+  const made = templates.ruleFrom(template, req.body.couponCode);
   const rule = await db.AutomationRule.create({
     workspaceId,
     name: template.name[req.body.locale === 'en' ? 'en' : 'ar'],
     trigger: template.trigger,
-    conditions: template.conditions,
-    actions: template.steps,
+    conditions: made.conditions,
+    actions: made.steps,
     isActive: true,
     templateKey: template.key,
   });
@@ -182,7 +186,11 @@ router.get('/', validate({ params: Joi.object(ws) }), list);
 router.get('/templates', validate({ params: Joi.object(ws) }), listTemplates);
 router.post(
   '/templates/:key/enable',
-  validate({ params: Joi.object({ ...ws, key: Joi.string().max(60).required() }), body: Joi.object({ locale: Joi.string().valid('ar', 'en').default('ar') }).default({}) }),
+  validate({ params: Joi.object({ ...ws, key: Joi.string().max(60).required() }), body: Joi.object({
+      locale: Joi.string().valid('ar', 'en').default('ar'),
+      // A template that offers a coupon (acceptsCoupon): the code its last message gives.
+      couponCode: Joi.string().trim().max(100).allow(null, '').optional(),
+    }).default({}) }),
   enableTemplate
 );
 router.get(

@@ -359,10 +359,11 @@ const themeSettings = {
     show: { theme: false, language: false, trackOrder: false },
   },
   mobileToolbar: true,
-  floating: { whatsapp: '201007591211', language: true },
+  // The WhatsApp button, contact details and social links are each store's own
+  // (store info, social links, floating WhatsApp settings) — never the template's (migration 430).
+  floating: { language: true },
   footer: {
     layout: 'rich',
-    contact: { address: 'شارع الفيروز، الشيخ زايد', email: 'info@uokids.com', phone: '01007591211' },
     groups: [
       {
         title: 'الاقسام',
@@ -394,11 +395,6 @@ const themeSettings = {
           { label: 'السلة', href: '/cart' },
         ],
       },
-    ],
-    social: [
-      { platform: 'facebook', url: 'https://www.facebook.com/uokids' },
-      { platform: 'instagram', url: 'https://www.instagram.com/uokids.store' },
-      { platform: 'tiktok', url: 'https://www.tiktok.com/@uokidsofficial' },
     ],
   },
 };

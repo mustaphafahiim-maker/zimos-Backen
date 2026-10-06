@@ -98,9 +98,12 @@ safe to run twice (at-least-once delivery).
 | `bullmqDriver.js` | `REDIS_URL` is set | Redis | queued after the commit |
 
 Both expose `add, process, every, start, stop, stats, listJobs, retryJob,
-prune`. The BullMQ driver needs the `bullmq` package (`npm install bullmq`);
-it could not be installed or exercised on the build machine (no Redis, no
-registry access), so treat it as written to the BullMQ v5 API but unproven.
+prune`. `bullmq` (v5), `ioredis` and `rate-limit-redis` are dependencies.
+The BullMQ driver has been run against Redis 7: the schedules register, and
+an order's events, notifications and pixel jobs complete. With `REDIS_URL`
+set the rate limiters share their counters through Redis
+(`core/middleware/rateLimitStore.js`); Redis down at boot lets requests
+through unlimited until it comes back, then limiting resumes.
 
 Repeatable jobs registered today: `webhooks.retry` (1m), `payments.sweep` (5m),
 `billing.sweep_payments` (10m), `carriers.poll_status` (30m),

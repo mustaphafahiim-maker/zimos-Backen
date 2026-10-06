@@ -45,6 +45,8 @@ module.exports = (sequelize, DataTypes) => {
         field: 'shipping_mode',
       },
       shippingExtraAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'shipping_extra_amount' },
+      // Its shipping group, when it has its own prices (migration 410, shipping/shippingProfiles.js).
+      shippingProfileId: { type: DataTypes.UUID, allowNull: true, field: 'shipping_profile_id' },
       // Fields the shopper fills in when ordering (catalog/customFields.js), at most five.
       customFields: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'custom_fields' },
       // SPEC §7.1–7.4 — see migration 185 and catalog/productPage.js.
@@ -53,6 +55,12 @@ module.exports = (sequelize, DataTypes) => {
       externalRefs: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'external_refs' },
       pageSettings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'page_settings' },
       cms: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // Sold beyond stock as a pre-order (migration 468, modules/preorders): { enabled, shipsAt, limit, message }.
+      preorder: { type: DataTypes.JSONB, allowNull: true },
+      // { min, max, maxPerCustomer } units per order / per customer (migration 470, catalog/purchaseLimits.js).
+      purchaseLimits: { type: DataTypes.JSONB, allowNull: true, field: 'purchase_limits' },
+      // "Track quantity": off, the product never runs out (catalog/stockTracking.js).
+      trackInventory: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'track_inventory' },
       // null = sold once; otherwise a subscription or installments plan (migration 315, modules/subscriptions).
       billingPlan: { type: DataTypes.JSONB, allowNull: true, field: 'billing_plan' },
       // The quantity bundle this product sells with (migration 189, modules/bundles).

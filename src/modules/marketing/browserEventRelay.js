@@ -55,6 +55,8 @@ async function relay(workspaceId, body, { clientIp, userAgent } = {}) {
   try {
     const events = (body.events || []).filter((e) => RELAYED.has(e.name) && e.eventId);
     if (events.length === 0 || !(await hasServerPixels(workspaceId))) return 0;
+    // A store that asks first sends nothing for a shopper who did not accept (cookieConsent.js).
+    if (!(await require('./cookieConsent').relayAllowed(workspaceId, body, clientIp))) return 0;
     const browser = body.pixel || {};
     for (const e of events) {
       const meta = e.metadata && typeof e.metadata === 'object' ? e.metadata : {};

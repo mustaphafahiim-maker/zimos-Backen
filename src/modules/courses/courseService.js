@@ -291,7 +291,8 @@ async function setEnrollmentRevoked(workspaceId, enrollmentId, revoked, req) {
 }
 
 /** After an order is paid: enrolls the buyer in every course sold through a product on the order. Never throws. */
-async function enrollForOrder(workspaceId, orderId) {
+// Started by the order.paid event (jobs.js): retried on failure; an enrolment that exists is not made twice.
+async function enrollForOrder(workspaceId, orderId, { rethrow = false } = {}) {
   try {
     const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, include: [{ model: db.OrderItem, as: 'items' }] });
     if (!order) return 0;
@@ -306,6 +307,7 @@ async function enrollForOrder(workspaceId, orderId) {
     return made;
   } catch (err) {
     logger.error(`[courses] enrolling for order ${orderId} failed: ${err.message}`);
+    if (rethrow) throw err;
     return 0;
   }
 }

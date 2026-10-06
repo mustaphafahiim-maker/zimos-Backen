@@ -62,12 +62,19 @@ async function calculateShippingAmount(
     totalQuantity,
     offerShippingOverride,
     weightLines,
-    productLines,
+    productLines: rawProductLines,
+    // An order in a funnel: the funnel's shipping group prices every line (funnels/funnelShipping.js).
+    funnelId = null,
+    // The whole address (province, city, area, placeId): the store's own place prices read it (places/placePricing.js).
+    address = null,
     transaction,
   }
 ) {
   const workspace = await db.Workspace.findByPk(workspaceId, { transaction });
   const settings = (workspace && workspace.settings) || {};
+  // An order in a funnel: its group, its threshold, and its currency's rules (funnels/funnelShipping.js).
+  const funnelPricing = await require('../funnels/funnelShipping').pricingFor(workspaceId, funnelId, workspace, rawProductLines, transaction);
+  const { productLines } = funnelPricing;
   const pricingMode = settings.shipping_pricing_mode === 'weight_tiers' ? 'weight_tiers' : 'rates';
 
   const weight = weightLines
@@ -82,7 +89,7 @@ async function calculateShippingAmount(
   const tier = resolveTier(tiers, weight.grams);
 
   const products = rules.productShipping(productLines);
-  const freeShipping = rules.freeShippingProgress(subtotal, settings.free_shipping_threshold_amount);
+  const freeShipping = rules.freeShippingProgress(subtotal, funnelPricing.thresholdAmount);
 
   const result = ({ rule, amount, baseAmount = amount, extraFeesAmount = 0, governorate = null }) => ({
     amount,
@@ -96,21 +103,37 @@ async function calculateShippingAmount(
     extraFeesAmount,
     governorate,
     freeShipping,
+    // A funnel selling in another currency than the store's: that currency (its group priced it).
+    ownCurrency: funnelPricing.ownCurrency ? funnelPricing.ownCurrency.currency : null,
   });
 
   const decided = rules.ruleBeforeRates({ country, offerShippingOverride, products, progress: freeShipping });
   if (decided) return result(decided);
+  // The destination as a place of the platform's list (shippingPlaces.js): Egypt's governorates and North Coast, Saudi regions.
+  const place = await require('./shippingPlaces').placeCode(country, region, transaction);
 
-  const base = await resolveBase(workspaceId, settings, {
+  // A funnel selling in another currency than the store's: its own group is the only price.
+  if (funnelPricing.ownCurrency) {
+    const profiles = require('./shippingProfiles');
+    const price = funnelPricing.ownCurrency.profile ? profiles.priceOf(funnelPricing.ownCurrency.profile, place) : null;
+    const own = price === null ? { rule: rules.RULES.NO_RATE, amount: 0 } : { rule: profiles.RULE, amount: price };
+    return result({ ...own, amount: own.amount + products.extraFeesAmount, baseAmount: own.amount, extraFeesAmount: products.extraFeesAmount });
+  }
+
+  const storeBase = await resolveBase(workspaceId, settings, {
     pricingMode,
     country,
     region,
+    place,
+    address,
     subtotal,
     tier,
     knownGrams: weight.knownGrams,
     totalQuantity,
     transaction,
   });
+  // Products in a shipping group carry their own price (shippingProfiles.js): the dearest applies.
+  const base = await require('./shippingProfiles').applyProfiles(workspaceId, { base: storeBase, productLines, place, transaction });
   return result({
     ...base,
     amount: Number(base.amount) + products.extraFeesAmount,
@@ -126,12 +149,15 @@ async function calculateShippingAmount(
 async function resolveBase(
   workspaceId,
   settings,
-  { pricingMode, country, region, subtotal, tier, knownGrams, totalQuantity, transaction }
+  { pricingMode, country, region, place, address, subtotal, tier, knownGrams, totalQuantity, transaction }
 ) {
   const fallback = rules.fallbackRate(settings);
 
   if (pricingMode === 'rates') {
-    const byGovernorate = rules.governorateRate(settings, country, region);
+    // A price on the store's own city or area wins over its governorate price (places/placePricing.js).
+    const byPlace = await require('../places/placePricing').priceFor(workspaceId, address || (country ? { country, province: region } : null), transaction);
+    if (byPlace) return { rule: byPlace.rule, amount: byPlace.amount, governorate: place || null };
+    const byGovernorate = require('./shippingPlaces').rateFor(settings, place);
     if (byGovernorate) return { rule: rules.RULES.GOVERNORATE_RATE, ...byGovernorate };
   }
 

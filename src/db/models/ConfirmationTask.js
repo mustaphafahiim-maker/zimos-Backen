@@ -27,6 +27,8 @@ module.exports = (sequelize, DataTypes) => {
       assignedAt: { type: DataTypes.DATE, allowNull: true, field: 'assigned_at' },
       attemptCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'attempt_count' },
       nextRetryAt: { type: DataTypes.DATE, allowNull: true, field: 'next_retry_at' },
+      // The time the customer asked to be called back (migration 454); next_retry_at follows it.
+      callbackAt: { type: DataTypes.DATE, allowNull: true, field: 'callback_at' },
       // While in the future, the task waits for its funnel's offer window to
       // close (funnels/funnelOfferMerge.js) and cannot be claimed. Null is
       // available at once.

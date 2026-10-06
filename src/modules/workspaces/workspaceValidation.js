@@ -48,7 +48,11 @@ module.exports = {
   // in a 200 response instead of a validation error, so the merchant UI can
   // explain what is wrong with an address as it is typed.
   checkSlug: {
-    query: Joi.object({ slug: Joi.string().trim().min(1).max(SLUG_LOOKUP_MAX).required() }),
+    query: Joi.object({
+      slug: Joi.string().trim().min(1).max(SLUG_LOOKUP_MAX).required(),
+      // Changing that store's address: its own current and previous addresses read as available.
+      workspaceId: Joi.string().uuid().optional(),
+    }),
   },
   updateWorkspace: {
     params: Joi.object({ workspaceId: uuid.required() }),

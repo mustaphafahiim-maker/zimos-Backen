@@ -65,7 +65,7 @@ const live = asyncHandler(async (req, res) => {
 });
 const liveTicket = asyncHandler(async (req, res) => {
   res.status(201).json({
-    ticket: realtimeStream.issueTicket(req.tenant.workspaceId, req.user.id),
+    ticket: realtimeStream.issueTicket(req.tenant.workspaceId, req.user.id, req.authTokenPayload && req.authTokenPayload.sid),
     expiresInSeconds: realtimeStream.TICKET_TTL_MS / 1000,
   });
 });

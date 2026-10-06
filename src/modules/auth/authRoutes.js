@@ -10,6 +10,8 @@ const router = Router();
 
 // The refresh token travels as an httpOnly cookie for browser clients.
 router.use(require('./refreshCookie').attach);
+// Sign-ins from a browser new to the account: the alert, and the browser remembered (newDeviceSignIn.js).
+router.use(require('./newDeviceSignIn').attach);
 // Devices signed in to the account and two-step sign-in (SPEC §17.2).
 router.use(require('./securityRoutes'));
 

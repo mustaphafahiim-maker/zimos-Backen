@@ -16,6 +16,9 @@ module.exports = (sequelize, DataTypes) => {
       lastMessagePreview: { type: DataTypes.STRING(300), allowNull: true, field: 'last_message_preview' },
       // The teammate who owns the chat (migration 216, whatsapp/inboxService.js).
       assignedToUserId: { type: DataTypes.UUID, allowNull: true, field: 'assigned_to_user_id' },
+      // The customer service bot (whatsapp/bot): quiet here since, and where it is in a conversation.
+      botPausedAt: { type: DataTypes.DATE, allowNull: true, field: 'bot_paused_at' },
+      botState: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'bot_state' },
     },
     { tableName: 'whatsapp_conversations', indexes: [{ unique: true, fields: ['workspace_id', 'phone_normalized'] }] }
   );

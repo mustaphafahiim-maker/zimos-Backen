@@ -26,7 +26,7 @@ const { DESTINATION_INDEPENDENT, RULES, settingsPriceShipping } = require('./shi
  *                        order is charged 0 and the storefront keeps its
  *                        "confirmed on the call" line, as it always has.
  */
-async function quote(workspaceId, { country, region, items }) {
+async function quote(workspaceId, { country, region, items, funnelId = null, address = null }) {
   const lines = [];
   for (const item of items) lines.push(await priceLine(workspaceId, item));
   // The same bundle pricing the order will get, so the quote's subtotal is the real one.
@@ -36,15 +36,21 @@ async function quote(workspaceId, { country, region, items }) {
   const shipping = await calculateShippingAmount(workspaceId, {
     country,
     region: region || null,
+    // City, area and the picked place, for the store's own place prices (places/placePricing.js).
+    address: address || (country ? { country, province: region || null } : null),
     subtotal,
     totalQuantity: lines.reduce((sum, l) => sum + l.quantity, 0),
     offerShippingOverride: lines.find((l) => l.shippingOverride)?.shippingOverride || null,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
+    // A funnel's checkout: its shipping group (funnels/funnelShipping.js).
+    funnelId,
   });
 
   return {
     pricingMode: shipping.pricingMode,
+    // The choices the shopper has (standard first), with their amounts; [] = none (shippingOptions.js).
+    options: await require('./shippingOptions').quoteOptions(workspaceId, shipping),
     amount: Number(shipping.amount),
     currency: lines[0].currency,
     subtotal,
@@ -64,6 +70,8 @@ async function quote(workspaceId, { country, region, items }) {
     freeShipping: shipping.freeShipping,
     destinationRequired: !DESTINATION_INDEPENDENT.includes(shipping.rule),
     configured: await pricesShipping(workspaceId, shipping),
+    // The delivery window for this address, or null (deliveryEstimates.js, item 199).
+    deliveryEstimate: await require('./deliveryEstimates').estimate(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings', 'timezone'] }), address || (country ? { country, province: region || null } : null)),
   };
 }
 
@@ -72,7 +80,9 @@ async function pricesShipping(workspaceId, shipping) {
   if (shipping.extraFeesAmount > 0) return true;
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'] });
   if (settingsPriceShipping(workspace && workspace.settings)) return true;
-  return (await db.ShippingZone.count({ where: { workspaceId, isActive: true } })) > 0;
+  if ((await db.ShippingZone.count({ where: { workspaceId, isActive: true } })) > 0) return true;
+  // Prices only on the store's own cities/areas still price shipping (frontend request).
+  return require('../places/placePricing').hasPrices(workspaceId);
 }
 
 module.exports = { quote };

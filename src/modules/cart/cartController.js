@@ -14,9 +14,15 @@ function readToken(req) {
   return req.headers['x-cart-token'];
 }
 
+/** A signed-in shopper sees their price-list prices (priceLists/, item 205): the cart is read again with them. */
+async function priced(req, cart) {
+  const shopperToken = req.headers['x-shopper-token'];
+  return shopperToken && cart && cart.id ? service.getCart(req.tenant.workspaceId, cart.id, { shopperToken }) : cart;
+}
+
 const getOrCreate = asyncHandler(async (req, res) => {
   const cart = await service.getOrCreateCart(req.tenant.workspaceId, readToken(req));
-  const full = await service.getCart(req.tenant.workspaceId, cart.id);
+  const full = await service.getCart(req.tenant.workspaceId, cart.id, { shopperToken: req.headers['x-shopper-token'] });
   res.status(201).json(full);
 });
 
@@ -24,7 +30,7 @@ const getCurrent = asyncHandler(async (req, res) => {
   const token = readToken(req);
   if (!token) throw new AppError('CART_TOKEN_REQUIRED', 'X-Cart-Token header is required', 400);
   const cart = await service.getOrCreateCart(req.tenant.workspaceId, token);
-  res.json(await service.getCart(req.tenant.workspaceId, cart.id));
+  res.json(await service.getCart(req.tenant.workspaceId, cart.id, { shopperToken: req.headers['x-shopper-token'] }));
 });
 
 const addItem = asyncHandler(async (req, res) => {
@@ -33,21 +39,21 @@ const addItem = asyncHandler(async (req, res) => {
   const cart = await service.getOrCreateCart(req.tenant.workspaceId, token);
   // Photos in the answers must be this visitor's own uploads.
   const visitorId = req.headers['x-visitor-id'] ? readVisitorId(req) : null;
-  res.status(201).json(await service.addItem(req.tenant.workspaceId, cart.id, { ...req.body, visitorId }));
+  res.status(201).json(await priced(req, await service.addItem(req.tenant.workspaceId, cart.id, { ...req.body, visitorId })));
 });
 
 const updateItem = asyncHandler(async (req, res) => {
   const token = readToken(req);
   if (!token) throw new AppError('CART_TOKEN_REQUIRED', 'X-Cart-Token header is required', 400);
   const cart = await service.getOrCreateCart(req.tenant.workspaceId, token);
-  res.json(await service.updateItemQuantity(req.tenant.workspaceId, cart.id, req.params.itemId, req.body.quantity));
+  res.json(await priced(req, await service.updateItemQuantity(req.tenant.workspaceId, cart.id, req.params.itemId, req.body.quantity)));
 });
 
 const removeItem = asyncHandler(async (req, res) => {
   const token = readToken(req);
   if (!token) throw new AppError('CART_TOKEN_REQUIRED', 'X-Cart-Token header is required', 400);
   const cart = await service.getOrCreateCart(req.tenant.workspaceId, token);
-  res.json(await service.removeItem(req.tenant.workspaceId, cart.id, req.params.itemId));
+  res.json(await priced(req, await service.removeItem(req.tenant.workspaceId, cart.id, req.params.itemId)));
 });
 
 module.exports = { getOrCreate, getCurrent, addItem, updateItem, removeItem };

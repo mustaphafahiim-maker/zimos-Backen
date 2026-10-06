@@ -16,6 +16,12 @@ const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.WEBSITE_PUBLISH));
 router.get('/', validate(schemas.list), controller.list);
 router.put('/:slot', validate(schemas.save), controller.save);
+// One page's or funnel step's own scripts (pageScripts.js).
+router.use('/page-scripts', require('./pageScripts').router);
+// Named store scripts by position and page type (storeScripts.js).
+router.use('/store-scripts', require('./storeScripts').router);
+// Custom HTML blocks placed in a page tree by id (htmlBlocks.js).
+router.use('/html-blocks', require('./htmlBlocks').router);
 
 // Mounted at /api/v1/store/:workspaceId/custom-code — the live store's read.
 const publicRouter = Router({ mergeParams: true });

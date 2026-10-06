@@ -5,7 +5,8 @@ const blockedEntries = require('./blockedEntries');
 const protectionActions = require('./protectionActions');
 
 const listFlagged = asyncHandler(async (req, res) =>
-  res.json(await service.listFlaggedOrders(req.tenant.workspaceId, req.query))
+  // Phones masked for roles without customers.reveal_sensitive; the order page shows the full one.
+  res.json(require('../../core/utils/phoneMask').forViewer(req, await service.listFlaggedOrders(req.tenant.workspaceId, req.query)))
 );
 const approve = asyncHandler(async (req, res) =>
   res.json({ order: await service.approveFlaggedOrder(req.tenant.workspaceId, req.params.orderId, req) })

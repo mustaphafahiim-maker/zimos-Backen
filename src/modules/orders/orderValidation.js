@@ -22,13 +22,15 @@ const carrierIdUnlessPathOrNames = () =>
 // the length check — two spaces are not a two-character search.
 const search = {
   q: Joi.string().trim().min(2).max(100).optional(),
-  from: Joi.date().iso().optional(),
-  to: Joi.date().iso().optional(),
+  // A date (YYYY-MM-DD) or an exact instant; `tz` makes a date mean that day in the zone (orderDateRange.js).
+  from: require('./orderDateRange').dateParam.optional(),
+  to: require('./orderDateRange').dateParam.optional(),
+  tz: require('./orderDateRange').tzParam.optional(),
   // SPEC §4.3 filters (orderFilters.js). Archived orders are left out unless asked for.
   archived: Joi.string().valid('exclude', 'only', 'include').optional(),
   tag: Joi.string().trim().min(1).max(40).optional(),
   source: Joi.string().valid('store', 'funnel', 'manual', 'api', 'import', 'upsell').optional(),
-  paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').optional(),
+  paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).optional(),
   governorate: Joi.string().trim().min(1).max(100).optional(),
   carrier: Joi.string().trim().min(1).max(100).optional(),
   seen: Joi.boolean().optional(),
@@ -37,6 +39,16 @@ const search = {
   updatedSince: Joi.date().iso().optional(),
   productId: Joi.string().uuid().optional(),
   riskLevel: Joi.string().valid('low', 'moderate', 'high').optional(),
+  dataQuality: Joi.string().valid('good', 'low').optional(),
+  ipCountry: Joi.string().trim().pattern(/^[A-Za-z]{2}$/).optional(),
+  discountCode: Joi.string().trim().min(1).max(100).optional(),
+  utmSource: Joi.string().trim().min(1).max(100).optional(),
+  utmCampaign: Joi.string().trim().min(1).max(200).optional(),
+  funnelId: Joi.string().uuid().optional(),
+  // Up to 100 order ids, comma-separated ("export selected").
+  ids: Joi.string()
+    .pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(,[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}){0,99}$/i)
+    .optional(),
 };
 
 const tagList = Joi.array().items(Joi.string().trim().min(1).max(40)).max(20);
@@ -53,6 +65,9 @@ const address = Joi.object({
   province: Joi.string().max(100).allow(null, '').optional(),
   city: Joi.string().max(100).required(),
   addressLine: Joi.string().max(500).required(),
+  // The third level of the store's places, and the place picked from its list (places/storePlaces.js).
+  area: Joi.string().max(120).allow(null, '').optional(),
+  placeId: Joi.string().uuid().allow(null).optional(),
   postalCode: Joi.string().max(20).allow(null, '').optional(),
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
@@ -73,7 +88,7 @@ module.exports = {
         .required(),
       contact: contact.required(),
       shippingAddress: address.optional(),
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').required(),
+      paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).required(),
       discountCode: Joi.string().max(100).optional(),
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
@@ -107,7 +122,7 @@ module.exports = {
       })
         .unknown(true)
         .optional(),
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').default('cod'),
+      paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).default('cod'),
       discountCode: Joi.string().max(100).optional(),
       shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
     }),
@@ -125,6 +140,10 @@ module.exports = {
       // The merchant cancelled the order's courier booking in the courier's
       // own dashboard (couriers without a cancel API only).
       acknowledgeManualCancel: Joi.boolean().optional(),
+      // Tell the customer (their email, the store's automations); unset: as the store's settings say.
+      notifyCustomer: Joi.boolean().optional(),
+      // Give this much back once cancelled (refunds.manage; orderCancelRefund.js).
+      refundAmount: Joi.number().integer().min(1).optional(),
     }),
   },
   // PATCH /:orderId/status — see orderStageChange.js for what each move does.
@@ -135,6 +154,8 @@ module.exports = {
       reason: Joi.string().trim().max(500).allow('', null).optional(),
       // → needs_follow_up: which of the two it is. Defaults to unreachable.
       followUp: Joi.string().valid('unreachable', 'postponed').optional(),
+      // → needs_follow_up: when the customer asked to be called back (cod/confirmationService.js).
+      callbackAt: require('../cod/confirmationValidation').callbackAt.optional(),
       // → cancelled, on an order booked with a courier that has no cancel API.
       acknowledgeManualCancel: Joi.boolean().optional(),
       // A shipping stage on an order with no shipment yet: the manual
@@ -142,6 +163,9 @@ module.exports = {
       carrierCode: Joi.string().trim().min(1).max(100).optional(),
       waybillNumber: Joi.string().trim().max(100).allow('', null).optional(),
       trackingUrl: Joi.string().uri().max(500).allow('', null).optional(),
+      // Tell the customer (SPEC §4.6): false sends nothing (email, push, automations); true sends the
+      // stage's email even while its template is off; unset: as the store's settings say.
+      notifyCustomer: Joi.boolean().optional(),
     }),
   },
   // PATCH /:orderId/meta — tags (replace, or add/remove), test, seen, archive.
@@ -237,6 +261,8 @@ module.exports = {
         tags: tagList.optional(),
         carrierCode: Joi.string().trim().min(1).max(100).optional(),
         notes: Joi.string().max(500).allow('', null).optional(),
+        // set_status: tell the customers, as PATCH /:orderId/status.
+        notifyCustomer: Joi.boolean().optional(),
       }).default({}),
     }).xor('orderIds', 'filter'),
   },
@@ -274,6 +300,8 @@ module.exports = {
     body: Joi.object({
       shippingAddress: address.optional(),
       notes: Joi.string().max(2000).allow('', null).optional(),
+      // The customer's details as written on the order (a typo in the name or number).
+      contact: contact.optional(),
     }).min(1),
   },
   listShipments: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }) },

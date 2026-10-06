@@ -19,6 +19,8 @@ module.exports = (sequelize, DataTypes) => {
       failedCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'failed_count' },
       // [{ row, name, message }]
       errors: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+      // [{ row, productId, name, sourceCurrency, reviewsImported }] — the products it created.
+      results: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
       createdBy: { type: DataTypes.UUID, allowNull: true, field: 'created_by' },
       finishedAt: { type: DataTypes.DATE, allowNull: true, field: 'finished_at' },
     },

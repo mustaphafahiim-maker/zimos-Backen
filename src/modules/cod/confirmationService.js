@@ -343,7 +343,7 @@ async function reserveOrderStock(workspaceId, orderId, referenceType, actorUserI
  * release and the customer's rejection counter. The caller has already
  * checked that the task is open and that the caller may work it.
  */
-async function applyOutcome(task, order, { outcome, notes, rejectionReason, source, channel }, req, transaction) {
+async function applyOutcome(task, order, { outcome, notes, rejectionReason, source, channel, callbackAt }, req, transaction) {
   const { workspaceId } = task;
   await db.ConfirmationAttempt.create(
     { taskId: task.id, agentUserId: req.user.id, outcome, notes: notes || null, source, channel: channel || null },
@@ -360,18 +360,28 @@ async function applyOutcome(task, order, { outcome, notes, rejectionReason, sour
       lockedByUserId: null,
       lockedAt: null,
       completedAt: isTerminal ? new Date() : null,
+      // "Call me tomorrow at 5": the task is due at the time the customer gave, else after the default delay.
+      callbackAt: !isTerminal && callbackAt ? new Date(callbackAt) : null,
       nextRetryAt:
-        !isTerminal && RETRY_DELAYS_HOURS[outcome]
-          ? new Date(Date.now() + RETRY_DELAYS_HOURS[outcome] * 60 * 60 * 1000)
-          : null,
+        !isTerminal && callbackAt
+          ? new Date(callbackAt)
+          : !isTerminal && RETRY_DELAYS_HOURS[outcome]
+            ? new Date(Date.now() + RETRY_DELAYS_HOURS[outcome] * 60 * 60 * 1000)
+            : null,
     },
     { transaction }
   );
 
   await setConfirmationState(workspaceId, order.id, outcome, req, transaction);
-  if (outcome === 'confirmed' || outcome === 'rejected') {
-    await require('../../core/outbox/outbox').record(transaction, `order.${outcome}`, { workspaceId, orderId: order.id });
-  }
+  // order.confirmed / order.rejected / order.unreachable / order.postponed — the
+  // last two drive the "we tried to reach you" automations.
+  await require('../../core/outbox/outbox').record(transaction, `order.${outcome}`, {
+    workspaceId,
+    orderId: order.id,
+    ...(!isTerminal && callbackAt ? { callbackAt: new Date(callbackAt).toISOString() } : {}),
+    // The merchant's "notify the customer" when the move came from the order page (orderStageChange.js).
+    ...(req && typeof req.notifyCustomer === 'boolean' ? { notifyCustomer: req.notifyCustomer } : {}),
+  });
 
   if (outcome === 'rejected') {
     // Release (not commit) the reservation — stock returns to available,
@@ -388,7 +398,7 @@ function assertOrderOpen(order) {
 }
 
 /** A queue call's outcome, recorded by the agent holding the task. */
-async function recordOutcome(workspaceId, taskId, { outcome, notes, rejectionReason, channel }, req) {
+async function recordOutcome(workspaceId, taskId, { outcome, notes, rejectionReason, channel, callbackAt }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const task = await db.ConfirmationTask.findOne({ where: { id: taskId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!task) throw new NotFoundError('ConfirmationTask');
@@ -399,7 +409,7 @@ async function recordOutcome(workspaceId, taskId, { outcome, notes, rejectionRea
     const order = await db.Order.findOne({ where: { id: task.orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     assertOrderOpen(order);
 
-    await applyOutcome(task, order, { outcome, notes, rejectionReason, channel, source: 'queue' }, req, transaction);
+    await applyOutcome(task, order, { outcome, notes, rejectionReason, channel, callbackAt, source: 'queue' }, req, transaction);
     return loadTask(workspaceId, task.id, transaction);
   });
 }
@@ -469,10 +479,13 @@ async function closeTasksForCancelledOrder(workspaceId, orderId, reason, req, tr
     lock: transaction.LOCK.UPDATE,
   });
   for (const task of tasks) {
-    await db.ConfirmationAttempt.create(
-      { taskId: task.id, agentUserId: req.user.id, outcome: 'rejected', notes: reason, source: 'order_page' },
-      { transaction }
-    );
+    // A shopper who cancels their own order (shopperAccounts/orderSelfService.js) is no agent: no attempt row.
+    if (req && req.user && req.user.id) {
+      await db.ConfirmationAttempt.create(
+        { taskId: task.id, agentUserId: req.user.id, outcome: 'rejected', notes: reason, source: 'order_page' },
+        { transaction }
+      );
+    }
     await task.update(
       {
         status: 'done',
@@ -870,6 +883,7 @@ async function taskSummaryForOrder(workspaceId, orderId) {
     outcome: task.outcome,
     attemptCount: task.attemptCount,
     nextRetryAt: task.nextRetryAt,
+    callbackAt: task.callbackAt,
     availableAt: task.availableAt,
     waitingForOffers: isWaitingForOffers(task),
     completedAt: task.completedAt,

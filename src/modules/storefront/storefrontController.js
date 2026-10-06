@@ -6,38 +6,66 @@ const shippingQuoteService = require('../shipping/shippingQuoteService');
 const cartService = require('../cart/cartService');
 const { AppError } = require('../../core/errors/AppError');
 
-// One legal policy, variables filled in (storefront/storeInfo.js); 404 when not written.
+// One legal policy, variables filled in (storefront/storeInfo.js), in the shopper's language; 404 when not written.
 const getPolicy = asyncHandler(async (req, res) =>
-  res.json({ policy: require('./storeInfo').publicLegalPolicy(req.publicWorkspace, req.params.key) })
+  res.json({ policy: await require('../translations/moreTexts').localizedPolicy(req, req.publicWorkspace, req.params.key) })
 );
 // Every public path of the store, for the storefront's sitemap.xml.
 const getSitemap = asyncHandler(async (req, res) =>
   res.json({ entries: await require('./generalSettings').storeSitemap(req.publicWorkspace) })
 );
-const getStore = asyncHandler(async (req, res) => res.json({ store: await service.getStorefront(req.tenant.workspaceId) }));
+// The store, its product lists and pages and its collections are the same for
+// every shopper: read through the 60-second cache (storefrontCache.js), then
+// put in the shopper's language.
+const cache = require('./storefrontCache');
+const getStore = asyncHandler(async (req, res) => {
+  const ws = req.tenant.workspaceId;
+  // Menus, store info and the thank-you texts in the shopper's language (translations/moreTexts.js).
+  const store = await require('../translations/moreTexts').localizeStore(req, await cache.cached(ws, 'store', () => service.getStorefront(ws)));
+  // The store's uploaded fonts, for its @font-face rules (fonts/storeFonts.js).
+  const customFonts = await cache.cached(ws, 'fonts', () => require('../fonts/storeFonts').publicList(ws));
+  // The merchant's rewording of the storefront's labels, per language (storefront/storefrontTexts.js).
+  const storefrontTexts = await cache.cached(ws, 'texts', () => require('./storefrontTexts').get(ws));
+  // The cookie banner and whether tracking waits for the shopper (marketing/cookieConsent.js).
+  const cookieConsent = require('../marketing/cookieConsent').publicView(await require('../../db/models').Workspace.findByPk(ws, { attributes: ['id', 'settings'] }));
+  const gateWorkspace = await require('../../db/models').Workspace.findByPk(ws, { attributes: ['id', 'settings'] });
+  // A password / coming-soon / age gate to show first (storeGate, item 197).
+  const gate = require('../storeGate').publicView(gateWorkspace);
+  // Gift wrap and message offered at checkout (giftOptions, item 214).
+  const giftOptions = await cache.cached(ws, 'gift-options', () => require('../giftOptions').publicView(gateWorkspace));
+  // A holiday: orders paused, or taken and shipped later (holidayMode, item 216).
+  const holiday = require('../holidayMode').publicView(gateWorkspace);
+  res.json({ store: { ...store, customFonts, storefrontTexts, cookieConsent, gate, giftOptions, holiday } });
+});
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.
 const i18n = require('../translations/translations');
 const plain = (row) => (row && typeof row.toJSON === 'function' ? row.toJSON() : row);
 const listProducts = asyncHandler(async (req, res) => {
-  const result = await service.listProducts(req.tenant.workspaceId, req.query);
+  const ws = req.tenant.workspaceId;
+  const result = await cache.cached(ws, `products?${cache.queryKey(req.query)}`, () => service.listProducts(ws, req.query));
   if (result && Array.isArray(result.products)) await i18n.localizeProducts(req, result.products);
+  // A search's first page is logged (after the cache, so every search counts); the click comes back with its id (item 211).
+  if (req.query.search) return res.json({ ...result, searchId: await require('../searchInsights').record(ws, req.query, result, req.headers['x-visitor-id']) });
   res.json(result);
 });
 const getProduct = asyncHandler(async (req, res) => {
-  const product = await service.getProductBySlugOrId(req.tenant.workspaceId, req.params.idOrSlug);
+  const ws = req.tenant.workspaceId;
+  const product = await cache.cached(ws, `product:${req.params.idOrSlug}`, () => service.getProductBySlugOrId(ws, req.params.idOrSlug));
   await i18n.localizeProducts(req, [product]);
   res.json({ product });
 });
 const listCollections = asyncHandler(async (req, res) => {
-  const collections = (await service.listCollections(req.tenant.workspaceId)).map(plain);
+  const ws = req.tenant.workspaceId;
+  const collections = (await cache.cached(ws, 'collections', () => service.listCollections(ws))).map(plain);
   res.json({ collections: await i18n.localizeCollections(req, collections) });
 });
 const suggestProducts = asyncHandler(async (req, res) =>
   res.json(await service.suggestProducts(req.tenant.workspaceId, req.query.q))
 );
 const getCollection = asyncHandler(async (req, res) => {
-  const collection = plain(await service.getCollection(req.tenant.workspaceId, req.params.collectionId));
+  const ws = req.tenant.workspaceId;
+  const collection = plain(await cache.cached(ws, `collection:${req.params.collectionId}`, () => service.getCollection(ws, req.params.collectionId)));
   await i18n.localizeCollections(req, [collection]);
   res.json({ collection });
 });
@@ -53,6 +81,8 @@ const trackOrder = asyncHandler(async (req, res) => res.json({ result: await ser
 const shippingQuote = asyncHandler(async (req, res) => {
   const workspaceId = req.tenant.workspaceId;
   let items = req.body.items;
+  // A product A/B test: priced for this visitor, or for whoever filled the cart (catalog/productTests.js).
+  let testVisitor = require('../catalog/productTests').visitorOf(req);
   if (!items) {
     const cartToken = req.headers['x-cart-token'];
     if (!cartToken) {
@@ -61,11 +91,15 @@ const shippingQuote = asyncHandler(async (req, res) => {
     const cart = await db.Cart.findOne({ where: { workspaceId, guestToken: cartToken, status: 'active' } });
     if (!cart) throw new AppError('CART_NOT_FOUND', 'No active cart found for this token', 404);
     ({ items } = await cartService.toOrderItems(workspaceId, cart.id));
+    testVisitor = cart.visitorId || testVisitor;
   }
   const quote = await shippingQuoteService.quote(workspaceId, {
     country: req.body.country,
     region: req.body.governorate,
-    items,
+    items: await require('../catalog/productTests').pinPrices(workspaceId, items, testVisitor),
+    // A funnel's checkout: priced with the funnel's shipping group (funnels/funnelShipping.js).
+    funnelId: req.body.funnelId || null,
+    address: { country: req.body.country, province: req.body.governorate || null, city: req.body.city || null, area: req.body.area || null, placeId: req.body.placeId || null },
   });
   res.json({ quote });
 });

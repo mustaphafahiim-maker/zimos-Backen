@@ -19,7 +19,9 @@ const PHONE_MATCH_DAYS = 7;
 
 /**
  * The storefront autosave: one open session per (workspace, visitor), created
- * on the first save and overwritten by every later one.
+ * on the first save and overwritten by every later one. The first save may
+ * carry only a name (phone_normalized null until a number is typed); a
+ * number, when sent, must be one.
  *
  * Every line is priced here from the catalogue with the order path's own
  * priceLine, so the merchant sees what the order would have cost, not what the
@@ -35,12 +37,29 @@ const PHONE_MATCH_DAYS = 7;
  * the next save from that visitor inserts a new session instead, and a save
  * racing a conversion re-checks after the conversion commits and inserts too.
  */
-async function capture(workspaceId, { contact, items, source = 'store', visitorId }) {
-  const phoneNormalized = normalizePhone(contact.phone);
-  if (!phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
+/** The touches with their empty values dropped; {} when there are none. */
+function cleanAttribution(attribution) {
+  const out = {};
+  for (const side of ['first', 'last']) {
+    const touch = attribution && attribution[side];
+    if (!touch || typeof touch !== 'object') continue;
+    const kept = Object.fromEntries(Object.entries(touch).filter(([, v]) => typeof v === 'string' && v.trim() !== ''));
+    if (Object.keys(kept).length) out[side] = kept;
+  }
+  return out;
+}
+
+async function capture(workspaceId, { contact, items, source = 'store', visitorId, attribution = null }, visitor = {}) {
+  const phoneNormalized = contact.phone ? normalizePhone(contact.phone) : null;
+  if (contact.phone && !phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
+  if (!phoneNormalized && !(contact.fullName && String(contact.fullName).trim())) {
+    throw new AppError('CONTACT_REQUIRED', 'A name or a phone number is required', 422);
+  }
 
   const priced = [];
-  for (const item of items) priced.push(await priceLine(workspaceId, item));
+  // A product A/B test's price for this visitor (catalog/productTests.js), as the order will charge it.
+  const pinned = await require('../catalog/productTests').pinPrices(workspaceId, items, visitorId);
+  for (const item of pinned) priced.push(await priceLine(workspaceId, item));
 
   const snapshot = priced.map((line) => ({
     productId: line.productId,
@@ -54,28 +73,37 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
 
   const contactFields = {
     fullName: contact.fullName || null,
-    phone: contact.phone,
+    phone: contact.phone || null,
     email: contact.email || null,
   };
 
   const [row] = await db.sequelize.query(
     `INSERT INTO checkout_sessions
        (id, workspace_id, visitor_id, contact_fields, phone_normalized, items, subtotal_amount, currency, source,
-        last_activity_at, created_at, updated_at)
+        ip_address, ip_country, attribution, last_activity_at, created_at, updated_at)
      VALUES
        ($id, $workspaceId, $visitorId, $contactFields::jsonb, $phoneNormalized, $items::jsonb, $subtotal, $currency,
-        $source, now(), now(), now())
+        $source, $ipAddress, $ipCountry, $attribution::jsonb, now(), now(), now())
      ON CONFLICT (workspace_id, visitor_id) WHERE status = 'in_progress' AND visitor_id IS NOT NULL
      DO UPDATE SET
-       contact_fields = EXCLUDED.contact_fields,
-       phone_normalized = EXCLUDED.phone_normalized,
+       -- A save without a number (a name typed while the number is being edited)
+       -- keeps the number the session already has.
+       contact_fields = CASE WHEN EXCLUDED.phone_normalized IS NULL
+                             THEN EXCLUDED.contact_fields || jsonb_build_object('phone', checkout_sessions.contact_fields->'phone')
+                             ELSE EXCLUDED.contact_fields END,
+       phone_normalized = COALESCE(EXCLUDED.phone_normalized, checkout_sessions.phone_normalized),
        items = EXCLUDED.items,
        subtotal_amount = EXCLUDED.subtotal_amount,
        currency = EXCLUDED.currency,
        source = EXCLUDED.source,
+       -- The latest address the shopper saved from (SPEC §6.1: IP and country on the lost order).
+       ip_address = COALESCE(EXCLUDED.ip_address, checkout_sessions.ip_address),
+       ip_country = CASE WHEN EXCLUDED.ip_address IS NULL THEN checkout_sessions.ip_country ELSE EXCLUDED.ip_country END,
+       -- How the shopper came (first / last touch): the latest pair the storefront sent, kept when a save sends none.
+       attribution = CASE WHEN EXCLUDED.attribution = '{}'::jsonb THEN checkout_sessions.attribution ELSE EXCLUDED.attribution END,
        last_activity_at = now(),
        updated_at = now()
-     RETURNING id`,
+     RETURNING id, (xmax = 0) AS inserted`,
     {
       bind: {
         id: crypto.randomUUID(),
@@ -88,12 +116,66 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
         // Like createOrder: the order's currency is its first line's.
         currency: priced[0].currency,
         source,
+        ipAddress: visitor.ip || null,
+        ipCountry: visitor.ipCountry || null,
+        attribution: JSON.stringify(cleanAttribution(attribution)),
       },
       type: QueryTypes.SELECT,
     }
   );
 
+  await announce(workspaceId, row, { contactFields, snapshot, priced, source });
   return { id: row.id };
+}
+
+// checkout.updated for a name or email edit at most this often per session: an autosave fires every pause in typing.
+const UPDATED_EVERY_SECONDS = 60;
+
+/**
+ * The checkout.created / checkout.updated webhook topics (webhooks/webhookTopics.js):
+ * the first save of a session, then each new number or change of lines, and
+ * other edits (the name, the email) at most once a minute. The payload is
+ * what the webhook sends: the contact, the lines and the total.
+ */
+async function announce(workspaceId, row, { contactFields, snapshot, priced, source }) {
+  try {
+    const outbox = require('../../core/outbox/outbox');
+    const aggregate = { aggregateType: 'checkout', aggregateId: row.id };
+    if (!row.inserted) {
+      // Within a minute of the last announcement, only a new number or other lines are worth another.
+      const [last] = await db.sequelize.query(
+        `SELECT payload, occurred_at > now() - make_interval(secs => $secs) AS recent FROM domain_events
+          WHERE aggregate_type = 'checkout' AND aggregate_id = $id AND type IN ('checkout.created', 'checkout.updated')
+          ORDER BY occurred_at DESC
+          LIMIT 1`,
+        { bind: { id: row.id, secs: UPDATED_EVERY_SECONDS }, type: QueryTypes.SELECT }
+      );
+      const before = last && last.payload ? last.payload : {};
+      const samePhone = ((before.contact && before.contact.phone) || null) === (contactFields.phone || null);
+      // Compared field by field: jsonb gives the stored lines back with their keys reordered.
+      const lineKey = (lines) => (lines || []).map((l) => `${l.variantId}:${l.quantity}:${l.lineTotalAmount}`).join('|');
+      const sameLines = lineKey(before.items) === lineKey(snapshot);
+      if (last && last.recent && samePhone && sameLines) return;
+    }
+    await outbox.record(
+      null,
+      row.inserted ? 'checkout.created' : 'checkout.updated',
+      {
+        workspaceId,
+        checkoutSessionId: row.id,
+        contact: contactFields,
+        items: snapshot,
+        subtotalAmount: String(add(...priced.map((line) => line.lineTotalAmount))),
+        currency: priced[0].currency,
+        source,
+        productIds: [...new Set(snapshot.map((line) => line.productId).filter(Boolean))],
+      },
+      aggregate
+    );
+  } catch (err) {
+    // The autosave must never fail on its announcement.
+    logger.warn('Could not record a checkout event', { workspaceId, checkoutSessionId: row.id, message: err.message });
+  }
 }
 
 /**

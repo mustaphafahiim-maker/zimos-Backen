@@ -24,9 +24,9 @@ const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 function issueTokenPair(user, req) {
-  const accessToken = signAccessToken({ sub: user.id });
+  // The access token names its session, so ending the session ends it too (core/security/sessionGate.js).
   return createSession(user, req).then(({ raw, session }) => ({
-    accessToken,
+    accessToken: signAccessToken({ sub: user.id, sid: session.id }),
     refreshToken: raw,
     sessionId: session.id,
     expiresAt: session.expiresAt,
@@ -210,7 +210,8 @@ async function login({ email, password, locale }, req) {
   // Two-step sign-in (twoFactorService.js): from a browser that is not
   // remembered the answer is a challenge, and POST /auth/two-factor/verify
   // finishes the sign-in through completeLogin.
-  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req, { locale });
+  const newDevice = require('./newDeviceSignIn').needsCode(user, req);
+  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req, { locale, newDevice });
   if (challenge) return challenge;
 
   return completeLogin(user, req);
@@ -318,7 +319,7 @@ async function refresh(rawRefreshToken, req) {
   const { raw, session: newSession } = await createSession(user, req);
   await session.update({ revokedAt: new Date(), rotatedToSessionId: newSession.id });
 
-  const accessToken = signAccessToken({ sub: user.id });
+  const accessToken = signAccessToken({ sub: user.id, sid: newSession.id });
   return { accessToken, refreshToken: raw, sessionId: newSession.id, expiresAt: newSession.expiresAt };
 }
 
@@ -386,6 +387,8 @@ async function resetPassword(rawToken, newPassword) {
   // compromised — revoke every existing session so old refresh tokens
   // (possibly in an attacker's hands) stop working immediately.
   await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
+  // Two-step sign-in stays on; every browser asks for it again (twoFactorRecovery.js).
+  await db.TrustedDevice.destroy({ where: { userId: user.id } });
   await recordAudit({ actorUserId: user.id, action: 'user.password_reset', entityType: 'User', entityId: user.id });
 
   return { success: true };
@@ -433,9 +436,9 @@ async function confirmVerificationCode(user, code, req) {
 
 // --- Phone verification (during/after registration) ----------------------
 
-async function requestPhoneVerification(userId, phone) {
-  await otpService.generateAndSendOtp(phone, 'phone_verification');
-  return { sent: true };
+async function requestPhoneVerification(userId, phone, channel = 'sms') {
+  const { sentVia } = await otpService.generateAndSendOtp(phone, 'phone_verification', { channel });
+  return { sent: true, sentVia };
 }
 
 async function confirmPhoneVerification(user, phone, code, req) {
@@ -465,6 +468,7 @@ async function resetPasswordSms(phone, code, newPassword) {
 
   await user.update({ passwordHash: await hashPassword(newPassword) });
   await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
+  await db.TrustedDevice.destroy({ where: { userId: user.id } });
   await recordAudit({ actorUserId: user.id, action: 'user.password_reset_sms', entityType: 'User', entityId: user.id });
   return { success: true };
 }

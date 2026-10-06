@@ -9,8 +9,6 @@ const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
 const cartController = require('../cart/cartController');
 const checkoutController = require('../checkout/checkoutController');
-const reviewController = require('../reviews/reviewController');
-const reviewSchemas = require('../reviews/reviewValidation');
 const schemas = require('./storefrontValidation');
 const checkoutSchemas = require('../checkout/checkoutValidation');
 const checkoutSessionController = require('../checkoutSessions/checkoutSessionController');
@@ -27,9 +25,13 @@ router.use(resolvePublicWorkspace);
 
 // Order bumps, cross-sell, the thank-you upsell and the exit popup (modules/offers).
 router.use(require('../offers/publicOfferRoutes'));
+// Shoppers following their order by push (notifications/push/orderPush.js).
+router.use(require('../notifications/push/orderPush').router);
 
 // What the checkout form needs to pass the bot guard (a fresh time token).
 router.get('/checkout/guard', botProtection.guardConfig);
+// The unsubscribe link in a marketing email (notifications/marketingUnsubscribe.js).
+router.use(require('../notifications/marketingUnsubscribe').router);
 // The code-entry step of a checkout that answered 428 OTP_REQUIRED.
 router.post('/checkout/otp/verify', checkoutOtp.verify);
 router.post('/checkout/otp/resend', checkoutOtp.resend);
@@ -43,7 +45,12 @@ router.get('/products', collectOptionFilters, validate(schemas.listProducts), co
 // Above '/products/:idOrSlug', so "suggest" is never read as a product slug.
 router.get('/products/suggest', suggestLimiter, validate(schemas.suggest), controller.suggestProducts);
 router.get('/products/:idOrSlug', validate(schemas.getProduct), controller.getProduct);
-router.post('/products/:productId/reviews', validate(reviewSchemas.submit), reviewController.submit);
+// The review form: order number + phone prove the purchase (reviews/shopperReviews.js).
+router.use(require('../reviews/shopperReviews').router);
+// A product page's A/B test: which variant this visitor sees (catalog/productTests.js).
+router.use(require('../catalog/productTests').publicRouter);
+// A rejected transfer sent again from the tracking page (payments/transferResubmit.js).
+router.use(require('../payments/transferResubmit').router);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 // A shopper's photo for a product's image field (customerUploads). Limited
 // before multer reads a byte; multer refuses anything over 15 MB mid-stream.
@@ -59,7 +66,7 @@ router.get('/orders/track-link', validate(schemas.trackLink), controller.trackOr
 
 // Checkout-form autosave for abandoned-checkout recovery. An upsert keyed on
 // the visitor, so a replay is harmless and it takes no Idempotency-Key.
-router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), refuseDraftOrders, checkoutSessionController.capture);
+router.post('/checkout-sessions', validate(checkoutSessionSchemas.capture), refuseDraftOrders, require('../checkoutSessions/autosaveGuard').guardAutosave, checkoutSessionController.capture);
 
 // Read-only: prices the shipping line the checkout would get.
 router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shippingQuote);
@@ -91,7 +98,7 @@ router.post('/orders/:orderId/payment/return', validate(onlinePaymentSchemas.sho
 router.post('/orders/:orderId/payment/retry', validate(onlinePaymentSchemas.shopperRetry), onlinePaymentController.shopperRetry);
 router.post(
   '/orders/:orderId/payment/switch-to-cod',
-  validate(onlinePaymentSchemas.shopperAction),
+  validate(onlinePaymentSchemas.shopperSwitchToCod),
   onlinePaymentController.shopperSwitchToCod
 );
 

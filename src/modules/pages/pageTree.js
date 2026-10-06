@@ -3,6 +3,7 @@
 const { ValidationError } = require('../../core/errors/AppError');
 const { validateElementStyle, namedStyleProblems } = require('./elementStyle');
 const showcase = require('./showcaseElements');
+const builderExtras = require('./builderExtras');
 
 /**
  * Pages are stored as a structured JSON tree, never raw HTML. Shape:
@@ -56,6 +57,7 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'toggle',
   'carousel',
   'stars_display',
+  'currency_converter',
   'price',
   'reviews_list',
   'cod_form',
@@ -65,8 +67,14 @@ const ALLOWED_ELEMENT_TYPES = new Set([
   'upsell_decline_link',
   // SPEC §9.4: one block per item of a product's list (features, FAQs, …).
   'repeater',
+  // SPEC §8.2 "HTML code" / §8.4: a placeholder that only names its block. The
+  // merchant's HTML is kept OUTSIDE the tree (customCode/htmlBlocks.js) and
+  // served to the live store's own host only — the tree itself never holds markup.
+  'html_block',
   // Full-width storefront bands (slider, tiles, product rails…): showcaseElements.js.
   ...showcase.TYPES,
+  // Gallery with thumbnails, variant and bundle pickers, review form: builderExtras.js.
+  ...builderExtras.TYPES,
 ]);
 
 const MAX_NODES = 10000;
@@ -77,7 +85,7 @@ const MAX_NODES = 10000;
 // for any product. Sources are a closed list — a binding is a name, never an
 // expression.
 const BINDING_SOURCE =
-  /^(?:product\.(?:title|description|price|compare_at|special_offer_text|images\[[0-9]\])|store\.(?:name|phone|email|address)|legal\.(?:refund_policy|privacy_policy|terms_of_service))$/;
+  /^(?:product\.(?:title|description|price|compare_at|special_offer_text|images\[[0-9]\])|store\.(?:name|phone|email|address)|legal\.(?:shipping_policy|refund_policy|privacy_policy|terms_of_service))$/;
 const REPEATER_SOURCES = ['product.cms.features', 'product.cms.testimonials', 'product.cms.faqs', 'product.reviews'];
 
 function validateBindings(bindings, field, errors) {
@@ -185,6 +193,7 @@ function validateProps(props, rules, field, errors) {
 
 const ELEMENT_PROP_RULES = {
   shoppable_image: { imageId: check.uuid, title: check.string(300) },
+  html_block: { blockId: (v) => (typeof v === 'string' && /^[a-z0-9]{8,24}$/.test(v) ? null : 'must be 8–24 lowercase letters or digits') },
   repeater: {
     title: check.string(300),
     source: check.oneOf(...REPEATER_SOURCES),
@@ -262,6 +271,10 @@ const ELEMENT_PROP_RULES = {
 };
 
 Object.assign(ELEMENT_PROP_RULES, showcase.propRules(check));
+Object.assign(ELEMENT_PROP_RULES, builderExtras.propRules(check));
+for (const [type, rules] of Object.entries(builderExtras.extraRules(check))) ELEMENT_PROP_RULES[type] = { ...(ELEMENT_PROP_RULES[type] || {}), ...rules };
+// A countdown's fixed end (countdownDeadline.js).
+ELEMENT_PROP_RULES.countdown = { ...(ELEMENT_PROP_RULES.countdown || {}), endsAt: require('./countdownDeadline').endsAtRule };
 
 function pushIdCheck(node, field, errors) {
   if (typeof node.id !== 'string' || node.id.trim() === '') {
@@ -301,6 +314,10 @@ function validateElement(el, field, errors, counter) {
   } else if (isPlainObject(el.settings)) {
     // The element's own look, per device, and its named style (elementStyle.js).
     validateElementStyle(el.settings, `${field}.settings`, errors);
+    // Its entrance animation (elementAnimation.js).
+    require('./elementAnimation').validateElementAnimation(el.settings, `${field}.settings`, errors);
+    // When it shows: dates, devices, countries, UTM (displayRules.js).
+    require('./displayRules').validateDisplayRules(el.settings, `${field}.settings`, errors);
   }
 }
 

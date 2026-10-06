@@ -17,7 +17,7 @@ const {
   EMPTY_TREE,
 } = require('./funnelGraph');
 const { conditionProblem, pickNextEdge } = require('./funnelRouting');
-const { assertBumpOfferUsable, bumpProblem, presentBump } = require('../checkout/orderBump');
+const { assertBumpOfferUsable, bumpProblem, presentBump, BUMP_STEP_TYPES } = require('../checkout/orderBump');
 const funnelOfferMerge = require('./funnelOfferMerge');
 const entitlements = require('../billing/entitlementsService');
 
@@ -90,21 +90,23 @@ async function assertOfferUsable(workspaceId, offerId) {
 
 function toSnapshotSteps(stepRows) {
   return stepRows.map((s) => ({
+    // The step row it was published from: its scripts are kept under it (customCode/pageScripts.js).
+    id: s.id,
     key: s.key,
     stepType: s.stepType,
     name: s.name,
     builderData: s.builderData,
     offerId: s.offerId,
-    // Only a checkout step has a form to offer a bump on.
-    bumpOfferId: s.stepType === 'checkout' ? s.bumpOfferId || null : null,
+    // Only a step with an order form (checkout, a sales page's cod_form) offers a bump.
+    bumpOfferId: BUMP_STEP_TYPES.includes(s.stepType) ? s.bumpOfferId || null : null,
     seo: s.seo || {},
   }));
 }
 
-/** A bump offer belongs on a checkout step only (422 elsewhere). */
+/** A bump offer belongs on a step with an order form: checkout or sales (422 elsewhere). */
 function assertBumpStepType(stepType) {
-  if (stepType !== 'checkout') {
-    throw new ValidationError([{ field: 'bumpOfferId', message: 'Only a checkout step can offer an order bump' }]);
+  if (!BUMP_STEP_TYPES.includes(stepType)) {
+    throw new ValidationError([{ field: 'bumpOfferId', message: 'Only a checkout or sales step can offer an order bump' }]);
   }
 }
 
@@ -173,6 +175,12 @@ async function updateFunnel(workspaceId, funnelId, data, req) {
   const before = funnel.toJSON();
   const patch = {};
   if (data.name !== undefined) patch.name = data.name;
+  // A new link: the old one stops answering (SPEC §9.7). Links are unique across stores.
+  if (data.subdomain !== undefined && data.subdomain !== funnel.subdomain) {
+    const taken = await db.Funnel.findOne({ where: { subdomain: data.subdomain }, attributes: ['id'] });
+    if (taken) throw new AppError('FUNNEL_SUBDOMAIN_TAKEN', 'This link is already used by another funnel', 409, [{ field: 'subdomain', message: 'This link is taken' }]);
+    patch.subdomain = data.subdomain;
+  }
   await funnel.update(patch);
   await recordAudit({
     workspaceId,
@@ -205,7 +213,7 @@ async function duplicateFunnel(workspaceId, funnelId, data, req) {
   const name = data.name || `${source.name.slice(0, 200 - COPY_SUFFIX.length)}${COPY_SUFFIX}`;
   // Resolved before the transaction opens, exactly as createFunnel does — the
   // subdomain is globally unique, so it can't be checked workspace-scoped.
-  const subdomain = await ensureUniqueSubdomain(name);
+  const subdomain = await ensureUniqueSubdomain(data.subdomain || name);
 
   return db.sequelize.transaction(async (t) => {
     const stepRows = await db.FunnelStep.findAll({
@@ -357,7 +365,11 @@ async function updateStep(workspaceId, funnelId, stepId, data, req) {
   const patch = {};
   if (data.stepType !== undefined) patch.stepType = data.stepType;
   if (data.name !== undefined) patch.name = data.name;
-  if (data.seo !== undefined) patch.seo = data.seo;
+  if (data.seo !== undefined) patch.seo = require('./genericPageAddress').keepPreviousKeys(step.seo, data.seo);
+  if (data.key !== undefined && data.key !== step.key) {
+    // Only a generic page's address can move; the old one is remembered (genericPageAddress.js).
+    Object.assign(patch, await require('./genericPageAddress').renameKey(step, data.key, { stepType: patch.stepType, nextSeo: patch.seo }));
+  }
   if (data.builderData !== undefined) {
     validateStepData(data.builderData, { label: `step "${step.key}"` });
     patch.builderData = data.builderData;
@@ -371,8 +383,8 @@ async function updateStep(workspaceId, funnelId, stepId, data, req) {
     assertBumpStepType(stepType);
     await assertBumpOfferUsable(workspaceId, data.bumpOfferId, 'bumpOfferId');
     patch.bumpOfferId = data.bumpOfferId;
-  } else if (data.bumpOfferId === null || (stepType !== 'checkout' && step.bumpOfferId)) {
-    // Cleared, or the step stopped being a checkout: no form, no bump.
+  } else if (data.bumpOfferId === null || (!BUMP_STEP_TYPES.includes(stepType) && step.bumpOfferId)) {
+    // Cleared, or the step stopped being one with an order form: no form, no bump.
     patch.bumpOfferId = null;
   }
 
@@ -549,7 +561,22 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
       transaction: t,
     });
 
+    // A countdown's "N hours" becomes a fixed date the first time it goes live (pages/countdownDeadline.js).
+    for (const row of stepRows) {
+      const stamped = require('../pages/countdownDeadline').stampCountdowns(row.builderData);
+      if (stamped.changed) await row.update({ builderData: stamped.tree }, { transaction: t });
+    }
+    // …and on the pages of the split tests running on it (splitTestCountdowns.js).
+    await require('./splitTestCountdowns').stampRunning(workspaceId, funnelId, t);
     const steps = toSnapshotSteps(stepRows);
+    // Linked saved sections are frozen with the saved section's current content, as a website publish does.
+    for (const step of steps) {
+      step.builderData = await require('../savedSections/savedSectionsService').resolveLinkedSections(workspaceId, step.builderData, {
+        transaction: t,
+        stampCountdowns: true,
+        funnelId,
+      });
+    }
     const edges = toSnapshotEdges(edgeRows);
 
     const problems = validateGraph(steps, edges, { requireContent: true });
@@ -585,6 +612,8 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
         }
       }
     }
+    // Everything it sells is priced in the funnel's currency (funnelCurrency.js).
+    problems.push(...(await require('./funnelCurrency').publishProblems(workspaceId, funnel, steps, t)));
     if (problems.length) {
       throw new ValidationError(problems, 'Funnel cannot be published yet — fix the issues below');
     }
@@ -713,15 +742,15 @@ const offerUnavailable = (resource) => new AppError('FUNNEL_OFFER_UNAVAILABLE', 
 function renderStepData(snapshot, stepKey) {
   const step = (snapshot.steps || []).find((s) => s.key === stepKey);
   if (!step) throw stepNotFound();
-  return { key: step.key, name: step.name, stepType: step.stepType, tree: step.builderData, seo: step.seo || {} };
+  return { id: step.id || null, key: step.key, name: step.name, stepType: step.stepType, tree: step.builderData, seo: step.seo || {} };
 }
 
 async function resolveStepPayload(workspaceId, snapshot, stepKey, session = null) {
   const step = (snapshot.steps || []).find((s) => s.key === stepKey);
   if (!step) throw stepNotFound();
   const payload = { step: renderStepData(snapshot, stepKey) };
-  // The checkout step's order bump, when it has one that can still be sold.
-  if (step.stepType === 'checkout' && step.bumpOfferId) {
+  // The step's order bump (checkout, or a sales page's cod_form), when it can still be sold.
+  if (BUMP_STEP_TYPES.includes(step.stepType) && step.bumpOfferId) {
     payload.bump = await presentBump(workspaceId, step.bumpOfferId);
   }
   if (OFFER_STEP_TYPES.has(step.stepType) && step.offerId) {
@@ -739,6 +768,9 @@ async function resolveStepPayload(workspaceId, snapshot, stepKey, session = null
         currency: offer.currency,
         badge: offer.badge,
         lines: (offer.lines || []).map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+        // The real countdown (offers/offerCountdown.js): from when the session reached this step.
+        countdownMinutes: offer.countdownMinutes || null,
+        expiresAt: session ? require('../offers/offerCountdown').deadline(offer, session.updatedAt) : null,
       };
     }
   }
@@ -832,30 +864,34 @@ async function startSession(workspaceId, funnelRef, body) {
 
   const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
   return {
-    funnel: {
-      id: funnel.id,
-      name: funnel.name,
-      subdomain: funnel.subdomain,
-      // Its own icon, title and currency label (funnels/geoRedirects.js).
-      settings: require('./geoRedirects').resolveSettings(funnel),
-    },
+    funnel: publicFunnel(funnel),
     session: publicSession(session),
     ...payload,
+  };
+}
+
+/** What a step page shows of the funnel: its own icon, title and currency (funnels/geoRedirects.js). */
+function publicFunnel(funnel) {
+  return {
+    id: funnel.id,
+    name: funnel.name,
+    subdomain: funnel.subdomain,
+    settings: require('./geoRedirects').resolveSettings(funnel),
   };
 }
 
 async function getSessionStep(workspaceId, funnelId, sessionId) {
   const session = await db.FunnelSession.findOne({ where: { id: sessionId, funnelId, workspaceId } });
   if (!session) throw sessionNotFound();
-  const { snapshot } = await loadPublishedSnapshot(workspaceId, funnelId);
+  const { funnel, snapshot } = await loadPublishedSnapshot(workspaceId, funnelId);
 
   if (session.status === 'completed') {
     // Still serve the step it finished on — that page is the thank-you the
     // visitor is looking at, and refreshing it must not blank it. Nothing to
     // render (or to resume) if a republish removed that step.
-    if (!stepExists(snapshot, session.currentStepKey)) return { done: true, session: publicSession(session) };
+    if (!stepExists(snapshot, session.currentStepKey)) return { done: true, funnel: publicFunnel(funnel), session: publicSession(session) };
     const finishedPayload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
-    return { done: true, session: publicSession(session), ...finishedPayload };
+    return { done: true, funnel: publicFunnel(funnel), session: publicSession(session), ...finishedPayload };
   }
 
   if (!stepExists(snapshot, session.currentStepKey)) {
@@ -864,7 +900,7 @@ async function getSessionStep(workspaceId, funnelId, sessionId) {
   const payload = await resolveStepPayload(workspaceId, snapshot, session.currentStepKey, session);
   // Whether accepting this offer joins the checkout order (funnelOfferMerge) — the card says so.
   if (payload.offer) payload.offerJoinsOrder = await funnelOfferMerge.offerJoinsOrder(workspaceId, session);
-  return { session: publicSession(session), ...payload };
+  return { funnel: publicFunnel(funnel), session: publicSession(session), ...payload };
 }
 
 /**
@@ -882,7 +918,7 @@ async function getSessionStep(workspaceId, funnelId, sessionId) {
  * after the order was created must never leave a charged visitor on a session
  * that never advanced. The caller links it via `linked_from_order_id`.
  */
-async function createFollowOnOrder(workspaceId, funnelId, step, session, req, transaction) {
+async function createFollowOnOrder(workspaceId, funnelId, step, session, req, transaction, variantId = null) {
   if (!session.orderId) {
     throw new AppError('FUNNEL_OFFER_NEEDS_ORDER', 'Cannot accept this offer', 422, [
       { field: 'session', message: 'This upsell has no prior order to attach to — the visitor must complete checkout first' },
@@ -897,14 +933,22 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
     transaction,
   });
   if (!offer || (offer.lines || []).length === 0) throw offerUnavailable('Offer');
+  // Its countdown ran out (the session has stayed on this step since it began).
+  const countdown = require('../offers/offerCountdown');
+  countdown.assertOpen(offer, session.updatedAt, countdown.funnelOfferExpired);
 
+  // One click (SPEC §9.5): the order was paid with a card the shopper agreed
+  // to save, so the offer is a card order charged to it once this
+  // transaction commits (chargeOneClick below). Otherwise cash on delivery.
+  const card = await require('../payments/savedMethods/consentedSave').oneClickCardFor(original, transaction);
   const { order } = await orderService.createOrder(
     workspaceId,
     {
-      items: [{ variantId: offer.lines[0].variantId, offerId: offer.id, quantity: 1 }],
+      // In the variant the shopper chose (offers/offerVariantChoice.js).
+      items: [await require('../offers/offerVariantChoice').offerLineFor(offer, variantId, transaction)],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
-      paymentMethod: 'cod',
+      paymentMethod: card ? 'card' : 'cod',
       funnelId,
     },
     { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
@@ -912,15 +956,49 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
     // shares that order's customer and often its variant, so duplicate_order
     // would flag (or refuse) every upsell. The original order already went
     // through the storefront rules.
-    { transaction, skipFraudRules: true, source: 'upsell' }
+    {
+      transaction,
+      skipFraudRules: true,
+      source: 'upsell',
+      // Not a sale until the card is charged; left unpaid it expires like any online order.
+      ...(card ? { awaitingPayment: oneClickHold() } : {}),
+    }
   );
-  return { order, originalId: original.id };
+  return { order, originalId: original.id, chargeWith: card ? card.id : null };
+}
+
+/** An online order's hold for a one-click charge: the usual payment window and token. */
+function oneClickHold() {
+  const online = require('../payments/onlinePaymentService');
+  const crypto = require('crypto');
+  const token = crypto.randomBytes(32).toString('base64url');
+  const minutes = require('../../config/env').payments.attemptTtlMinutes;
+  return { expiresAt: new Date(Date.now() + minutes * 60 * 1000), tokenHash: online.hashToken(token), completionContext: {} };
+}
+
+/**
+ * After the session move commits: charges a one-click follow-on order to the
+ * saved card (outside the transaction, never holding a lock over the
+ * gateway call). Declined: the offer stays unpaid and expires; the shopper is
+ * told, and their first order is untouched.
+ */
+async function chargeOneClick(workspaceId, result) {
+  const charge = result && result.followOnOrder && result.followOnOrder.chargeWith;
+  if (!charge) return result;
+  delete result.followOnOrder.chargeWith;
+  try {
+    const paid = await require('../payments/savedMethods/savedMethodService').chargeOrder(workspaceId, charge, result.followOnOrder.id, null);
+    result.followOnOrder.payment = { status: 'paid', amount: paid.amount, currency: paid.currency };
+  } catch (err) {
+    result.followOnOrder.payment = { status: 'declined', code: err.code || 'SAVED_METHOD_DECLINED' };
+  }
+  return result;
 }
 
 async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
   const { outcome, fromStepKey } = body;
 
-  return db.sequelize.transaction(async (t) => {
+  const advanced = await db.sequelize.transaction(async (t) => {
     const session = await db.FunnelSession.findOne({
       where: { id: sessionId, funnelId, workspaceId },
       lock: t.LOCK.UPDATE,
@@ -965,6 +1043,9 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       return { session: publicSession(session), ...restarted };
     }
 
+    // An opt-in step moves on only once the visitor signed up on it (funnelOptIn.js).
+    require('./funnelOptIn').assertOptedIn(currentStep, session);
+
     // Accepted upsell/downsell, in this same transaction so it cannot outlive
     // a failed advance: joined to the checkout order while its offer window is
     // open when the store has turned that on (funnelOfferMerge), else a linked
@@ -972,20 +1053,21 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
     let followOn = null;
     let accepted = null;
     if (outcome.type === 'accepted_offer' && OFFER_STEP_TYPES.has(currentStep.stepType)) {
-      accepted = await funnelOfferMerge.acceptOffer({ workspaceId, funnelId, step: currentStep, session, req }, t);
-      if (!accepted) followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t);
+      accepted = await funnelOfferMerge.acceptOffer({ workspaceId, funnelId, step: currentStep, session, req, variantId: outcome.variantId }, t);
+      if (!accepted) followOn = await createFollowOnOrder(workspaceId, funnelId, currentStep, session, req, t, outcome.variantId);
     }
 
     // completed_checkout carries the order just placed on this step. An order
     // paid online only counts once it is paid: the shopper is sent on through
-    // the funnel after the payment page, not before.
+    // the funnel after the payment page, not before. A manual transfer goes on
+    // like cash on delivery: the merchant checks the receipt afterwards.
     if (outcome.type === 'completed_checkout' && outcome.orderId) {
       const placed = await db.Order.findOne({
         where: { id: outcome.orderId, workspaceId },
         attributes: ['id', 'paymentMethod', 'financialState', 'cancelledAt'],
         transaction: t,
       });
-      if (placed && placed.paymentMethod !== 'cod' && !['paid', 'partially_paid'].includes(placed.financialState)) {
+      if (placed && !['cod', 'bank_transfer'].includes(placed.paymentMethod) && !['paid', 'partially_paid'].includes(placed.financialState)) {
         throw new AppError('FUNNEL_ORDER_NOT_PAID', 'This order has not been paid yet', 409);
       }
     }
@@ -1000,6 +1082,9 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
         await require('./splitTests').recordOrder(workspaceId, funnelId, session.visitorId, outcome.orderId, t);
       }
     }
+
+    // The pressed button's tags, on the customer who ordered in this session (funnelTags.js).
+    await require('./funnelTags').tagFromOutcome(workspaceId, currentStep, outcome, session, t);
 
     const outbound = edges.filter((e) => e.fromStepKey === session.currentStepKey);
     const nextEdge = pickNextEdge(outbound, outcome);
@@ -1046,14 +1131,17 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
         orderNumber: followOn.order.orderNumber,
         totalAmount: followOn.order.totalAmount,
         linkedFromOrderId: followOn.originalId,
+        ...(followOn.chargeWith ? { chargeWith: followOn.chargeWith } : {}),
       };
     }
 
     return result;
   });
+  return chargeOneClick(workspaceId, advanced);
 }
 
 module.exports = {
+  ensureUniqueSubdomain,
   createFunnel,
   listFunnels,
   getFunnel,

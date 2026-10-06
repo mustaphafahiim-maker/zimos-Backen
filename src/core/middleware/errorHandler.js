@@ -2,7 +2,15 @@
 
 const { AppError } = require('../errors/AppError');
 const logger = require('../utils/logger');
+const errorReporter = require('../errors/errorReporter');
 const env = require('../../config/env');
+
+const BODY_ERROR_CODES = {
+  'entity.parse.failed': 'INVALID_JSON',
+  'entity.too.large': 'PAYLOAD_TOO_LARGE',
+  'charset.unsupported': 'UNSUPPORTED_MEDIA_TYPE',
+  'encoding.unsupported': 'UNSUPPORTED_MEDIA_TYPE',
+};
 
 function notFoundHandler(req, res, next) {
   next(new AppError('ROUTE_NOT_FOUND', `Cannot ${req.method} ${req.originalUrl}`, 404));
@@ -15,6 +23,7 @@ function errorHandler(err, req, res, next) {
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
       logger.error(err.message, { code: err.code, requestId, stack: err.stack });
+      errorReporter.report(err, { code: err.code });
     } else if (err.statusCode === 424) {
       // A courier or payment gateway failed us (CARRIER_ERROR, GATEWAY_ERROR,
       // CARRIER_BOOKING_NOT_SAVED). Below 500 only so no edge proxy replaces
@@ -31,6 +40,16 @@ function errorHandler(err, req, res, next) {
         details: err.details,
         requestId,
       },
+    });
+  }
+
+  // The body parser's own refusals (malformed JSON, a body over the limit, an
+  // unsupported charset) are the client's fault: their 4xx, not a 500.
+  if (err.type && err.expose && err.status >= 400 && err.status < 500) {
+    const code = BODY_ERROR_CODES[err.type] || 'BAD_REQUEST';
+    logger.warn(err.message, { code, requestId });
+    return res.status(err.status).json({
+      error: { code, message: code === 'INVALID_JSON' ? 'Request body is not valid JSON' : err.message, requestId },
     });
   }
 
@@ -58,6 +77,7 @@ function errorHandler(err, req, res, next) {
 
   // Unexpected/unknown error: never leak internals.
   logger.error('Unhandled error', { message: err.message, stack: err.stack, requestId });
+  errorReporter.report(err, { route: `${req.method} ${req.route ? req.route.path : req.path}` });
   return res.status(500).json({
     error: {
       code: 'INTERNAL_SERVER_ERROR',

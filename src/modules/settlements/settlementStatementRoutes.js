@@ -11,8 +11,11 @@ const settlements = require('./settlementService');
 
 const uuid = Joi.string().uuid();
 const ws = { workspaceId: uuid.required() };
+// The statement: CSV text, or the courier's file as it came (.xlsx or .csv, base64, ≤ 1 MB).
 const statementBody = {
-  csv: Joi.string().min(1).max(1500000).required(),
+  csv: Joi.string().min(1).max(1500000),
+  fileBase64: Joi.string().max(1400000),
+  fileName: Joi.string().max(255).allow('', null),
   carrierCode: Joi.string().min(1).max(100),
 };
 
@@ -29,7 +32,7 @@ router.get('/held', READ, validate({ params: Joi.object(ws) }), asyncHandler(asy
 router.post(
   '/statement/match',
   READ,
-  validate({ params: Joi.object(ws), body: Joi.object(statementBody) }),
+  validate({ params: Joi.object(ws), body: Joi.object(statementBody).xor('csv', 'fileBase64') }),
   asyncHandler(async (req, res) => res.json({ report: await statements.matchStatement(req.tenant.workspaceId, req.body) }))
 );
 
@@ -45,7 +48,7 @@ router.post(
       periodStart: Joi.date().iso().allow(null),
       periodEnd: Joi.date().iso().allow(null),
       notes: Joi.string().max(1000).allow('', null),
-    }),
+    }).xor('csv', 'fileBase64'),
   }),
   asyncHandler(async (req, res) => {
     const { settlementId, report } = await statements.importStatement(req.tenant.workspaceId, req.body, req);

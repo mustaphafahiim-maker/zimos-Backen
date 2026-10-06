@@ -319,6 +319,19 @@ const hooks = can(PERMISSIONS.WEBHOOKS_MANAGE);
 const hookScope = requireScope('webhooks:write');
 router.get('/webhooks/events', hookScope, ws, validate(webhookSchemas.list), hooks, webhookController.events);
 router.get('/webhooks', hookScope, ws, validate(webhookSchemas.list), hooks, webhookController.list);
+// Zapier / Make (item 193): the store's latest real payloads of one event, to map fields when setting up a trigger.
+router.get(
+  '/webhooks/samples/:event',
+  hookScope,
+  ws,
+  validate({ params: require('joi').object({ workspaceId: require('joi').any(), event: require('joi').string().max(60).required() }), query: require('joi').object({ limit: require('joi').number().integer().min(1).max(10).default(3) }) }),
+  hooks,
+  require('express-async-handler')(async (req, res) => {
+    const out = await require('./integrations/hookSamples').samples(req.tenant.workspaceId, req.params.event, req.query.limit);
+    if (!out) return res.status(404).json({ error: { code: 'NOT_FOUND', message: `Unknown event "${req.params.event}"` } });
+    return res.json(out);
+  })
+);
 // The signing secret is in this answer and never shown again.
 router.post('/webhooks', hookScope, ws, validate(webhookSchemas.create), hooks, webhookController.create);
 router.patch('/webhooks/:endpointId', hookScope, ws, validate(webhookSchemas.update), hooks, webhookController.update);

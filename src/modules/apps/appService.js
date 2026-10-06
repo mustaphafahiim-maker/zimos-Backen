@@ -2,15 +2,17 @@
 
 const db = require('../../db/models');
 const env = require('../../config/env');
-const { AppError, NotFoundError, AuthorizationError } = require('../../core/errors/AppError');
+const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const outbox = require('../../core/outbox/outbox');
 const { CATEGORIES, APPS, BY_KEY } = require('./appCatalogue');
+const gate = require('./appGate');
 
 /**
  * The store's side of the app store (SPEC §16.6): what can be installed, what
  * is installed, install and uninstall. A feature that is an app asks
- * `isInstalled` (or mounts `requireApp(key)`) before it runs.
+ * appGate.js before it runs; a `standard` app counts as installed until the
+ * store uninstalls it.
  */
 
 const sandboxAllowed = () => !env.isProduction;
@@ -56,17 +58,20 @@ function externalView(row) {
 
 async function listApps(workspaceId) {
   await ensureCatalogue();
-  const [rows, installs] = await Promise.all([
+  const [rows, records] = await Promise.all([
     db.App.findAll({ order: [['displayOrder', 'ASC']] }),
-    db.WorkspaceApp.findAll({ where: { workspaceId, status: 'installed' } }),
+    db.WorkspaceApp.findAll({ where: { workspaceId } }),
   ]);
-  const installedByKey = new Map(installs.filter((i) => i.appKey).map((i) => [i.appKey, i]));
+  const installs = records.filter((i) => i.status === 'installed');
+  const recordByKey = new Map(records.filter((i) => i.appKey).map((i) => [i.appKey, i]));
   const apps = [];
   for (const row of rows) {
     const entry = BY_KEY.get(row.key);
     if (!entry || !row.isActive) continue;
     if (entry.sandbox && !sandboxAllowed()) continue;
-    const install = installedByKey.get(row.key);
+    const record = recordByKey.get(row.key);
+    const install = record && record.status === 'installed' ? record : null;
+    const installed = record ? Boolean(install) : Boolean(entry.standard);
     apps.push({
       key: entry.key,
       category: row.category,
@@ -77,7 +82,8 @@ async function listApps(workspaceId) {
       isTest: Boolean(entry.sandbox),
       openPath: entry.openPath || null,
       price: priceOf(row),
-      installed: Boolean(install),
+      installed,
+      standard: Boolean(entry.standard),
       installedAt: install ? install.installedAt : null,
       renewsAt: install ? install.renewsAt : null,
     });
@@ -112,39 +118,30 @@ async function install(workspaceId, key, req) {
   if (created || record.changed) {
     await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'app.install', entityType: 'WorkspaceApp', entityId: record.id, after: { key }, req });
   }
+  gate.forget(workspaceId);
   return { key, installed: true, installedAt: record.installedAt, openPath: entry.openPath || null };
 }
 
 async function uninstall(workspaceId, key, req) {
-  entryOrThrow(key);
-  const record = await db.WorkspaceApp.findOne({ where: { workspaceId, appKey: key, status: 'installed' } });
-  if (!record) return { key, installed: false };
+  const entry = entryOrThrow(key);
+  let record = await db.WorkspaceApp.findOne({ where: { workspaceId, appKey: key } });
+  if (record ? record.status !== 'installed' : !entry.standard) return { key, installed: false };
   await db.sequelize.transaction(async (transaction) => {
-    await record.update({ status: 'uninstalled', uninstalledAt: new Date() }, { transaction });
+    if (record) await record.update({ status: 'uninstalled', uninstalledAt: new Date() }, { transaction });
+    // A standard app the store never touched has no row yet: this one records that it was taken off.
+    else record = await db.WorkspaceApp.create({ workspaceId, appKey: key, kind: 'catalogue', status: 'uninstalled', uninstalledAt: new Date() }, { transaction });
     await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'app.uninstall', entityType: 'WorkspaceApp', entityId: record.id, before: { key }, req, transaction });
     await outbox.record(transaction, 'app.uninstalled', { workspaceId, appKey: key }, { aggregateType: 'app', aggregateId: key });
   });
+  gate.forget(workspaceId);
   return { key, installed: false };
 }
 
-async function isInstalled(workspaceId, key) {
-  const record = await db.WorkspaceApp.findOne({ where: { workspaceId, appKey: key, status: 'installed' }, attributes: ['id'] });
-  return Boolean(record);
-}
+const isInstalled = (workspaceId, key) => gate.isEnabled(workspaceId, key);
 
-/** Route guard for a feature that is an app: 403 APP_NOT_INSTALLED until the store installs it. */
+/** Route guard for a feature that is an app: 403 APP_NOT_INSTALLED while the store does not have it. */
 function requireApp(key) {
-  return async (req, res, next) => {
-    try {
-      if (await isInstalled(req.tenant.workspaceId, key)) return next();
-      const err = new AuthorizationError('Install this app from the app store first');
-      err.code = 'APP_NOT_INSTALLED';
-      err.details = { app: key };
-      return next(err);
-    } catch (err) {
-      return next(err);
-    }
-  };
+  return (req, res, next) => gate.assertEnabled(req.tenant.workspaceId, key).then(() => next(), next);
 }
 
 module.exports = { listApps, install, uninstall, isInstalled, requireApp, ensureCatalogue, externalView, sandboxAllowed };

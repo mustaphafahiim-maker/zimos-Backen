@@ -41,13 +41,19 @@ const deliveryBody = Joi.object({
 });
 
 // Digital products (SPEC §18.2). Mounted at /api/v1/workspaces/:workspaceId/digital
+// The plan's file storage limit, once the file's size is known (billing/limitGuards.js).
+const { requireStorageRoom } = require('../billing/limitGuards');
 const staff = Router({ mergeParams: true });
 staff.use(authenticate, resolveTenant);
 const view = requirePermission(P.PRODUCTS_VIEW);
 const manage = requirePermission(P.PRODUCTS_MANAGE);
 
 staff.get('/files', validate({ params: Joi.object(ws) }), view, asyncHandler(async (req, res) => res.json(await service.listFiles(wsId(req)))));
-staff.post('/files', manage, acceptFile, asyncHandler(async (req, res) => res.status(201).json({ file: await service.uploadFile(wsId(req), req.file, req) })));
+staff.post('/files', manage, acceptFile, requireStorageRoom(), asyncHandler(async (req, res) => res.status(201).json({ file: await service.uploadFile(wsId(req), req.file, req) })));
+// Large files, uploaded in parts straight to storage (multipartUploads.js).
+staff.use('/files/multipart', require('./multipartUploads').router);
+// When to warn that a licence code pool runs low (codePoolAlerts.js, item 213).
+staff.use('/code-alerts', require('./codePoolAlerts').router);
 staff.delete(
   '/files/:fileId',
   validate({ params: Joi.object({ ...ws, fileId: uuid.required() }) }),
@@ -122,11 +128,29 @@ staff.post(
 const store = Router({ mergeParams: true });
 const downloadLimiter = createIpMinuteLimiter('store-downloads', 30, { skip: () => env.isTest });
 store.use(downloadLimiter, resolvePublicWorkspace);
+// The thank-you page: an online order's download links, for the shopper who
+// holds its payment token (x-payment-token, as GET /orders/:id/payment). Empty
+// until the payment is captured; the page asks again until they appear.
+store.get(
+  '/order/:orderId',
+  // The store may be named by id or slug (resolvePublicWorkspace); the order only by id.
+  validate({ params: Joi.object({ workspaceId: Joi.string().max(100).required(), orderId: uuid.required() }) }),
+  asyncHandler(async (req, res) => {
+    const order = await require('../payments/onlinePaymentService').loadOrderForShopper(wsId(req), req.params.orderId, req.headers['x-payment-token']);
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ downloads: await service.publicGrantsForOrder(wsId(req), order.id) });
+  })
+);
 store.get('/:token', asyncHandler(async (req, res) => res.json(await service.getPublicGrant(wsId(req), req.params.token))));
 store.get(
   '/:token/file',
   asyncHandler(async (req, res) => {
     const file = await service.downloadFile(wsId(req), req.params.token);
+    // A large file is fetched from storage itself, through a short-lived signed link.
+    if (file.redirect) {
+      res.set('Cache-Control', 'private, no-store');
+      return res.redirect(302, file.redirect);
+    }
     res.set('Content-Type', file.mimeType || 'application/octet-stream');
     res.set('Content-Length', String(file.buffer.length));
     res.set('Cache-Control', 'private, no-store');

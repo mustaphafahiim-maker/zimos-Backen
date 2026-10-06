@@ -33,12 +33,13 @@ const previewToken = asyncHandler(async (req, res) => res.status(201).json(metho
 
 const storefrontMethods = asyncHandler(async (req, res) => {
   const preview = methods.isPreviewRequest(req, req.publicWorkspace.id);
-  // Gateway methods and cash on delivery, then the store's manual transfer methods.
-  const offered = await methods.storefrontMethods(req.publicWorkspace, { preview });
+  // Gateway methods that take the checkout's currency and cash on delivery, then the store's manual transfer methods.
+  const currency = await require('./methodCurrency').shopperCurrency(req.publicWorkspace, req.query);
+  const offered = await methods.storefrontMethods(req.publicWorkspace, { preview, currency });
   const manual = require('./manualTransferService');
   // Narrowed to the funnel's own list, each with its fee or discount (paymentRulesService).
   const all = [...offered, ...manual.storefrontMethods(req.publicWorkspace)];
-  res.json({ methods: require('./paymentRulesService').forStorefront(req.publicWorkspace, all, req.query.funnelId), preview });
+  res.json({ methods: require('./paymentRulesService').forStorefront(req.publicWorkspace, all, req.query.funnelId, currency), preview, currency });
 });
 
 const shopperStatus = asyncHandler(async (req, res) => {

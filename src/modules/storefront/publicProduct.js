@@ -20,6 +20,8 @@ function toPublicVariant(variant, product) {
     compareAtAmount: price.compareAtAmount,
     currency: variant.currency,
     weightGrams: variant.weightGrams,
+    // Its own picture, when the merchant gave it one (SPEC §7.2).
+    imageUrl: variant.imageUrl || null,
     // Availability is exposed as a boolean, not exact counts, so shoppers
     // (and competitors) never see precise stock levels via the public API.
     inStock: variant.allowOverselling || variant.stockOnHand - variant.reservedStock > 0,
@@ -60,6 +62,8 @@ function toPublicProduct(product) {
     offers: (product.offers || []).map(toPublicOffer),
     // The fields the shopper fills in when ordering; [] for most products.
     customFields: Array.isArray(product.customFields) ? product.customFields : [],
+    // Paid every period or in installments (SPEC §18.1); null when sold once.
+    billingPlan: require('../subscriptions/planCheckout').publicPlan(product.billingPlan),
   };
 }
 

@@ -69,6 +69,13 @@ previous `ssl_status`.
 2. Every later `POST /domains/:id/ssl/check` → `getStatus` → `ssl_status` updated; on
    `issued` the domain's `status` becomes `active`.
 3. Deleting the domain → `revoke`.
+4. A root domain or its www whose counterpart is sent to it
+   (domains/rootDomains.js) needs the counterpart certified too: a visitor
+   reaches www.<root> over https before being sent on. Each check asks the
+   provider about the counterpart's hostname as well, as its own request
+   (`domains.counterpart.sslProviderRef`); turning the redirect off or
+   deleting the domain revokes it. A provider failure for the counterpart
+   never fails the domain's own check.
 
 ## The sandbox adapter
 

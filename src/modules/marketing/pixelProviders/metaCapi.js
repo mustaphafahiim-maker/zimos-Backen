@@ -64,12 +64,11 @@ async function call(pixelId, accessToken, body) {
 /**
  * `secrets` is this workspace's decrypted server_pixels secrets blob
  * ({ metaAccessToken, metaTestEventCode? }); `pixelId` is the public Meta
- * pixel id from workspaces.settings.tracking_pixels.meta. Neither fbp nor fbc
- * is populated today — the storefront (apps/storefront) does not currently
- * capture Meta's own `_fbp`/`_fbc` cookies anywhere, so there is nothing real
- * to forward; left out rather than invented.
+ * pixel id from workspaces.settings.tracking_pixels.meta. fbp/fbc and
+ * `matching` (hashed name, city, postcode, country and external ids; the
+ * order's lines) come from marketing/pixelMatching.js.
  */
-async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, fbp, fbc, eventSourceUrl }) {
+async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, fbp, fbc, eventSourceUrl, matching = {}, eventName = 'Purchase' }) {
   if (!pixelId || !secrets || !secrets.metaAccessToken) {
     throw new AppError('META_NOT_CONFIGURED', 'Meta pixel id or access token is not configured', 422);
   }
@@ -81,17 +80,37 @@ async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAg
     ...(userAgent ? { client_user_agent: userAgent } : {}),
     ...(fbp ? { fbp } : {}),
     ...(fbc ? { fbc } : {}),
+    ...(matching.fn ? { fn: [matching.fn] } : {}),
+    ...(matching.ln ? { ln: [matching.ln] } : {}),
+    ...(matching.ct ? { ct: [matching.ct] } : {}),
+    ...(matching.zp ? { zp: [matching.zp] } : {}),
+    ...(matching.country ? { country: [matching.country] } : {}),
+    ...(matching.externalIds && matching.externalIds.length ? { external_id: matching.externalIds } : {}),
   };
+  const contents = matching.contents || [];
   const body = {
     data: [
       {
-        event_name: 'Purchase',
+        // 'Lead' for a store or funnel that reports leads (marketing/conversionEvent.js).
+        event_name: eventName,
         event_time: Math.floor(Date.now() / 1000),
         event_id: eventId,
         action_source: 'website',
         ...(eventSourceUrl ? { event_source_url: eventSourceUrl } : {}),
         user_data: userData,
-        custom_data: { currency: order.currency, value: Number(order.totalAmount) / 100 },
+        custom_data: {
+          currency: order.currency,
+          value: Number(order.totalAmount) / 100,
+          order_id: order.orderNumber || order.id,
+          ...(contents.length
+            ? {
+                content_type: 'product',
+                content_ids: contents.map((c) => c.id),
+                contents: contents.map((c) => ({ id: c.id, quantity: c.quantity, item_price: c.price })),
+                num_items: matching.numItems,
+              }
+            : {}),
+        },
       },
     ],
     ...(secrets.metaTestEventCode ? { test_event_code: secrets.metaTestEventCode } : {}),

@@ -31,7 +31,8 @@ module.exports = {
   },
   storeMethods: {
     params: Joi.object({ workspaceId: workspaceRef().required() }),
-    query: Joi.object({ funnelId: Joi.string().uuid().optional() }),
+    // currency: what the checkout sells in, when the storefront knows (else the funnel's or the store's).
+    query: Joi.object({ funnelId: Joi.string().uuid().optional(), currency: Joi.string().trim().uppercase().pattern(/^[A-Z]{3}$/).optional() }),
   },
   shopperStatus: {
     params: storeOrderParam,
@@ -50,12 +51,24 @@ module.exports = {
   shopperRetry: {
     params: storeOrderParam,
     body: Joi.object({
-      paymentMethod: Joi.string().valid('card', 'wallet').optional(),
+      paymentMethod: Joi.string().valid(...require('./methodNames').ONLINE_METHODS).optional(),
       paymentProvider: Joi.string().max(50).optional(),
       returnUrl: Joi.string().max(2000).optional(),
     }),
   },
   shopperAction: { params: storeOrderParam },
+  // The COD checks the switch may ask for (payments/codSwitchChecks.js): a code by phone, a deposit by transfer.
+  shopperSwitchToCod: {
+    params: storeOrderParam,
+    body: Joi.object({
+      otpCode: Joi.string().trim().pattern(/^\d{4,6}$/).optional(),
+      transfer: Joi.object({
+        methodId: Joi.string().max(80).required(),
+        receiptUploadId: Joi.string().uuid().allow(null).optional(),
+        senderReference: Joi.string().max(100).allow('', null).optional(),
+      }).optional(),
+    }),
+  },
   webhook: {
     params: Joi.object({ code: Joi.string().max(50).required(), token: Joi.string().max(100).required() }),
   },

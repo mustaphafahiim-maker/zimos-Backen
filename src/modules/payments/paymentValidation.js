@@ -13,6 +13,8 @@ module.exports = {
       reason: Joi.string().max(300).optional(),
       // Which gateway payment to refund, when the order has more than one.
       paymentId: uuid.optional(),
+      // Tell the customer (their email, the store's automations); unset: as the store's settings say.
+      notifyCustomer: Joi.boolean().optional(),
     }),
   },
 };

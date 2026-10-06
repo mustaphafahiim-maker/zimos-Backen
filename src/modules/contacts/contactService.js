@@ -240,6 +240,8 @@ async function createContact(workspaceId, data, req) {
     tags: cleanTags(data.tags),
     source: 'manual',
   });
+  // Lists that follow new contacts (emailMarketing/, webhooks) hear of it.
+  await require('../../core/outbox/outbox').record(null, 'customer.created', { workspaceId, customerId: customer.id });
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -378,7 +380,7 @@ async function previewSegment(workspaceId, rules) {
 }
 
 /**
- * The contacts of a segment, for senders (WhatsApp campaigns, email sync):
+ * The contacts of a segment, for senders (automations, email sync):
  * `{ id, phoneNormalized, fullName, email, marketingConsent }[]`.
  */
 async function resolveSegment(workspaceId, segmentId, { consentingOnly = true, limit = EXPORT_LIMIT } = {}) {
@@ -398,6 +400,7 @@ async function resolveSegment(workspaceId, segmentId, { consentingOnly = true, l
 }
 
 module.exports = {
+  buildFilter,
   cleanTags,
   listContacts,
   countContacts,

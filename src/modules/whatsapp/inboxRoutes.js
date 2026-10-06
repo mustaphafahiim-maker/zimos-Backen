@@ -12,6 +12,7 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { AuthenticationError } = require('../../core/errors/AppError');
 const service = require('./inboxService');
 const inboxEvents = require('./inboxEvents');
+const sessionGate = require('../../core/security/sessionGate');
 
 const uuid = Joi.string().uuid();
 const ws = { workspaceId: uuid.required() };
@@ -42,6 +43,8 @@ stream.get(
     });
     const permissions = membership ? membership.role.permissions : [];
     if (!permissions.includes('*') && !permissions.includes(PERMISSIONS.ORDERS_CONFIRM)) throw new AuthenticationError('The stream ticket is missing or has expired');
+    if (!(await sessionGate.isActive(ticket.sid))) throw new AuthenticationError('The stream ticket is missing or has expired');
+    sessionGate.closeWhenEnded(req, res, ticket.sid);
     await inboxEvents.stream(ticket.workspaceId, req, res);
   })
 );
@@ -51,7 +54,7 @@ router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.ORDERS_CON
 router.post(
   '/stream-ticket',
   validate({ params: Joi.object(ws) }),
-  asyncHandler(async (req, res) => res.status(201).json({ ticket: inboxEvents.issueTicket(wid(req), req.user.id), expiresInSeconds: inboxEvents.TICKET_TTL_MS / 1000 }))
+  asyncHandler(async (req, res) => res.status(201).json({ ticket: inboxEvents.issueTicket(wid(req), req.user.id, req.authTokenPayload && req.authTokenPayload.sid), expiresInSeconds: inboxEvents.TICKET_TTL_MS / 1000 }))
 );
 
 router.get(

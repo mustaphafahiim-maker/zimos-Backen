@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { normalizeDescription } = require('./richDescription');
 const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
@@ -9,6 +10,8 @@ const slugify = require('../../core/utils/slugify');
 const inventoryService = require('../inventory/inventoryService');
 const { resolveProductShipping } = require('../shipping/shippingRules');
 const { MAX_COLLECTION_DEPTH, findTreeProblem } = require('./collectionTree');
+// Installs the hooks that keep smart collections filled (smartCollections.js).
+const smartCollections = require('./smartCollections');
 const { bumpProblem } = require('../checkout/orderBump');
 const { escapeLike } = require('../storefront/productSearch');
 
@@ -52,6 +55,8 @@ function slugFor(source, fallback) {
 async function createProduct(workspaceId, data, req) {
   const { variant: variantData, shippingMode, shippingExtraAmount, ...rest } = data;
   const productData = { ...rest, ...productShippingFields(null, { shippingMode, shippingExtraAmount }) };
+  // A formatted description is kept as marks, never HTML (richDescription.js).
+  if (productData.description !== undefined) productData.description = normalizeDescription(productData.description);
   const products = scoped(db.Product, workspaceId);
   const baseSlug = slugFor(productData.slug || productData.name, 'product');
   let slug = baseSlug;
@@ -92,9 +97,17 @@ async function createProduct(workspaceId, data, req) {
 
     if (!variantData) return { product };
 
-    const { stockOnHand, ...variantFields } = variantData;
+    // An untracked product's variant sells past its stock (stockTracking.js).
+    const { stockOnHand, ...variantFields } = require('./stockTracking').firstVariant(productData, variantData);
     const variant = await db.ProductVariant.create(
-      { ...variantFields, workspaceId, productId: product.id, stockOnHand: 0 },
+      {
+        ...variantFields,
+        // Priced in the store's currency unless told otherwise (currencies/baseCurrency.js).
+        currency: variantFields.currency || (await require('../currencies/baseCurrency').storeCurrency(workspaceId, t)),
+        workspaceId,
+        productId: product.id,
+        stockOnHand: 0,
+      },
       { transaction: t }
     );
     await recordAudit({
@@ -199,10 +212,13 @@ async function updateProduct(workspaceId, productId, data, req) {
     });
     const before = product.toJSON();
     const { shippingMode, shippingExtraAmount, ...rest } = data;
+    if (rest.description !== undefined) rest.description = normalizeDescription(rest.description);
     await product.update(
       { ...rest, ...productShippingFields(before, { shippingMode, shippingExtraAmount }) },
       { transaction: t }
     );
+    // "Track quantity" switched: the variants follow (stockTracking.js).
+    await require('./stockTracking').afterProductUpdate(before, product, t);
 
     let cascade;
     if (before.status !== 'archived' && product.status === 'archived') {
@@ -235,8 +251,9 @@ async function createVariant(workspaceId, productId, data, req) {
   // (see catalogController), so every stock change — including the very
   // first one — goes through the one code path that writes an
   // InventoryMovement audit row. Never set it directly here.
-  const { stockOnHand, ...createData } = data;
-  const variant = await db.ProductVariant.create({ ...createData, workspaceId, productId: product.id, stockOnHand: 0 });
+  const { stockOnHand, ...createData } = require('./stockTracking').variantFields(product, data);
+  const currency = createData.currency || (await require('../currencies/baseCurrency').storeCurrency(workspaceId));
+  const variant = await db.ProductVariant.create({ ...createData, currency, workspaceId, productId: product.id, stockOnHand: 0 });
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -257,7 +274,10 @@ async function updateVariant(workspaceId, variantId, data, req) {
   // Stock is never mutated through this endpoint — only inventoryService can
   // change stockOnHand/reservedStock, so silently strip those fields even if
   // a caller mistakenly includes them.
-  const { stockOnHand, reservedStock, ...safeData } = data;
+  const { stockOnHand, reservedStock, ...rawData } = data;
+  // A variant of an untracked product keeps selling past its stock (stockTracking.js).
+  const safeData =
+    rawData.allowOverselling === false && (await require('./stockTracking').untracked(variant.productId)) ? { ...rawData, allowOverselling: true } : rawData;
   // A status the merchant sets by hand is theirs, not the product cascade's.
   if (safeData.status) safeData.archivedWithProduct = false;
   await variant.update(safeData);
@@ -886,6 +906,7 @@ async function deleteCollection(workspaceId, collectionId, req) {
 async function removeProductFromCollection(workspaceId, productId, collectionId, req) {
   const product = await scoped(db.Product, workspaceId).findByPkOrThrow(productId);
   const collection = await scoped(db.Collection, workspaceId, 'Collection').findByPkOrThrow(collectionId);
+  smartCollections.assertManual(collection);
   await db.ProductCollection.destroy({ where: { productId: product.id, collectionId: collection.id } });
   await recordAudit({
     workspaceId,
@@ -910,10 +931,11 @@ async function createOffer(workspaceId, productId, data, req) {
         name: data.name,
         pricingMode: data.pricingMode,
         priceAmount: data.priceAmount,
-        currency: data.currency,
+        currency: data.currency || (await require('../currencies/baseCurrency').storeCurrency(workspaceId, t)),
         badge: data.badge,
         isDefault: data.isDefault,
         shippingOverride: data.shippingOverride,
+        countdownMinutes: data.countdownMinutes ?? null,
       },
       { transaction: t }
     );
@@ -978,6 +1000,7 @@ async function createCollection(workspaceId, data, req) {
 async function addProductToCollection(workspaceId, productId, collectionId, req) {
   const product = await scoped(db.Product, workspaceId).findByPkOrThrow(productId);
   const collection = await scoped(db.Collection, workspaceId, 'Collection').findByPkOrThrow(collectionId);
+  smartCollections.assertManual(collection);
   // A product joins at the end of the collection's order.
   const last = await db.ProductCollection.max('position', { where: { collectionId: collection.id } });
   const [, created] = await db.ProductCollection.findOrCreate({

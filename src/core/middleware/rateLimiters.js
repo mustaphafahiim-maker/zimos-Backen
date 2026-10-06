@@ -8,6 +8,7 @@ const { ipKeyGenerator } = require('express-rate-limit');
 const env = require('../../config/env');
 const { RateLimitError } = require('../errors/AppError');
 const { normalizePhone } = require('../utils/phone');
+const { verifyAccessToken } = require('../security/tokens');
 
 function handler(req, res, next) {
   next(new RateLimitError());
@@ -21,6 +22,23 @@ function handler(req, res, next) {
 // project report for how that was verified.
 const skip = () => env.isTest;
 
+// Signed-in staff are counted per user: a confirmation team working from one
+// office connection would otherwise share a single budget. The token is
+// verified, so a forged one cannot pick its own bucket; no token, or an
+// invalid or expired one, is counted by IP as before.
+function userOrIpKey(req) {
+  const [scheme, token] = String(req.headers.authorization || '').split(' ');
+  if (scheme === 'Bearer' && token) {
+    try {
+      const { sub } = verifyAccessToken(token);
+      if (sub) return `user:${sub}`;
+    } catch (err) {
+      // Not a valid access token: counted by IP below.
+    }
+  }
+  return ipKeyGenerator(req.ip);
+}
+
 const generalLimiter = rateLimit({
   windowMs: env.rateLimit.windowMs,
   max: env.rateLimit.max,
@@ -30,6 +48,7 @@ const generalLimiter = rateLimit({
   // which marks the requests it handled. Counting them again here, by IP,
   // would put every shopper behind our storefront server back in one bucket.
   skip: (req) => skip() || req.rateLimitScope === 'storefront' || req.rateLimitScope === 'carrier_webhook' || req.rateLimitScope === 'payment_webhook',
+  keyGenerator: userOrIpKey,
   handler,
 });
 

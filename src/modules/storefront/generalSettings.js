@@ -95,20 +95,28 @@ const SITEMAP_PRODUCT_LIMIT = 5000;
  * Every public address of a store, as paths relative to its origin, for the
  * storefront's sitemap.xml: home, the product listing, each active product,
  * the published and active website pages, and the legal policies the store
- * has written. Pages marked noindex are left out. Collections have no address
- * of their own in the store (they filter the listing), so none is listed.
+ * has written, and each category's listing (/products?collection=<slug>, its
+ * canonical address). Anything marked noindex, and hidden categories, are left out.
  */
 async function storeSitemap(workspace) {
   const workspaceId = workspace.id;
   const entries = [{ path: '/', updatedAt: workspace.updatedAt }, { path: '/products', updatedAt: workspace.updatedAt }];
 
   const products = await db.Product.findAll({
-    where: { workspaceId, status: 'active' },
-    attributes: ['id', 'slug', 'updatedAt'],
+    // A hidden product (page_settings.hidden) opens by its link only — never in a listing, this one included.
+    where: { workspaceId, status: 'active', [Op.and]: [db.sequelize.literal(require('../catalog/productPage').notHiddenSql('"Product"'))] },
+    attributes: ['id', 'slug', 'updatedAt', 'seo'],
     order: [['updatedAt', 'DESC']],
     limit: SITEMAP_PRODUCT_LIMIT,
   });
-  for (const p of products) entries.push({ path: `/products/${p.slug || p.id}`, updatedAt: p.updatedAt });
+  // A product the merchant hid from search engines (seo.noindex) is left out.
+  for (const p of products.filter((x) => !(x.seo && x.seo.noindex === true))) entries.push({ path: `/products/${p.slug || p.id}`, updatedAt: p.updatedAt });
+
+  const collections = await db.Collection.findAll({ where: { workspaceId, hidden: false }, attributes: ['slug', 'seo', 'updatedAt'], order: [['position', 'ASC']] });
+  for (const c of collections.filter((x) => !(x.seo && x.seo.noindex === true))) {
+    // Raw like the product paths: the storefront encodes the whole path (encodeURI).
+    entries.push({ path: `/products?collection=${c.slug}`, updatedAt: c.updatedAt });
+  }
 
   const website = await db.Website.findOne({
     where: { workspaceId, status: 'published', publishedRevisionId: { [Op.ne]: null } },
@@ -132,6 +140,8 @@ async function storeSitemap(workspace) {
     if (text(legal[key])) entries.push({ path: `/policies/${key.replace(/_/g, '-')}`, updatedAt: workspace.updatedAt });
   }
 
+  // The blog's index and published posts (modules/blog, item 190).
+  entries.push(...(await require('../blog').sitemapEntries(workspaceId)));
   return entries.map((e) => ({ path: e.path, updatedAt: e.updatedAt ? new Date(e.updatedAt).toISOString() : null }));
 }
 

@@ -38,6 +38,9 @@ router.put(
   asyncHandler(async (req, res) => res.json({ currencies: await fx.saveSettings(req.tenant.workspaceId, req.body, req) }))
 );
 
+// The store's own currency, until its first order (baseCurrency.js).
+router.put('/base', requirePermission(PERMISSIONS.WORKSPACE_MANAGE), validate(require('./baseCurrency').schema), require('./baseCurrency').handler);
+
 router.post(
   '/refresh',
   requirePermission(PERMISSIONS.WORKSPACE_MANAGE),

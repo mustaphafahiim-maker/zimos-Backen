@@ -54,6 +54,7 @@ const touch = Joi.object({
   campaign: touchField,
   content: touchField,
   term: touchField,
+  adId: touchField,
   fbclid: touchField,
   ttclid: touchField,
   gclid: touchField,
@@ -70,6 +71,8 @@ module.exports = {
     params: Joi.object({ workspaceId: workspaceRef().required() }),
     body: Joi.object({
       visitorId: Joi.string().min(8).max(64).required(),
+      // The shopper's cookie choice (marketing/cookieConsent.js).
+      consent: Joi.object({ marketing: Joi.boolean() }).optional(),
       sessionId: Joi.string().min(8).max(64).required(),
       screen: Joi.string().max(11).pattern(/^\d{1,5}x\d{1,5}$/).optional(),
       language: Joi.string().max(35).optional(),

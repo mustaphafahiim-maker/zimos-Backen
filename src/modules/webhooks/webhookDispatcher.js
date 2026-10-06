@@ -69,6 +69,11 @@ async function attemptDelivery(deliveryId, { now = new Date() } = {}) {
     await delivery.update({ status: 'failed', nextAttemptAt: null, lastError: 'Endpoint is paused' });
     return delivery;
   }
+  // The store took the Webhooks app off: its own endpoints stop the same way (redeliver once it is back).
+  if (!(await require('../apps/appGate').endpointAllowed(endpoint))) {
+    await delivery.update({ status: 'failed', nextAttemptAt: null, lastError: 'The Webhooks app is not installed' });
+    return delivery;
+  }
 
   const body = JSON.stringify(delivery.payload);
   const timestamp = Math.floor(now.getTime() / 1000);
@@ -77,6 +82,8 @@ async function attemptDelivery(deliveryId, { now = new Date() } = {}) {
     body,
     timeoutMs: env.webhooks.timeoutMs,
     headers: {
+      // The merchant's own headers first; ours below always win (customHeaders.js).
+      ...require('./customHeaders').forSend(endpoint.customHeaders),
       'Content-Type': 'application/json',
       'User-Agent': USER_AGENT,
       'X-Zimos-Event': delivery.eventType,

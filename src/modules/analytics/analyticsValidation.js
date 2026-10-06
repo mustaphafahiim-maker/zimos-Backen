@@ -41,6 +41,9 @@ module.exports = {
     query: rangeQuery.keys({
       compare: Joi.string().valid('previous', 'none').optional(),
       funnelId: Joi.string().uuid().optional(),
+      // Item 172: one product, one website (store) of the workspace.
+      productId: Joi.string().uuid().optional(),
+      websiteId: Joi.string().uuid().optional(),
       currency: Joi.string().length(3).uppercase().optional(),
     }),
   },
@@ -48,6 +51,8 @@ module.exports = {
     params: wsParams,
     query: rangeQuery.keys({
       groupBy: Joi.string().valid('source', 'medium', 'campaign', 'content').optional(),
+      // Which of the order's touches gets the sale (analytics/orderTouch.js).
+      touch: Joi.string().valid('first', 'last').optional(),
       funnelId: Joi.string().uuid().optional(),
       utm_source: Joi.string().max(100).optional(),
       utm_medium: Joi.string().max(100).optional(),

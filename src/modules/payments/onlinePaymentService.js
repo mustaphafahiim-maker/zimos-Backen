@@ -93,6 +93,8 @@ function newPaymentToken() {
 }
 
 function tokenMatches(order, token) {
+  // A message's payment link (paymentLinkToken.js) opens the same page.
+  if (require('./paymentLinkToken').linkTokenMatches(order, token)) return true;
   if (!order.paymentTokenHash || typeof token !== 'string' || !token) return false;
   const a = Buffer.from(hashToken(token));
   const b = Buffer.from(order.paymentTokenHash);
@@ -160,7 +162,7 @@ async function prepareOnlineCheckout(workspace, body, req) {
   const method = await methodsService.resolveStorefrontMethod(workspace, body, { preview });
   const returnUrl = await assertReturnUrl(workspace.id, body.returnUrl);
   const { token, hash } = newPaymentToken();
-  const expiresAt = new Date(Date.now() + env.payments.attemptTtlMinutes * 60 * 1000);
+  const expiresAt = new Date(Date.now() + ttlMinutesFor(method.method) * 60 * 1000);
   return { method, returnUrl, token, tokenHash: hash, expiresAt };
 }
 
@@ -169,12 +171,20 @@ async function prepareOnlineCheckout(workspace, body, req) {
  * then the gateway. A gateway that refuses or does not answer leaves the
  * attempt 'failed' — the shopper can retry or switch to cash on delivery.
  */
+/** How long an unpaid online order waits: a kiosk reference is paid in cash later, so it waits longer. */
+function ttlMinutesFor(method) {
+  return method === 'kiosk' ? env.payments.kioskTtlMinutes : env.payments.attemptTtlMinutes;
+}
+
 async function startAttempt(order, { provider, method, returnUrl: template }) {
   const ctx = await gatewayRuntime.contextFor(order.workspaceId, provider);
   // The storefront builds its return URL before the order exists, with an
   // {orderId} placeholder (URL-encoded once it went through new URL()).
   const returnUrl = String(template).replace(/\{orderId\}|%7BorderId%7D/gi, order.id);
   const expiresAt = order.paymentExpiresAt;
+  // A free trial with nothing to pay saves the card instead (subscriptions/trialCheckout.js).
+  const cardOnly = await require('../subscriptions/trialCheckout').startInsteadOfPayment(order, { provider, method, returnUrl });
+  if (cardOnly) return cardOnly;
 
   const attempt = await db.Payment.create({
     workspaceId: order.workspaceId,
@@ -183,7 +193,8 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
     method,
     mode: ctx.mode,
     status: OPEN_ATTEMPT,
-    amount: order.totalAmount,
+    // What is left once earlier payments and held gift cards or points are counted (heldTenders.js).
+    amount: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('./heldTenders').heldOn(order.id))),
     currency: order.currency,
     returnUrl,
     expiresAt,
@@ -219,7 +230,11 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
       code: err.code,
       reason: err.message,
     });
+    // Rejected keys or a gateway that does not answer: the merchant is told (once a day).
+    require('../notifications/integrationAlerts').gateway(order.workspaceId, provider, err);
     await attempt.update({ status: 'failed', failureReason: String(err.message || 'The payment could not be started').slice(0, 300) });
+    // The gateway refused to start it: a failed payment all the same (paymentFailure.js).
+    await require('./paymentFailure').markFailed(attempt);
   }
   return attempt;
 }
@@ -282,6 +297,9 @@ async function recordPaymentTransaction(account, tx) {
       },
       { where: { id: attempt.id, status: OPEN_ATTEMPT } }
     );
+    // The order's payment failed, and the "payment failed + try again" automation
+    // starts (paymentFailure.js); the order stays open for a retry or a switch to cash on delivery.
+    if (n) await require('./paymentFailure').markFailed(attempt);
     return { outcome: n ? 'failed' : 'ignored_failed', ...ids };
   }
 
@@ -357,7 +375,13 @@ async function recordPaymentTransaction(account, tx) {
       { transaction }
     );
 
-    const amountPaid = Number(order.amountPaid) + (sameCurrency ? received : 0);
+    // A gift card or points held at checkout pay their part now, or go back if the order does not stand (items 201, 203).
+    const holds = require('./heldTenders');
+    const stands = !platformBlock && (!order.cancelledAt || reopened);
+    const fromCard = stands
+      ? await holds.capture(order, Number(order.totalAmount) - Number(order.amountPaid) - (sameCurrency ? received : 0), transaction)
+      : (await holds.release(order.id, transaction, 'payment on a cancelled order'), 0);
+    const amountPaid = Number(order.amountPaid) + (sameCurrency ? received : 0) + fromCard;
     const updates = { amountPaid, riskFlags: flags };
     if (platformBlock) {
       updates.cancelledAt = order.cancelledAt || new Date();
@@ -425,6 +449,8 @@ async function recordPaymentTransaction(account, tx) {
       cartId: context.cartId || null,
       checkoutSessionId: context.checkoutSessionId || null,
     });
+    // The shopper ticked "save my card" at checkout.
+    await require('./savedMethods/consentedSave').afterPaid(order, context);
   }
   return { outcome, ...ids };
 }
@@ -476,6 +502,7 @@ async function inquireOpenAttempts(orderId, { throttle = false } = {}) {
     } catch (err) {
       unknown += 1;
       logger.warn('Payment inquiry failed', { orderId, attemptId: attempt.id, code: err.code, reason: err.message });
+      require('../notifications/integrationAlerts').gateway(attempt.workspaceId, attempt.providerCode, err);
     }
   }
   return { unknown };
@@ -516,6 +543,8 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
     if (new Date(locked.paymentExpiresAt).getTime() > Date.now()) return 'not_due';
 
     await releaseStock(locked, transaction, 'order_payment_expired');
+    // A gift card or points held for it go back (heldTenders.js).
+    await require('./heldTenders').release(locked.id, transaction, 'payment expired');
     await db.Payment.update(
       { status: 'expired' },
       { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction }
@@ -580,7 +609,10 @@ function shopperStatusOf(order) {
   // Paid, but not going ahead: the shopper sees a cancelled order, not a
   // confirmation, and is told nothing about why.
   if (order.cancelledAt && order.cancellationReason === BLOCKED_REASON) return 'cancelled';
-  if (isPaid(order) && Number(order.amountPaid) > 0) return 'paid';
+  // Cash on delivery partly paid already (a gift card, a deposit): the courier still collects the rest.
+  if (order.paymentMethod === 'cod' && order.financialState === 'partially_paid' && !order.cancelledAt) return 'cod';
+  // A free trial with nothing to pay is paid at 0 once its card is saved (subscriptions/trialCheckout.js).
+  if (isPaid(order) && (Number(order.amountPaid) > 0 || (Number(order.totalAmount) === 0 && order.completedAt))) return 'paid';
   if (order.cancelledAt) return order.cancellationReason === EXPIRED_REASON ? 'expired' : 'cancelled';
   if (order.paymentMethod === 'cod') return 'cod';
   return 'awaiting_payment';
@@ -590,10 +622,11 @@ async function describeForShopper(order, workspace, preview) {
   const attempts = await db.Payment.findAll({ where: { orderId: order.id }, order: [['createdAt', 'DESC']] });
   const latest = attempts[0] || null;
   const status = shopperStatusOf(order);
-  const offered = await methodsService.storefrontMethods(workspace, { preview });
+  const offered = await methodsService.storefrontMethods(workspace, { preview, currency: order.currency });
   const online = offered.filter((m) => m.id !== methodsService.COD);
   const awaiting = status === 'awaiting_payment';
   const retriesLeft = Math.max(0, env.payments.maxAttemptsPerOrder - attempts.length);
+  const canSwitchToCod = awaiting && offered.some((m) => m.id === methodsService.COD) && require('./codSwitchChecks').funnelAllowsCod(workspace, order);
 
   return {
     orderId: order.id,
@@ -603,6 +636,11 @@ async function describeForShopper(order, workspace, preview) {
     paymentMethod: order.paymentMethod,
     totalAmount: Number(order.totalAmount),
     amountPaid: Number(order.amountPaid),
+    // What gift cards and points hold for this payment (heldTenders.js), and what is left to pay.
+    giftCardHeld: await require('../giftCards/giftCardHolds').heldOn(order.id),
+    pointsHeld: await require('../loyalty/loyaltyHolds').heldOn(order.id),
+    storeCreditHeld: await require('../storeCredit/storeCreditHolds').heldOn(order.id),
+    amountDue: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('./heldTenders').heldOn(order.id))),
     currency: order.currency,
     expiresAt: order.paymentExpiresAt,
     testMode: Boolean(latest && latest.mode === 'test'),
@@ -621,7 +659,9 @@ async function describeForShopper(order, workspace, preview) {
       : null,
     canRetry: awaiting && retriesLeft > 0 && online.length > 0,
     retriesLeft,
-    canSwitchToCod: awaiting && offered.some((m) => m.id === methodsService.COD),
+    canSwitchToCod,
+    // The deposit by transfer the switch needs (payments/codSwitchChecks.js), for the pay page to ask first.
+    codDeposit: canSwitchToCod ? ((await require('./codSwitchChecks').depositFor(workspace, order)) || {}).view || null : null,
     methods: awaiting ? online : [],
   };
 }
@@ -658,6 +698,8 @@ async function getShopperStatus(workspaceId, orderId, token, { refresh = false, 
 async function handleReturn(workspaceId, orderId, token, query, req) {
   const order = await loadOrderForShopper(workspaceId, orderId, token);
   const attempts = await db.Payment.findAll({ where: { orderId: order.id }, order: [['createdAt', 'DESC']] });
+  // Back from a free trial's card page (subscriptions/trialCheckout.js).
+  if (await require('../subscriptions/trialCheckout').finishOnReturn(order, attempts, query)) return getShopperStatus(workspaceId, orderId, token, { req });
   const providers = [...new Set(attempts.map((a) => a.providerCode).filter((c) => gateways.isGateway(c)))];
 
   let recorded = false;
@@ -698,11 +740,13 @@ async function retry(workspaceId, orderId, token, body, req) {
   const method = await methodsService.resolveStorefrontMethod(
     workspace,
     { paymentMethod: body.paymentMethod || order.paymentMethod, paymentProvider: body.paymentProvider },
-    { preview }
+    { preview, currency: order.currency }
   );
   if (method.id === methodsService.COD) {
     throw new AppError('PAYMENT_METHOD_UNAVAILABLE', 'Use switch-to-cod for cash on delivery', 422);
   }
+  // A subscription or installment product stays on a card that can be saved (subscriptions/planCheckout).
+  await require('../subscriptions/planCheckout').assertOrderPayable(order, method);
 
   const lastAttempt = await db.Payment.findOne({ where: { orderId: order.id }, order: [['createdAt', 'DESC']] });
   const returnUrl = await assertReturnUrl(workspaceId, body.returnUrl || (lastAttempt && lastAttempt.returnUrl));
@@ -717,8 +761,10 @@ async function retry(workspaceId, orderId, token, body, req) {
     await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
     // The retry gets a full window of its own; the attempt cap bounds how long
     // one order can hold its stock this way.
-    const expiresAt = new Date(Date.now() + env.payments.attemptTtlMinutes * 60 * 1000);
+    const expiresAt = new Date(Date.now() + ttlMinutesFor(method.method) * 60 * 1000);
     await locked.update({ paymentMethod: method.method, paymentExpiresAt: expiresAt }, { transaction });
+    // Waiting for a payment again (paymentFailure.js).
+    await require('./paymentFailure').reopen(locked, transaction);
     return locked;
   });
 
@@ -758,6 +804,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
   if (!(await methodsService.codOffered(workspace, { preview }))) {
     throw new AppError('PAYMENT_METHOD_UNAVAILABLE', 'This store does not take cash on delivery', 422);
   }
+  await require('../subscriptions/planCheckout').assertOrderPayable(order, { method: 'cod' });
 
   await inquireOpenAttempts(order.id);
   order = await db.Order.findByPk(order.id);
@@ -783,6 +830,8 @@ async function switchToCod(workspaceId, orderId, token, req) {
     });
     throw new fraudRules.OrderRejectedError({ customerId: order.customerId, flags: flagged });
   }
+  // What a COD checkout would have asked: the funnel's methods, the per-IP rule, a code, a deposit.
+  const codChecks = await require('./codSwitchChecks').check(workspace, order, (req && req.body) || {}, req);
 
   const completed = await db.sequelize.transaction(async (transaction) => {
     const locked = await db.Order.findOne({ where: { id: order.id }, transaction, lock: transaction.LOCK.UPDATE });
@@ -792,7 +841,18 @@ async function switchToCod(workspaceId, orderId, token, req) {
     await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
     // The online method's fee or discount comes off; cash on delivery's goes on.
     const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
-    await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced }, { transaction });
+    const riskFlags = [...new Set([...(locked.riskFlags || []), ...codChecks.flags])];
+    await locked.update({ paymentMethod: 'cod', paymentExpiresAt: null, ...repriced, riskFlags }, { transaction });
+    // A gift card or points held for the online payment pay their part now; the courier collects the rest (items 201, 203).
+    const fromCard = await require('./heldTenders').capture(locked, Number(locked.totalAmount) - Number(locked.amountPaid), transaction);
+    if (fromCard > 0) {
+      const amountPaid = Number(locked.amountPaid) + fromCard;
+      await locked.update({ amountPaid }, { transaction });
+      await setFinancialState(workspaceId, locked.id, amountPaid >= Number(locked.totalAmount) ? 'paid' : 'partially_paid', null, transaction);
+    }
+    // Cash on delivery: unpaid, not failed (paymentFailure.js).
+    await require('./paymentFailure').reopen(locked, transaction);
+    await require('./codSwitchChecks').recordDeposit(locked, codChecks.deposit, transaction);
     await db.ConfirmationTask.create({ workspaceId, orderId: locked.id, status: 'queued' }, { transaction });
     await trackStage(workspaceId, locked.id, { transaction, actorType: 'customer', reason: 'switched_to_cod' });
 
@@ -821,6 +881,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
 }
 
 module.exports = {
+  loadOrderForShopper,
   FLAGS,
   EXPIRED_REASON,
   BLOCKED_REASON,

@@ -150,8 +150,23 @@ async function countryOf(req) {
 
 // --- funnel settings --------------------------------------------------------
 
-const DEFAULT_SETTINGS = Object.freeze({ currency: null, faviconUrl: null, title: null, description: null });
+// headCode / bodyCode: the funnel's own scripts on every step (SPEC §9.7, storefront FunnelCode);
+// shippingProfileId: its shipping group, freeShippingThresholdAmount: its own
+// free-shipping threshold, in its currency (funnelShipping.js).
+const DEFAULT_SETTINGS = Object.freeze({
+  currency: null,
+  faviconUrl: null,
+  title: null,
+  description: null,
+  headCode: null,
+  bodyCode: null,
+  shippingProfileId: null,
+  freeShippingThresholdAmount: null,
+  // null = the store's; 'purchase' | 'lead' (marketing/conversionEvent.js).
+  conversionEvent: null,
+});
 const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+const amount = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 
 function resolveSettings(funnel) {
   const s = (funnel && funnel.settings) || {};
@@ -160,6 +175,11 @@ function resolveSettings(funnel) {
     faviconUrl: text(s.faviconUrl),
     title: text(s.title),
     description: text(s.description),
+    headCode: text(s.headCode),
+    bodyCode: text(s.bodyCode),
+    shippingProfileId: text(s.shippingProfileId),
+    freeShippingThresholdAmount: amount(s.freeShippingThresholdAmount),
+    conversionEvent: ['purchase', 'lead'].includes(s.conversionEvent) ? s.conversionEvent : null,
   };
 }
 
@@ -173,9 +193,13 @@ async function saveSettings(workspaceId, funnelId, body, req) {
   const funnel = await db.Funnel.findOne({ where: { id: funnelId, workspaceId } });
   if (!funnel) throw new NotFoundError('Funnel');
   const before = resolveSettings(funnel);
+  if (body.shippingProfileId) {
+    const profile = await db.ShippingProfile.findOne({ where: { id: body.shippingProfileId, workspaceId }, attributes: ['id'] });
+    if (!profile) throw new NotFoundError('Shipping group');
+  }
   const next = { ...DEFAULT_SETTINGS, ...before };
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
-    if (body[key] !== undefined) next[key] = text(body[key]);
+    if (body[key] !== undefined) next[key] = key === 'freeShippingThresholdAmount' ? amount(body[key]) : text(body[key]);
   }
   await funnel.update({ settings: { ...(funnel.settings || {}), ...next } });
   await recordAudit({
@@ -215,6 +239,11 @@ const schemas = {
       faviconUrl: Joi.string().trim().max(1000).uri({ scheme: ['http', 'https'] }).allow(null, '').optional(),
       title: Joi.string().trim().max(200).allow(null, '').optional(),
       description: Joi.string().trim().max(320).allow(null, '').optional(),
+      headCode: Joi.string().max(20000).allow(null, '').optional(),
+      bodyCode: Joi.string().max(20000).allow(null, '').optional(),
+      shippingProfileId: uuid.allow(null, '').optional(),
+      freeShippingThresholdAmount: Joi.number().integer().min(0).max(100000000).allow(null).optional(),
+      conversionEvent: Joi.string().valid('purchase', 'lead').allow(null, '').optional(),
     }).min(1),
   },
 };

@@ -15,10 +15,11 @@ const { AppError } = require('../../core/errors/AppError');
  * or a plan whose features are the older array form — means **unlimited**,
  * so nothing is restricted until someone decides a number.
  *
- * Keys in use: members, stores, domains, leads, storage_bytes, funnels_per_month.
+ * Keys in use: members, stores, domains, leads, storage_bytes, funnels_per_month,
+ * bot_replies (the WhatsApp bot's replies this month).
  */
 
-const LIMIT_KEYS = ['members', 'stores', 'domains', 'leads', 'storage_bytes', 'funnels_per_month'];
+const LIMIT_KEYS = ['members', 'stores', 'domains', 'leads', 'storage_bytes', 'funnels_per_month', 'bot_replies'];
 
 async function planOf(workspaceId) {
   const subscription = await db.Subscription.findOne({
@@ -45,6 +46,27 @@ const USAGE = {
   stores: async (workspaceId) => {
     const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['ownerUserId'] });
     return workspace ? db.Workspace.count({ where: { ownerUserId: workspace.ownerUserId } }) : 0;
+  },
+  // New contacts collected by forms and the newsletter this calendar month (UTC, as usage_counters).
+  leads: (workspaceId) => {
+    const now = new Date();
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return db.Customer.count({ where: { workspaceId, source: ['form', 'newsletter'], createdAt: { [db.Sequelize.Op.gte]: from } } });
+  },
+  // The WhatsApp bot's replies this calendar month (UTC).
+  bot_replies: (workspaceId) => {
+    const now = new Date();
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return db.WhatsappMessage.count({ where: { workspaceId, sentByBot: true, status: { [db.Sequelize.Op.ne]: 'failed' }, createdAt: { [db.Sequelize.Op.gte]: from } } });
+  },
+  // Files the store keeps: the media library and digital products.
+  storage_bytes: async (workspaceId) => {
+    const [row] = await db.sequelize.query(
+      `SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM media_assets WHERE workspace_id = :workspaceId)
+            + (SELECT COALESCE(SUM(size_bytes), 0) FROM digital_files WHERE workspace_id = :workspaceId) AS bytes`,
+      { replacements: { workspaceId }, type: db.Sequelize.QueryTypes.SELECT }
+    );
+    return Number(row.bytes);
   },
 };
 

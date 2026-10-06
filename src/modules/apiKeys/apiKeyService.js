@@ -63,6 +63,9 @@ const SCOPES = Object.freeze({
   'shipping_areas:write': [PERMISSIONS.SHIPPING_MANAGE],
   'webhooks:write': [PERMISSIONS.WEBHOOKS_MANAGE],
   'analytics:read': [PERMISSIONS.ANALYTICS_VIEW],
+  // The MCP server's funnel tools (mcp/mcpServer.js): check pages / create a draft funnel.
+  'funnels:read': [PERMISSIONS.FUNNELS_MANAGE],
+  'funnels:write': [PERMISSIONS.FUNNELS_MANAGE],
 });
 const SCOPE_NAMES = Object.keys(SCOPES);
 

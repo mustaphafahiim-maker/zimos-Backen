@@ -25,7 +25,11 @@ function sameDigest(a, b) {
   return x.length > 0 && x.length === y.length && crypto.timingSafeEqual(x, y);
 }
 
-async function generateAndSendOtp(rawPhone, purpose) {
+/**
+ * `channel`: 'sms' (default) or 'whatsapp' — the authentication template,
+ * with SMS as the fallback when WhatsApp cannot deliver it (as checkoutOtp).
+ */
+async function generateAndSendOtp(rawPhone, purpose, { channel = 'sms' } = {}) {
   const phone = normalizePhone(rawPhone);
   if (!phone) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
 
@@ -44,9 +48,17 @@ async function generateAndSendOtp(rawPhone, purpose) {
     expiresAt: new Date(Date.now() + CODE_TTL_MS),
   });
 
-  await notify.sms({ recipient: phone, template: `otp_${purpose}`, data: { code, purpose } });
+  const message = { recipient: phone, template: `otp_${purpose}`, data: { code, purpose } };
+  let sentVia = 'sms';
+  if (channel === 'whatsapp') {
+    const result = await notify.whatsapp(message);
+    if (result && result.status === 'failed') await notify.sms(message);
+    else sentVia = 'whatsapp';
+  } else {
+    await notify.sms(message);
+  }
 
-  return { sent: true, phone };
+  return { sent: true, phone, sentVia };
 }
 
 async function verifyOtp(rawPhone, purpose, code) {

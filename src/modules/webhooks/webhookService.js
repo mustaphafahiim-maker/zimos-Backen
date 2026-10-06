@@ -19,7 +19,8 @@ const { normaliseFilter } = require('./webhookFilter');
  * we need it back, to sign every request.
  */
 
-const MAX_ENDPOINTS_PER_WORKSPACE = 10;
+// Each Zapier / Make trigger is one subscription (item 193), so a store needs room for several.
+const MAX_ENDPOINTS_PER_WORKSPACE = 25;
 
 function serializeEndpoint(endpoint) {
   return {
@@ -28,6 +29,8 @@ function serializeEndpoint(endpoint) {
     events: endpoint.events,
     isActive: endpoint.isActive,
     filter: endpoint.filter || null,
+    // Names with masked values; the values are sealed (customHeaders.js).
+    customHeaders: require('./customHeaders').view(endpoint.customHeaders),
     failingSince: endpoint.failingSince || null,
     // Set when the endpoint was switched off after three days of failures.
     disabledAt: endpoint.disabledAt || null,
@@ -79,7 +82,7 @@ async function listEndpoints(workspaceId) {
   return { endpoints: endpoints.map(serializeEndpoint), ...eventCatalogue() };
 }
 
-async function createEndpoint(workspaceId, { url, events, isActive = true, filter = null }, req) {
+async function createEndpoint(workspaceId, { url, events, isActive = true, filter = null, customHeaders = [] }, req) {
   const cleanUrl = checkUrl(url);
   return db.sequelize.transaction(async (transaction) => {
     const count = await db.WebhookEndpoint.count({ where: { workspaceId }, transaction });
@@ -92,7 +95,7 @@ async function createEndpoint(workspaceId, { url, events, isActive = true, filte
     }
     const signingSecret = generateSecret();
     const endpoint = await db.WebhookEndpoint.create(
-      { workspaceId, url: cleanUrl, events: normaliseEvents(events), signingSecret, isActive, filter: normaliseFilter(filter) },
+      { workspaceId, url: cleanUrl, events: normaliseEvents(events), signingSecret, isActive, filter: normaliseFilter(filter), customHeaders: require('./customHeaders').normalise(customHeaders) },
       { transaction }
     );
     await recordAudit({
@@ -118,6 +121,8 @@ async function updateEndpoint(workspaceId, endpointId, changes, req) {
     if (changes.events !== undefined) next.events = normaliseEvents(changes.events);
     if (changes.isActive !== undefined) next.isActive = changes.isActive;
     if (changes.filter !== undefined) next.filter = normaliseFilter(changes.filter);
+    // The whole list; { name, keep: true } keeps a stored value (customHeaders.js).
+    if (changes.customHeaders !== undefined) next.customHeaders = require('./customHeaders').normalise(changes.customHeaders, endpoint.customHeaders);
     // Turning it back on starts with a clean record.
     if (changes.isActive === true) Object.assign(next, { failingSince: null, disabledAt: null, disabledReason: null });
     await endpoint.update(next, { transaction });

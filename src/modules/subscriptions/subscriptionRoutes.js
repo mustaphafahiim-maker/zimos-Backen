@@ -11,6 +11,7 @@ const { createIpMinuteLimiter } = require('../../core/middleware/rateLimiters');
 const { PERMISSIONS: P } = require('../../core/security/permissions');
 const env = require('../../config/env');
 const service = require('./subscriptionService');
+const card = require('./subscriptionCard');
 
 const uuid = Joi.string().uuid();
 const ws = { workspaceId: uuid.required() };
@@ -24,7 +25,7 @@ staff.use(authenticate, resolveTenant);
 staff.get('/', validate({
   params: Joi.object(ws),
   query: Joi.object({
-    status: Joi.string().valid('active', 'past_due', 'paused', 'cancelled', 'completed'),
+    status: Joi.string().valid('trialing', 'active', 'past_due', 'paused', 'cancelled', 'completed'),
     kind: Joi.string().valid('subscription', 'installments'),
     limit: Joi.number().integer().min(1).max(500).default(100),
   }),
@@ -51,7 +52,18 @@ staff.post(
 // Mounted at /api/v1/store/:workspaceId/subscriptions
 const portal = Router({ mergeParams: true });
 portal.use(createIpMinuteLimiter('subscription-portal', 30, { skip: () => env.isTest }), resolvePublicWorkspace);
-portal.get('/:token', asyncHandler(async (req, res) => res.json(await service.portalGet(wsId(req), req.params.token))));
-portal.post('/:token/cancel', asyncHandler(async (req, res) => res.json(await service.portalCancel(wsId(req), req.params.token))));
+// The view carries the card on file; the card is replaced on the payment provider's page (subscriptionCard.js).
+portal.get('/:token', asyncHandler(async (req, res) => res.json(await card.portalGet(wsId(req), req.params.token))));
+portal.post('/:token/cancel', asyncHandler(async (req, res) => res.json(await card.portalCancel(wsId(req), req.params.token))));
+portal.post(
+  '/:token/card',
+  validate({ body: Joi.object({ returnUrl: Joi.string().max(2000).required() }) }),
+  asyncHandler(async (req, res) => res.json(await card.startUpdate(wsId(req), req.params.token, req.body)))
+);
+portal.post(
+  '/:token/card/return',
+  validate({ body: Joi.object({ query: Joi.object().pattern(Joi.string().max(100), [Joi.string().max(2000), Joi.array().items(Joi.string().max(2000))]).required() }) }),
+  asyncHandler(async (req, res) => res.json(await card.finishUpdate(wsId(req), req.params.token, req.body)))
+);
 
 module.exports = { staff, portal };

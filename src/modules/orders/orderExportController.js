@@ -12,23 +12,29 @@ const columns = asyncHandler(async (req, res) => {
 
 /** Streams the CSV: a page of orders is written as soon as it is read. */
 const exportCsv = asyncHandler(async (req, res) => {
-  const { columns: requested, rowPer, lang, format, ...filters } = req.query;
+  const { columns: requested, rowPer: askedRowPer, lang, format, preset: presetId, ...filters } = req.query;
   const { workspaceId } = req.tenant;
+  // A courier's layout brings its own columns and rows (exportPresets.js).
+  const preset = presetId ? await require('./exportPresets').layoutOf(workspaceId, presetId) : null;
+  const layout = preset ? preset.columns : undefined;
+  const rowPer = preset ? preset.rowPer : askedRowPer;
 
   // Dates are written on the store's own clock, not the server's.
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['timezone'] });
   const timezone = (workspace && workspace.timezone) || 'UTC';
+  // Phones partly hidden, as in the orders list, without customers.reveal_sensitive (SPEC §3.4 #8).
+  const maskPhones = !req.tenant.hasPermission('customers.reveal_sensitive');
 
   // Excel: the same table as one .xlsx document (right-to-left for Arabic).
   if (format === 'xlsx') {
-    const rows = await exportService.tableRows(workspaceId, filters, { columns: requested, rowPer, lang, timezone });
+    const rows = await exportService.tableRows(workspaceId, filters, { columns: requested, rowPer, lang, timezone, maskPhones, layout });
     const file = buildXlsx(rows, { sheetName: lang === 'ar' ? 'الأوردرات' : 'Orders', rtl: lang === 'ar' });
     await recordAudit({
       workspaceId,
       actorUserId: req.user.id,
       action: 'order.export',
       entityType: 'Order',
-      metadata: { filters, rowPer, format, columns: requested || 'default' },
+      metadata: { filters, rowPer, format, columns: requested || 'default', preset: presetId || null, maskedPhones: maskPhones },
       req,
     });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -40,7 +46,7 @@ const exportCsv = asyncHandler(async (req, res) => {
 
   // The first chunk is produced before any header is sent, so a database
   // error still answers as a normal JSON error.
-  const chunks = exportService.csvChunks(workspaceId, filters, { columns: requested, rowPer, lang, timezone });
+  const chunks = exportService.csvChunks(workspaceId, filters, { columns: requested, rowPer, lang, timezone, maskPhones, layout });
   const first = await chunks.next();
 
   await recordAudit({
@@ -48,7 +54,7 @@ const exportCsv = asyncHandler(async (req, res) => {
     actorUserId: req.user.id,
     action: 'order.export',
     entityType: 'Order',
-    metadata: { filters, rowPer, columns: requested || 'default' },
+    metadata: { filters, rowPer, columns: requested || 'default', preset: presetId || null, maskedPhones: maskPhones },
     req,
   });
 

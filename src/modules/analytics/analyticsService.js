@@ -2,6 +2,7 @@
 
 const { Op } = require('sequelize');
 const db = require('../../db/models');
+const base = require('../currencies/baseAmounts');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_RANGE_DAYS = 366;
@@ -161,6 +162,7 @@ async function getSummary(workspaceId, query = {}) {
     attributes: [
       'id', 'createdAt', 'currency', 'confirmationState', 'fulfillmentState', 'financialState', 'cancelledAt',
       'subtotalAmount', 'discountAmount', 'shippingAmount', 'totalAmount', 'amountPaid', 'amountRefunded',
+      'totalAmountBase', 'fxRateToBase',
     ],
     include: [
       {
@@ -186,15 +188,16 @@ async function getSummary(workspaceId, query = {}) {
   for (const o of orders) {
     const cancelled = Boolean(o.cancelledAt);
     const active = !cancelled && o.confirmationState !== 'rejected';
-    const total = toNumber(o.totalAmount);
+    // Every amount in the store's base currency (currencies/baseAmounts.js).
+    const total = base.total(o);
     counts.placed += 1;
     if (cancelled) counts.cancelled += 1;
     else counts[o.confirmationState] = (counts[o.confirmationState] || 0) + 1;
     if (o.fulfillmentState === 'fulfilled') counts.delivered += 1;
     if (o.fulfillmentState === 'returned') counts.returned += 1;
 
-    revenue.collected += toNumber(o.amountPaid);
-    revenue.refunded += toNumber(o.amountRefunded);
+    revenue.collected += base.amount(o, o.amountPaid);
+    revenue.refunded += base.amount(o, o.amountRefunded);
 
     const key = dayKey(o.createdAt, timeZone);
     const day = series.get(key) || { date: key, orders: 0, revenue: 0, delivered: 0, sessions: 0 };
@@ -207,19 +210,19 @@ async function getSummary(workspaceId, query = {}) {
         const id = item.productId || item.productNameSnapshot;
         const p = products.get(id) || { productId: item.productId, name: item.productNameSnapshot, quantity: 0, revenue: 0 };
         p.quantity += item.quantity;
-        p.revenue += toNumber(item.lineTotalAmount);
+        p.revenue += base.amount(o, item.lineTotalAmount);
         products.set(id, p);
       }
     }
 
     if (o.fulfillmentState === 'fulfilled') {
       revenue.delivered += total;
-      revenue.shippingCharged += toNumber(o.shippingAmount);
-      revenue.discounts += toNumber(o.discountAmount);
+      revenue.shippingCharged += base.amount(o, o.shippingAmount);
+      revenue.discounts += base.amount(o, o.discountAmount);
       day.delivered += 1;
       for (const item of o.items || []) {
         profit.deliveredQuantity += item.quantity;
-        profit.deliveredItemsRevenue += toNumber(item.lineTotalAmount);
+        profit.deliveredItemsRevenue += base.amount(o, item.lineTotalAmount);
         if (item.unitCostAmount !== null && item.unitCostAmount !== undefined) {
           profit.productCost += toNumber(item.unitCostAmount) * item.quantity;
           profit.costedQuantity += item.quantity;

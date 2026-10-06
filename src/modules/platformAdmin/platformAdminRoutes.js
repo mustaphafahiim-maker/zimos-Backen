@@ -17,6 +17,18 @@ router.use(authenticate);
 
 // Lane 7: queues, app catalogue, suppliers, usage, delivery network, support access.
 router.use(require('./platformExtraRoutes'));
+// Support's view of a store's own data: only while the merchant has let support in.
+router.use(require('./supportViewRoutes'));
+// The couriers' areas map for every store.
+router.use(require('./carrierMapRoutes'));
+// The merchants' referral program: its share and the payout requests.
+router.use(require('../referrals/merchantReferrals').admin);
+// The help center, Telegram and tutorial links the dashboard shows (educationLinks.js).
+router.use(require('./educationLinks').admin);
+// The theme catalog (themes/themesCatalog.js).
+router.use(require('../themes/themesCatalog').admin);
+// Reviewing merchants' marketplace templates (marketplace/, item 192).
+router.use(require('../marketplace').admin);
 
 // --- Plans ---------------------------------------------------------------
 router.get('/plans', can(P.PLANS_VIEW), controller.listPlans);
@@ -137,6 +149,8 @@ router.post('/payment-gateways/:code/health-check', can(P.PROVIDERS_VIEW), valid
 // Agents never held it and still see only their own referrals (/my/*).
 router.get('/users', can(P.WORKSPACES_VIEW), validate(schemas.searchUsers), controller.searchUsers);
 router.get('/users/:userId', can(P.WORKSPACES_VIEW), validate(schemas.userParams), controller.getUser);
+// Turning off a person's two-step sign-in when they lost every way through it (support.manage).
+router.use(require('../auth/twoFactorRecovery').adminRouter);
 
 // --- Platform users (roles and permissions) --------------------------------
 // A role and a permission set on an existing account: no invitations. Only a

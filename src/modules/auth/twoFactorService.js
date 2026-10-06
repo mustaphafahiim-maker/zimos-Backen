@@ -15,6 +15,8 @@ const notify = require('../notifications/notify');
  *   email  a 6-digit code by email when signing in from a browser that is
  *          not remembered
  *   totp   a code from an authenticator app (RFC 6238: SHA-1, 30 s, 6 digits)
+ *   whatsapp  a 6-digit code to the verified phone on WhatsApp (SMS, then
+ *          email, when it cannot be delivered: twoFactorWhatsapp.js)
  *
  * The password check stays where it is (authService.login). When the person
  * has a second step and the browser is not remembered, login answers
@@ -87,7 +89,14 @@ async function settingsRow(userId) {
 async function status(user) {
   const row = await db.UserTwoFactor.findByPk(user.id);
   const devices = await db.TrustedDevice.count({ where: { userId: user.id, expiresAt: { [db.Sequelize.Op.gt]: new Date() } } });
-  return { mode: row ? row.mode : 'off', enabledAt: row ? row.enabledAt : null, rememberedDevices: devices, hasPassword: Boolean(user.passwordHash) };
+  return {
+    mode: row ? row.mode : 'off',
+    enabledAt: row ? row.enabledAt : null,
+    rememberedDevices: devices,
+    hasPassword: Boolean(user.passwordHash),
+    // Backup codes left (twoFactorRecovery.js).
+    ...require('./twoFactorRecovery').backupStatus(row),
+  };
 }
 
 /** Changing the second step asks for the password again (when the account has one). */
@@ -104,6 +113,12 @@ async function enableEmail(user, { password }, req) {
   const row = await settingsRow(user.id);
   await row.update({ mode: 'email', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: new Date() });
   await recordAudit({ actorUserId: user.id, action: 'user.two_factor_enable', entityType: 'User', entityId: user.id, after: { mode: 'email' }, req });
+  return status(user);
+}
+
+async function enableWhatsapp(user, { password }, req) {
+  await assertPassword(user, password);
+  await require('./twoFactorWhatsapp').enable(user, await settingsRow(user.id), req);
   return status(user);
 }
 
@@ -139,7 +154,7 @@ async function confirmTotp(user, { code }, req) {
 async function disable(user, { password }, req) {
   await assertPassword(user, password);
   const row = await settingsRow(user.id);
-  await row.update({ mode: 'off', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: null });
+  await row.update({ mode: 'off', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: null, backupCodes: [], backupCodesCreatedAt: null });
   await db.TrustedDevice.destroy({ where: { userId: user.id } });
   await recordAudit({ actorUserId: user.id, action: 'user.two_factor_disable', entityType: 'User', entityId: user.id, req });
   return status(user);
@@ -167,24 +182,35 @@ function maskEmail(email) {
  * Called by authService.login once the password is right. Null = sign in as
  * usual; otherwise the answer login must return instead of tokens.
  */
-async function challengeIfNeeded(user, req, { locale = 'ar' } = {}) {
+async function challengeIfNeeded(user, req, { locale = 'ar', newDevice = false } = {}) {
   const row = await db.UserTwoFactor.findByPk(user.id);
-  if (!row || row.mode === 'off') return null;
+  // Without a second step of its own, a browser new to the account is asked
+  // for an email code (newDeviceSignIn.js).
+  const mode = row && row.mode !== 'off' ? row.mode : newDevice ? 'email' : 'off';
+  if (mode === 'off') return null;
   if (await isTrusted(user.id, req)) return null;
+  const flag = mode !== (row && row.mode) ? { newDevice: true } : {};
 
-  const base = { userId: user.id, channel: row.mode, expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? req.ip : null };
-  if (row.mode === 'totp') {
+  const base = { userId: user.id, channel: mode, expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? req.ip : null };
+  if (mode === 'totp') {
     const challenge = await db.LoginChallenge.create(base);
     return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'totp' };
   }
 
   // Not more than five codes in ten minutes for one account.
   const recent = await db.LoginChallenge.count({ where: { userId: user.id, createdAt: { [db.Sequelize.Op.gt]: new Date(Date.now() - CODE_TTL_MS) } } });
-  if (recent >= 5) throw new AppError('TOO_MANY_CODES', 'Too many codes were sent. Try again in a few minutes.', 429);
+  if (recent >= 5) {
+    // No new code for now, but the step still opens: a backup code works in it (twoFactorRecovery.js).
+    const challenge = await db.LoginChallenge.create(base);
+    return { twoFactorRequired: true, challengeToken: challenge.id, channel: mode, codeNotSent: true, ...flag };
+  }
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   const challenge = await db.LoginChallenge.create({ ...base, codeHash: sha256(`${user.id}:${code}`) });
-  await notify.email({ recipient: user.email, template: 'login_code', data: { code, minutes: CODE_TTL_MS / 60000, locale } });
-  return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'email', sentTo: maskEmail(user.email) };
+  const minutes = CODE_TTL_MS / 60000;
+  const phone = mode === 'whatsapp' ? await require('./twoFactorWhatsapp').sendCode(user, code, { minutes, locale }) : null;
+  if (phone) return { twoFactorRequired: true, challengeToken: challenge.id, ...phone };
+  await notify.email({ recipient: user.email, template: 'login_code', data: { code, minutes, locale } });
+  return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'email', sentTo: maskEmail(user.email), ...flag };
 }
 
 const invalid = () => new AuthenticationError('That code is not correct or has expired', 'INVALID_TWO_FACTOR_CODE');
@@ -206,6 +232,8 @@ async function verifyChallenge({ challengeToken, code, rememberDevice }, req, re
     const given = sha256(`${user.id}:${String(code || '').replace(/\s/g, '')}`);
     ok = Boolean(challenge.codeHash) && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(challenge.codeHash));
   }
+  // A backup code works in place of any channel's code (twoFactorRecovery.js).
+  if (!ok) ok = await require('./twoFactorRecovery').useBackupCode(user, code, req);
   if (!ok) {
     await challenge.increment('attempts');
     throw invalid();
@@ -231,4 +259,4 @@ async function forgetDevices(user, req) {
   return status(user);
 }
 
-module.exports = { status, enableEmail, setupTotp, confirmTotp, disable, challengeIfNeeded, verifyChallenge, forgetDevices, totpAt, totpMatches, base32Encode };
+module.exports = { status, enableEmail, enableWhatsapp, setupTotp, confirmTotp, disable, challengeIfNeeded, verifyChallenge, forgetDevices, totpAt, totpMatches, base32Encode };

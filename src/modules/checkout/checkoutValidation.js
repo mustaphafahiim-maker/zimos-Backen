@@ -19,6 +19,9 @@ const address = Joi.object({
   // per store in checkoutForm.assertCheckoutForm.
   city: Joi.string().max(100).allow(null, '').optional(),
   addressLine: Joi.string().max(500).allow(null, '').optional(),
+  // The third level of the store's places, and the place picked from its list (places/storePlaces.js).
+  area: Joi.string().max(120).allow(null, '').optional(),
+  placeId: Joi.string().uuid().allow(null).optional(),
   postalCode: Joi.string().max(20).allow(null, '').optional(),
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
@@ -32,6 +35,8 @@ module.exports = {
     body: Joi.object({
       contact: contact.required(),
       shippingAddress: address.optional(),
+      // "Billing address same as shipping" (checkout/checkoutExtras.js).
+      ...require('./checkoutExtras').billingBodyKeys(Joi),
       // 'card' / 'wallet' go through the store's connected gateway and are
       // refused unless PAYMENTS_ONLINE_ENABLED is on (see checkoutController):
       // with it off the checkout takes cash on delivery only, as it always
@@ -39,7 +44,7 @@ module.exports = {
       // method — a merchant recording a bank transfer they received is real.
       // 'bank_transfer' is a manual transfer with a receipt (payments/
       // manualTransferService.js); it does not depend on the gateway flag.
-      paymentMethod: Joi.string().valid('cod', 'card', 'wallet', 'bank_transfer').required(),
+      paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).required(),
       // The shopper's transfer: for 'bank_transfer', or the deposit a COD order needs.
       transfer: Joi.object({
         methodId: Joi.string().max(80).required(),
@@ -50,7 +55,28 @@ module.exports = {
       paymentProvider: Joi.string().max(50).optional(),
       // Where the gateway sends the shopper back to (online methods only).
       returnUrl: Joi.string().max(2000).optional(),
+      // The shopper agreed to keep the card for next time and one-click offers
+      // (payments/savedMethods/consentedSave.js). Online card payments only.
+      saveCard: Joi.boolean().optional(),
       discountCode: Joi.string().max(100).optional(),
+      // A gift card paying part or all of a cash-on-delivery order (giftCards, item 189).
+      giftCardCode: Joi.string().trim().max(40).optional(),
+      // Gift wrap / gift message (giftOptions, item 214).
+      gift: Joi.object({ wrap: Joi.boolean(), message: Joi.string().trim().max(500).allow(''), hidePrices: Joi.boolean() }).optional(),
+      // The delivery day and time slot (deliverySlots/, item 221).
+      deliverySlot: Joi.object({ date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(), slotId: Joi.string().max(40).required() }).optional(),
+      // A friend's invite code (customerReferrals/, item 222).
+      referralCode: Joi.string().trim().max(16).optional(),
+      // Collect at this store location instead of delivery (clickAndCollect/, item 225).
+      pickupLocationId: Joi.string().uuid().optional(),
+      // Loyalty points a signed-in shopper (X-Shopper-Token) spends on this order (loyalty/, item 203).
+      loyaltyPoints: Joi.number().integer().min(1).max(100000000).optional(),
+      // The signed-in shopper's store credit (storeCredit/, item 204): true = as much as the order takes.
+      useStoreCredit: Joi.boolean().optional(),
+      // The shopper's cookie choice, kept on the order for purchase events (marketing/cookieConsent.js).
+      trackingConsent: Joi.boolean().optional(),
+      // The shipping option the shopper picked (shipping/shippingOptions.js); absent = standard.
+      shippingOption: Joi.string().max(40).optional(),
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
       notes: Joi.string().max(2000).allow('').optional(),
@@ -95,8 +121,16 @@ module.exports = {
       website: Joi.string().max(500).allow('', null).optional(),
       // The browser's own id (kept by the storefront in localStorage): device blocklist and risk.
       deviceId: Joi.string().trim().min(8).max(128).allow('', null).optional(),
+      // The ad platforms' browser ids, for the server-side Purchase (marketing/pixelMatching.js). Loose: cleaned there.
+      adIds: Joi.object().pattern(/^[A-Za-z]{2,12}$/, Joi.string().max(500).allow('', null)).max(10).optional(),
       botToken: Joi.string().max(500).allow('', null).optional(),
       captchaToken: Joi.string().max(4000).allow('', null).optional(),
+      // The website page buttons / order forms the shopper used: their tags go on the customer,
+      // read from the published page (contacts/pageTags.js).
+      pageTags: Joi.array()
+        .items(Joi.object({ pageId: Joi.string().uuid().required(), elementId: Joi.string().trim().min(1).max(100).required() }))
+        .max(10)
+        .optional(),
       // Proof that the phone was verified (POST /checkout/otp/verify) — risk/checkoutOtp.
       otpToken: Joi.string().max(500).allow('', null).optional(),
       // Answers to the purchase-form fields with no column of their own

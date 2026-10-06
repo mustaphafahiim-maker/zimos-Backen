@@ -64,6 +64,9 @@ const checkout = {
     addressLine: Joi.string().min(1).max(500).required(),
     city: Joi.string().min(1).max(100).required(),
     country: Joi.string().uppercase().length(2).default('EG'),
+    // The bot guard's fields (legacyCheckoutGuard.js): the honeypot and the time token.
+    website: Joi.string().allow('').max(200).optional(),
+    botToken: Joi.string().allow('').max(300).optional(),
   }),
 };
 

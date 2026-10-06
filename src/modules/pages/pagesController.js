@@ -104,7 +104,14 @@ const publicGetPage = asyncHandler(async (req, res) => {
     res.removeHeader('Content-Security-Policy');
     return res.render('store-home', await quickstartService.storeHomeLocals(req.tenant.workspaceId));
   }
-  return res.json(result.data);
+  // In the shopper's language when the page is translated (translations/contentTranslations.js).
+  const data = await require('../translations/contentTranslations').localizePage(req, result.data);
+  // The page's own scripts (customCode/pageScripts.js), for the live store only.
+  if (data.page) data.page.scripts = await require('../customCode/pageScripts').publicScripts(req, 'page', data.page.id);
+  // The custom HTML blocks the page places (customCode/htmlBlocks.js), for the live store only.
+  if (data.page) data.page.htmlBlocks = await require('../customCode/htmlBlocks').publicBlocks(req, data.page.tree);
+  // Elements whose display window is closed are not sent (displayRules.js).
+  return res.json(require('./displayRules').stripClosed(data));
 });
 
 module.exports = {

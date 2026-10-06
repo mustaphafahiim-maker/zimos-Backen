@@ -27,11 +27,12 @@ module.exports = {
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `feature` | `'product' \| 'page' \| 'translate' \| 'policies'` | Which feature (see `features.js`). |
+| `feature` | `'product' \| 'page' \| 'translate' \| 'policies' \| 'page_review' \| 'ad_creatives' \| 'store_builder' \| 'wa_reply'` | Which feature (see `features.js`; the last four in `featuresP2.js`). |
 | `prompt` | string | The rendered prompt from `prompts/<file>.vN.md`, placeholders filled. Send this to the model. |
 | `promptVersion` | string | e.g. `product_content.v1`. |
 | `input` | object | The merchant's validated input (`features.js` → `input`). |
-| `context` | object | Server-side facts the prompt was built from. `page`: `{ product: { id, name, slug, description, imageUrl, features[], faqs[] }, allowedElements[] }`. Others: `{}`. |
+| `images` | string[] | Public http(s) URLs of the product photos the merchant attached (`product` only, at most 6; `[]` otherwise). Send them to a vision-capable model with the prompt; the prompt says how many there are. |
+| `context` | object | Server-side facts the prompt was built from. `page`: `{ product: { id, name, slug, description, imageUrl, features[], faqs[] }, allowedElements[] }`. `page_review`: `{ pageKind, pageName, metrics, facts, outline }` (facts measured from the tree, `pageFacts.js`). `ad_creatives`: `{ product: { name, description, price, compareAtPrice, specialOfferText, features[], images[] } }`. `store_builder`: `{ themes[], allowedElements[] }`. `wa_reply`: `{ storeName, dialect, facts, products, orders, history, lastMessage, brain }`. Others: `{}`. |
 | `workspaceId`, `jobId` | uuid | For the provider's own logging. No customer data is ever in a request. |
 
 ### Return value
@@ -55,10 +56,29 @@ merchant on the failed job, so it must not contain secrets.
 ## What the module guarantees around a provider
 
 - **Draft only.** Output is stored on the job. "Apply" creates a *draft*
-  product or an *unpublished* page; the merchant publishes.
+  product or an *unpublished* page; the merchant publishes. `store_builder`
+  applies as an unpublished page plus *hidden* collections — the theme and
+  policies it suggests are switched on by the merchant. `ad_creatives`
+  banners must sit on the product's own images (others are dropped), and
+  `store_builder`'s `home.tree` must pass `validatePageTree`. `wa_reply` only
+  fills the inbox's message box; a person sends it.
 - **Limits.** A request is refused before the provider is called when the
   store is over its plan's `ai_requests_per_month` (read from the plan's
   features; absent = no monthly limit) or over the abuse guard of 30 requests
   per hour.
 - **No fake content.** The prompts forbid invented reviews, counters, stock
   and urgency (SPEC §21); a provider must not add them.
+
+## `support_reply` — the WhatsApp customer service bot
+
+Called synchronously by `whatsapp/bot/botBrain.js` for each customer message
+the bot answers (no job row). Unlike the merchant features, the request does
+carry conversation text: the customer's new message (`input.message`), the
+last few messages in `prompt`, and in `context` the store's facts, its active
+products with price and stock, and **this customer's own** latest orders
+(number, status, total — never an address or another customer's data).
+`input.dialect` is the merchant's chosen tone.
+
+Answer `{ action: 'reply' | 'handoff', text }`. `handoff` hands the
+conversation to the team (the bot stays quiet there until someone lets it
+answer again). The sandbox answers with fixed rules (`providers/sandboxSupport.js`).
