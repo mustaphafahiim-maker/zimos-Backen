@@ -1688,3 +1688,17 @@ Migrations 490–499; no prices in code.
   - productSpecs/index.js; migration 494 (spec_keys, product_specs). Keys per store (≤ 100, ar/en name, unit, filterable, order); one text value per product and key, replaced whole.
   - Storefront specs and filters read through storefrontCache; filtered list is its own endpoint (keys AND, values OR, optional collection, hidden products left out) rather than a change to the main listing query; compare 2–4 with a differs flag per key.
   - Verified: key validation, values per product, suggestions, store specs, filter counts, AND/OR filtering, bad filter 422, compare + differs, 1 product 422, key delete cascades.
+
+## Tenth pass (2026-10-07) — gap pass after the ninth list
+
+How the list was made: candidates searched under several spellings first. Not listed because already built:
+customer CSV import (contacts/contactImport), weight-based shipping, gift card balance, one-click upsells, UTM /
+channel reports, 2FA, age notice (storeGate ageCheck), dynamic segments. Not listed because of SPEC §21: survey or
+review requests sent to many customers at once. Migrations 495–499 are the last of this pass's range.
+
+- [ ] 232. URL redirects: the merchant's old-path → new-path list (301/302), a public lookup the storefront calls on a not-found page, and a redirect added by itself when a product or collection slug changes; CSV import for a platform move.
+- [ ] 233. Store locator: the store's branches (from stock locations) with address, phone, opening hours, map coordinates and a "get directions" link, as a public list and a nearest-branch answer for given coordinates.
+- [ ] 234. Price history: every variant price change recorded, the lowest price of the last 30 days shown honestly next to a sale price, and the history in the dashboard.
+- [ ] 235. Customer privacy requests: a signed-in shopper downloads their data or asks to delete their account; the team sees the requests and completes an erase that removes personal details but keeps order and accounting records.
+- [ ] 236. Post-purchase survey: one or two questions on the thank-you page ("How did you hear about us?", a 0–10 score), answers kept on the order, and a report.
+- [ ] 237. RFM customer scores: recency, frequency and money scores 1–5 per customer from delivered orders, the usual labels (champions, loyal, at risk, lost…), counts per label, and a filter in the customer list.
