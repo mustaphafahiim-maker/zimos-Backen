@@ -882,6 +882,21 @@ Orders can be exported in a courier's own layout (SPEC §12.3: "A carrier withou
   - Through the API: an 8-column Arabic layout saved; an unknown field and a field-plus-fixed column answered 422. CSV and Excel exports with the layout came out with the courier's titles, the full address, amount to collect (250.00, 570.00) and the fixed "توصيل".
   - In the dashboard (Arabic): pasting a header row of 8 titles guessed all eight fields right (the service type as a fixed value). The saved layout was selected, and "Prepare file" built the Excel in the background with the layout copied into the job.
   - The layouts, the file and its notification were removed afterwards.
+Stores can add the Pinterest Tag (SPEC §13.1: "Pinterest — Tag | Conversions API — P2").
+
+- **Backend:** `pinterest` is a tracking-pixel platform (`marketing/trackingPixelService.js`). Its id is the tag's digits (10–16). Like every pixel, it can cover the whole store or some funnels or products.
+- **Decision: the browser tag only.** Pinterest's Conversions API is sent per ad account (an ad account id and its token, not the tag id), and the SPEC marks it P2. So `capi` is off for Pinterest and the dashboard shows no server-events switch for it.
+- **Storefront:**
+  - The tag script (`s.pinimg.com/ct/core.js`) loads with the store-wide tags and a `pintrk("page")`.
+  - Events map to Pinterest's standard ones: page view → `page`, product view → `pagevisit`, add to cart → `addtocart`, purchase → `checkout` (only when the store reports Purchase at order time, like the others), lead → `lead`. Checkout started and payment info have no Pinterest event.
+  - Each event carries value, currency, quantity, the order id, `line_items`, and the same `event_id` the other platforms use, for dedup.
+  - Like Snap, a Pinterest event reaches every loaded tag, so a funnel's or product's tag is loaded when the shopper first reaches it.
+- **Dashboard:** Pinterest is in the platform list with its ID shape and an example.
+- **Tested** on the scratch DB:
+  - Adding a tag through the API worked, and a bad id was refused. The store's public answer listed it.
+  - On the product page the tag script was requested and queued `load 2612345678901` and `page`.
+  - Add to cart queued `track addtocart {value 250, currency EGP, order_quantity 1, event_id, line_items}`.
+  - The tag was deleted afterwards.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1099,7 +1114,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
 - [x] 152. A currency switcher on attribution, reports and profit (§11.5).
 - [x] 153. Order export presets in a courier's own layout (§12.3).
-- [ ] 154. The Pinterest tag (§13.1).
+- [x] 154. The Pinterest tag (§13.1).
 - [ ] 155. Google Sheets sync for orders and lost orders: adapter + sandbox + README (§16.4).
 - [ ] 156. The dashboard home remembers its period; bulk tagging from the contacts list (§15.1, §18.4).
 
