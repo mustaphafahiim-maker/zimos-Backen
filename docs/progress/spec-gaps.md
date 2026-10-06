@@ -1385,7 +1385,12 @@ Integrations (interface + sandbox + README):
   - WooCommerce: REST v3 with a consumer key/secret. SKU `<productId>[:<variationId>]`; an unmappable line is refused (Woo orders need a product). Idempotent by meta `_zimos_order_id`. completed → shipped, cancelled/failed → cancelled, refunded → returned.
   - `storeHttp.js`: https only (plain http to localhost only outside production), timeout, no redirects, README error codes. Registered in production; the `sandbox` provider stays the test one.
   - Verified against a local mock store for both: bad token 422, import 404/201, push twice → same id, refresh → shipped.
-- [ ] 182. Sync contacts and leads to Mailchimp or Klaviyo lists.
+- [x] 182. Sync contacts and leads to Mailchimp or Klaviyo lists. (backend done, UI in frontend-handoff.md)
+  - New `emailMarketing/`: provider interface (README) + `mailchimp.js`, `klaviyo.js`, `sandbox.js` (outside production). Connections are `workspace_integrations` rows `email_marketing:<code>` with the key sealed; no migration.
+  - Only contacts with an email, marketing consent and not blocked are sent; withdrawing consent (contact.updated) unsubscribes them. Sources: leads (no order) and/or buyers; store tags + the contact's own tags.
+  - Live: consumer on lead.created / customer.created / contact.updated; "Sync now" is an io job (pages of 200, at most 20,000). Unreachable → outbox retry; refused → `lastError` on the card.
+  - Mailchimp and Klaviyo became installable app-store apps (were "coming soon"); routes work only while installed. Adding a contact by hand now records customer.created, so it syncs (and reaches customer.created webhooks) too.
+  - Verified with the sandbox (connect, lists, settings, live sync of the consented contact only, Sync now) and with stubbed fetch for the Mailchimp/Klaviyo request shapes.
 - [ ] 183. Express checkout buttons (wallets) and Stripe and PayPal adapters behind the payment interface. They stay sandbox until the owner's keys are set.
 - [ ] 184. Address autocomplete at checkout (places-provider interface + sandbox).
 

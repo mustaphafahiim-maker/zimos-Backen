@@ -1164,3 +1164,59 @@ Wording:
 | Don't change these SKUs: they link the product to your store | متغيرش الـ SKU دي: هي اللي بتربط المنتج بمتجرك |
 | Sent to your store as order #{id} | اتبعت لمتجرك كأوردر رقم {id} |
 | This product isn't in your WooCommerce store | المنتج ده مش موجود في متجر ووكومرس بتاعك |
+
+## 182. Send contacts to Mailchimp or Klaviyo — UI: pending
+
+App-store apps **Mailchimp** and **Klaviyo** (`/apps`, now "available", not "coming soon"; open path `/apps/email-marketing`).
+They must be installed (POST `/workspaces/:ws/apps/:key/install`) before connecting, or 403 `APP_NOT_INSTALLED`.
+A test provider `sandbox` ("Test email list", `isTest: true`) exists outside production and needs no install.
+All routes: `/workspaces/:ws/email-marketing/...`, permission **`apps.manage`**.
+
+Only contacts **with an email, who agreed to marketing (`marketingConsent`) and are not blocked** are ever sent. A contact who
+withdraws consent is unsubscribed there. New or changed contacts (checkout, forms, funnel opt-ins, newsletter, added by hand,
+edited) go by themselves within seconds; "Sync now" sends everyone already in the store (up to 20,000 per run).
+
+**GET `/providers`** →
+```json
+{ "providers": [ { "code": "mailchimp", "name": "Mailchimp", "isTest": false,
+  "credentialFields": [ { "key": "apiKey", "label": { "en": "API key", "ar": "مفتاح API" }, "secret": true, "required": true } ],
+  "connected": true, "accountName": "My Brand", "listId": "ab12cd", "listName": "Newsletter",
+  "tags": ["zimos"], "sources": ["leads", "buyers"], "lastSyncAt": "2026-10-06T19:55:44.023Z", "syncedCount": 120,
+  "syncing": false, "lastError": null } ] }
+```
+- **PUT `/providers/:code`** `{ "credentials": { "apiKey": "…-us21" } }` → the provider view. Key 6–200 chars. 422
+  `EMAIL_MARKETING_INVALID_CREDENTIALS` ("The service refused the API key"; Mailchimp: "A Mailchimp API key ends in its data centre,
+  like \"-us21\""). Reconnecting keeps the list and tags. The key is never returned.
+- **DELETE `/providers/:code`** → `{ "code", "connected": false }`.
+- **GET `/providers/:code/lists`** → `{ "lists": [ { "id": "ab12cd", "name": "Newsletter", "memberCount": 5 } ] }` (Klaviyo: `memberCount: null`).
+  409 `EMAIL_MARKETING_NOT_CONNECTED`.
+- **PATCH `/providers/:code/settings`** `{ "listId"?, "tags"?: [≤10 × ≤60 chars], "sources"?: ["leads"|"buyers", 1–2] }` (at least one)
+  → the provider view. A list not in the account: 404 `EMAIL_MARKETING_LIST_NOT_FOUND`. `leads` = contacts with no order yet,
+  `buyers` = contacts with an order. Mailchimp tags = these tags + the contact's own tags; Klaviyo gets them as the profile
+  property `zimos_tags`.
+- **POST `/providers/:code/sync`** → 202 `{ "queued": true }`; `syncing` turns true until done, then `lastSyncAt`, `syncedCount`.
+  409 `EMAIL_MARKETING_NO_LIST` before a list is picked.
+- `lastError` (string|null): the last refusal (key revoked, list deleted…), cleared on the next success.
+
+### Screen — Apps → Email marketing (`/apps/email-marketing`)
+- One card per provider: logo, name, "Test" badge for `isTest`, status (Not connected / Connected as {accountName}).
+- Not connected: the key field from `credentialFields` (password input) + "Connect"; for Mailchimp a help line on where to find the key.
+- Connected: list picker (GET lists), tags input (chips), checkboxes "Leads (no order yet)" / "Buyers", "Save";
+  "Sync now" with "Last synced {time} — {n} contacts" or a spinner while `syncing`; red banner with `lastError`; "Disconnect".
+- Note under the card: "Only contacts who agreed to marketing are sent."
+
+Wording:
+| en | ar |
+|---|---|
+| Email marketing | التسويق بالإيميل |
+| Send contacts who agreed to marketing to your list | ابعت العملاء اللي وافقوا على التسويق لقائمتك |
+| API key | مفتاح API |
+| Connected as {name} | متوصل باسم {name} |
+| List | القائمة |
+| Tags added to each contact | تاجات تتحط على كل عميل |
+| Leads (no order yet) | عملاء محتملين (لسه ماطلبوش) |
+| Buyers | اللي اشتروا |
+| Sync now | زامن دلوقتي |
+| Last synced {time} — {n} contacts | آخر مزامنة {time} — {n} عميل |
+| Only contacts who agreed to marketing are sent. | بنبعت بس العملاء اللي وافقوا على التسويق. |
+| Pick a list first | اختار قائمة الأول |

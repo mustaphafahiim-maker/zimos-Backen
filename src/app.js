@@ -254,6 +254,8 @@ v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').s
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
 v1.use('/workspaces/:workspaceId/integrations/google-sheets', appGate.requireAppForChanges('google_sheets'), require('./modules/sheets/sheetsRoutes').router);
 v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
+// Contacts to Mailchimp / Klaviyo lists (item 182).
+v1.use('/workspaces/:workspaceId/email-marketing', require('./modules/emailMarketing/emailMarketing').router);
 // Lane 7: the simple invite (sections → permissions) and support access.
 v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
 v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);

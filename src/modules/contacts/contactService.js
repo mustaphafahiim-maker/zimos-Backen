@@ -240,6 +240,8 @@ async function createContact(workspaceId, data, req) {
     tags: cleanTags(data.tags),
     source: 'manual',
   });
+  // Lists that follow new contacts (emailMarketing/, webhooks) hear of it.
+  await require('../../core/outbox/outbox').record(null, 'customer.created', { workspaceId, customerId: customer.id });
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,

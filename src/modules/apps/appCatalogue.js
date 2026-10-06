@@ -46,7 +46,9 @@ const APPS = [
   app('google_merchant', 'seo', 'integration', { en: 'Google Merchant', ar: 'جوجل ميرشانت' }, { en: 'A product feed for Google Shopping, with a checklist of what Merchant Center needs.', ar: 'ملف منتجات لجوجل شوبنج، مع قائمة بما يحتاجه Merchant Center.' }, { openPath: '/offers/feed', standard: true }),
   // A Clarity project id among the tracking pixels (marketing/trackingPixelService.js) loads its script in the store.
   app('clarity', 'tracking', 'integration', { en: 'Microsoft Clarity', ar: 'مايكروسوفت كلاريتي' }, { en: 'Session recordings and heatmaps: add your Clarity project id under Tracking tools.', ar: 'تسجيل الجلسات وخرائط الحرارة: أضف معرّف مشروع كلاريتي في أدوات التتبع.' }, { openPath: '/marketing', standard: true }),
-  app('mailchimp', 'marketing', 'integration', { en: 'Mailchimp', ar: 'ميل شيمب' }, { en: 'Sync contacts and segments.', ar: 'مزامنة جهات الاتصال والشرائح.' }, soon),
+  // Contacts with marketing consent to a list (emailMarketing/, item 182).
+  app('mailchimp', 'marketing', 'integration', { en: 'Mailchimp', ar: 'ميل شيمب' }, { en: 'Send contacts who agreed to marketing to a Mailchimp audience, with tags.', ar: 'ابعت العملاء اللي وافقوا على التسويق لقائمة في ميل شيمب، بالتاجات.' }, { openPath: '/apps/email-marketing' }),
+  app('klaviyo', 'marketing', 'integration', { en: 'Klaviyo', ar: 'كلافيو' }, { en: 'Send contacts who agreed to marketing to a Klaviyo list.', ar: 'ابعت العملاء اللي وافقوا على التسويق لقائمة في كلافيو.' }, { openPath: '/apps/email-marketing' }),
 ];
 
 const BY_KEY = new Map(APPS.map((entry) => [entry.key, entry]));
