@@ -1513,3 +1513,22 @@ interface + `sandbox` adapter + README; migrations stay in 450–499; no prices 
   - Numbers come from analytics/overviewService.getOverview, so they match the dashboard home. Periods are store-local: daily = yesterday, weekly = the 7 days before the chosen weekday; both are compared with the period before.
   - A schedule runs every 15 minutes and sends once the store-local hour has passed. A report missed during downtime still goes out later that day; earlier days are not backfilled.
   - Recipients: active members whose role has analytics.view (or *), checked again at send time. Language = the member's locale, else the store's. Settings permission: workspace.manage; preview and send-to-me: analytics.view.
+
+## Sixth pass (2026-10-06) — gap pass after the fifth list
+
+How the list was made: the code was searched for features merchants expect from Lightfunnels and the stores they
+compare it with, and that are not in the code: loyalty, store credit, price lists, stock locations, purchasing, gifts
+with purchase, notes on customers, size charts and search analytics. Every item was checked against SPEC §21:
+**no campaigns or bulk sends of any kind** (item 200 was withdrawn for this), no fake urgency or social proof, no call
+centre, no unofficial WhatsApp. Outside services are an interface + `sandbox` adapter + README; migrations stay in
+474–499; no prices in code.
+
+- [ ] 203. Loyalty points: the merchant sets the earn rate (points per currency unit on delivered orders) and the value of a point; points are redeemed at checkout as a discount, can expire, are shown in the shopper account, and are taken back when an order is returned or refunded.
+- [ ] 204. Store credit: staff give a customer credit (or refund an order to store credit), the shopper spends it at checkout (COD and online, like gift cards), and the balance and its history are shown to staff and in the shopper account.
+- [ ] 205. Wholesale price lists: price lists by customer tag (a percentage off, or fixed variant prices, with minimum quantities), applied to signed-in shoppers in the cart and at checkout, and shown on product pages.
+- [ ] 206. Multiple stock locations: stock per location (warehouse, shop), orders assigned to a location that has the stock, transfers between locations, and the location on the packing slip (the plan feature `multi_warehouse`).
+- [ ] 207. Suppliers, purchase orders and stock counts: a supplier list, purchase orders with lines and unit costs, receiving into stock (updating cost), and stock counts that adjust stock with a reason.
+- [ ] 208. Free gift with purchase: rules (minimum subtotal or a product in the cart) that add a chosen gift line at no charge in the cart and at checkout, limited by stock, with the gift removed when the rule stops holding.
+- [ ] 209. Notes and follow-ups on customers: staff notes on a contact (with author and time), follow-up reminders assigned to a team member, and a due-reminders list and notification.
+- [ ] 210. Size charts: reusable size tables (rows/columns, cm/inch), attached to products or collections, shown on the product page.
+- [ ] 211. Storefront search analytics: what shoppers search, searches with no results, the results clicked, and merchant-set synonyms used by the store search.
