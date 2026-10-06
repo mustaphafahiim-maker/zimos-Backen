@@ -862,6 +862,26 @@ Analytics have a currency switcher (SPEC §11.5: "Analytics include a currency s
 - **Decision: the choice is the teammate's, per store, in this browser** (localStorage), and all report pages share it. Choosing the store's own currency again goes back to the plain amounts.
 - The live view (today's orders as they come in) and the product costs page stay in their own currencies.
 - **Tested** on the scratch DB, in Arabic: the switcher offered EGP (store), AED, EUR, MAD, SAR and USD. On the summary, 118,544.16 EGP of sales became 2,469.67 US$ (rate 0.02083333) and the note showed. The reports, attribution and profit pages opened already in USD. Switching back showed EGP again.
+Orders can be exported in a courier's own layout (SPEC §12.3: "A carrier without an API remains manual: the merchant exports an Excel file in the format the carrier requires").
+
+- **Courier layouts** (`orders/exportPresets.js`, kept in `settings.order_export_presets`, up to 20 per store):
+  - A layout is a name, rows per order or per product, CSV or Excel, and the courier's column titles in its order.
+  - Each column is filled from one of the export's columns or with a fixed value the courier asks for ("Service type: Delivery").
+  - Endpoints: `GET /orders/export/presets` (orders.view); `PUT /orders/export/presets` to create or replace, and `DELETE /orders/export/presets/:id` (both orders.manage, audited).
+  - A column must name a known export column or a fixed value, not both.
+- **Exporting with one:** `preset=<id>` on GET /orders/export and POST /exports/orders writes the file with the layout's titles, order and rows. Phone masking, dates in the store's timezone and the spreadsheet formula guard are as before.
+  - **Decision:** a background export copies the layout when it is asked for, so editing the layout later doesn't change a file already being built.
+- **Two new export columns** couriers ask for:
+  - "Amount to collect": the unpaid part of a cash-on-delivery order, 0 otherwise; a number in Excel.
+  - "Full address": street, city and governorate in one cell.
+- **Decision: no courier's layout is shipped ready-made.** We don't have their official sheets, and guessing them would put wrong columns on real waybills. The merchant builds each one from the courier's sample file:
+  - The export dialog takes the courier's header row pasted from Excel (tabs, or a CSV line) and turns every title into a column.
+  - It guesses each field from the title (name, phone, second phone, governorate, city, address, amount to collect, quantity, description, notes, reference) for the merchant to check.
+- **Dashboard:** the export dialog has a "Layout" choice ("Your columns", or a saved courier layout) with New / Edit. The editor has the name, the paste box, the columns (title, field or fixed value, move, remove), rows and file. With a layout chosen, the dialog shows its columns instead of the column checkboxes.
+- **Tested** on the scratch DB:
+  - Through the API: an 8-column Arabic layout saved; an unknown field and a field-plus-fixed column answered 422. CSV and Excel exports with the layout came out with the courier's titles, the full address, amount to collect (250.00, 570.00) and the fixed "توصيل".
+  - In the dashboard (Arabic): pasting a header row of 8 titles guessed all eight fields right (the service type as a fixed value). The saved layout was selected, and "Prepare file" built the Excel in the background with the layout copied into the job.
+  - The layouts, the file and its notification were removed afterwards.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1078,7 +1098,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 150. Formatted product descriptions, sanitized (§7.1).
 - [x] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
 - [x] 152. A currency switcher on attribution, reports and profit (§11.5).
-- [ ] 153. Order export presets in a courier's own layout (§12.3).
+- [x] 153. Order export presets in a courier's own layout (§12.3).
 - [ ] 154. The Pinterest tag (§13.1).
 - [ ] 155. Google Sheets sync for orders and lost orders: adapter + sandbox + README (§16.4).
 - [ ] 156. The dashboard home remembers its period; bulk tagging from the contacts list (§15.1, §18.4).
