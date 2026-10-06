@@ -1656,3 +1656,47 @@ Wording:
 | From our blog | من مدونتنا |
 | Read more | اقرأ أكتر |
 | Categories | التصنيفات |
+
+## 191. Element display rules: between dates, by device, country or UTM source — UI: pending
+
+Stored on any builder element (store pages and funnel steps), beside its style — no new endpoint for saving, it goes with
+the page/step tree as today:
+```json
+"settings": { "visibility": {
+  "from": "2026-11-20T00:00:00Z", "until": "2026-11-30T23:59:59Z",
+  "devices": ["mobile", "tablet"],
+  "countries": { "mode": "include", "list": ["EG", "SA"] },
+  "utm": { "source": ["facebook", "tiktok"], "campaign": ["black-friday"] } } }
+```
+Validation (422 on save, field `…settings.visibility.*`): only these keys; dates valid and `until` after `from`; devices from
+mobile/tablet/desktop; countries `{ mode: include|exclude, list: ["EG", …] }` (upper-case 2 letters, ≤250); utm keys
+source/medium/campaign, each a list of ≤20 values. All rules present must pass (AND); within a list, any value matches.
+
+How it applies:
+- **Dates — enforced by the backend**: public store pages (`/store/:ws/pages…`) and funnel steps (session step, generic
+  pages) are sent **without** elements whose window is closed (before `from`, or after `until`). Pages are cached ~60 s, so
+  a window opens/closes within a minute.
+- **Device, country, UTM — applied by the storefront** (the page is the same for everyone in the cache):
+  **GET `/store/:ws/visitor-context`** (public, not cached) → `{ "country": "EG" | null, "device": "mobile" | "tablet" | "desktop", "now": "…" }`.
+  Device from the browser's own width is fine too. UTM from the landing URL's `utm_source/medium/campaign` (keep the first
+  ones of the visit in sessionStorage, as the attribution code does). Reference logic (backend `pages/displayRules.evaluate`):
+  devices must include the visitor's; `include` needs a known country in the list; `exclude` hides listed countries (an
+  unknown country passes); each utm key must equal one value, case-insensitive. Render nothing (no gap) for a hidden element.
+  In the builder preview, show every element with a small "Rules" badge.
+
+### Builder UI — element panel → "Display" tab
+- "Show between" two date-time pickers (store time zone), "Devices" three toggles, "Countries" include/exclude + multi-select,
+  "Only for visitors from" UTM source / medium / campaign tag inputs, "Clear rules".
+
+Wording:
+| en | ar |
+|---|---|
+| Display rules | شروط الظهور |
+| Show between | يظهر في الفترة من |
+| and | لحد |
+| Devices | الأجهزة |
+| Mobile / Tablet / Desktop | موبايل / تابلت / كمبيوتر |
+| Only in these countries / Everywhere except | في البلاد دي بس / في كل مكان ماعدا |
+| Only for visitors from (UTM source) | للزوار اللي جايين من (UTM source) |
+| Rules | شروط |
+| Clear rules | امسح الشروط |

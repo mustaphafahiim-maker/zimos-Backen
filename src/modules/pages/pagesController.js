@@ -110,7 +110,8 @@ const publicGetPage = asyncHandler(async (req, res) => {
   if (data.page) data.page.scripts = await require('../customCode/pageScripts').publicScripts(req, 'page', data.page.id);
   // The custom HTML blocks the page places (customCode/htmlBlocks.js), for the live store only.
   if (data.page) data.page.htmlBlocks = await require('../customCode/htmlBlocks').publicBlocks(req, data.page.tree);
-  return res.json(data);
+  // Elements whose display window is closed are not sent (displayRules.js).
+  return res.json(require('./displayRules').stripClosed(data));
 });
 
 module.exports = {

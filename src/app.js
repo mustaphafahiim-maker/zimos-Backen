@@ -339,6 +339,8 @@ v1.use('/store/:workspaceId/returns', require('./modules/returns/shopperReturns'
 v1.use('/store/:workspaceId/gift-cards', require('./modules/giftCards').store);
 // The store's blog (item 190).
 v1.use('/store/:workspaceId/blog', require('./modules/blog').store);
+// The visitor's country and device, for element display rules (item 191).
+v1.get('/store/:workspaceId/visitor-context', require('./core/middleware/publicWorkspace').resolvePublicWorkspace, (req, res, next) => require('./modules/pages/displayRules').visitorContext(req).then((ctx) => res.set('Cache-Control', 'private, no-store').json(ctx), next));
 v1.use('/store/:workspaceId/fonts', require('./modules/fonts/storeFonts').store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);

@@ -1437,7 +1437,11 @@ What the platform still lacks (the owner's "كل حاجه ناقصه"):
   - Scheduling without a job: published + future publishedAt is hidden until then. Slugs keep Arabic letters and get -2, -3 when taken.
   - Public index/post/categories/latest with 60 s cache; posts added to the store sitemap (noindex respected). Staff permission website.edit.
   - Verified: Arabic slugs, bad image URL and extra fields refused, publish/draft/scheduled states, slug conflict 409, public list/category/tag, product block filled, draft/scheduled 404, latest, sitemap, deleting a category keeps its posts.
-- [ ] 191. Element display rules: show between dates, and by device, country or UTM source.
+- [x] 191. Element display rules: show between dates, and by device, country or UTM source. (backend done, UI in frontend-handoff.md)
+  - `pages/displayRules.js`: `element.settings.visibility` validated in the page tree (store pages and funnel steps share it). No migration.
+  - Dates are enforced server-side: public page and funnel-step payloads drop elements outside their window, so hidden offers/codes never reach the browser early.
+  - Device/country/UTM are per visitor, so the cached page carries the rules and the storefront applies them, with `GET /store/:ws/visitor-context` (country from the IP lookup used by geo redirects, device from the user agent) and `evaluate` as the reference. Same page for every visitor of a kind — not a cloak (SPEC §21).
+  - Verified: every invalid rule shape reported, a valid rule set accepted, past/future elements stripped and open/plain kept, evaluate cases (device, include/exclude with unknown country, UTM case-insensitive), visitor context.
 - [ ] 192. A template marketplace: merchants submit funnel templates (built on the share code), the platform reviews them, and others use them (no prices in code).
 
 Not built, and why:

@@ -139,7 +139,8 @@ const localizeStep = async (req, funnelId, payload) => {
   if (payload && payload.step) payload.step.scripts = await require('../customCode/pageScripts').publicScripts(req, 'step', payload.step.id);
   // …and the custom HTML blocks it places (customCode/htmlBlocks.js).
   if (payload && payload.step) payload.step.htmlBlocks = await require('../customCode/htmlBlocks').publicBlocks(req, payload.step.tree);
-  return payload;
+  // Elements whose display window is closed are not sent (pages/displayRules.js).
+  return require('../pages/displayRules').stripClosed(payload);
 };
 
 const startSession = asyncHandler(async (req, res) => {

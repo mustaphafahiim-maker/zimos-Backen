@@ -316,6 +316,8 @@ function validateElement(el, field, errors, counter) {
     validateElementStyle(el.settings, `${field}.settings`, errors);
     // Its entrance animation (elementAnimation.js).
     require('./elementAnimation').validateElementAnimation(el.settings, `${field}.settings`, errors);
+    // When it shows: dates, devices, countries, UTM (displayRules.js).
+    require('./displayRules').validateDisplayRules(el.settings, `${field}.settings`, errors);
   }
 }
 
