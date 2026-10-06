@@ -314,6 +314,8 @@ function validateElement(el, field, errors, counter) {
   } else if (isPlainObject(el.settings)) {
     // The element's own look, per device, and its named style (elementStyle.js).
     validateElementStyle(el.settings, `${field}.settings`, errors);
+    // Its entrance animation (elementAnimation.js).
+    require('./elementAnimation').validateElementAnimation(el.settings, `${field}.settings`, errors);
   }
 }
 
