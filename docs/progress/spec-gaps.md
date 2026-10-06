@@ -1330,7 +1330,10 @@ Tracking and analytics:
   - Built on demand (`marketing/gtmContainer.js`), not stored: GTM's export format v2 with dataLayer variables, one Custom Event trigger per storefront event, GA4 tags and Google Ads conversions from the store's own Google pixels (or ids passed in the query).
   - Meta, TikTok and Snapchat tags are left out on purpose: the store already loads them, and copies in GTM would count every event twice.
   - The storefront is asked to push `event_id` and an `ecommerce: null` reset, and `generate_lead` for stores reporting leads.
-- [ ] 171. Live View on a world map: visitors, checkouts and orders from the last 10 minutes.
+- [x] 171. Live View on a world map: visitors, checkouts and orders from the last 10 minutes. (backend done, UI in frontend-handoff.md)
+  - One read (`analytics/liveMap.js`), computed live from analytics sessions/events, open checkouts and sale orders; window 1–60 minutes, funnel filter as on the realtime page.
+  - Aggregated by country and place, not per person: no coordinates or ids leave the server. Egyptian governorates and Saudi regions carry the platform place code, so Arabic and English names of one place merge and the dashboard can place a dot without a geocoder.
+  - The dashboard draws its own map from ISO codes; no map-tile provider is added.
 - [ ] 172. Dashboard home: filter by product and by store, beside the funnel filter.
 
 Email:

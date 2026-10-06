@@ -725,3 +725,40 @@ Wording:
 | In Google Tag Manager: Admin → Import container → choose the file → Merge. | في Google Tag Manager: الإدارة ← استيراد كونتينر ← اختار الملف ← دمج. |
 | Events sent to the dataLayer | الأحداث اللي بتتبعت للـ dataLayer |
 | Meta, TikTok and Snapchat stay in Zimos so nothing is counted twice. | فيسبوك وتيك توك وسناب بيفضلوا في زيموس علشان مفيش حاجة تتحسب مرتين. |
+
+---
+
+## 171. Live View on a world map — UI: pending
+
+**GET `/workspaces/:ws/analytics/web/live-map?minutes=10[&funnelId=…]`** — permission `analytics.view`.
+`minutes` 1–60 (default 10). Poll every 10–15 s (or on each realtime-stream tick).
+```json
+{ "minutes": 10, "since": "2026-10-06T18:55:09.677Z",
+  "totals": { "visitors": 3, "checkouts": 1, "orders": 1 },
+  "countries": [ { "country": "EG", "visitors": 2, "checkouts": 1, "orders": 1 },
+                 { "country": "SA", "visitors": 1, "checkouts": 0, "orders": 0 } ],
+  "places": [ { "country": "EG", "region": "Cairo", "city": null, "code": "cairo", "visitors": 1, "checkouts": 0, "orders": 1 },
+              { "country": "EG", "region": "الجيزة", "city": null, "code": "giza", "visitors": 0, "checkouts": 1, "orders": 0 },
+              { "country": "SA", "region": "Riyadh Region", "city": null, "code": "sa-riyadh", "visitors": 1, "checkouts": 0, "orders": 0 } ] }
+```
+- `country`: ISO-3166 alpha-2 (`ZZ` = unknown). Visitors are located by their session's IP lookup; checkouts by IP
+  country and the governorate typed; orders by the shipping address.
+- `places[].code` is the platform place code (`geo_regions`) for Egypt's governorates and Saudi regions — the same codes
+  as `lib/places.ts`; null elsewhere (then `region`/`city` are the names as received). Sorted by activity, max 300.
+
+### Dashboard — Analytics → Live (beside the realtime page)
+- A world map (SVG, coloured by `countries[]` activity; no external tiles needed) with a zoomable Egypt/Saudi inset
+  where `places[]` with a `code` get dots sized by activity (orders > checkouts > visitors; three colours).
+- Top strip: "Visitors now", "Checking out", "Orders" from `totals`, plus the window selector (5 / 10 / 30 / 60 min)
+  and the funnel filter.
+- A side list of the top places. States: loading, empty ("Nobody on the store in the last {n} minutes"), error,
+  no permission.
+
+Wording:
+| en | ar |
+|---|---|
+| Live view | المشاهدة المباشرة |
+| Visitors now / Checking out / Orders | زوار دلوقتي / بيكملوا الطلب / طلبات |
+| Last {n} minutes | آخر {n} دقيقة |
+| Nobody on the store in the last {n} minutes | مفيش حد في المتجر آخر {n} دقيقة |
+| Unknown location | مكان غير معروف |
