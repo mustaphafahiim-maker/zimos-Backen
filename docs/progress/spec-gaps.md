@@ -950,6 +950,33 @@ The dashboard home opens with the period the merchant last chose, and contacts c
   - "Select all" ticked 50, and removing the two tags left "newsletter" in place.
   - Contact tags were restored from a snapshot afterwards.
   - The test server ran with a higher request limit. The home page makes enough calls that reloading it in a loop hits the normal 100 per minute; the normal limit is back.
+Every builder element now has the full Style tab (SPEC §9.3, Lightfunnels' element styles).
+
+- **New options:**
+  - **Background:** a gradient (start and end colour, angle) laid over a background image (fit: fill, whole or original size; position).
+  - **Sizes:** height, minimum and maximum height, minimum width.
+  - **Custom shadow:** inner or outer, with colour, across, down, blur and spread. It replaces the small/medium/large preset.
+  - **Other:** overflow (show, cut off, scroll) and the pointer shape.
+  - **Visibility:** "hide when the phone is upright / sideways", beside the existing per-device hide.
+- **Where it lives:**
+  - Backend rules: `pages/styleExtras.js`, merged into `elementStyle.js`.
+  - Storefront CSS: `page-renderer/elementStyleExtras.ts`.
+  - Dashboard fields: `editor/StyleExtrasFields.tsx`, inside the Style and Layout tabs.
+  - Each value is stored per device like the rest, so a tablet or mobile override works the same way.
+- **Decision: the image address is the one free-form style value.**
+  - Both sides hold it to http(s) or a site path, using characters that cannot leave `url("…")`: no quotes, brackets, spaces, backslashes or semicolons.
+  - Every other value is a clamped number, a keyword or a hex colour, as before.
+- **Decision: upright vs sideways.**
+  - Upright means a narrow portrait screen (≤ 639 px wide).
+  - Sideways means a short landscape screen (≤ 500 px high).
+  - A tablet is neither, so these two options apply to phones only.
+- **Tested** on the scratch DB:
+  - A page with a styled element was saved through the API. A script address and an out-of-range blur were refused.
+  - On the published page, the computed styles matched: the gradient over the image, contain/top, 240 px height, min width, max height, the inset custom shadow, overflow hidden and the hand pointer.
+  - The upright-phone element was hidden at 390×844, and the sideways one at 844×390.
+  - In the editor, in Arabic and English, every value read back. Changing the pointer and saving stored it.
+  - The test page was deleted and the site rolled back to its previous published version.
+- **Scratch only:** the test server runs with a higher request limit (`RATE_LIMIT_MAX`). The editor makes enough calls that browser runs hit the normal 100 per minute.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1191,7 +1218,7 @@ Rules that still hold:
 Migrations for this pass: **450–499**.
 
 Design (page builder):
-- [ ] 157. The full element Style tab (SPEC §9.3): background gradient and image, height and min/max sizes, custom shadow (inner/outer, x, y, blur, spread, colour), overflow, cursor, and visibility on mobile portrait/landscape.
+- [x] 157. The full element Style tab (SPEC §9.3): background gradient and image, height and min/max sizes, custom shadow (inner/outer, x, y, blur, spread, colour), overflow, cursor, and visibility on mobile portrait/landscape.
 - [ ] 158. Entrance animations per element (fade, slide, zoom; delay, duration; respects reduced motion).
 - [ ] 159. Fonts: Google Fonts for the store and per element, plus the merchant's uploaded fonts (woff2).
 - [ ] 160. Editable storefront texts per language: button labels, form errors, cart/checkout/bundle wording.
