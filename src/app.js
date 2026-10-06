@@ -267,6 +267,7 @@ v1.use('/workspaces/:workspaceId/cookie-consent', require('./modules/marketing/c
 v1.use('/workspaces/:workspaceId/store-gate', require('./modules/storeGate').staff);
 // Purchase limits per product (item 198).
 v1.use('/workspaces/:workspaceId/purchase-limits', require('./modules/catalog/purchaseLimits').router);
+v1.use('/workspaces/:workspaceId/delivery-estimates', require('./modules/shipping/deliveryEstimates').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
@@ -352,6 +353,8 @@ v1.use('/store/:workspaceId/blog', require('./modules/blog').store);
 v1.use('/store/:workspaceId/stock-alerts', require('./modules/stockAlerts').store);
 // Store gates: password, coming soon, age check (item 197).
 v1.use('/store/:workspaceId/gate', require('./modules/storeGate').store);
+// Estimated delivery dates (item 199).
+v1.use('/store/:workspaceId/delivery-estimate', require('./modules/shipping/deliveryEstimates').store);
 // The visitor's country and device, for element display rules (item 191).
 v1.get('/store/:workspaceId/visitor-context', require('./core/middleware/publicWorkspace').resolvePublicWorkspace, (req, res, next) => require('./modules/pages/displayRules').visitorContext(req).then((ctx) => res.set('Cache-Control', 'private, no-store').json(ctx), next));
 v1.use('/store/:workspaceId/fonts', require('./modules/fonts/storeFonts').store);

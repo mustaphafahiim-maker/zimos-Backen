@@ -170,6 +170,7 @@ const checkout = asyncHandler(async (req, res) => {
     await saveCheckoutAnswers(order, workspace, formFields);
     await require('./checkoutExtras').apply(order, extras);
     await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
+  await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
     await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
@@ -197,6 +198,7 @@ const checkout = asyncHandler(async (req, res) => {
   await saveCheckoutAnswers(order, workspace, formFields);
   await require('./checkoutExtras').apply(order, extras);
   await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
+  await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
   await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 

@@ -320,6 +320,8 @@ async function presentTrackedOrder(workspaceId, order) {
       quantity: item.quantity,
       lineTotalAmount: String(item.lineTotalAmount),
     })),
+    // The delivery window promised at checkout (shipping/deliveryEstimates.js, item 199).
+    deliveryEstimate: (order.shippingSnapshot && order.shippingSnapshot.deliveryEstimate) || null,
     subtotalAmount: String(order.subtotalAmount),
     discountAmount: String(order.discountAmount),
     shippingAmount: String(order.shippingAmount),

@@ -1928,3 +1928,34 @@ Wording:
 | Maximum per customer | أكبر كمية للعميل الواحد |
 | Max {n} per order | بحد أقصى {n} في الطلب |
 | You can buy {n} more | تقدر تشتري {n} كمان |
+
+## 199. Estimated delivery dates — UI: pending
+
+### Dashboard — Shipping → Delivery times (permission `shipping.manage`)
+- **GET `/workspaces/:ws/delivery-estimates`** →
+```json
+{ "enabled": true, "default": { "minDays": 2, "maxDays": 4 }, "regions": { "cairo": { "minDays": 1, "maxDays": 2 } },
+  "places": { "<store place id>": { "minDays": 1, "maxDays": 1 } }, "cutoffHour": 14, "skipDays": [5] }
+```
+- **PUT** same shape (`enabled` required; days 0–90 / 0–120, min ≤ max; `regions` keyed by the platform governorate codes of
+  `/geo` lists, ≤100; `places` keyed by store place ids (item 163), ≤2000; `cutoffHour` 0–23 or null; `skipDays` 0=Sunday…6).
+- Screen: switch; default min–max days; a table of governorates (and, when the store has its own places, cities/areas)
+  with min–max; "Orders after {hour} ship the next day"; "Days we don't deliver" (weekday chips).
+
+### Storefront
+- **GET `/store/:ws/delivery-estimate?province=&city=&area=&placeId=&country=`** (public, cached 5 min) →
+  `{ "estimate": { "minDays": 1, "maxDays": 2, "from": "2026-10-08", "to": "2026-10-10", "source": "place:area" | "region" | "default" } }`
+  or `{ "estimate": null }` (off). Working days in the store's time zone, after the cutoff, skipping `skipDays`.
+- Product page: "Get it {from} – {to}" (with the visitor's saved/selected governorate, else the default). Cart and checkout:
+  the shipping quote (`POST /store/:ws/shipping-quote`) now returns `quote.deliveryEstimate` for the address.
+- The window is kept on the order (`shippingSnapshot.deliveryEstimate`) and shown on tracking (`result.deliveryEstimate`)
+  and the thank-you page: "Expected {from} – {to}".
+
+Wording:
+| en | ar |
+|---|---|
+| Get it {from} – {to} | هيوصلك من {from} لـ {to} |
+| Expected delivery | التوصيل المتوقع |
+| Delivery times | مواعيد التوصيل |
+| Orders after {hour} ship the next day | الطلبات بعد الساعة {hour} بتتشحن تاني يوم |
+| Days we don't deliver | أيام مفيش فيها توصيل |

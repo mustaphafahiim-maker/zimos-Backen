@@ -70,6 +70,8 @@ async function quote(workspaceId, { country, region, items, funnelId = null, add
     freeShipping: shipping.freeShipping,
     destinationRequired: !DESTINATION_INDEPENDENT.includes(shipping.rule),
     configured: await pricesShipping(workspaceId, shipping),
+    // The delivery window for this address, or null (deliveryEstimates.js, item 199).
+    deliveryEstimate: await require('./deliveryEstimates').estimate(await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings', 'timezone'] }), address || (country ? { country, province: region || null } : null)),
   };
 }
 

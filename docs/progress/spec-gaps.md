@@ -1493,7 +1493,10 @@ interface + `sandbox` adapter + README; migrations stay in 450–499; no prices 
   - Checkout (store and funnel, before stock is held): min, max, and maxPerCustomer (earlier non-cancelled, non-test orders by the same phone). Cart add/update: max, so shoppers hear early. Staff orders are not limited. Product payload carries the limits.
   - Errors keep the existing 422 shape with per-product `details` (productId and the limit hit, `left` for per-customer).
   - Verified: min>max refused, below min, above max, within, per-customer remainder, another customer unaffected, cart max, public limits. Orders, stock and test cart restored.
-- [ ] 199. Estimated delivery dates: min/max days per governorate/place and shipping option, shown on the product page, cart and checkout, and stored on the order.
+- [x] 199. Estimated delivery dates: min/max days per governorate/place and shipping option, shown on the product page, cart and checkout, and stored on the order. (backend done, UI in frontend-handoff.md)
+  - `shipping/deliveryEstimates.js`: `settings.delivery_estimates` (shipping.manage) — default, per governorate code, per store place (area → city → region), cutoff hour, skipped weekdays; working days in the store's time zone. No migration.
+  - Public estimate endpoint, `deliveryEstimate` on the shipping quote, kept on the order's shipping snapshot at checkout and shown on tracking. Per shipping option is left out (options carry no days yet); noted for later.
+  - Verified: min>max refused, Cairo region (ar/en) vs default, after-cutoff start with Friday skipped (Thu 8 → Sat 10), quote, order snapshot, off. Order and settings removed.
 - [ ] 200. Email campaigns: a broadcast to a contact segment (consented contacts only), with the block designer, a test send, scheduling, an unsubscribe link and sent/opened counts.
 - [ ] 201. Gift cards with online payments: the gateway attempt charges the total minus the card (follow-up of 189).
 - [ ] 202. Scheduled reports: a daily or weekly summary email (sales, orders, confirmation and delivery rates, top products) to chosen team members.
