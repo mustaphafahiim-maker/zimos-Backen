@@ -114,6 +114,7 @@ async function create(workspaceId, body, req) {
     const scope = await cleanScope(workspaceId, body.scope, transaction);
     if (body.capiEnabled && capable && !body.capiToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
     assertAdAccount(body.platform, body.capiEnabled, body.config);
+    assertAdsLabels(body.platform, body.pixelId, body.config);
     const pixel = await db.TrackingPixel.create(
       {
         workspaceId,
@@ -169,6 +170,7 @@ async function update(workspaceId, pixelId, body, req) {
     const wantsCapi = body.capiEnabled !== undefined ? body.capiEnabled : pixel.capiEnabled;
     if (body.capiEnabled && capable && !hasToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
     assertAdAccount(pixel.platform, wantsCapi, patch.config !== undefined ? patch.config : pixel.config);
+    assertAdsLabels(pixel.platform, patch.pixelId || pixel.pixelId, patch.config !== undefined ? patch.config : pixel.config);
     patch.capiEnabled = Boolean(wantsCapi && capable && hasToken);
 
     await pixel.update(patch, { transaction });
@@ -221,8 +223,34 @@ async function publicPixels(workspaceId) {
     platform: p.platform,
     pixelId: p.pixelId,
     scope: { type: p.scopeType, ids: p.scopeIds || [] },
-    ...(p.platform === 'google' && p.config && p.config.adsConversionLabel ? { adsConversionLabel: p.config.adsConversionLabel } : {}),
+    ...(p.platform === 'google' ? adsConversion(p) : {}),
   }));
+}
+
+/**
+ * Google Ads conversions (item 169): the labels of an AW- tag and the ready
+ * `send_to` values the storefront's gtag('event', 'conversion', { send_to }) takes —
+ * `purchase` for orders, `lead` when the store or funnel reports leads (conversionEvent.js).
+ */
+function adsConversion(p) {
+  const c = p.config || {};
+  if (!/^AW-/i.test(p.pixelId) || !(c.adsConversionLabel || c.adsLeadLabel)) return {};
+  return {
+    ...(c.adsConversionLabel ? { adsConversionLabel: c.adsConversionLabel } : {}),
+    ...(c.adsLeadLabel ? { adsLeadLabel: c.adsLeadLabel } : {}),
+    sendTo: {
+      ...(c.adsConversionLabel ? { purchase: `${p.pixelId}/${c.adsConversionLabel}` } : {}),
+      ...(c.adsLeadLabel ? { lead: `${p.pixelId}/${c.adsLeadLabel}` } : {}),
+    },
+  };
+}
+
+/** A conversion label only means something on a Google Ads (AW-) tag. */
+function assertAdsLabels(platform, pixelId, config) {
+  if (platform !== 'google' || /^AW-/i.test(pixelId || '')) return;
+  for (const key of ['adsConversionLabel', 'adsLeadLabel']) {
+    if (config && config[key]) throw fieldError(`config.${key}`, 'A conversion label needs a Google Ads id (AW-…)');
+  }
 }
 
 /** True when a pixel's scope covers an order (its funnel, or any of its products). */

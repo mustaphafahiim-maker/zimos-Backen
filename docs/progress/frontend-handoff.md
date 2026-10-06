@@ -649,3 +649,41 @@ Wording:
 | Conversion access token | توكن التحويلات |
 | Send as test events | ابعتها كأحداث تجريبية |
 | The Pinterest ad account id is needed to turn the Conversions API on | محتاج رقم الحساب الإعلاني في بنترست علشان تشغّل الـ Conversions API |
+
+---
+
+## 169. Google Ads conversions with a conversion label — UI: pending (mostly built in item 132)
+
+Item 132 already stores `config.adsConversionLabel` on a Google pixel and serves it to the storefront. Added now:
+
+- **`config.adsLeadLabel`** — the label of the Ads conversion action for leads, used when the store or funnel
+  reports orders as leads (item 167). Same rule as the purchase label: 4–60 of `A–Z a–z 0–9 _ -`.
+- Labels are refused on a non-Ads tag: 422 field `config.adsConversionLabel` / `config.adsLeadLabel`
+  "A conversion label needs a Google Ads id (AW-…)" (create, and update when the id changes).
+- **`GET /store/:ws` → `store.trackingPixels[]`** for an `AW-` pixel with labels now also carries a ready **`sendTo`**:
+```json
+{ "platform": "google", "pixelId": "AW-123456789", "scope": { "type": "all", "ids": [] },
+  "adsConversionLabel": "AbC-D_efG", "adsLeadLabel": "LeadLbl_1",
+  "sendTo": { "purchase": "AW-123456789/AbC-D_efG", "lead": "AW-123456789/LeadLbl_1" } }
+```
+
+### Storefront (`lib/adPixels.ts` / `lib/track.ts`)
+On the order's conversion (with `purchaseEventTiming = on_order`), for each in-scope AW- pixel:
+`gtag('event', 'conversion', { send_to: sendTo[kind], value, currency, transaction_id: <order id> })`, where
+`kind` is the effective conversion event (`purchase` or `lead`, item 167); skip when that key is missing.
+`transaction_id` = the order id keeps a reload of the thank-you page from counting twice.
+
+### Dashboard — Marketing → Pixels → Google (AW- id)
+- Existing "Conversion label" field → rename "Purchase conversion label"; add "Lead conversion label"
+  (shown only for AW- ids, like the first). Hint: "Google Ads → Goals → Conversions → your action → Tag setup →
+  the part after the slash in send_to".
+
+Wording:
+| en | ar |
+|---|---|
+| Purchase conversion label | ليبل تحويل الشراء |
+| Lead conversion label | ليبل تحويل العميل المحتمل |
+| A conversion label needs a Google Ads id (AW-…) | الليبل محتاج رقم إعلانات جوجل (AW-…) |
+
+Not built: sending Google Ads conversions from the server (offline conversion upload). It needs a Google Ads
+developer token and OAuth app — the integrations team's work with the owner's account (noted in spec-gaps).

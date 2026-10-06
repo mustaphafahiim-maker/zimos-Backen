@@ -1323,7 +1323,9 @@ Tracking and analytics:
   - Sandbox by default (`PINTEREST_CAPI_MODE` unset): the body is built, checked and logged, nothing is sent; `live` sends it. The owner switches it once a real account has been checked.
   - Order conversion goes as `checkout` (or `lead`, item 167); relayed browser events map to `page_visit`, `add_to_cart` and `lead`; Pinterest has no checkout-start or payment-info event, so those are skipped for it.
   - Hashing, event id (the order id), value as a string in major units, as the README states.
-- [ ] 169. Google Ads purchase conversions with a conversion label (`send_to AW-…/label`).
+- [x] 169. Google Ads purchase conversions with a conversion label (`send_to AW-…/label`). (backend done, UI in frontend-handoff.md)
+  - The purchase label was already stored and served (item 132). Added a lead label for item 167, a ready `sendTo` { purchase, lead } in the public pixel list, and a server check that labels go only with an AW- id.
+  - Browser only: the storefront fires `conversion` with `transaction_id` = the order id. Server-side Google Ads conversions (offline upload) need a developer token and an OAuth app, so they are left to the integrations team with the owner's account.
 - [ ] 170. Google Tag Manager: a ready-made container to import (triggers and tags for the store's events), with the dataLayer events listed.
 - [ ] 171. Live View on a world map: visitors, checkouts and orders from the last 10 minutes.
 - [ ] 172. Dashboard home: filter by product and by store, beside the funnel filter.
