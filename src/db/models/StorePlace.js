@@ -17,6 +17,8 @@ module.exports = (sequelize, DataTypes) => {
       geoCode: { type: DataTypes.STRING(80), allowNull: true, field: 'geo_code' },
       sortOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'sort_order' },
       hidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      // Shipping price to this place, minor units; null = not priced here (migration 452).
+      shippingAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'shipping_amount', get() { const v = this.getDataValue('shippingAmount'); return v === null || v === undefined ? null : Number(v); } },
     },
     { tableName: 'store_places' }
   );

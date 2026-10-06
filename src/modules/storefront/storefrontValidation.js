@@ -65,6 +65,10 @@ module.exports = {
     body: Joi.object({
       country: Joi.string().length(2).uppercase().default('EG'),
       governorate: Joi.string().max(100).allow(null, '').optional(),
+      // The store's own places (places/storePlaces.js): city/area prices.
+      city: Joi.string().max(100).allow(null, '').optional(),
+      area: Joi.string().max(120).allow(null, '').optional(),
+      placeId: uuid.allow(null).optional(),
       items: Joi.array()
         .items(
           Joi.object({

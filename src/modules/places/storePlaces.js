@@ -38,7 +38,7 @@ const PARENT_LEVEL = { region: null, city: 'region', area: 'city' };
 const MAX_PLACES = 5000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
-const view = (p) => ({ id: p.id, level: p.level, parentId: p.parentId, nameAr: p.nameAr, nameEn: p.nameEn, geoCode: p.geoCode, sortOrder: p.sortOrder, hidden: p.hidden });
+const view = (p) => ({ id: p.id, level: p.level, parentId: p.parentId, nameAr: p.nameAr, nameEn: p.nameEn, geoCode: p.geoCode, sortOrder: p.sortOrder, hidden: p.hidden, shippingAmount: p.shippingAmount });
 
 function treeOf(rows, { publicView = false } = {}) {
   const byParent = new Map();
@@ -112,7 +112,7 @@ async function create(workspaceId, body, req) {
     const geoCode = await geoCodeFor(country, body.level, [body.nameAr, nameEn], parent && parent.geoCode, transaction);
     const last = await db.StorePlace.max('sortOrder', { where: { workspaceId, country, parentId: parent ? parent.id : null }, transaction });
     const place = await db.StorePlace.create(
-      { workspaceId, country, level: body.level, parentId: parent ? parent.id : null, nameAr: body.nameAr, nameEn, geoCode, hidden: Boolean(body.hidden), sortOrder: body.sortOrder ?? (last || 0) + 1 },
+      { workspaceId, country, level: body.level, parentId: parent ? parent.id : null, nameAr: body.nameAr, nameEn, geoCode, hidden: Boolean(body.hidden), shippingAmount: body.shippingAmount ?? null, sortOrder: body.sortOrder ?? (last || 0) + 1 },
       { transaction }
     );
     await audit(req, workspaceId, 'store_place.create', place.id, { country, level: place.level, name: place.nameAr }, transaction);
@@ -164,6 +164,7 @@ async function importRows(workspaceId, country, rows, mode, req) {
     const known = new Map(existing.map((p) => [key(p.parentId, p.level, p.nameAr), p]));
     let count = existing.length;
     let created = 0;
+    let priced = 0;
     const nextOrder = new Map();
     const order = (parentId) => {
       const k = parentId || 'root';
@@ -194,12 +195,22 @@ async function importRows(workspaceId, country, rows, mode, req) {
         errors.push({ row: r.__row, message: 'An area needs its city' });
         continue;
       }
+      // A `shipping` column prices the row's deepest place, in the store's currency (major units) — places/placePricing.js.
+      const price = require('./placePricing').parseSheetPrice(r.shipping ?? r.shipping_price ?? r.price);
+      if (price === undefined) {
+        errors.push({ row: r.__row, message: 'The shipping price is not a number' });
+        continue;
+      }
       const region = await ensure('region', null, regionAr, cell(r, 'region_en'));
       const city = cityAr ? await ensure('city', region, cityAr, cell(r, 'city_en')) : null;
-      if (areaAr) await ensure('area', city, areaAr, cell(r, 'area_en'));
+      const deepest = areaAr ? await ensure('area', city, areaAr, cell(r, 'area_en')) : city || region;
+      if (price !== null && deepest.shippingAmount !== price) {
+        await deepest.update({ shippingAmount: price }, { transaction });
+        priced += 1;
+      }
     }
-    await audit(req, workspaceId, 'store_place.import', null, { country, mode, rows: rows.length, created, errors: errors.length }, transaction);
-    return { country, mode, created, total: count, errors: errors.slice(0, 100) };
+    await audit(req, workspaceId, 'store_place.import', null, { country, mode, rows: rows.length, created, priced, errors: errors.length }, transaction);
+    return { country, mode, created, priced, total: count, errors: errors.slice(0, 100) };
   });
 }
 
@@ -275,6 +286,8 @@ const country = Joi.string().pattern(/^[A-Za-z]{2}$/);
 const name = Joi.string().trim().min(1).max(120);
 const ws = { workspaceId: uuid.required() };
 const withId = Joi.object({ ...ws, id: uuid.required() });
+// Minor units; null = not priced at this place.
+const price = Joi.number().integer().min(0).max(100000000).allow(null);
 
 // Mounted at /api/v1/workspaces/:workspaceId/store-places (shipping.manage: it is where the store delivers).
 const staff = Router({ mergeParams: true });
@@ -289,7 +302,7 @@ staff.post(
   '/',
   validate({
     params: Joi.object(ws),
-    body: Joi.object({ country: country.required(), level: Joi.string().valid(...LEVELS).required(), parentId: uuid.allow(null).optional(), nameAr: name.required(), nameEn: name.allow('').optional(), hidden: Joi.boolean().optional(), sortOrder: Joi.number().integer().min(0).max(100000).optional() }),
+    body: Joi.object({ country: country.required(), level: Joi.string().valid(...LEVELS).required(), parentId: uuid.allow(null).optional(), nameAr: name.required(), nameEn: name.allow('').optional(), hidden: Joi.boolean().optional(), shippingAmount: price.optional(), sortOrder: Joi.number().integer().min(0).max(100000).optional() }),
   }),
   asyncHandler(async (req, res) => res.status(201).json({ place: await create(req.tenant.workspaceId, req.body, req) }))
 );
@@ -304,9 +317,15 @@ staff.post(
   validate({ params: Joi.object(ws), body: Joi.object({ country: country.required() }) }),
   asyncHandler(async (req, res) => res.json(await copyPlatform(req.tenant.workspaceId, req.body.country.toUpperCase(), req)))
 );
+// Many prices at once, from the prices table (places/placePricing.js).
+staff.put(
+  '/prices',
+  validate({ params: Joi.object(ws), body: Joi.object({ prices: Joi.array().items(Joi.object({ id: uuid.required(), shippingAmount: price.required() })).min(1).max(MAX_PLACES).unique('id').required() }) }),
+  asyncHandler(async (req, res) => res.json(await require('./placePricing').setPrices(req.tenant.workspaceId, req.body.prices, req)))
+);
 staff.patch(
   '/:id',
-  validate({ params: withId, body: Joi.object({ nameAr: name.optional(), nameEn: name.optional(), hidden: Joi.boolean().optional(), sortOrder: Joi.number().integer().min(0).max(100000).optional() }).min(1) }),
+  validate({ params: withId, body: Joi.object({ nameAr: name.optional(), nameEn: name.optional(), hidden: Joi.boolean().optional(), shippingAmount: price.optional(), sortOrder: Joi.number().integer().min(0).max(100000).optional() }).min(1) }),
   asyncHandler(async (req, res) => res.json({ place: await update(req.tenant.workspaceId, req.params.id, req.body, req) }))
 );
 staff.delete('/:id', validate({ params: withId }), asyncHandler(async (req, res) => res.json(await remove(req.tenant.workspaceId, req.params.id, req))));

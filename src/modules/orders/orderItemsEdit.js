@@ -146,6 +146,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   const shipping = await calculateShippingAmount(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
+    address,
     subtotal,
     totalQuantity,
     offerShippingOverride: manualShipping ? { amount: Number(order.shippingAmount) } : offerShippingOverride,

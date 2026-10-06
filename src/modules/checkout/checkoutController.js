@@ -54,6 +54,8 @@ const checkout = asyncHandler(async (req, res) => {
   assertRequiredCheckoutFields(workspace, req.body);
   // A place the store hid is not delivered to (shipping/shippingPlaces.js).
   await require('../shipping/shippingPlaces').assertDeliverable(workspace, req.body.shippingAddress);
+  // A hidden or unknown place of the store's own list (places/placePricing.js).
+  await require('../places/placePricing').assertDeliverable(workspace.id, req.body.shippingAddress);
 
   // A manual transfer (the whole order, or a COD order's deposit) is checked
   // here, before any cart work; it is not an online (gateway) payment.

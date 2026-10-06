@@ -461,6 +461,7 @@ async function createOrder(
     const shipping = await calculateShippingAmount(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
+      address: shippingAddress || null,
       subtotal,
       totalQuantity,
       offerShippingOverride,
@@ -726,6 +727,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   const shipping = await calculateShippingAmount(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
+    address,
     subtotal,
     totalQuantity,
     offerShippingOverride,

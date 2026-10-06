@@ -88,6 +88,7 @@ const shippingQuote = asyncHandler(async (req, res) => {
     items: await require('../catalog/productTests').pinPrices(workspaceId, items, testVisitor),
     // A funnel's checkout: priced with the funnel's shipping group (funnels/funnelShipping.js).
     funnelId: req.body.funnelId || null,
+    address: { country: req.body.country, province: req.body.governorate || null, city: req.body.city || null, area: req.body.area || null, placeId: req.body.placeId || null },
   });
   res.json({ quote });
 });

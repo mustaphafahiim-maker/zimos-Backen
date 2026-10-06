@@ -26,7 +26,7 @@ const { DESTINATION_INDEPENDENT, RULES, settingsPriceShipping } = require('./shi
  *                        order is charged 0 and the storefront keeps its
  *                        "confirmed on the call" line, as it always has.
  */
-async function quote(workspaceId, { country, region, items, funnelId = null }) {
+async function quote(workspaceId, { country, region, items, funnelId = null, address = null }) {
   const lines = [];
   for (const item of items) lines.push(await priceLine(workspaceId, item));
   // The same bundle pricing the order will get, so the quote's subtotal is the real one.
@@ -36,6 +36,8 @@ async function quote(workspaceId, { country, region, items, funnelId = null }) {
   const shipping = await calculateShippingAmount(workspaceId, {
     country,
     region: region || null,
+    // City, area and the picked place, for the store's own place prices (places/placePricing.js).
+    address: address || (country ? { country, province: region || null } : null),
     subtotal,
     totalQuantity: lines.reduce((sum, l) => sum + l.quantity, 0),
     offerShippingOverride: lines.find((l) => l.shippingOverride)?.shippingOverride || null,

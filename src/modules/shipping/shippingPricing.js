@@ -65,6 +65,8 @@ async function calculateShippingAmount(
     productLines: rawProductLines,
     // An order in a funnel: the funnel's shipping group prices every line (funnels/funnelShipping.js).
     funnelId = null,
+    // The whole address (province, city, area, placeId): the store's own place prices read it (places/placePricing.js).
+    address = null,
     transaction,
   }
 ) {
@@ -123,6 +125,7 @@ async function calculateShippingAmount(
     country,
     region,
     place,
+    address,
     subtotal,
     tier,
     knownGrams: weight.knownGrams,
@@ -146,11 +149,14 @@ async function calculateShippingAmount(
 async function resolveBase(
   workspaceId,
   settings,
-  { pricingMode, country, region, place, subtotal, tier, knownGrams, totalQuantity, transaction }
+  { pricingMode, country, region, place, address, subtotal, tier, knownGrams, totalQuantity, transaction }
 ) {
   const fallback = rules.fallbackRate(settings);
 
   if (pricingMode === 'rates') {
+    // A price on the store's own city or area wins over its governorate price (places/placePricing.js).
+    const byPlace = await require('../places/placePricing').priceFor(workspaceId, address || (country ? { country, province: region } : null), transaction);
+    if (byPlace) return { rule: byPlace.rule, amount: byPlace.amount, governorate: place || null };
     const byGovernorate = require('./shippingPlaces').rateFor(settings, place);
     if (byGovernorate) return { rule: rules.RULES.GOVERNORATE_RATE, ...byGovernorate };
   }

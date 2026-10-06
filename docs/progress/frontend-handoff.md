@@ -307,3 +307,58 @@ Wording:
 | Deleting a region deletes its cities and areas. | حذف المحافظة بيحذف مدنها ومناطقها. |
 | No places yet — import a sheet or start from the platform list. | مفيش مناطق لسه — استورد شيت أو ابدأ من قائمة المنصة. |
 | Choose your area | اختار منطقتك |
+
+---
+
+## 164. Shipping prices per city and area — UI: pending
+
+Each place of the store's own list (item 163) can carry a shipping price. The
+deepest priced place of the shopper's address wins (area → city → region); with
+none, the store's governorate prices and zones apply as before. Only in the
+"rates" pricing mode (weight tiers keep their own table).
+
+### Data
+`shippingAmount` (integer minor units, or `null` = not priced here) is now on every
+place in `GET /workspaces/:ws/store-places` and accepted by POST and PATCH there
+(0 … 100 000 000; `null` clears).
+
+### Endpoints (permission `shipping.manage`)
+
+**PUT `/workspaces/:ws/store-places/prices`** — save the prices table in one go
+```json
+{ "prices": [ { "id": "<place id>", "shippingAmount": 4500 }, { "id": "<place id>", "shippingAmount": null } ] }
+```
+→ `{ "changed": 2 }`. 422 when an id is not the store's. Up to 5000 rows, unique ids.
+
+**POST `/workspaces/:ws/store-places/import`** — the sheet may add a `shipping` column (also read as
+`shipping_price` or `price`): the price of the row's deepest place, **in major units** of the store's
+currency (`45`, `45.50`, Arabic digits accepted; empty = leave as is). Answer adds `"priced": 3`;
+a non-number gives a row error "The shipping price is not a number".
+
+### Storefront
+- **POST `/store/:ws/shipping-quote`** now also takes `city`, `area` and `placeId` (besides `country`,
+  `governorate`). Send them as soon as the shopper picks, and re-quote on every change. The quote's
+  rule is `"store_place_rate"` when a place price applied.
+- Checkout: send `shippingAddress.placeId` (deepest picked place) plus the names in
+  `province` / `city` / `area`. A hidden place → 422 `SHIPPING_PLACE_UNAVAILABLE`
+  (field `shippingAddress.placeId`); an id not in the list → 422 `VALIDATION_ERROR`. Show the
+  message under the pickers.
+- Without `placeId`, the server matches the names (Arabic or English, case-insensitive), so
+  staff orders and older forms are priced too.
+
+### Dashboard — Shipping → Places (from item 163)
+- A "Shipping price" column on every row (money input in the store's currency; empty = "uses
+  {parent}'s price" / "uses the governorate price"), saved with PUT `/prices` (Save button,
+  dirty-state warning). Show the effective price in grey when inherited.
+- Import dialog: mention the optional `shipping` column; the sample CSV gets it.
+- Order page: the shipping line shows "City/area price" when `shippingSnapshot.rule = "store_place_rate"`.
+
+Wording:
+| en | ar |
+|---|---|
+| Shipping price | سعر الشحن |
+| Uses {name}'s price | بياخد سعر {name} |
+| Uses the governorate price | بياخد سعر المحافظة |
+| City/area price | سعر المدينة/المنطقة |
+| Prices saved | الأسعار اتحفظت |
+| The store does not deliver to this area | المتجر مش بيوصل للمنطقة دي |

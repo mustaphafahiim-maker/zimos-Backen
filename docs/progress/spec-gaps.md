@@ -1295,7 +1295,13 @@ Commerce:
   - Import reads CSV or .xlsx through the catalog's sheet reader (no new dependency); `merge` reuses names already there, `replace` clears the country first. "Start from the platform list" is the same import fed from `geo_regions`.
   - The public list falls back to the platform's governorates and cities when the store has none, so every checkout has pickers.
   - Addresses take `area` and `placeId` (checkout, lost orders, staff orders); they are stored with the order's address. Pricing by place is item 164.
-- [ ] 164. Shipping prices per city and area, from a CSV or the places list.
+- [x] 164. Shipping prices per city and area, from a CSV or the places list. (backend done, UI in frontend-handoff.md)
+  - The price lives on the place itself (`store_places.shipping_amount`, migration 452), minor units, null = not priced here. The deepest priced place of the address wins (area → city → region), ahead of the governorate price; otherwise pricing is unchanged.
+  - Applied in the "rates" pricing mode only; weight tiers and shipping groups keep their own tables. A funnel in its own currency keeps its group's price.
+  - Addresses are read by `placeId`, else by names, so staff orders, order edits and quotes are priced the same way (`calculateShippingAmount` now takes the whole `address`).
+  - Sheet prices are in major units (what merchants type), converted with two minor digits; a bulk `PUT …/prices` saves the prices table.
+  - A hidden place of the store's list, or an unknown `placeId`, is refused at checkout.
+  - Platform cities get prices by copying the platform list into the store's list (item 163), rather than a second price table.
 - [ ] 165. A file-upload field in the checkout form, and an optional billing address ("same as shipping").
 - [ ] 166. Bulk actions on funnels: publish, pause, duplicate and delete several at once.
 
