@@ -1397,7 +1397,11 @@ Integrations (interface + sandbox + README):
   - Express buttons = adapter `expressFor` → `express: { wallets }` on the storefront methods list; the button runs the normal checkout + redirect, so no new shopper endpoint. The sandbox gateway offers both, so the preview works with no keys ("sandbox until keys are set").
   - `gatewayHttp.request` takes `form` (form-encoded). `STRIPE_API_BASE`/`PAYPAL_API_BASE` point at a mock outside production.
   - Verified on a mock Stripe/PayPal: connect (bad pattern 422, bad key GATEWAY_AUTH_FAILED), methods list with express (PayPal only for USD), Stripe checkout → pay → return = paid → refund, webhook good/forged/stale/ignored; PayPal create → approve → capture → refund at adapter level.
-- [ ] 184. Address autocomplete at checkout (places-provider interface + sandbox).
+- [x] 184. Address autocomplete at checkout (places-provider interface + sandbox). (backend done, UI in frontend-handoff.md)
+  - `places/autocomplete/`: provider interface (README) + `builtin` (the store's places list or the platform's; no key, the default and the sandbox) + `google` (Places API New, the store's own key sealed, session tokens). No migration: setting in `workspace_integrations` `address_autocomplete`.
+  - Public: /store/:ws/address/config|suggest|details. Every pick is matched back to the store's list (folded Arabic/English names) so pricing, hidden places and courier maps keep working; `placeId` set when a store place matches.
+  - A refused Google key is shown to the merchant (`lastError`) and shoppers fall back to the built-in list instead of an error.
+  - Verified: platform list (زايد, مدينه نصر, giza), store list with an added area (ar/en), Google on a mock (no key, bad key, suggest, details matched to the store's Nasr City), off.
 
 What the platform still lacks (the owner's "كل حاجه ناقصه"):
 - [ ] 185. Shopper accounts: sign in by phone or email code, with order history, saved addresses and reorder.

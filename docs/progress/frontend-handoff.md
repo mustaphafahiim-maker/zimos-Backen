@@ -1273,3 +1273,48 @@ Wording:
 | Show Apple Pay and Google Pay buttons | اعرض أزرار Apple Pay وGoogle Pay |
 | PayPal | باي بال |
 | PayPal isn't available in this currency | PayPal مش متاح بالعملة دي |
+
+## 184. Address autocomplete at checkout — UI: pending
+
+### Storefront (public, no auth; storefront rate limit)
+- **GET `/store/:ws/address/config`** → `{ "enabled": true, "provider": "builtin" | "google" | null, "attribution": "google" | null }`
+  (cached 60 s). Show the autocomplete only when `enabled`; with `attribution: "google"` show "Powered by Google" under the list.
+- **GET `/store/:ws/address/suggest?q=…&country=EG&lang=ar&session=…`** — `q` 2–120 chars (send after 2 chars, debounce ~250 ms);
+  `country` optional (store's country); `lang` ar|en|fr; `session` optional, 8–64 chars `[A-Za-z0-9_-]` — generate one per
+  checkout visit and reuse it for suggest and details (groups Google billing).
+  → `{ "enabled": true, "suggestions": [ { "id": "p:52bf…", "text": "الحي العاشر", "secondaryText": "مدينة نصر، القاهرة", "level": "area" } ] }`
+  (at most 8; `level`: region|city|area|address). Off → `{ "enabled": false, "suggestions": [] }`.
+- **GET `/store/:ws/address/details?id=…&session=…`** →
+```json
+{ "address": { "country": "EG", "province": "القاهرة", "city": "مدينة نصر", "area": "الحي العاشر",
+  "addressLine": "12 Abbas El Akkad", "postalCode": null, "placeId": "52bf…", "location": { "lat": 30.05, "lng": 31.34 } } }
+```
+  Fill the checkout fields with the non-null values: province/city/area pickers (names are the store list's names, so they
+  select the right entries), `placeId` → the address `placeId` (delivery price), `addressLine` → street field (Google only;
+  the store list gives no street, so focus the street field next). 404 `ADDRESS_NOT_FOUND`.
+
+### Checkout UI
+- One field "Search your address" above the address fields (or the area field), dropdown of suggestions: `text` bold,
+  `secondaryText` grey; keyboard up/down/enter; "No matches — fill the address below" when empty. Manual entry always stays possible.
+
+### Dashboard — Settings → Shipping → Places (permission `shipping.manage`)
+- **GET `/workspaces/:ws/address-autocomplete`** →
+  `{ "provider": "builtin", "providers": [ { "code": "builtin", "name": { "en": "Your places list", "ar": "قائمة أماكنك" }, "needsKey": false }, { "code": "google", "name": { "en": "Google Maps", "ar": "خرائط جوجل" }, "needsKey": true } ], "hasKey": false, "lastError": null }`
+- **PUT** same path `{ "provider": "off" | "builtin" | "google", "apiKey"?: "AIza…" (20–200) }` → same shape.
+  Google without a key: 422 `ADDRESS_LOOKUP_KEY_REQUIRED`; a refused key: 422 `ADDRESS_LOOKUP_INVALID_KEY` ("is the Places API
+  enabled for it?"). The key is never returned (`hasKey` only). `lastError` shows when Google later refuses the key — shoppers
+  then get suggestions from the places list meanwhile.
+- Card "Address suggestions at checkout": radio Off / Your places list / Google Maps; key field (password) when Google;
+  note "Google bills your Google Cloud account for these lookups."
+
+Wording:
+| en | ar |
+|---|---|
+| Search your address | دوّر على عنوانك |
+| No matches — fill the address below | مفيش نتايج — اكتب العنوان تحت |
+| Powered by Google | Powered by Google |
+| Address suggestions at checkout | اقتراحات العنوان في صفحة الدفع |
+| Your places list | قائمة أماكنك |
+| Google Maps | خرائط جوجل |
+| Google API key | مفتاح Google API |
+| Google bills your Google Cloud account for these lookups. | جوجل بتحاسب حساب Google Cloud بتاعك على عمليات البحث دي. |
