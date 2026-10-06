@@ -1000,6 +1000,33 @@ Builder elements can have an entrance animation (SPEC §9.3 Style tab).
   - With reduced motion and with JavaScript off, they were visible straight away.
   - In the editor, in Arabic and English, the stored animation read back, a change to zoom out with a 300 ms delay saved, and choosing "None" removed it.
   - The page was deleted and the site rolled back.
+The store can use any Google font, or a font it uploads, for its text, its headings, or any single element (SPEC §9.3 font family; Lightfunnels' Google and uploaded fonts).
+
+- **Font references:**
+  - A font is referenced as `g:<Name>` (Google) or `c:<id>` (uploaded) wherever it is used:
+    - `themeSettings.bodyFont` and `headingFont`, set from the store look panel's new "Your fonts" section, over the look's or theme's own font;
+    - `style.fontFamily` on an element, per device, in the Style tab.
+  - The editor offers 42 Google fonts: 24 Arabic-capable, then Latin-only. The list and the reference parsing live in `api-client/endpoints/storeFonts.ts`, shared by the dashboard and the store.
+- **Uploaded fonts** (`modules/fonts/storeFonts.js`):
+  - WOFF2, WOFF, TTF or OTF, decided by the file's signature, up to 2 MB, at most 10 per store.
+  - They are kept in `settings.store_fonts`, and their names reach the store in `GET /store/:ws` (`customFonts`).
+- **Decision: uploaded fonts are served through the public store API** (`GET /store/:ws/fonts/:id`).
+  - A browser fetches fonts under cross-site rules, and the store may be on any custom domain.
+  - The response allows any origin and is cached for a year. Behind it is local disk or R2 (`getStorage().get`).
+- **Decision: the store's chosen fonts survive a theme switch.**
+  - They are an explicit choice, unlike the look's own font pairing.
+  - Arabic text in a Latin-only font falls back to Tajawal.
+- **Safe CSS:** only names matching the reference patterns reach CSS (letters, digits and spaces; 12 hex digits). Anything else is refused by the backend and ignored by the store.
+- **Live preview:** unsaved body and heading fonts show at once (`components/preview/fontPreview.ts`). A font change now counts as an unsaved look.
+- **Store security policy (development only):** fonts may also come from the local http hosts, as scripts already could. Production serves the API over https, which the policy allows.
+- **Tested** on the scratch DB:
+  - **Uploads:** a WOFF2 and a TTF were accepted; a PNG named as a font and an upload without a name were refused.
+  - **Public link:** the font came back as `font/woff2` with `Access-Control-Allow-Origin: *` and a one-year cache; an unknown id gave 404 and a malformed one 422.
+  - **Editor, store look:** the editor listed the two uploads above the Google groups. Choosing the upload for body text and Lalezar for headings updated the live preview's variables, link and @font-face, and saving stored `c:…` and `g:Lalezar`.
+  - **Store page:** the wrapper carried both fonts. Elements rendered in Cairo and in the uploaded font, with the mobile override in Amiri on a phone. The uploaded fonts were fetched (200) and reported "loaded".
+  - **Google Fonts:** they could not load here, because this sandbox's network blocks fonts.googleapis.com (the existing Fraunces link fails the same way).
+  - **Element font:** the choice read back and saved, in Arabic and English.
+  - **Cleanup:** the test page, the uploads, the settings and the site version were all restored.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1243,7 +1270,7 @@ Migrations for this pass: **450–499**.
 Design (page builder):
 - [x] 157. The full element Style tab (SPEC §9.3): background gradient and image, height and min/max sizes, custom shadow (inner/outer, x, y, blur, spread, colour), overflow, cursor, and visibility on mobile portrait/landscape.
 - [x] 158. Entrance animations per element (fade, slide, zoom; delay, duration; respects reduced motion).
-- [ ] 159. Fonts: Google Fonts for the store and per element, plus the merchant's uploaded fonts (woff2).
+- [x] 159. Fonts: Google Fonts for the store and per element, plus the merchant's uploaded fonts (woff2).
 - [ ] 160. Editable storefront texts per language: button labels, form errors, cart/checkout/bundle wording.
 - [ ] 161. Store scripts targeted by position (head, body start, body end) and by page type (all, home, collection, product, checkout, thank you).
 
