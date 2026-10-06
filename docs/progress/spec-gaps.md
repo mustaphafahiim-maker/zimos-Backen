@@ -977,6 +977,29 @@ Every builder element now has the full Style tab (SPEC §9.3, Lightfunnels' elem
   - In the editor, in Arabic and English, every value read back. Changing the pointer and saving stored it.
   - The test page was deleted and the site rolled back to its previous published version.
 - **Scratch only:** the test server runs with a higher request limit (`RATE_LIMIT_MAX`). The editor makes enough calls that browser runs hit the normal 100 per minute.
+Builder elements can have an entrance animation (SPEC §9.3 Style tab).
+
+- **Options:**
+  - Type: fade, slide up, slide down, slide in from the start or the end, zoom in, zoom out.
+  - A duration (100–3000 ms, default 600) and a delay (0–5000 ms).
+  - It plays once, when the element first scrolls into view.
+- **Where it lives:**
+  - Stored as `settings.animation`, validated in `pages/elementAnimation.js`.
+  - The store wraps the element (`data-za` plus timing variables). A small observer, `EntranceAnimations.tsx`, is shipped only on pages that use animations, and reveals each element.
+  - In the editor it is the "Entrance animation" part of the Style tab.
+- **Decision: one animation for every device.**
+  - It describes how the element arrives, not its per-device look.
+  - "Start" and "end" follow the page direction, so in Arabic, start is the right side.
+- **Decision: never lose content to an animation.**
+  - Shoppers who ask their device for less motion see the element at once.
+  - Without JavaScript a noscript rule shows it.
+  - If the browser lacks IntersectionObserver, everything is revealed.
+- **Tested** on the scratch DB:
+  - A page with a top element and two lower ones was published.
+  - The top element appeared at once. The lower ones were hidden (opacity 0; offset +32 px in Arabic, −32 px in English) until scrolled to, then revealed.
+  - With reduced motion and with JavaScript off, they were visible straight away.
+  - In the editor, in Arabic and English, the stored animation read back, a change to zoom out with a 300 ms delay saved, and choosing "None" removed it.
+  - The page was deleted and the site rolled back.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1219,7 +1242,7 @@ Migrations for this pass: **450–499**.
 
 Design (page builder):
 - [x] 157. The full element Style tab (SPEC §9.3): background gradient and image, height and min/max sizes, custom shadow (inner/outer, x, y, blur, spread, colour), overflow, cursor, and visibility on mobile portrait/landscape.
-- [ ] 158. Entrance animations per element (fade, slide, zoom; delay, duration; respects reduced motion).
+- [x] 158. Entrance animations per element (fade, slide, zoom; delay, duration; respects reduced motion).
 - [ ] 159. Fonts: Google Fonts for the store and per element, plus the merchant's uploaded fonts (woff2).
 - [ ] 160. Editable storefront texts per language: button labels, form errors, cart/checkout/bundle wording.
 - [ ] 161. Store scripts targeted by position (head, body start, body end) and by page type (all, home, collection, product, checkout, thank you).
