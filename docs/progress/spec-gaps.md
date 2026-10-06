@@ -671,6 +671,21 @@ New-order notifications now name the product and the governorate, and reach each
   - A two-product order in Cairo notified "New order … · Demo T-Shirt × 2 +1 more · 706.80 EGP · Cairo".
   - With Arabic it read "… و1 غيره · … · القاهرة", and the bell shows the same.
 - **Next free migration: 440.**
+The AI's store policies are now applied to the store's own policies (SPEC §19.2 "Store policies", into §8.3), instead of being copied by hand.
+
+- **Decision: a fourth long policy, `shipping_policy`.** §8.3 notes that shipping, returns and privacy policies are required for TikTok ads, and the AI writes those three, but the store only had refund, privacy and terms.
+  - It now sits in `settings.legal` next to them and works like them: the footer link, `/policies/shipping-policy`, the sitemap, the page builder's `legal.shipping_policy` binding, and the funnel checklist.
+  - The dashboard's Policies tab has it with Arabic and English templates, and the storefront names it in ar, en and fr.
+- **`POST /ai/jobs/:jobId/apply-policies { policies? }`** (website.edit, `ai/applyPolicies.js`):
+  - Writes a `policies` result, or a store builder's: shipping → shipping_policy, returns → refund_policy, privacy → privacy_policy. Only the parts asked for (all three by default); terms of service are never touched.
+  - Returns `{ written, replaced }`, and is audited (`ai.apply_policies`).
+  - Can be done again; the job is not marked applied.
+- **AI Studio.** The Policies tool and the store builder's result have a "Use as my store policies" button. When the store already has some of them, it names them and asks once before replacing. Afterwards it links to the store policies.
+- **Tested** on the scratch DB:
+  - A generation applied over an existing refund policy reported `replaced: ["refund_policy"]` and kept the terms.
+  - The storefront served the shipping policy page with its footer link.
+  - The dashboard flow worked in Arabic.
+  - The test policies were removed afterwards.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -877,7 +892,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 140. Subscribers get their portal link (§18.1).
 - [x] 141. The store's subdomain can be changed in settings (§17.3).
 - [x] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
-- [ ] 143. AI store policies applied to the store's policies (§19.2).
+- [x] 143. AI store policies applied to the store's policies (§19.2).
 - [ ] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
 - [ ] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
 - [ ] 146. Split tests with more than two versions (§9.6).
