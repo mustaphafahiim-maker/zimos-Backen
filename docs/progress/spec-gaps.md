@@ -686,6 +686,25 @@ The AI's store policies are now applied to the store's own policies (SPEC §19.2
   - The storefront served the shipping policy page with its footer link.
   - The dashboard flow worked in Arabic.
   - The test policies were removed afterwards.
+The builder picks products and collections from the store's own catalogue (SPEC §9.3), instead of asking for a pasted ID. Each pick has an "Edit product" link.
+
+- **A product picker** (`editor/ProductPickerField.tsx`):
+  - A search box runs the catalogue's own search (name or SKU) over active and draft products.
+  - The list below it shows the matches; a draft product is marked as one.
+  - "Edit product" opens the picked product in a new tab.
+- **Where it is used.** Every block's "product" field is now this picker:
+  - product cards, the product page blocks, the 3D product, the button's product, and the showcase items, including their second product;
+  - the orbit gallery's collection gets the same picker for collections, with a link to the collections page.
+- **Decision: it still stores the product's ID, and old values keep working.**
+  - A value typed by hand before (an ID, or a slug in the showcase items, which the storefront also accepts) stays as it is.
+  - If the product is found, the picker shows it by name. Otherwise it shows "Saved value: …".
+  - Nothing is rewritten until the merchant picks something.
+  - The variant ID stays a text field.
+- **Tested** on the scratch DB, in Arabic, on the Cap landing page's product price block:
+  - Searching "cap" left only Demo Cap.
+  - Picking it set the block's product.
+  - "Edit product" pointed to `/catalog/<id>`.
+  - The page was not saved.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -893,7 +912,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 141. The store's subdomain can be changed in settings (§17.3).
 - [x] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
 - [x] 143. AI store policies applied to the store's policies (§19.2).
-- [ ] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
+- [x] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
 - [ ] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
 - [ ] 146. Split tests with more than two versions (§9.6).
 - [ ] 147. Copy a coupon's share link (§10.5).
