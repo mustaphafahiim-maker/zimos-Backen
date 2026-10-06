@@ -1410,7 +1410,11 @@ What the platform still lacks (the owner's "كل حاجه ناقصه"):
   - Orders: own orders only (customer + store, not test, not archived), tracking-page view reused (presentTrackedOrder/trackingStage exported). Reorder returns cart lines with availability; the frontend fills the cart (no order is placed by the backend).
   - Addresses in `customers.saved_addresses` (max 10, one default). Off by default: `settings.shopper_accounts` (website.edit). Email/SMS use the store's name (new `shopper_login_code` email template).
   - Verified: off 404, codes + cooldown 429, wrong code count, verify, reuse refused, me/patch, addresses CRUD + default, orders/detail/reorder, foreign order 404, email sign-in, sign-out-everywhere 401, new phone contact.
-- [ ] 186. Shopper returns: ask for a return from the order tracking page, which feeds the existing returns flow.
+- [x] 186. Shopper returns: ask for a return from the order tracking page, which feeds the existing returns flow. (backend done, UI in frontend-handoff.md)
+  - `returns/shopperReturns.js`: public eligibility + request, the order named by the tracking token or by orderId + shopper token (185). Lands as a `requested` ReturnRequest with `source: shopper` (migration 462 adds `source`, `photo_upload_ids`); the merchant's approve/reject/restock flow is unchanged.
+  - Off by default: `settings.shopper_returns` { enabled, windowDays 14, photoRequiredFor [damaged, defective] } (orders.manage). Window counts from the delivered shipment (or the fulfilled order). Returnable = ordered − quantities in other non-rejected returns.
+  - Photos reuse customer uploads (same visitor id, attached on request); staff lists get signed photo links. Outbox `return.requested`.
+  - Verified: off, not delivered, eligible, photo required, wrong visitor refused, request with photo, returnable shrinks, over-quantity refused, staff sees source + photo, all requested, window closed, bad token 404.
 - [ ] 187. Import contacts from CSV, with tags and marketing consent.
 - [ ] 188. A wishlist for signed-in shoppers.
 - [ ] 189. Gift cards: issue, sell as a product, redeem at checkout, check the balance.

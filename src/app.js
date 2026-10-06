@@ -253,6 +253,7 @@ v1.use('/workspaces/:workspaceId/store-places', require('./modules/places/storeP
 // Address suggestions at checkout (item 184).
 v1.use('/workspaces/:workspaceId/address-autocomplete', require('./modules/places/autocomplete').staff);
 v1.use('/workspaces/:workspaceId/shopper-accounts', require('./modules/shopperAccounts').staff);
+v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
 v1.use('/workspaces/:workspaceId/integrations/google-sheets', appGate.requireAppForChanges('google_sheets'), require('./modules/sheets/sheetsRoutes').router);
@@ -325,6 +326,8 @@ v1.use('/store/:workspaceId/places', require('./modules/places/storePlaces').sto
 v1.use('/store/:workspaceId/address', require('./modules/places/autocomplete').store);
 // Shopper accounts: sign in with a code, orders, addresses (item 185).
 v1.use('/store/:workspaceId/account', require('./modules/shopperAccounts').store);
+// Returns asked for by the shopper (item 186).
+v1.use('/store/:workspaceId/returns', require('./modules/returns/shopperReturns').store);
 v1.use('/store/:workspaceId/fonts', require('./modules/fonts/storeFonts').store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);

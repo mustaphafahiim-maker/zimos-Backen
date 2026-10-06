@@ -17,6 +17,9 @@ module.exports = (sequelize, DataTypes) => {
       // Restocking is an explicit separate action (see returnService.restock),
       // never automatic on refund/approval.
       restockedAt: { type: DataTypes.DATE, allowNull: true, field: 'restocked_at' },
+      // merchant | shopper (migration 462): a shopper opens one from the tracking page (shopperReturns.js).
+      source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'merchant' },
+      photoUploadIds: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'photo_upload_ids' },
     },
     { tableName: 'return_requests', indexes: [{ fields: ['workspace_id'] }, { fields: ['order_id'] }] }
   );

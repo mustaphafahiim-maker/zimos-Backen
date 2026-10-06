@@ -1406,3 +1406,54 @@ uses its own plain subject + body": it is stored as such and the store's blocks 
 sends). An override that never sends `blocks` still inherits the store's blocks. On the store itself `blocks: null` is
 unchanged (plain body). Lists/GET show `blocks: null` for a plain override with `overridden: true`. UI: the "Plain text"
 toggle on a funnel/website email sends `blocks: null`.
+
+## 186. Shopper returns from the tracking page (and the account) — UI: pending
+
+### Dashboard — Orders → Returns settings (permission `orders.manage`)
+- **GET `/workspaces/:ws/shopper-returns`** → `{ "enabled": false, "windowDays": 14, "photoRequiredFor": ["damaged", "defective"] }`
+- **PUT** same `{ "enabled": true, "windowDays": 7 (1–365), "photoRequiredFor": [reason codes] }` → same shape.
+- Card "Let customers ask for a return": switch, "Days after delivery" number, checkboxes "Photo required for" per reason.
+- Returns list/order page (existing `GET /workspaces/:ws/returns`, `GET /orders/:id/returns`): each return now has
+  **`source`** (`merchant` | `shopper`) and **`photos`** `[{ uploadId, url, expiresAt }]` (signed links). Show a "From customer"
+  badge and the photo thumbnails; approve/reject/restock as today. A new shopper return records the event `return.requested`.
+
+### Storefront — `/store/:ws/returns` (public)
+The order is named either by the tracking page's token (`token`, the `t` of the tracking link) or, for a signed-in shopper,
+by `orderId` + header `X-Shopper-Token` (item 185).
+- **GET `/eligibility?token=…`** (or `?orderId=…`) →
+```json
+{ "eligible": true, "reason": null, "deadline": "2026-10-13T20:23:57Z", "windowDays": 7,
+  "reasons": ["damaged","defective","wrong_item","not_as_described","no_longer_wanted","arrived_late","other"],
+  "photoRequiredFor": ["damaged","defective"],
+  "items": [ { "orderItemId": "…", "name": "Demo T-Shirt", "variantOptions": { "Size": "M" }, "quantity": 3, "returnable": 3 } ],
+  "returns": [ { "id", "status": "requested", "reason": "damaged: cracked", "items": [...], "source": "shopper", "createdAt" } ] }
+```
+  `reason` when not eligible: `off` (hide the button), `cancelled`, `not_delivered`, `window_closed`, `already_requested`.
+  404 for an unknown token/order; 401 `SHOPPER_NOT_SIGNED_IN` for a bad shopper token.
+- **POST `/`** `{ "token"|"orderId", "reasonCode", "reasonDetail"? (≤280), "items": [ { "orderItemId", "quantity" } ] (1–50, unique), "photoUploadIds"? [≤4] }`
+  → 201 `{ "return": { "id", "status": "requested", "reason", "items", "source": "shopper", "createdAt" } }`.
+  Photos: upload first with the existing `POST /store/:ws/uploads` (multipart `file`, header `X-Visitor-Id`), send the
+  `upload.uploadId`s here **with the same `X-Visitor-Id`**. Errors: 409 `RETURN_NOT_POSSIBLE` (`details.reason` as above);
+  422 with `items.N.quantity` "At most N can be returned", `photoUploadIds` "Add a photo of the problem" / "A photo is
+  missing or has expired — upload it again".
+
+### Storefront screens
+- Tracking page (and account order page): "Return items" button when `eligible`, with "until {deadline}"; past returns listed
+  with their status (Requested / Approved / Rejected / Received / Refunded).
+- Return form: lines with quantity steppers up to `returnable`, reason select, details textarea, photo picker (required when
+  the reason is in `photoRequiredFor`), "Send request" → "We got your request — the store will contact you".
+
+Wording:
+| en | ar |
+|---|---|
+| Return items | ارجع منتجات |
+| Returns possible until {date} | المرتجع متاح لحد {date} |
+| Why are you returning it? | ليه عايز ترجعه؟ |
+| Damaged / Defective / Wrong item / Not as described / No longer wanted / Arrived late / Other | وصل متكسر / فيه عيب / منتج غلط / مش زي الوصف / مبقتش عايزه / وصل متأخر / سبب تاني |
+| Add a photo of the problem | ضيف صورة للمشكلة |
+| Send request | ابعت الطلب |
+| We got your request — the store will contact you | وصلنا طلبك — المتجر هيتواصل معاك |
+| Returns are closed for this order | المرتجع اتقفل للطلب ده |
+| From customer | من العميل |
+| Let customers ask for a return | خلّي العملاء يطلبوا مرتجع |
+| Days after delivery | عدد الأيام بعد الاستلام |

@@ -11,11 +11,12 @@ const create = asyncHandler(async (req, res) => {
 });
 
 const listForOrder = asyncHandler(async (req, res) => {
-  res.json({ returns: await service.listReturnsForOrder(wid(req), req.params.orderId) });
+  // A shopper's photos come with fresh signed links (shopperReturns.js).
+  res.json({ returns: (await service.listReturnsForOrder(wid(req), req.params.orderId)).map(require('./shopperReturns').withPhotos) });
 });
 
 const list = asyncHandler(async (req, res) => {
-  res.json({ returns: await service.listReturns(wid(req), req.query) });
+  res.json({ returns: (await service.listReturns(wid(req), req.query)).map(require('./shopperReturns').withPhotos) });
 });
 
 const moderate = asyncHandler(async (req, res) => {
