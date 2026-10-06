@@ -1661,7 +1661,10 @@ covers auto-grouping), order line editing (orders/orderItemsEdit), quantity brea
 (catalog/customFieldPricing), invoices. Not listed because of SPEC §21: anything sending to many customers at once.
 Migrations 490–499; no prices in code.
 
-- [ ] 226. Pick list: for the orders picked in the list (or every order ready to ship), the units to take off the shelves, summed per variant, grouped by stock location, with SKU and image, and which orders each serves; JSON and a printable PDF.
+- [x] 226. Pick list: for the orders picked in the list (or every order ready to ship), the units to take off the shelves, summed per variant, grouped by stock location, with SKU and image, and which orders each serves; JSON and a printable PDF. (backend done, UI in frontend-handoff.md)
+  - orders/pickList.js, POST /orders/documents/pick-list (beside waybills, invoices and manifest); no migration. Grouped by the order's stock location (default when unassigned), summed per variant (or per name+options for lines without a variant), with the orders each line serves.
+  - JSON, PDF (Arabic through bidiText) or base64. readyToShip uses the shared STAGE_SQL so it matches the orders list tab.
+  - Verified: 3 orders → 3 + 3 units with per-order split, ready-to-ship selection after confirming 2, PDF rendered and checked as an image, both/none 422.
 - [ ] 227. Scheduled price changes: a sale on chosen variants, products or a collection — a new price (fixed or percent off) from a start time, and the old price back at an end time, applied by the server; listed, editable before it starts, cancellable.
 - [ ] 228. Business customers: company name and tax ID on a customer, a tax-exempt flag honoured at checkout for that signed-in customer, and the tax ID printed on the order invoice.
 - [ ] 229. Pay later on account (net terms) for approved business customers: a credit limit and N days to pay, an "on account" checkout method for those signed-in customers, the outstanding balance, overdue orders, and the merchant recording the payment.

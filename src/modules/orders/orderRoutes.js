@@ -51,6 +51,9 @@ router.post(
 // Many invoices in one PDF (orderInvoicesPdf.js).
 const invoices = require('./orderInvoicesPdf');
 router.post('/documents/invoices', validate(invoices.schema), requirePermission(PERMISSIONS.ORDERS_VIEW), invoices.handler);
+// What to take off the shelves for a batch of orders (pickList.js, item 226).
+const pickList = require('./pickList');
+router.post('/documents/pick-list', validate(pickList.schema), requirePermission(PERMISSIONS.ORDERS_VIEW), pickList.handler);
 router.post(
   '/documents/manifest',
   validate(schemas.manifestPdf),

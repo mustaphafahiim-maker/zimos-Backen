@@ -2593,3 +2593,21 @@ The storefront strip already exists: `GET /api/v1/store/:ws/cross-sell?productId
 
 - `GET /api/v1/store/:ws` → `store.gate` now carries `lockFunnels: boolean`: `{ mode, message, opensAt, lockFunnels, ageCheck }`. The 423 `STORE_LOCKED` error's `details.gate` has it too (same view).
 - Storefront: on funnel pages, show the gate only when `gate.mode !== 'off' && gate.lockFunnels`; no extra funnel request needed.
+
+## 226. Pick list — UI: pending
+
+### `POST /api/v1/workspaces/:ws/orders/documents/pick-list?as=json|pdf|base64` (`orders.view`)
+- Body: either `{ orderIds: [uuid] }` (1–500, cancelled ones skipped) **or** `{ readyToShip: true }` (every order at stage `ready_to_ship`, oldest first, up to 500); optional `locationId` keeps only the orders that location ships. Sending both or neither → 422. Nothing to pick → 422 `NO_ORDERS_SELECTED`.
+- `as=json` (default) →
+  ```json
+  { "orderCount": 3, "unitCount": 6,
+    "locations": [{ "locationId": null, "name": null,
+      "lines": [{ "variantId": "…", "productId": "…", "name": "ZZ Pick Socks", "options": {}, "sku": "ZZ-SOCK", "imageUrl": null,
+                  "quantity": 3, "orders": [{ "orderId": "…", "orderNumber": "ORD-…", "quantity": 2 }] }] }] }
+  ```
+  Locations as the orders are assigned (item 206); `locationId: null` = the store's main stock when it has no locations. Lines sorted by SKU, then name.
+- `as=pdf` → `application/pdf` (A4: tick box, quantity, name — options, SKU, the orders); `as=base64` → `{ filename, contentType, base64, orderCount }` for the dashboard's request helper.
+
+### Screens
+- Orders list: in the bulk actions next to «طباعة البوالص» / "Print waybills", add «قائمة التجهيز» / "Pick list" for the selected orders. In the "Ready to ship" tab add a button «جهّز كل الجاهز للشحن» / "Pick everything ready to ship".
+- A pick-list view (or the PDF): per location «المخزن الرئيسي» / "Main stock", rows «3 × ZZ Pick Socks — ZZ-SOCK» with the order numbers under each, checkboxes, and «اطبع» / "Print".
