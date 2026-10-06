@@ -7,6 +7,7 @@
 
 const { app, request, registerAndActivate, createWorkspace, setupWorkspaceWithProduct } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const env = require('../../src/config/env');
 
 const bearer = (token) => ({ Authorization: `Bearer ${token}` });
 
@@ -149,6 +150,13 @@ describe('catalog CRUD', () => {
 });
 
 describe('domains DELETE', () => {
+  // The domains routes are closed unless CUSTOM_DOMAINS_ENABLED (domains/domainsGate.js).
+  beforeAll(() => {
+    env.customDomains.enabled = true;
+  });
+  afterAll(() => {
+    env.customDomains.enabled = false;
+  });
   it('hard-deletes a custom domain (host routing config only)', async () => {
     const auth = await registerAndActivate();
     const workspace = await createWorkspace(auth.accessToken, 'Domain Del Co');

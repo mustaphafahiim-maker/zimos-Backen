@@ -6,8 +6,15 @@ const { lookupTxt } = require('../../src/modules/domains/dnsVerifier');
 
 const { app, request, registerAndActivate, createWorkspace } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const env = require('../../src/config/env');
 
-beforeEach(() => lookupTxt.mockReset());
+beforeEach(() => {
+  lookupTxt.mockReset();
+  env.customDomains.enabled = true;
+});
+afterAll(() => {
+  env.customDomains.enabled = false;
+});
 
 async function setupStore(name = 'Domain Co') {
   const auth = await registerAndActivate();
@@ -106,5 +113,47 @@ describe('custom domains', () => {
     expect(health.status).toBe(200);
     const shop = await request(app).get(`/shop/${wid}`).set('Host', 'never-added.com');
     expect(shop.status).toBe(200);
+  });
+});
+
+describe('CUSTOM_DOMAINS_ENABLED off', () => {
+  it('answers every merchant domains route with the 404 of an unknown path', async () => {
+    const { wid, H } = await setupStore('Closed Domains');
+    const fake = '00000000-0000-4000-8000-000000000000';
+    env.customDomains.enabled = false;
+    const base = `/api/v1/workspaces/${wid}/domains`;
+    const attempts = [
+      request(app).post(base).set(H).send({ hostname: 'www.closedshop.com' }),
+      request(app).get(base).set(H),
+      request(app).get(`${base}/overview`).set(H),
+      request(app).post(`${base}/${fake}/verify`).set(H),
+      request(app).patch(`${base}/${fake}`).set(H).send({ isPrimary: true }),
+      request(app).post(`${base}/${fake}/ssl/check`).set(H),
+      request(app).get(`${base}/${fake}/dns-check`).set(H),
+      request(app).delete(`${base}/${fake}`).set(H),
+    ];
+    for (const res of await Promise.all(attempts)) {
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('ROUTE_NOT_FOUND');
+    }
+    // No token: the same answer as any unknown path under the workspace.
+    const unknown = await request(app).get(`/api/v1/workspaces/${wid}/no-such-thing`);
+    const noToken = await request(app).get(base);
+    expect(noToken.status).toBe(unknown.status);
+    expect(noToken.body.error.code).toBe(unknown.body.error.code);
+    expect(await db.Domain.count({ where: { workspaceId: wid } })).toBe(0);
+  });
+
+  it('a domain verified before the switch went off still resolves', async () => {
+    const { wid, H, workspace } = await setupStore('Still Resolves');
+    const add = await addDomain(wid, H, 'www.stillresolves.com');
+    lookupTxt.mockResolvedValueOnce([[add.body.record.value]]);
+    expect((await request(app).post(`/api/v1/workspaces/${wid}/domains/${add.body.domain.id}/verify`).set(H)).status).toBe(200);
+
+    env.customDomains.enabled = false;
+    const res = await request(app).get('/api/v1/store/resolve-host').query({ host: 'www.stillresolves.com' });
+    expect(res.status).toBe(200);
+    expect(res.body.store.workspaceId).toBe(wid);
+    expect(res.body.store.slug).toBe(workspace.slug);
   });
 });

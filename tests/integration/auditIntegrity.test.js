@@ -9,6 +9,15 @@
 const bwipjs = require('bwip-js');
 const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace, confirmCodOrder } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const env = require('../../src/config/env');
+
+// The domains routes are closed unless CUSTOM_DOMAINS_ENABLED (domains/domainsGate.js).
+beforeAll(() => {
+  env.customDomains.enabled = true;
+});
+afterAll(() => {
+  env.customDomains.enabled = false;
+});
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 

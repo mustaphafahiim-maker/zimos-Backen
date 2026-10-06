@@ -19,6 +19,14 @@ const db = require('../../src/db/models');
 const env = require('../../src/config/env');
 const goLive = require('../../src/modules/billing/goLiveService');
 
+// The domains routes are closed unless CUSTOM_DOMAINS_ENABLED (domains/domainsGate.js).
+beforeAll(() => {
+  env.customDomains.enabled = true;
+});
+afterAll(() => {
+  env.customDomains.enabled = false;
+});
+
 const ORIGINAL_SIGNUP = { ...env.signup, paymentInstructions: { ...env.signup.paymentInstructions } };
 afterEach(() => {
   Object.assign(env.signup, ORIGINAL_SIGNUP, { paymentInstructions: { ...ORIGINAL_SIGNUP.paymentInstructions } });

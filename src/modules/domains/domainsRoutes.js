@@ -8,12 +8,14 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const { requirePlanFeature } = require('../billing/planFeatureGate');
+const { requireCustomDomains } = require('./domainsGate');
 const controller = require('./domainsController');
 const schemas = require('./domainsValidation');
 
 // Mounted at /api/v1/workspaces/:workspaceId/domains — staff, `domain.manage`.
+// Closed (404) unless CUSTOM_DOMAINS_ENABLED (domainsGate.js).
 const router = Router({ mergeParams: true });
-router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.DOMAIN_MANAGE));
+router.use(requireCustomDomains, authenticate, resolveTenant, requirePermission(PERMISSIONS.DOMAIN_MANAGE));
 
 // Connecting a custom domain needs a store out of draft and, while
 // PLAN_FEATURE_ENFORCEMENT is on, custom_domain (billing/planFeatureGate).

@@ -15,6 +15,14 @@ const { lookupTxt } = require('../../src/modules/domains/dnsVerifier');
 
 jest.mock('../../src/modules/domains/dnsVerifier', () => ({ lookupTxt: jest.fn() }));
 
+// The domains routes are closed unless CUSTOM_DOMAINS_ENABLED (domains/domainsGate.js).
+beforeAll(() => {
+  env.customDomains.enabled = true;
+});
+afterAll(() => {
+  env.customDomains.enabled = false;
+});
+
 const ORIGINAL_ENFORCEMENT = env.planFeatures.enforcement;
 afterEach(() => {
   env.planFeatures.enforcement = ORIGINAL_ENFORCEMENT;

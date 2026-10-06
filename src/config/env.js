@@ -591,6 +591,15 @@ const env = {
     enabled: process.env.NODE_ENV !== 'test' && process.env.SITE_ANALYTICS_ENABLED === 'true',
     origins: csvList(process.env.SITE_ANALYTICS_ORIGINS, ''),
   },
+
+  // Merchant custom domains (modules/domains). Off unless exactly "true": every
+  // dashboard route under /workspaces/:id/domains answers 404 like an unknown
+  // path. Domains already verified keep resolving: GET /store/resolve-host and
+  // the host resolver are not behind it. Under NODE_ENV=test it starts off; a
+  // test flips it on this object.
+  customDomains: {
+    enabled: process.env.NODE_ENV !== 'test' && process.env.CUSTOM_DOMAINS_ENABLED === 'true',
+  },
 };
 
 module.exports = env;
