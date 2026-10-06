@@ -1996,53 +1996,12 @@ Shopify links alike; `details[0].field` stays `url`):
 | `LINK_NO_PRODUCT_DATA` | the page publishes no product data / the Shopify link returned no product | That page does not show its product details — import a sheet instead | الصفحة دي مش بتنشر بيانات المنتج — استورده من شيت |
 | `IMPORT_SOURCE_UNREACHABLE` | the page could not be read (timeout, 404…) | We could not reach that page — try again later | مقدرناش نوصل للصفحة — جرب تاني بعدين |
 
-## 200. Email campaigns — UI: pending
+## 200. Email campaigns — WITHDRAWN, do not build
 
-A broadcast email designed with the same block designer as the order emails (heading, text, button, image, divider — **no
-order table**), sent to contacts who **agreed to marketing** and have an email, narrowed by a saved segment and/or a tag.
-Never sent to a blacklisted contact, an address/phone that unsubscribed or answered STOP, or a blocked address/phone.
-Variables: `{{first_name}}`, `{{full_name}}`, `{{store_name}}`, `{{store_link}}`. Every email ends with the store's
-unsubscribe link (the existing storefront `/unsubscribe?t=` page — unchanged) and an open pixel.
-
-### Endpoints — `/api/v1/workspaces/:ws/email-campaigns` (read `customers.view`, change/send `customers.manage`)
-- `GET /?status=draft|scheduled|sending|sent|cancelled` → `{ campaigns: [Campaign] }` (newest first, 200 max)
-- `GET /audience-count?segmentId=&tag=` → `{ recipients: 37 }` (live count for the audience picker)
-- `POST /` `{ name (1–120), subject (1–200), blocks (1–40 blocks), audience?: { segmentId?, tag? } }` → 201 Campaign
-- `GET /:id` → Campaign, plus `audienceCount` while draft/scheduled
-- `PATCH /:id` (any of the same fields; draft/scheduled only, else 409 `CAMPAIGN_LOCKED`)
-- `DELETE /:id` → 204 (409 `CAMPAIGN_SENDING` while sending)
-- `POST /:id/preview` `{ subject?, blocks? }` (unsaved edits) → `{ subject, html, text }` with sample name "Sara Ahmed"
-- `POST /:id/test` `{ emails?: [≤5] }` (default: the signed-in user's email) → `{ results: [{ email, status: "sent"|"failed" }] }`; subject gets "[Test] "
-- `POST /:id/send` `{ scheduledAt?: ISO (≤ 1 year) }` → Campaign. Future time → `scheduled`; none/now → `sending` at once.
-  409 `NO_RECIPIENTS` "No contact in this audience agreed to marketing emails"; 409 `CAMPAIGN_LOCKED` if already sent.
-- `POST /:id/cancel` → scheduled ⇒ back to `draft`; sending ⇒ `cancelled` (the rest are skipped). Else 409 `CAMPAIGN_NOT_CANCELLABLE`.
-- `GET /:id/recipients?status=queued|sent|failed|skipped|opened&offset=&limit=(≤200)` → `{ recipients: [{ email, fullName, customerId, status, error, sentAt, openedAt }], total }`
-
-Campaign:
-```json
-{ "id": "…", "name": "Eid sale", "subject": "{{first_name}}, Eid offers at {{store_name}}",
-  "blocks": [{ "type": "heading", "text": "Hi {{first_name}}" }, { "type": "button", "label": "Shop now", "url": "{{store_link}}" }],
-  "audience": { "segmentId": null, "tag": "vip" }, "status": "sent", "scheduledAt": null,
-  "startedAt": "2026-10-06T21:40:00Z", "sentAt": "2026-10-06T21:40:03Z",
-  "stats": { "recipients": 2, "sent": 2, "failed": 0, "skipped": 0, "queued": 0, "opened": 1, "openRate": 50 } }
-```
-`openRate` is % of sent (null before any). Sending runs 100 at a time; poll `GET /:id` while `sending`.
-
-### Screens
-- **Marketing → Email campaigns** (list): name, status chip, sent / opened (rate), date. Statuses: مسودة Draft · مجدولة
-  Scheduled · بتتبعت Sending · اتبعتت Sent · اتلغت Cancelled. Empty: «ابعت أول حملة إيميل لعملاءك» / "Send your first email campaign".
-- **Editor**: name, subject (with variable chips), the block designer (reuse the order-email designer without the order table),
-  audience = segment picker + tag + live count «هتوصل لـ 37 عميل موافق على الرسائل التسويقية» / "Reaches 37 contacts who agreed
-  to marketing emails", preview pane, «ابعت تجربة» / "Send a test", «ابعت دلوقتي» / "Send now", «حدد ميعاد» / "Schedule".
-  Confirm before sending: «هتتبعت لـ 37 عميل ومش هتقدر ترجعها» / "This goes to 37 contacts and can't be undone".
-- **Report** (sent/sending): the stats, a progress bar while sending, recipients table with status filter, «إلغاء الإرسال» /
-  "Stop sending" while sending, «إلغاء الميعاد» / "Unschedule" while scheduled.
-- Note on the editor: «الإيميل بيتبعت بس للي وافقوا على الرسائل التسويقية، وفي آخره لينك إلغاء الاشتراك» / "Only contacts who
-  agreed to marketing get it, and every email ends with an unsubscribe link".
-
-### Storefront
-Nothing new: the unsubscribe link opens the existing `/unsubscribe?t=…` page, which posts to `/store/:ws/marketing/unsubscribe`
-(now also open while the store is locked by a store gate).
+The email campaigns backend (`/workspaces/:ws/email-campaigns`, `/email-campaigns/open`) was removed again: SPEC §21
+forbids campaigns of any kind, email blasts included (owner, 2026-10-03). If any screen, api-client call or menu entry
+for it was started, please remove it. Nothing else changes: the abandoned-cart email's unsubscribe page works as before,
+and it now also works while a store is locked by a store gate.
 
 ## 201. Gift cards with online payments — UI: pending
 

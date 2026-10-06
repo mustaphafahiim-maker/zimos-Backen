@@ -53,19 +53,13 @@ function linkFor(base, workspaceId, checkoutSessionId) {
 async function unsubscribe(workspace, token) {
   const sessionId = readToken(token, workspace.id);
   if (!sessionId) throw new AppError('INVALID_LINK', 'This link is not valid', 404);
-  // A campaign email's link names its recipient instead (emailCampaigns): "r:<recipientId>".
-  if (sessionId.startsWith('r:')) return require('../emailCampaigns/campaignService').unsubscribeRecipient(workspace, sessionId.slice(2));
   const session = await db.CheckoutSession.findOne({ where: { id: sessionId, workspaceId: workspace.id } });
   if (!session) throw new AppError('INVALID_LINK', 'This link is not valid', 404);
   const contact = session.contactFields || {};
   const email = typeof contact.email === 'string' && contact.email.trim() ? contact.email.trim().toLowerCase().slice(0, 255) : null;
   const phoneNormalized = session.phoneNormalized || null;
   if (!email && !phoneNormalized) return;
-  await optOut(workspace, { email, phoneNormalized, entityType: 'CheckoutSession', entityId: session.id });
-}
 
-/** Records the STOP for an address and/or phone; `customerId` also withdraws that contact's consent. */
-async function optOut(workspace, { email, phoneNormalized, customerId = null, entityType, entityId }) {
   await db.sequelize.transaction(async (transaction) => {
     // The address may already be on a row of its own (an earlier unsubscribe without a phone).
     const emailTaken = email ? await db.MarketingOptOut.count({ where: { workspaceId: workspace.id, email }, transaction }) : 0;
@@ -82,15 +76,12 @@ async function optOut(workspace, { email, phoneNormalized, customerId = null, en
     if (phoneNormalized) {
       await db.Customer.update({ marketingConsent: false }, { where: { workspaceId: workspace.id, phoneNormalized, marketingConsent: true }, transaction });
     }
-    if (customerId) {
-      await db.Customer.update({ marketingConsent: false }, { where: { workspaceId: workspace.id, id: customerId, marketingConsent: true }, transaction });
-    }
     await recordAudit({
       workspaceId: workspace.id,
       actorUserId: null,
       action: 'customer.marketing_consent.withdrawn',
-      entityType,
-      entityId,
+      entityType: 'CheckoutSession',
+      entityId: session.id,
       metadata: { via: 'email', phoneNormalized, email },
       transaction,
     });
@@ -107,4 +98,4 @@ router.post(
   })
 );
 
-module.exports = { router, tokenFor, readToken, linkFor, unsubscribe, optOut };
+module.exports = { router, tokenFor, readToken, linkFor, unsubscribe };

@@ -268,11 +268,8 @@ v1.use('/workspaces/:workspaceId/store-gate', require('./modules/storeGate').sta
 // Purchase limits per product (item 198).
 v1.use('/workspaces/:workspaceId/purchase-limits', require('./modules/catalog/purchaseLimits').router);
 v1.use('/workspaces/:workspaceId/delivery-estimates', require('./modules/shipping/deliveryEstimates').staff);
-// Email campaigns to consenting contacts (spec-gaps item 200) and their open pixel.
-v1.use('/workspaces/:workspaceId/email-campaigns', require('./modules/emailCampaigns').staff);
 // Daily / weekly summary emails to team members (spec-gaps item 202).
 v1.use('/workspaces/:workspaceId/scheduled-reports', require('./modules/scheduledReports').router);
-v1.use('/email-campaigns/open', require('./modules/emailCampaigns').pixel);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
