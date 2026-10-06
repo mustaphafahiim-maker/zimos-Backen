@@ -939,6 +939,13 @@ function applySearchAndDates(conditions, bind, { q, from, to }) {
       arms.push(
         "right(regexp_replace(coalesce(o.contact_snapshot->>'phone', ''), '[^0-9]', '', 'g'), 10) = $qPhone"
       );
+    } else if (digits.length >= 4 && /^[\d\s+\-()]+$/.test(term)) {
+      // The last digits read off a waybill or a caller ID (4–9): the phone or the second phone ends with them.
+      bind.qPhoneTail = `%${digits}`;
+      arms.push(
+        "regexp_replace(coalesce(o.contact_snapshot->>'phone', ''), '[^0-9]', '', 'g') LIKE $qPhoneTail",
+        "regexp_replace(coalesce(o.contact_snapshot->>'alternatePhone', ''), '[^0-9]', '', 'g') LIKE $qPhoneTail"
+      );
     }
 
     conditions.push(`(${arms.join(' OR ')})`);

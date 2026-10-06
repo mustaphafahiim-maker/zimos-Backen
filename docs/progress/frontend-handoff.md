@@ -412,3 +412,18 @@ Wording:
 | Billing address same as shipping | عنوان الفاتورة نفس عنوان الشحن |
 | Billing address | عنوان الفاتورة |
 | Same as shipping | نفس عنوان الشحن |
+
+---
+
+## Frontend request — order search by the last digits of a phone — done
+
+From `docs/ux/backend-requests.md` (audit U-35).
+
+**GET `/workspaces/:ws/orders?q=5678`** (permission `orders.view`, unchanged endpoint and answer).
+`q` made only of 4–9 digits (spaces, `+`, `-`, brackets allowed) now also matches orders whose phone **or second phone**
+ends with those digits. 10+ digits keep the exact "last ten digits" match; 1–3 digits only match order numbers.
+Names/emails/order numbers/waybills still match as before (any of them).
+The ⌘K search (`GET /workspaces/:ws/search`) already matched 4+ digits anywhere in the phone; unchanged.
+
+UI: nothing new needed — the Orders list and ⌘K just send the digits. Suggested placeholder:
+"Order #, name, phone or its last 4 digits" / «رقم الطلب أو الاسم أو التليفون أو آخر ٤ أرقام».
