@@ -2566,3 +2566,25 @@ The storefront strip already exists: `GET /api/v1/store/:ws/cross-sell?productId
   - Row checkboxes, then «اعمل أمر شراء» / "Create purchase order": pick the supplier (and location), then open the new draft PO.
 - Settings dialog: «احسب المبيعات من آخر … يوم» / "Sales over the last … days", «المورّد بيوصّل في … يوم» / "Supplier lead time (days)", «عايز المخزون يكفي … يوم» / "Stock to cover (days)", «هامش أمان … يوم» / "Safety margin (days)".
 - Product page in the dashboard: a small card from `?productId=` («يكفي 30 يوم — اطلب قبل 22 أكتوبر» / "30 days left — reorder by 22 Oct").
+
+## 225. Click and collect — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/click-and-collect` (read `orders.view`, save `shipping.manage`)
+- `GET` / `PUT` `{ enabled, locations: { "<stockLocationId>": { enabled, instructions: { ar, en } | null, hours: { ar, en } | null } } }` — texts ≤ 300; locations must be this store's (Inventory → Locations, item 206); when enabled at least one location must be on (422 `locations`).
+
+### Orders — same base
+- `GET /orders?status=pending|ready|collected|cancelled&locationId=&limit=&offset=` → `{ total, pickups: [{ orderId, status, location: { id, name, address, instructions, hours }, readyAt, collectedAt, order: { id, orderNumber, totalAmount, currency, customerName, phone, paymentMethod, financialState, createdAt } }] }`.
+- `POST /orders/:orderId/ready` (`orders.manage`) → `{ pickup, emailed }` — emails the shopper «طلبك … جاهز للاستلام» with the place and the code (when the order has an email). 409 `PICKUP_NOT_PENDING`, `ORDER_CANCELLED`.
+- `POST /orders/:orderId/collect` `{ code: "713997" }` → `{ pickup }` — the order becomes delivered (fulfilled; loyalty, referrals, gift cards and automations run as for a delivery). 422 `PICKUP_CODE_WRONG` «الكود غلط» / "Wrong code"; 409 `PICKUP_NOT_OPEN`.
+
+### Storefront
+- `GET /api/v1/store/:ws/pickup/locations?variantIds=a,b` → 404 when off, else `{ locations: [{ id, name, address, instructions, hours, available }] }` (`available` = every given variant has a free unit there; null without `variantIds`).
+- Checkout body: `pickupLocationId` instead of `shippingAddress` (any address sent is dropped; address fields of the checkout form aren't required; shipping is 0; `shippingOption` ignored). Errors: 422 `pickupLocationId` «الاستلام مش متاح من المكان ده — اختار مكان تاني» / "Pickup isn't offered at this place — choose another"; 409 `PICKUP_OUT_OF_STOCK` `{ variantIds }` «في منتجات مش موجودة في الفرع ده — اختار فرع تاني أو التوصيل» / "Some items aren't available at this place — choose another place or delivery".
+- The 201 checkout response carries `pickup: { code, location }`. The order has the tag `pickup` and `shippingSnapshot.pickup = { locationId, name, address }`.
+- `GET /api/v1/store/:ws/pickup/orders/:orderId?token=<tracking token>` (or `X-Shopper-Token`) → `{ pickup: { orderId, status, location, readyAt, collectedAt, code } }` (`code` null once collected or cancelled).
+
+### Screens
+- Settings → Shipping → «الاستلام من الفرع» / "Store pickup": on/off, per location a toggle, instructions and opening hours (ar/en).
+- Checkout: a choice «توصيل» / "Delivery" vs «استلام من الفرع» / "Pick up in store"; for pickup a list of places (address, hours, unavailable ones disabled «مش متوفر هنا» / "Not available here") and no address form; shipping shows «مجانًا» / "Free".
+- Thank-you / tracking page: «كود الاستلام: 713997» / "Pickup code: 713997" big, the place, hours and instructions, status «بنجهّز طلبك» / "Preparing" → «جاهز للاستلام» / "Ready for pickup" → «اتسلّم» / "Collected".
+- Dashboard → Orders → «طلبات الاستلام» / "Pickups": tabs by status and a location filter; «جاهز» / "Mark ready"; «تسليم» / "Hand over" opens a code field (6 digits) and confirms. The order page shows the pickup block instead of the address.

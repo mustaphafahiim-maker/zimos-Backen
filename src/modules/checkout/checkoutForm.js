@@ -256,8 +256,11 @@ function assertCheckoutForm(workspace, body) {
   const form = resolveCheckoutForm(workspace);
   const problems = [];
 
+  // A pickup order has no delivery address (clickAndCollect, item 225).
+  const ADDRESS_KEYS = ['country', 'government', 'city', 'address', 'postal_code', 'note'];
   for (const f of form.fields) {
     if (!f.enabled) continue;
+    if (body.pickupLocationId && ADDRESS_KEYS.includes(f.key)) continue;
     const { field, name, value } = readBodyValue(f.key, body);
     if (f.required && isBlank(value)) {
       problems.push({ field, message: `"${name}" is required` });

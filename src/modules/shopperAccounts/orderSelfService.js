@@ -135,4 +135,4 @@ staff.put('/', validate({ params: ws, body: Joi.object({ cancel: rule.required()
   res.json(settingsOf(w));
 }));
 
-module.exports = { store, staff, allowed, settingsOf };
+module.exports = { store, staff, allowed, settingsOf, orderFor };

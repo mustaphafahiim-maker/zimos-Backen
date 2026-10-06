@@ -46,12 +46,14 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, trackingConsent, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, pickupLocationId, trackingConsent, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
   // A store on a "pause" holiday takes no orders (holidayMode, item 216).
   require('../holidayMode').assertOpen(workspace);
+  // Click and collect: no delivery address, no shipping charge (clickAndCollect, item 225).
+  const pickupLocation = await require('../clickAndCollect').prepare(workspace, pickupLocationId, req.body, orderBody);
   // Per-store required fields (settings.checkout_settings). Checked before any
   // cart work so a rejected checkout costs nothing.
   assertRequiredCheckoutFields(workspace, req.body);
@@ -173,6 +175,7 @@ const checkout = asyncHandler(async (req, res) => {
   if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
   // The delivery day and time slot: a place is held now and given to the order once it exists (deliverySlots/, item 221).
   const slotBooking = await require('../deliverySlots').hold(workspace, deliverySlot);
+  await require('../clickAndCollect').assertStock(workspace, pickupLocation, items);
 
   // The gateway takes the order's currency, or the order is not created (payments/methodCurrency.js).
   if (isOnline) {
@@ -214,6 +217,7 @@ const checkout = asyncHandler(async (req, res) => {
     await require('../holidayMode').markOrder(workspace, order);
     await require('../deliverySlots').attach(order, slotBooking);
     await require('../customerReferrals').recordOnOrder(order, referral);
+    const pickup = await require('../clickAndCollect').attach(order, pickupLocation);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
     await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
@@ -223,7 +227,7 @@ const checkout = asyncHandler(async (req, res) => {
     const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
     const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
     if ((giftCard && giftCard.applied) || (points && points.applied) || (credit && credit.applied)) await order.reload();
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}) });
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -248,6 +252,7 @@ const checkout = asyncHandler(async (req, res) => {
     await require('../holidayMode').markOrder(workspace, order);
     await require('../deliverySlots').attach(order, slotBooking);
     await require('../customerReferrals').recordOnOrder(order, referral);
+    const pickup = await require('../clickAndCollect').attach(order, pickupLocation);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
   await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 
@@ -270,6 +275,7 @@ const checkout = asyncHandler(async (req, res) => {
         ...(points ? { loyalty: { ...points, held: false } } : {}),
         paidByGiftCard: Boolean(giftCard && giftCard.applied),
         paidInStore: true,
+        ...(pickup ? { pickup } : {}),
       });
     } catch (err) {
       // COD not offered (or refused): the card and points go back and the gateway takes the whole order.
@@ -288,6 +294,7 @@ const checkout = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     order: { ...order.toJSON(), items: orderItems },
+    ...(pickup ? { pickup } : {}),
     payment: {
       id: attempt.id,
       status: attempt.status,

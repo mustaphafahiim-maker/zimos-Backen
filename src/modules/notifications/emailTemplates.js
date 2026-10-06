@@ -87,6 +87,18 @@ ${codeHtml}
     return { subject: `${data.storeName || ''} رد على سؤالك`, ...wrap(`<p>${store} رد على سؤالك عن <b>${name}</b>:</p><p style="color:#6b7280">${q}</p><p>${a}</p>${link}`, `${data.question}\n\n${data.answer}\n\n${url}`, { dir: 'rtl', arabicFooter: true }) };
   },
 
+  // An order ready to collect at a store location (clickAndCollect, item 225): where, and the pickup code.
+  pickup_ready(data = {}) {
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const order = escapeHtml(String(data.orderNumber || ''));
+    const place = escapeHtml(String(data.locationName || '').slice(0, 120));
+    const address = escapeHtml(String(data.address || '').slice(0, 300));
+    const extra = data.instructions ? `<p style="color:#6b7280">${escapeHtml(String(data.instructions).slice(0, 500))}</p>` : '';
+    const codeHtml = `<p dir="ltr" style="font-size:24px;font-weight:700;letter-spacing:3px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(String(data.code || ''))}</p>`;
+    if (data.locale === 'en') return { subject: `Order ${data.orderNumber || ''} is ready for pickup`, ...wrap(`<p>Your order <b>${order}</b> from ${store} is ready at <b>${place}</b>${address ? ` (${address})` : ''}.</p>${extra}<p>Show this pickup code when you collect it:</p>${codeHtml}`, `Order ${data.orderNumber} is ready at ${data.locationName}. Pickup code: ${data.code}`) };
+    return { subject: `طلبك ${data.orderNumber || ''} جاهز للاستلام`, ...wrap(`<p>طلبك <b>${order}</b> من ${store} جاهز في <b>${place}</b>${address ? ` (${address})` : ''}.</p>${extra}<p>وريهم كود الاستلام ده وانت بتستلم:</p>${codeHtml}`, `طلبك ${data.orderNumber} جاهز في ${data.locationName}. كود الاستلام: ${data.code}`, { dir: 'rtl', arabicFooter: true }) };
+  },
+
   // A gift card sent to its holder (giftCards, item 189): the code, the value, the store's name.
   gift_card(data = {}) {
     const store = escapeHtml(String(data.storeName || '').slice(0, 120));
