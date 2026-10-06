@@ -932,6 +932,24 @@ Stores can write orders, lost orders and leads into their own Google sheets as t
   - A leads sheet got a live sign-up plus 5 older ones. A lost-orders sheet got 9 rows.
   - Revoked access stopped the sheet with a badge, a banner and a notification in the viewer's language. Connecting again resumed it.
   - All test data was removed afterwards: orders, customers, sign-ups, sheets, the app install and the sandbox files.
+The dashboard home opens with the period the merchant last chose, and contacts can be tagged in bulk from the list (SPEC §15.1, §18.4).
+
+- **Home (frontend only):**
+  - The period, the store/funnel filter and the currency of the overview, and the 7/30-day switch of the site traffic, are kept per store in this browser (`lib/rememberedChoice.ts`, `zimos.home.*.<store>`).
+  - **Decision: per browser, not per account.** It is a viewing convenience, like the list sort. The default stays 7 days (SPEC §15.1), and choosing the default clears the stored value.
+  - A stored value that is no longer valid falls back to the default: an unknown period, a deleted funnel, or a currency the store no longer offers.
+- **Contacts (frontend only):**
+  - The list has a tick box per row and one for all the rows shown.
+  - While some are ticked, a bar offers "Add tags" and "Remove tags". The dialog takes typed tags (comma or Arabic comma) or picks from the tags in use.
+  - It calls the existing `POST /contacts/bulk-tag`, in batches of 200, the server's limit. The selection clears after the change and when the filters change.
+  - **Decision: tick boxes cover the loaded rows.** There is no "every contact matching the filter" option: a segment already covers "everyone who…", and the server takes explicit ids.
+- **Tested** on the scratch DB, in Arabic and English:
+  - The period, funnel and site range stayed after a reload and after moving to Orders and back.
+  - A stale funnel and a bad period fell back to the store and 7 days, with no error.
+  - On 3 ticked contacts, an empty submit was refused, then "pw156-vip, wave 2" plus the picked "newsletter" were added to exactly those 3.
+  - "Select all" ticked 50, and removing the two tags left "newsletter" in place.
+  - Contact tags were restored from a snapshot afterwards.
+  - The test server ran with a higher request limit. The home page makes enough calls that reloading it in a loop hits the normal 100 per minute; the normal limit is back.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1151,7 +1169,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 153. Order export presets in a courier's own layout (§12.3).
 - [x] 154. The Pinterest tag (§13.1).
 - [x] 155. Google Sheets sync for orders and lost orders: adapter + sandbox + README (§16.4).
-- [ ] 156. The dashboard home remembers its period; bulk tagging from the contacts list (§15.1, §18.4).
+- [x] 156. The dashboard home remembers its period; bulk tagging from the contacts list (§15.1, §18.4).
 
 Not queued (decided already or waiting on the owner): cross-sell discounts and "once per customer" by phone/email (lane 3), the full style/layout tab list (lane 5), city/district shipping prices (decision 19 keeps the city as free text), service ratings (lane 8: no fake ratings), a niche-template wizard card (decision 75).
 
