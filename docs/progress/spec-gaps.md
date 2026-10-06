@@ -897,6 +897,41 @@ Stores can add the Pinterest Tag (SPEC §13.1: "Pinterest — Tag | Conversions 
   - On the product page the tag script was requested and queued `load 2612345678901` and `page`.
   - Add to cart queued `track addtocart {value 250, currency EGP, order_quantity 1, event_id, line_items}`.
   - The tag was deleted afterwards.
+Stores can write orders, lost orders and leads into their own Google sheets as things happen (SPEC §16.4).
+
+- **Scope decision:** SPEC §16 leaves the real Google connection to the integrations team (§22 table: "Google Sheets … builds on …"). So, per LANES rule 6, this item is the interface + a `sandbox` adapter + a README:
+  - `modules/sheets/adapters`: `GOOGLE_SHEETS_PROVIDER`, default `sandbox`. The sandbox is refused in production, where the page says Google Sheets is not available yet.
+  - The sandbox keeps each spreadsheet as a JSON file. A sheet id ending `-revoked` or `-flaky` acts out a revoked token or an outage.
+  - The README lists what the `google` adapter must do: `drive.file` scope, offline refresh token, `valueInputOption=RAW` so a name never runs as a formula, and the row number read from `updatedRange`.
+- **Backend:**
+  - Migration 441 adds `sheet_connections` and `sheet_row_refs`. The account's tokens are sealed in `workspace_integrations` (`google_sheets`) and never sent to the browser.
+  - Routes live at `/integrations/google-sheets` (apps.manage). Changes need the Google Sheets app installed: it moved from "coming soon" to available, opening `/apps/google-sheets`. Uninstalling it stops the writing.
+  - **What gets written:**
+    - A new order adds a row. Any later order event (confirmed, shipped, delivered, cancelled, paid, edited, shipment status…) rewrites the same row with the order as it is now; the row number is kept in `sheet_row_refs`.
+    - Lost orders (abandoned, refused, payment failed) add a row; recovering one rewrites it.
+    - Leads are the contact-form and funnel opt-in sign-ups (`contact_form.submitted`). They are written once.
+  - **Columns:**
+    - Orders use the export's columns (the same list as the courier layouts), the checkout form's custom fields (`field:custom_N`), or a fixed value.
+    - Lost orders and leads have their own column lists.
+    - "Group products into one row by order number" chooses one row per order or one per product line.
+  - **Filters:** orders by products and funnels, lost orders by products, leads by funnel.
+  - **Language and phones:** the sheet's language sets the dates and status words. Phones are masked when the teammate who added the sheet can't see them.
+  - **Failures:**
+    - A failure that may pass is retried by the outbox.
+    - Revoked access or a deleted sheet stops that sheet (`revoked` / `error`) and alerts the store once a day at most, in each teammate's language.
+    - Connecting the account again resumes revoked sheets.
+  - **Sync existing** adds the last 30 days that aren't in the sheet yet, in batches, up to 2000.
+- **Dashboard (`/apps/google-sheets`):**
+  - The page has the account panel (connect, which comes back with `?code&state`; disconnect; "connect again" when access was removed) and the list of sheets.
+  - Each sheet shows its status, rows written and last write. Actions: Sync existing, pause/resume, edit, delete, and Preview (sandbox).
+  - The add/edit dialog sets the name, what the sheet carries, the language, the columns (ordered, field or fixed value, defaults), the grouping switch and the product/funnel filters.
+- **Tested** on the scratch DB, in Arabic and English, through the page:
+  - Install, then connect (sandbox round trip).
+  - An orders sheet got its 19 default columns plus a fixed column. A new order appeared in it.
+  - A status change rewrote the same row. Sync existing added 451 orders with no duplicates. Pause/resume worked.
+  - A leads sheet got a live sign-up plus 5 older ones. A lost-orders sheet got 9 rows.
+  - Revoked access stopped the sheet with a badge, a banner and a notification in the viewer's language. Connecting again resumed it.
+  - All test data was removed afterwards: orders, customers, sign-ups, sheets, the app install and the sandbox files.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1115,7 +1150,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 152. A currency switcher on attribution, reports and profit (§11.5).
 - [x] 153. Order export presets in a courier's own layout (§12.3).
 - [x] 154. The Pinterest tag (§13.1).
-- [ ] 155. Google Sheets sync for orders and lost orders: adapter + sandbox + README (§16.4).
+- [x] 155. Google Sheets sync for orders and lost orders: adapter + sandbox + README (§16.4).
 - [ ] 156. The dashboard home remembers its period; bulk tagging from the contacts list (§15.1, §18.4).
 
 Not queued (decided already or waiting on the owner): cross-sell discounts and "once per customer" by phone/email (lane 3), the full style/layout tab list (lane 5), city/district shipping prices (decision 19 keeps the city as free text), service ratings (lane 8: no fake ratings), a niche-template wizard card (decision 75).
