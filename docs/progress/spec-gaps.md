@@ -809,6 +809,25 @@ The rest of the store's own words can now be translated (SPEC §8.10). Product n
   - The refund policy page read "…within 14 days from Demo Store.", and the offer came back as "Buy 2 and save / Best seller".
   - In Arabic, everything stayed the original. The variant still matched by "M".
   - The store, the product, the offer and the translations were restored afterwards.
+Product descriptions can be formatted (SPEC §7.1 "description (rich text)"): headings, bulleted and numbered lists, bold, italic and links. They are safe however they arrive.
+
+- **Decision: a description is stored as text with a few marks, never as HTML:** `## heading`, `- item`, `1. item`, `**bold**`, `_italic_`, `[text](https://…)`.
+  - The store and the dashboard parse the marks (api-client `endpoints/richText.ts`) and draw them with their own elements. React escapes every character, so nothing in a description can run in a shopper's browser, whatever was typed.
+  - Links are kept only for http(s), mailto and tel; externals open with `rel="nofollow noopener noreferrer"`.
+  - Existing plain descriptions render as before: paragraphs and line breaks.
+- **Sanitizing** (`catalog/richDescription.js`, on product create and update, and on the Shopify import that used to strip all formatting):
+  - HTML is turned into the marks: paragraphs, line breaks, headings, lists, bold, italic and safe links.
+  - Everything else is dropped, keeping only the words: script, style, iframe, svg and their content, event handlers, attributes, `javascript:` links, other tags. Entities are decoded.
+  - Text that isn't HTML is kept as written (only control characters and long runs of blank lines are tidied).
+- **Plain text where formatting doesn't belong:** the product feeds, the store's meta description and shared product data (JSON-LD), product cards, and a page's bound `product.description` use the text without its marks.
+- **Dashboard:** the product form's description has a toolbar that writes the marks around the selection (bold, italic, heading, bulleted and numbered list, link with its address selected for typing), a Preview, and a hint. It is in both languages.
+- **Decision: an italic mark may follow an Arabic letter** ("و_خفيف_"), but not a Latin letter or digit, so snake_case words stay as they are.
+- **Tested** on the scratch DB:
+  - Saving HTML with a heading, bold, italic, a list, a safe link, a `javascript:` link, a `<script>` and an `<img onerror>` stored only the marks and the words.
+  - The store page drew h3, strong, em, the list and the safe link (with nofollow). No script or img was inside, and no alert fired.
+  - In the dashboard (Arabic), Bold wrapped the selection, Numbered list numbered two lines, and Preview showed the numbered list.
+  - The cap's description was put back afterwards.
+  - Dashboard, storefront and platform-admin typecheck.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -1022,7 +1041,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 147. Copy a coupon's share link (§10.5).
 - [x] 148. Page settings Details tab: a generic page's address and its title (§9.3).
 - [x] 149. Translations for product content, offer text, option values, policies, store info, the thank-you text and menu labels (§8.10).
-- [ ] 150. Formatted product descriptions, sanitized (§7.1).
+- [x] 150. Formatted product descriptions, sanitized (§7.1).
 - [ ] 151. A "track quantity" switch for physical products; variant prices labelled in the store's currency (§7.1).
 - [ ] 152. A currency switcher on attribution, reports and profit (§11.5).
 - [ ] 153. Order export presets in a courier's own layout (§12.3).
