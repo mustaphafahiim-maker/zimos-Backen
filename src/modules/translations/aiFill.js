@@ -32,7 +32,7 @@ const TARGET = { ar: 'msa', en: 'english', fr: 'french' };
 
 /** [{ target: "type|id|field", text }] still untranslated in `locale`. */
 async function missingTexts(workspaceId, entityType, locale) {
-  if (entityType === 'page' || entityType === 'funnel') {
+  if (require('./contentTranslations').CONTENT_KINDS.includes(entityType)) {
     const items = await require('./contentTranslations').listContent(workspaceId, { entityType, locale });
     return items.flatMap((item) =>
       item.texts.filter((t) => !t.translation).map((t) => ({ target: `${entityType}|${item.entityId}|${t.key}`, text: t.source }))
@@ -131,7 +131,7 @@ const locale = () =>
 const schemas = {
   start: {
     params: Joi.object({ workspaceId: uuid.required() }),
-    body: Joi.object({ entityType: Joi.string().valid('product', 'collection', 'page', 'funnel').required(), locale: locale().required() }),
+    body: Joi.object({ entityType: Joi.string().valid('product', 'collection', 'page', 'funnel', 'product_details', 'store_text').required(), locale: locale().required() }),
   },
   apply: {
     params: Joi.object({ workspaceId: uuid.required() }),

@@ -206,7 +206,11 @@ async function overlay(workspaceId, locale, entityType, items) {
 async function localizeProducts(req, products) {
   try {
     const locale = await shopperLocale(req);
-    if (locale) await overlay(req.tenant.workspaceId, locale, 'product', products);
+    if (locale) {
+      await overlay(req.tenant.workspaceId, locale, 'product', products);
+      // Offers, options, the special-offer line and the page content (moreTexts.js).
+      await require('./moreTexts').localizeProductDetails(req.tenant.workspaceId, locale, products);
+    }
   } catch (err) {
     logger.warn('Products could not be localized', { error: err.message });
   }

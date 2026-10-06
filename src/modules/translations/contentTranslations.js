@@ -135,12 +135,19 @@ async function liveFunnels(workspaceId) {
   return out;
 }
 
-const sourcesOf = (workspaceId, entityType) => (entityType === 'page' ? livePages(workspaceId) : liveFunnels(workspaceId));
+// Products' other texts and the store's own (menus, policies, store info, thank-you) are in moreTexts.js.
+const CONTENT_KINDS = ['page', 'funnel', 'product_details', 'store_text'];
+const sourcesOf = (workspaceId, entityType) =>
+  entityType === 'page'
+    ? livePages(workspaceId)
+    : entityType === 'funnel'
+      ? liveFunnels(workspaceId)
+      : require('./moreTexts').sourcesOf(workspaceId, entityType);
 
 /** "type:id:key" of every live text, for the Languages overview's percentages. */
 async function wantedFields(workspaceId) {
   const out = [];
-  for (const entityType of ['page', 'funnel']) {
+  for (const entityType of CONTENT_KINDS) {
     for (const source of await sourcesOf(workspaceId, entityType)) {
       for (const key of source.texts.keys()) out.push(`${entityType}:${source.entityId}:${key}`);
     }
@@ -173,9 +180,9 @@ async function saveContent(workspaceId, { entityType, entityId, locale, texts },
     throw new ValidationError([{ field: 'locale', message: "The store's own language is edited in the builder" }]);
   }
   const source = (await sourcesOf(workspaceId, entityType)).find((s) => s.entityId === entityId);
-  if (!source) throw new NotFoundError(entityType === 'page' ? 'Page' : 'Funnel');
+  if (!source) throw new NotFoundError({ page: 'Page', funnel: 'Funnel', product_details: 'Product', store_text: 'Store text' }[entityType] || 'Item');
   const unknown = Object.keys(texts).filter((k) => !source.texts.has(k));
-  if (unknown.length) throw new ValidationError(unknown.map((k) => ({ field: `texts.${k}`, message: 'This text is not on the live page' })));
+  if (unknown.length) throw new ValidationError(unknown.map((k) => ({ field: `texts.${k}`, message: 'This text is not live any more' })));
 
   await db.sequelize.transaction(async (transaction) => {
     for (const [field, raw] of Object.entries(texts)) {
@@ -255,7 +262,7 @@ async function localizeFunnelStep(req, funnelId, payload) {
 // --- routes (inside the translations router: website.edit) --------------------
 
 const uuid = Joi.string().uuid();
-const entityType = Joi.string().valid('page', 'funnel');
+const entityType = Joi.string().valid(...CONTENT_KINDS);
 // Checked when a request comes in: translations.js requires this file while it loads.
 const locale = () =>
   Joi.string().custom((value, helpers) => (require('./translations').TRANSLATION_LOCALES.includes(value) ? value : helpers.error('any.only')));
@@ -287,4 +294,16 @@ router.put(
   asyncHandler(async (req, res) => res.json({ item: await saveContent(req.tenant.workspaceId, req.body, req) }))
 );
 
-module.exports = { router, textsOf, translateTree, keyOf, wantedFields, listContent, saveContent, localizePage, localizeFunnelStep };
+module.exports = {
+  router,
+  CONTENT_KINDS,
+  textsOf,
+  translateTree,
+  keyOf,
+  wantedFields,
+  listContent,
+  saveContent,
+  localizePage,
+  localizeFunnelStep,
+  shopperLocaleFor,
+};

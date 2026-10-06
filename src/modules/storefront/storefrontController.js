@@ -6,9 +6,9 @@ const shippingQuoteService = require('../shipping/shippingQuoteService');
 const cartService = require('../cart/cartService');
 const { AppError } = require('../../core/errors/AppError');
 
-// One legal policy, variables filled in (storefront/storeInfo.js); 404 when not written.
+// One legal policy, variables filled in (storefront/storeInfo.js), in the shopper's language; 404 when not written.
 const getPolicy = asyncHandler(async (req, res) =>
-  res.json({ policy: require('./storeInfo').publicLegalPolicy(req.publicWorkspace, req.params.key) })
+  res.json({ policy: await require('../translations/moreTexts').localizedPolicy(req, req.publicWorkspace, req.params.key) })
 );
 // Every public path of the store, for the storefront's sitemap.xml.
 const getSitemap = asyncHandler(async (req, res) =>
@@ -20,7 +20,8 @@ const getSitemap = asyncHandler(async (req, res) =>
 const cache = require('./storefrontCache');
 const getStore = asyncHandler(async (req, res) => {
   const ws = req.tenant.workspaceId;
-  res.json({ store: await cache.cached(ws, 'store', () => service.getStorefront(ws)) });
+  // Menus, store info and the thank-you texts in the shopper's language (translations/moreTexts.js).
+  res.json({ store: await require('../translations/moreTexts').localizeStore(req, await cache.cached(ws, 'store', () => service.getStorefront(ws))) });
 });
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.
