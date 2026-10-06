@@ -2436,3 +2436,25 @@ Perks apply to **signed-in** shoppers (`X-Shopper-Token`) at checkout.
 - Customers → «مستويات VIP» / "VIP tiers": basis switch «حسب المبلغ» / "By amount spent" / «حسب عدد الطلبات» / "By number of orders", window, tier rows (name ar/en, threshold, % off, free shipping, points ×).
 - Customer page: tier badge + «فاضل 3 طلبات لـ Platinum» / "3 more orders to Platinum".
 - Storefront account: «مستواك: ذهبي» / "Your level: Gold" with perks and progress to the next; checkout line «خصم VIP ‎10%» / "VIP 10% off".
+
+## 219. Quote requests (B2B) — UI: pending
+
+### Storefront — `/api/v1/store/:ws/quotes`
+- `POST` `{ contact: { fullName, phone, email?, company? }, lines: [{ variantId, quantity (1–100000), note? }] (1–50), message? }` → 201 `{ quoteId, number: "Q-0001", token, status: "new" }`.
+  **Keep `token`** (shown once): it opens the quote. Send `X-Shopper-Token` too when signed in (links the quote to the account). 429 after 5 an hour.
+- `GET /:quoteId?token=` → `{ quote: { id, number, status: new|quoted|accepted|declined|cancelled|expired, contact: { fullName, company }, lines: [{ variantId, productName, sku, optionValues, quantity, requestedQuantity, note, listPrice, unitPrice, lineTotal }], message, quotedNote, totalAmount, currency, validUntil, orderId } }` (404 for a wrong token).
+- `POST /:quoteId/accept` `{ token, shippingAddress: { country?, province, city, area?, addressLine, placeId? }, notes? }` → 201 `{ quote, orderId, orderNumber, totalAmount }`: a cash-on-delivery order at exactly the quoted prices (stock, shipping and fraud rules apply as usual).
+  409 `QUOTE_EXPIRED` «عرض السعر انتهى — اطلب واحد جديد» / "This quote has expired — ask for a new one", 409 `QUOTE_NOT_OPEN`.
+- `POST /:quoteId/decline` `{ token }`.
+
+### Dashboard — `/api/v1/workspaces/:ws/quotes` (read `orders.view`, change `orders.manage`)
+- `GET ?status=` → `{ quotes: [{ id, number, status, contact, lineCount, validUntil, orderId, createdAt }], newCount }`; `GET /:id` → `{ quote }` with the full contact.
+- `PUT /:id/answer` `{ lines: [{ variantId, quantity, unitPrice }], note?, validUntil (future) }` → quoted; only requested products (422). The first answer emails the shopper a link «عرض السعر جاهز» / "Your quote is ready" pointing at `/quotes/:id` on the store (the page asks for the token kept by the shopper's browser, or the shopper signs in).
+- `POST /:id/cancel`.
+- New merchant notification type **`quote.request`** (orders.view, bell + email).
+- Accepted orders carry the tag `quote` and the note "Quote Q-0001". For online payment, the team sends the existing payment link from the order.
+
+### Screens
+- Product page / cart: «اطلب عرض سعر» / "Request a quote" (quantities per variant, company, message). After sending: «وصلنا طلبك، هنرد عليك بعرض سعر» / "We got it — we'll send you a quote".
+- Storefront `/quotes/:id`: status, the store's prices vs list prices, total, validity «صالح لحد …» / "Valid until …", buttons «موافق — اطلب» / "Accept and order" (address form) and «رفض» / "Decline".
+- Dashboard → Orders → «عروض الأسعار» / "Quotes": inbox with the new count, editor to set the unit price/quantity per line, note and validity, «ابعت العرض» / "Send quote"; link to the order once accepted.

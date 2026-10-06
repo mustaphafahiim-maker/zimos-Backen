@@ -298,6 +298,8 @@ v1.use('/workspaces/:workspaceId/gift-options', require('./modules/giftOptions')
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
+// B2B quote requests (spec-gaps item 219).
+v1.use('/workspaces/:workspaceId/quotes', require('./modules/quotes').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
@@ -380,6 +382,7 @@ v1.use('/store/:workspaceId/price-list', require('./modules/priceLists').store);
 v1.use('/store/:workspaceId/size-chart', require('./modules/sizeCharts').store);
 // The mix-and-match box builder (spec-gaps item 215).
 v1.use('/store/:workspaceId/bundles', require('./modules/bundles/mixAndMatch').store);
+v1.use('/store/:workspaceId/quotes', require('./modules/quotes').store);
 v1.use('/store/:workspaceId/search', require('./modules/searchInsights').store);
 v1.use('/store/:workspaceId/products/:productId/questions', require('./modules/productQuestions').store);
 v1.use('/store/:workspaceId/loyalty', require('./modules/loyalty').store);
