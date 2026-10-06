@@ -13,6 +13,11 @@ const register = (provider) => providers.set(provider.code, provider);
 
 // eslint-disable-next-line global-require
 if (!env.isProduction) register(require('./sandbox'));
+// The merchant's own store elsewhere: orders are sent there, fulfilment comes back (item 181).
+// eslint-disable-next-line global-require
+register(require('./shopify'));
+// eslint-disable-next-line global-require
+register(require('./woocommerce'));
 
 // Shown in the dashboard as "Coming soon" until their adapter exists.
 const PLANNED = [

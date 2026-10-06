@@ -1116,3 +1116,51 @@ Wording:
 | {n} reviews waiting for your approval | {n} تقييم مستني موافقتك |
 | Imported | مستورد |
 | That page does not publish its product details | الصفحة دي مش بتعرض بيانات المنتج |
+
+## 181. Send orders to a Shopify or WooCommerce store, and bring back fulfilment — UI: pending
+
+Two new providers on the **existing dropship screens** (Apps → Dropshipping; permission `apps.manage`; order page Supplier
+card: `orders.view` / `orders.manage`). No new endpoint: the existing ones take `code` = `shopify` or `woocommerce`.
+
+**GET `/workspaces/:ws/dropship/providers`** now lists them (also in production):
+```json
+{ "providers": [
+  { "code": "shopify", "name": "Shopify store", "isTest": false, "connected": false, "accountName": null, "followsStatus": true,
+    "credentialFields": [
+      { "key": "storeUrl", "label": { "en": "Store address (mystore.myshopify.com)", "ar": "عنوان المتجر (mystore.myshopify.com)" }, "secret": false, "required": true },
+      { "key": "accessToken", "label": { "en": "Admin API access token", "ar": "توكن Admin API" }, "secret": true, "required": true } ] },
+  { "code": "woocommerce", "name": "WooCommerce store", "credentialFields": [ "storeUrl", "consumerKey (secret)", "consumerSecret (secret)" ], "…": "…" }
+] }
+```
+
+- **PUT `/dropship/providers/shopify`** `{ "credentials": { "storeUrl": "mystore.myshopify.com", "accessToken": "shpat_…" } }`
+  → `{ "code": "shopify", "connected": true, "accountName": "My Shop" }`. The address may omit `https://`; it must be https.
+  Errors 422 `DROPSHIP_INVALID_CREDENTIALS` ("The store refused the credentials", "The store address must start with https://").
+  Secrets are sealed and never returned.
+- **PUT `/dropship/providers/woocommerce`** `{ "credentials": { "storeUrl": "https://mystore.com", "consumerKey": "ck_…", "consumerSecret": "cs_…" } }`.
+- **POST `/dropship/providers/:code/import`** `{ "code": "123456" }` (the product id in that store) → 201 `{ product }`, a draft.
+  Variant SKUs become the other store's ids (Shopify variant id; Woo `30` or `30:31`) — **the UI should warn not to edit
+  these SKUs**, they link the lines. 404 `DROPSHIP_PRODUCT_NOT_FOUND`, 409 `DROPSHIP_ALREADY_IMPORTED`.
+- **POST `/dropship/providers/:code/orders/:orderId/push`** (or the order page's `/orders/:orderId/dropship/:code/push`)
+  → `{ "externalOrderId": "5000", "externalStatus": "open", "suggestedStage": null }`. Pushing again returns the same order.
+  WooCommerce refuses an order with a line that is not one of its products: 409 `DROPSHIP_ORDER_REJECTED`
+  ("\"Demo T-Shirt\" is not a product of the WooCommerce store"). Shopify sends such a line as a custom line.
+- **POST `/orders/:orderId/dropship/refresh`** and the follow job bring the status back: Shopify `open|partial|fulfilled|delivered|cancelled`,
+  Woo `pending|processing|on-hold|completed|cancelled|refunded|failed`; `suggestedStage` = shipped / delivered / cancelled /
+  returned, applied by itself when the provider's "apply status" setting is on (existing PATCH `/providers/:code/settings`).
+
+### Screens
+- Dropshipping page: two cards "Shopify store" and "WooCommerce store" in a group **"Your other store"** (separate from the
+  suppliers), with the credential form generated from `credentialFields` and a help link on where to get the token/keys.
+- Import dialog: field "Product id in your store".
+- Order page Supplier card: unchanged; shows the provider name, its order number and status.
+
+Wording:
+| en | ar |
+|---|---|
+| Your other store | متجرك التاني |
+| Send orders to your Shopify or WooCommerce store and get the shipping status back | ابعت الأوردرات لمتجرك على شوبيفاي أو ووكومرس وارجع بحالة الشحن |
+| Product id in your store | رقم المنتج في متجرك |
+| Don't change these SKUs: they link the product to your store | متغيرش الـ SKU دي: هي اللي بتربط المنتج بمتجرك |
+| Sent to your store as order #{id} | اتبعت لمتجرك كأوردر رقم {id} |
+| This product isn't in your WooCommerce store | المنتج ده مش موجود في متجر ووكومرس بتاعك |

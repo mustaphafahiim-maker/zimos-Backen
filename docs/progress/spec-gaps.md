@@ -1379,7 +1379,12 @@ Integrations (interface + sandbox + README):
   - Products land through the existing import job as drafts with stock 0; the page's price is kept in its own currency and noted in the description for the merchant to check.
   - Reviews: only those the page publishes, `source: 'import'`, `status: 'pending'` until approved; the sandbox brings none, so no review is ever made up (SPEC §21).
   - This environment has no outside network, so live pages answered 403 here; the reader and the job were checked on a saved product page with JSON-LD and reviews.
-- [ ] 181. Send orders to a Shopify or WooCommerce store, and bring back fulfilment.
+- [x] 181. Send orders to a Shopify or WooCommerce store, and bring back fulfilment. (backend done, UI in frontend-handoff.md)
+  - Two dropship providers (`dropship/providers/shopify.js`, `woocommerce.js`) on the existing contract, so connect, import, push, auto-forward, follow and apply-status all come for free; no new endpoint or migration.
+  - Shopify: Admin API 2024-10 with a custom app token. Imported variants carry the Shopify variant id as SKU; other lines go as custom lines. Idempotent by `source_identifier = zimos-<orderId>`. fulfilled → shipped, delivered → delivered, cancelled → cancelled; tracking comes back too.
+  - WooCommerce: REST v3 with a consumer key/secret. SKU `<productId>[:<variationId>]`; an unmappable line is refused (Woo orders need a product). Idempotent by meta `_zimos_order_id`. completed → shipped, cancelled/failed → cancelled, refunded → returned.
+  - `storeHttp.js`: https only (plain http to localhost only outside production), timeout, no redirects, README error codes. Registered in production; the `sandbox` provider stays the test one.
+  - Verified against a local mock store for both: bad token 422, import 404/201, push twice → same id, refresh → shipped.
 - [ ] 182. Sync contacts and leads to Mailchimp or Klaviyo lists.
 - [ ] 183. Express checkout buttons (wallets) and Stripe and PayPal adapters behind the payment interface. They stay sandbox until the owner's keys are set.
 - [ ] 184. Address autocomplete at checkout (places-provider interface + sandbox).
