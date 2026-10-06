@@ -244,6 +244,7 @@ v1.use('/workspaces/:workspaceId/webhooks', appGate.requireAppForChanges('webhoo
 // Features that are apps take changes only while the store has the app (apps/appGate.js).
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 // Google Sheets sync: the account, the sheets, "Sync existing" (modules/sheets, SPEC §16.4).
+v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/integrations/google-sheets', appGate.requireAppForChanges('google_sheets'), require('./modules/sheets/sheetsRoutes').router);
 v1.use('/workspaces/:workspaceId/dropship', require('./modules/dropship/dropshipRoutes'));
 // Lane 7: the simple invite (sections → permissions) and support access.
@@ -305,6 +306,8 @@ v1.use('/store/:workspaceId/affiliate', affiliateRoutes.portal);
 v1.use('/store/:workspaceId/subscriptions', customerSubscriptionRoutes.portal);
 v1.use('/store/:workspaceId/shoppable-images', shoppableImageRoutes.store);
 v1.use('/store/:workspaceId/learn', courseRoutes.portal);
+// A store's uploaded fonts, served to any origin (modules/fonts).
+v1.use('/store/:workspaceId/fonts', require('./modules/fonts/storeFonts').store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 

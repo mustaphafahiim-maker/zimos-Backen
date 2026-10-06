@@ -21,7 +21,10 @@ const cache = require('./storefrontCache');
 const getStore = asyncHandler(async (req, res) => {
   const ws = req.tenant.workspaceId;
   // Menus, store info and the thank-you texts in the shopper's language (translations/moreTexts.js).
-  res.json({ store: await require('../translations/moreTexts').localizeStore(req, await cache.cached(ws, 'store', () => service.getStorefront(ws))) });
+  const store = await require('../translations/moreTexts').localizeStore(req, await cache.cached(ws, 'store', () => service.getStorefront(ws)));
+  // The store's uploaded fonts, for its @font-face rules (fonts/storeFonts.js).
+  const customFonts = await cache.cached(ws, 'fonts', () => require('../fonts/storeFonts').publicList(ws));
+  res.json({ store: { ...store, customFonts } });
 });
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.

@@ -13,6 +13,8 @@
  *   other       overflow, cursor
  *   visibility  hiddenPortrait / hiddenLandscape: a phone held upright or
  *               sideways, beside the per-device `hidden`
+ *   font        fontFamily: `g:<Google font name>` or `c:<uploaded font id>`
+ *               (modules/fonts/storeFonts.js)
  *
  * Same contract as the rest: numbers in a range, keywords from a list, hex
  * colours, booleans. The image address is the one free-form value, so it is
@@ -27,6 +29,8 @@ const int = (min, max) => (v) => (Number.isInteger(v) && v >= min && v <= max ? 
 const oneOf = (...allowed) => (v) => (allowed.includes(v) ? null : `must be one of: ${allowed.join(', ')}`);
 const colour = (v) => (typeof v === 'string' && HEX.test(v) ? null : 'must be a hex colour like #1a2b3c');
 const bool = (v) => (typeof v === 'boolean' ? null : 'must be true or false');
+const FONT_REF = /^(?:g:[A-Za-z0-9][A-Za-z0-9 ]{1,39}|c:[0-9a-f]{12})$/;
+const fontRef = (v) => (typeof v === 'string' && FONT_REF.test(v) ? null : 'must be a Google font (g:Name) or an uploaded font (c:id)');
 const imageUrl = (v) => (typeof v === 'string' && v.length <= 500 && IMAGE_URL.test(v) ? null : 'must be an image address (http, https or a site path)');
 
 const EXTRA_STYLE_RULES = {
@@ -50,6 +54,7 @@ const EXTRA_STYLE_RULES = {
   cursor: oneOf('auto', 'default', 'pointer', 'text', 'not-allowed'),
   hiddenPortrait: bool,
   hiddenLandscape: bool,
+  fontFamily: fontRef,
 };
 
-module.exports = { EXTRA_STYLE_RULES, IMAGE_URL };
+module.exports = { EXTRA_STYLE_RULES, IMAGE_URL, FONT_REF };
