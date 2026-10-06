@@ -705,6 +705,22 @@ The builder picks products and collections from the store's own catalogue (SPEC 
   - Picking it set the block's product.
   - "Edit product" pointed to `/catalog/<id>`.
   - The page was not saved.
+The funnel's page editor gets three of the §9.3 top-bar and element-menu tools it was missing: a tablet preview, previous/next page, and "select parent".
+
+- **Tablet preview.** The website editor already had a tablet width in its device switch; the funnel page's preview now has it too (desktop, tablet, mobile).
+- **Previous / next page.** Arrows on either side of the step picker move to the funnel's previous or next page.
+  - **Decision: the order is the funnel's own step order**, the same as the step picker's list. It is not a walk of the flow's links, which can branch (accept or decline).
+  - At the first or last page the arrow is disabled and says so.
+  - The step picker now keeps a usable width; the page's actions move to their own line when the space runs out.
+- **Select parent** (the inspector, so the website editor gets it as well):
+  - Each element's caption row and each column's header have a "Select its parent: …" button.
+  - An element's parent is its column when the section shows its columns, otherwise the section. A column's parent is the section.
+  - **Decision: "selecting" the parent brings its controls into view in the inspector, focuses them and outlines them briefly.** The canvas picks whole sections and the inspector already lists the section's whole tree, so there is no separate element selection to move.
+- **Tested** on the scratch DB, in Arabic and in English, on the "Link test" funnel:
+  - The arrows went sales → checkout → thank-you and back, disabled at both ends.
+  - On a three-column section, an element's button outlined and focused its column, and the column's button went to the section's settings.
+  - The tablet button narrowed the preview.
+  - Nothing was saved to the funnel.
 
 ## P0 — correctness, compliance, launch gates
 
@@ -913,7 +929,7 @@ Same order: bugs and security first, then what blocks selling, then features. Le
 - [x] 142. New-order notifications name the product and governorate, in the teammate's language (§20.1).
 - [x] 143. AI store policies applied to the store's policies (§19.2).
 - [x] 144. Product pickers in the builder instead of pasted IDs, with "Edit product" (§9.3).
-- [ ] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
+- [x] 145. Funnel page editor: tablet preview, previous/next page, select the parent element (§9.3).
 - [ ] 146. Split tests with more than two versions (§9.6).
 - [ ] 147. Copy a coupon's share link (§10.5).
 - [ ] 148. Page settings Details tab: a generic page's address and its title (§9.3).
