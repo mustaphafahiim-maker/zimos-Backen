@@ -69,9 +69,17 @@ describe('what a merchant is offered', () => {
         kind: 'manual',
         label: { ar: 'محفظة إلكترونية', en: 'Mobile wallet' },
         accountNumber: '01000000001',
+        paymentLink: null,
         note: { ar: 'حوّل من محفظتك', en: 'Send from your wallet' },
       },
-      { code: 'instapay', kind: 'manual', label: { ar: 'إنستا باي', en: 'InstaPay' }, accountNumber: 'zimos@instapay', note: { ar: null, en: null } },
+      {
+        code: 'instapay',
+        kind: 'manual',
+        label: { ar: 'إنستا باي', en: 'InstaPay' },
+        accountNumber: 'zimos@instapay',
+        paymentLink: null,
+        note: { ar: null, en: null },
+      },
     ]);
 
     await patch(creator, 'wallet', { enabled: false });
@@ -130,6 +138,36 @@ describe('what a merchant is offered', () => {
       expect(text).not.toContain('fake-client-id');
       expect(text).not.toContain('fake-webhook-token');
     });
+  });
+});
+
+describe('the optional payment link', () => {
+  it('is empty by default, https only when given, and cleared by an empty value', async () => {
+    const creator = await makePlatformUser('creator');
+    expect((await setAccount(creator, 'instapay', { accountNumber: 'zimos@instapay', paymentLink: '' })).status).toBe(200);
+    expect((await db.PaymentMethod.findOne({ where: { code: 'instapay' } })).paymentLink).toBeNull();
+    expect((await setAccount(creator, 'instapay', { paymentLink: null })).status).toBe(200);
+
+    expect((await setAccount(creator, 'instapay', { paymentLink: 'http://ipn.eg/S/zimos/instapay/x' })).status).toBe(422);
+    expect((await setAccount(creator, 'instapay', { paymentLink: 'javascript:alert(1)' })).status).toBe(422);
+    expect((await setAccount(creator, 'instapay', { paymentLink: 'not a link' })).status).toBe(422);
+
+    const set = await setAccount(creator, 'instapay', { paymentLink: 'https://ipn.eg/S/zimos/instapay/x' });
+    expect(set.status).toBe(200);
+    expect(set.body.method.paymentLink).toBe('https://ipn.eg/S/zimos/instapay/x');
+    await patch(creator, 'instapay', { enabled: true });
+    const m = await newMerchant();
+    expect((await methodsOf(m)).body.methods[0].paymentLink).toBe('https://ipn.eg/S/zimos/instapay/x');
+
+    expect((await setAccount(creator, 'instapay', { paymentLink: '' })).status).toBe(200);
+    expect((await methodsOf(m)).body.methods[0].paymentLink).toBeNull();
+    const audit = await db.AuditLog.findOne({ where: { action: 'payment_method.account_update' }, order: [['createdAt', 'DESC']] });
+    expect(audit.beforeState.paymentLink).toBe('https://ipn.eg/S/zimos/instapay/x');
+  });
+
+  it('needs the same permission as the number', async () => {
+    const admin = await makePlatformUser('admin');
+    expect((await setAccount(admin, 'instapay', { paymentLink: 'https://ipn.eg/x' })).status).toBe(403);
   });
 });
 

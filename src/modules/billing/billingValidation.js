@@ -94,6 +94,8 @@ module.exports = {
     params: Joi.object({ code: Joi.string().pattern(METHOD_CODE).required() }),
     body: Joi.object({
       accountNumber: Joi.string().trim().max(80).allow(''),
+      // Optional: empty or null clears it; a given link must be https.
+      paymentLink: Joi.string().trim().max(500).uri({ scheme: ['https'] }).allow('', null),
       noteAr: Joi.string().trim().max(500).allow(''),
       noteEn: Joi.string().trim().max(500).allow(''),
     }).min(1),
