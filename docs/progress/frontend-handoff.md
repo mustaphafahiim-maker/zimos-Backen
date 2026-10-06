@@ -2311,3 +2311,9 @@ All under `/api/v1/workspaces/:ws/customer-notes` (`customers.view` unless noted
 ### Screens
 - Analytics → «البحث في المتجر» / "Store search": totals cards, top searches table (searches, results, clicks, rate), «بحث من غير نتايج» / "Searches with no results" with a quick «أضف مرادف» / "Add a synonym" action, top clicked products.
 - Products → «مرادفات البحث» / "Search synonyms": groups of words as chips; hint «لو حد دوّر على كلمة ومالقاش، بنجرّب مرادفاتها» / "When a word finds nothing, we try its synonyms".
+
+## Frontend request (2026-10-06): wishlist `available` for a whole product — done
+
+`GET/POST /store/:ws/account/wishlist` → `items[].available` for an item saved **without** a variant is now true when **any**
+active variant of the product can be bought (in stock, overselling, or inventory not tracked). An item saved with a variant
+still reflects that variant only. The per-item product request can go.

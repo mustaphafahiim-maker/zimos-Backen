@@ -33,6 +33,8 @@ const signedIn = asyncHandler(async (req, res, next) => {
   next();
 });
 
+const buyable = (p, v) => Boolean(v && v.status === 'active' && (!p.trackInventory || v.allowOverselling || v.stockOnHand - v.reservedStock > 0));
+
 function view(item) {
   const p = item.product;
   const v = item.variant || (p && p.variants && p.variants[0]) || null;
@@ -44,7 +46,8 @@ function view(item) {
     addedAt: item.createdAt,
     product: p ? { name: p.name, slug: p.slug, imageUrl: (v && v.imageUrl) || (media && media.url) || null } : null,
     price: v ? { amount: String(v.priceAmount), compareAt: v.compareAtAmount === null ? null : String(v.compareAtAmount), currency: v.currency } : null,
-    available: Boolean(p && p.status === 'active' && v && v.status === 'active' && (!p.trackInventory || v.allowOverselling || v.stockOnHand - v.reservedStock > 0)),
+    // A saved variant: that variant. A product saved as a whole: any of its variants can be bought (frontend request).
+    available: Boolean(p && p.status === 'active' && (item.variantId ? buyable(p, v) : (p.variants || []).some((x) => buyable(p, x)))),
   };
 }
 
