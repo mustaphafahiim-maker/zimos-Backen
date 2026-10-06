@@ -2104,3 +2104,33 @@ History `kind`s: `earn`, `redeem`, `hold` (for an unpaid online order), `release
 - Checkout (signed in): «استخدم نقطك (عندك 2000 = 200 ج.م)» / "Use your points (2000 = EGP 200)" with an amount field; not signed in: «سجّل دخول عشان تستخدم نقطك» / "Sign in to use your points".
 - Account → «نقطي» / "My points": balance, worth, expiry date, history.
 - Refunds: the merchant can refund a gift-card or points payment by its `paymentId` too (it goes back to the card or the points). Before this, only gateway payments could be named.
+
+## 204. Store credit — UI: pending
+
+Money a customer holds at the store (store currency, minor units). Staff give it, or refund an order to store credit
+instead of money. A **signed-in shopper** (`X-Shopper-Token`) spends it at checkout, with COD or online (not bank
+transfer), exactly like gift cards and points.
+
+### Staff — `/api/v1/workspaces/:ws/store-credit`
+- `GET /` (`customers.view`) → `{ spendingEnabled, customers: [{ customerId, fullName, phone, email, balance }], outstanding, currency }` (holders, biggest first, 500 max).
+- `PUT /settings` (`discounts.manage`) `{ enabled }` — whether shoppers may spend credit at checkout (default on).
+- `GET /customers/:customerId` (`customers.view`) → `{ balance, currency, history: [{ kind, amount, balanceAfter, currency, orderId, note, createdAt }] }`.
+  Kinds: `grant`, `adjust` (taken off), `refund_credit` (an order refunded as credit), `redeem`, `hold`, `release`, `refund` (refund of a credit payment).
+- `POST /customers/:customerId/adjust` (`refunds.manage`) `{ amount: ±int minor units (not 0), note }` → `{ balance, applied }`; taking more than the balance → 422 `STORE_CREDIT_NOT_ENOUGH`.
+- `POST /orders/:orderId/refund` (`refunds.manage`) `{ amount, reason }` → 201 `{ refund: { id, amount, status: "processed", reason: "Store credit: …" }, balance }`.
+  A normal refund of the order (counted in `amountRefunded`, with a credit note), paid onto the customer's credit. At most
+  what was paid and not refunded (422 `REFUND_EXCEEDS_ELIGIBLE_AMOUNT`). 422 `ORDER_HAS_NO_CUSTOMER` / `STORE_CREDIT_CURRENCY` (other currency).
+- The normal refund endpoint can name a `store_credit` payment by `paymentId` (puts it back on the balance), like gift cards and points.
+
+### Storefront
+- Checkout `useStoreCredit: true` (+ `X-Shopper-Token`): uses as much credit as the order takes. Response `storeCredit`: `{ applied, held, amount, balance, currency }`.
+  Errors on `useStoreCredit`: 401 `SHOPPER_NOT_SIGNED_IN`, 422 `STORE_CREDIT_EMPTY`, `STORE_CREDIT_OFF`.
+- Online: held, and the gateway charges the rest; taken on payment, returned on expiry or cancel. Shopper payment status adds `storeCreditHeld`. Covering the whole order → `paidInStore: true`.
+- `GET /store/:ws/account/store-credit` (X-Shopper-Token) → `{ spendingEnabled, balance, currency, history }`.
+
+### Screens
+- Customer page: «رصيد المتجر» / "Store credit" card with balance and history; «إضافة رصيد» / "Add credit" and «خصم رصيد» / "Take credit" (amount + note).
+- Order page → Refund: a choice «ترجيع فلوس» / "Refund money" or «ترجيع كرصيد في المتجر» / "Refund as store credit" (the second calls `/store-credit/orders/:id/refund`).
+- Customers → «أرصدة العملاء» / "Store credit balances": list + total outstanding; toggle «العملاء يقدروا يستخدموا رصيدهم في الدفع» / "Customers can spend credit at checkout".
+- Checkout (signed in, balance > 0): checkbox «استخدم رصيدك (150 ج.م)» / "Use your store credit (EGP 150)".
+- Account: «رصيدي» / "My credit" with the history.

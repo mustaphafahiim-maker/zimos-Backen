@@ -1,14 +1,14 @@
 'use strict';
 
 /*
- * Store-held tenders on an unpaid online order (items 201, 203): a gift card
- * or loyalty points held at checkout, so the gateway is asked only for the
+ * Store-held tenders on an unpaid online order (items 201, 203, 204): a gift
+ * card, store credit or loyalty points held at checkout, so the gateway is asked only for the
  * rest. Each tender module has heldOn(orderId, t), capture(order, due, t) and
  * release(orderId, t, note); this runs them all, in a fixed order (gift cards
  * first), so onlinePaymentService has one call per step.
  */
 
-const TENDERS = [() => require('../giftCards/giftCardHolds'), () => require('../loyalty/loyaltyHolds')];
+const TENDERS = [() => require('../giftCards/giftCardHolds'), () => require('../storeCredit/storeCreditHolds'), () => require('../loyalty/loyaltyHolds')];
 
 async function heldOn(orderId, transaction = null) {
   let total = 0;

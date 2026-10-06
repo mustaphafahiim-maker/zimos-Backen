@@ -639,6 +639,7 @@ async function describeForShopper(order, workspace, preview) {
     // What gift cards and points hold for this payment (heldTenders.js), and what is left to pay.
     giftCardHeld: await require('../giftCards/giftCardHolds').heldOn(order.id),
     pointsHeld: await require('../loyalty/loyaltyHolds').heldOn(order.id),
+    storeCreditHeld: await require('../storeCredit/storeCreditHolds').heldOn(order.id),
     amountDue: Math.max(0, Number(order.totalAmount) - Number(order.amountPaid) - (await require('./heldTenders').heldOn(order.id))),
     currency: order.currency,
     expiresAt: order.paymentExpiresAt,
