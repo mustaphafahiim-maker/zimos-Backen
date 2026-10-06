@@ -37,6 +37,8 @@ function presentCounterpart(domain, target) {
     hostname,
     redirect: Boolean(c && c.redirect),
     sslStatus: c && SSL_STATUSES.includes(c.sslStatus) ? c.sslStatus : 'none',
+    // A bought domain: we created this record ourselves, nothing for the merchant to add.
+    dnsManaged: Boolean(c && c.dnsManaged),
     records: routing.records,
     alternatives: routing.alternatives,
   };

@@ -11,6 +11,7 @@ store is connected to it with no DNS work by the merchant; it renews itself.
 | `register({ domain, years, contact })` | `{ providerRef, expiresAt }` |
 | `setRecords({ domain, providerRef, records })` | — records `[{ type: 'A' \| 'CNAME' \| 'ALIAS' \| 'TXT', name, value }]` |
 | `renew({ domain, providerRef, years, expiresAt })` | `{ expiresAt }` |
+| `renewQuote({ domain, providerRef, years })` (optional) | `{ amount, currency } \| null` — else `search`'s `renewalPrice` × years |
 
 Prices are never written in our code: they come from the registrar's answer
 (or, in the sandbox, from `DOMAIN_SANDBOX_PRICES`). A purchase sends back the price
@@ -35,3 +36,12 @@ nothing here takes money. In the sandbox nothing is bought.
 2. Adds the domain to the store (`domains`), marks it verified (we hold its DNS).
 3. Sets the routing records (`rootDomains.routingFor`) and the verification TXT through `setRecords`.
 4. The daily job `domains.renew_due` renews purchases with auto-renew on that expire within 30 days.
+
+## Order of checks (frontend request)
+
+A purchase checks everything that could stop the store from using the domain
+(store set up with a website, not a platform subdomain, the www/root not
+connected elsewhere, plan limit, price) **before** `register`, so money is
+never spent on a domain that then fails. A failure after `register` answers
+502 `DOMAIN_CONNECT_FAILED` (bought, not yet connected), never "nothing was charged".
+A root domain's www record is created with the others, and marked `dnsManaged`.

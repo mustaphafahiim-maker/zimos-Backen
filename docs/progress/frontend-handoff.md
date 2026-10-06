@@ -1375,3 +1375,34 @@ Wording:
 | Default | الافتراضي |
 | Sign out of all devices | الخروج من كل الأجهزة |
 | Let customers sign in to see their orders | خلّي العملاء يدخلوا يشوفوا طلباتهم |
+
+## Frontend requests (2026-10-06, docs/ux/backend-requests.md) — done
+
+### Domain purchase order of checks (money) — done
+`POST /workspaces/:ws/domains/purchases` now checks **before** registering: not a platform subdomain (422), store set up with a
+website and a slug (409 `STORE_NOT_SET_UP`), the www/root not connected to another store (409 `DOMAIN_UNAVAILABLE`), plan
+limit, availability, price (409 `DOMAIN_PRICE_CHANGED`). Nothing is registered when any fails. If something fails *after*
+the registrar registered it: 502 **`DOMAIN_CONNECT_FAILED`** "The domain was bought but could not be connected yet — support
+will finish it" (the purchase shows `status: "failed"` with `lastError`); `DOMAIN_PURCHASE_FAILED` ("nothing was charged")
+is only for failures before that. Suggested UI: on `DOMAIN_CONNECT_FAILED` show a warning (not "nothing charged").
+
+### Root domain purchase and www — done
+Buying a root domain now creates the **www record too** (CNAME/ALIAS to the store, purpose `redirect`) with the others, and
+the domain's `counterpart` carries **`dnsManaged: true`** (GET `/domains/overview` → `domains[].counterpart.dnsManaged`).
+UI: when `counterpart.dnsManaged` is true, don't ask the merchant to add the www record ("We set this up for you" /
+"جهزناه لك").
+
+### Renewal price quote — done
+- **GET `/workspaces/:ws/domains/purchases/:purchaseId/renew-quote?years=1`** (domain.manage; years 1–10) →
+  `{ "hostname": "mystore.com", "years": 2, "price": { "amount": 110000, "currency": "EGP" } | null, "expiresAt": "2029-10-06T…" }`
+  (`expiresAt` = the new expiry). 409 `DOMAIN_NOT_ACTIVE` for a purchase that isn't active/expired.
+- **POST `/purchases/:purchaseId/renew`** now takes optional **`acceptPrice`** (`{ amount, currency }` or null, as shown by the
+  quote); a different current price → 409 `DOMAIN_PRICE_CHANGED` with `details.price`. Without `acceptPrice` it behaves as before.
+- Renew dialog: years select → quote → "Renew for {price} until {date}" → confirm with `acceptPrice`.
+
+### Funnel/website email override in simple text — done
+On an override (`?funnelId=` / `?websiteId=`), **`PUT /order-emails/:key` with `"blocks": null`** now means "this override
+uses its own plain subject + body": it is stored as such and the store's blocks no longer come back (preview, test and real
+sends). An override that never sends `blocks` still inherits the store's blocks. On the store itself `blocks: null` is
+unchanged (plain body). Lists/GET show `blocks: null` for a plain override with `overridden: true`. UI: the "Plain text"
+toggle on a funnel/website email sends `blocks: null`.

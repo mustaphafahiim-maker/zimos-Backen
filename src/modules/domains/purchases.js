@@ -73,6 +73,17 @@ async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice }, 
     throw new AppError('DOMAIN_PRICE_CHANGED', 'The price changed — check it and confirm again', 409, { price: quote.price });
   }
 
+  // Everything that could stop the store from using the domain is checked before anything is bought (frontend request).
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug'] });
+  if (env.platformRootDomain && host.endsWith(`.${env.platformRootDomain}`)) throw new AppError('VALIDATION_ERROR', 'That is a subdomain of the platform', 422, [{ field: 'domain', message: 'Enter your own domain' }]);
+  if (!workspace || !workspace.slug) throw new ConflictError('Set up your store before buying a domain', 'STORE_NOT_SET_UP');
+  if (!(await db.Website.count({ where: { workspaceId } }))) throw new ConflictError('Set up your store (add a product) before buying a domain', 'STORE_NOT_SET_UP');
+  const rootDomains = require('./rootDomains');
+  const counterpartHost = rootDomains.counterpartOf(host);
+  if (counterpartHost && (await db.Domain.count({ where: { hostname: counterpartHost, workspaceId: { [Op.ne]: workspaceId } } }))) {
+    throw new ConflictError(`${counterpartHost} is connected to another store`, 'DOMAIN_UNAVAILABLE');
+  }
+
   const row = await db.DomainPurchase.create({
     workspaceId, hostname: host, registrar: r.name, status: 'pending', years, autoRenew,
     priceAmount: quote.price ? quote.price.amount : null, currency: quote.price ? quote.price.currency : null, createdBy: req.user.id,
@@ -81,22 +92,28 @@ async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice }, 
     throw err;
   });
 
+  let bought = false;
   try {
     const contact = await db.User.findByPk(req.user.id, { attributes: ['fullName', 'email', 'phone'] });
     const reg = await r.register({ domain: host, years, contact: contact ? contact.toJSON() : {} });
+    bought = true;
     await row.update({ providerRef: reg.providerRef, expiresAt: reg.expiresAt });
 
     // Connect it to the store, then point its DNS here: we hold the zone, so it is verified at once.
     const domainsService = require('./domainsService');
     const { domain: added, record } = await domainsService.addDomain(workspaceId, { hostname: host }, req);
-    const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug'] });
-    const routing = require('./rootDomains').routingFor(host, `${workspace.slug}.${env.platformRootDomain}`);
-    await r.setRecords({ domain: host, providerRef: reg.providerRef, records: [...routing.records, record] });
-    await added.update({ status: 'verified', verifiedAt: new Date() });
+    const target = `${workspace.slug}.${env.platformRootDomain}`;
+    const routing = rootDomains.routingFor(host, target);
+    // www (or the root) is sent to the domain: its record is ours to create too, so the merchant has none to add.
+    const counterpart = added.counterpart && added.counterpart.redirect && counterpartHost ? rootDomains.routingFor(counterpartHost, target, 'redirect').records : [];
+    await r.setRecords({ domain: host, providerRef: reg.providerRef, records: [...routing.records, ...counterpart, record] });
+    await added.update({ status: 'verified', verifiedAt: new Date(), ...(counterpart.length ? { counterpart: { ...added.counterpart, dnsManaged: true } } : {}) });
     await row.update({ status: 'active', domainId: added.id, lastError: null });
   } catch (err) {
     await row.update({ status: 'failed', lastError: String(err.message).slice(0, 500) });
     logger.error('[domains] purchase failed', { workspaceId, domain: host, message: err.message });
+    // Once registered the domain is the store's: say so rather than "nothing was charged".
+    if (bought) throw new AppError('DOMAIN_CONNECT_FAILED', 'The domain was bought but could not be connected yet — support will finish it', 502);
     throw err.isOperational ? err : new AppError('DOMAIN_PURCHASE_FAILED', 'The domain could not be bought — nothing was charged', 502);
   } finally {
     await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'domain.purchase', entityType: 'DomainPurchase', entityId: row.id, after: { hostname: host, years, status: row.status, registrar: r.name }, req });
@@ -123,9 +140,37 @@ async function renewRow(row, years) {
   return row;
 }
 
-async function renewNow(workspaceId, id, years, req) {
+/** What renewing for `years` costs now, as the registrar quotes it (the renew dialog shows it before confirming). */
+async function quoteRenewal(row, years) {
+  const r = registrar();
+  let price = null;
+  if (typeof r.renewQuote === 'function') price = await r.renewQuote({ domain: row.hostname, providerRef: row.providerRef, years });
+  else {
+    const [q] = await r.search([row.hostname]);
+    const perYear = q && (q.renewalPrice || q.price);
+    price = perYear ? { amount: perYear.amount * years, currency: perYear.currency } : null;
+  }
+  const from = row.expiresAt && new Date(row.expiresAt) > new Date() ? new Date(row.expiresAt) : new Date();
+  const expiresAt = new Date(from);
+  expiresAt.setUTCFullYear(expiresAt.getUTCFullYear() + years);
+  return { years, price, expiresAt };
+}
+
+async function renewQuote(workspaceId, id, years) {
   const row = await findOwn(workspaceId, id);
   if (!['active', 'expired'].includes(row.status)) throw new ConflictError('Only a bought domain can be renewed', 'DOMAIN_NOT_ACTIVE');
+  return { hostname: row.hostname, ...(await quoteRenewal(row, years)) };
+}
+
+async function renewNow(workspaceId, id, years, req, acceptPrice) {
+  const row = await findOwn(workspaceId, id);
+  if (!['active', 'expired'].includes(row.status)) throw new ConflictError('Only a bought domain can be renewed', 'DOMAIN_NOT_ACTIVE');
+  // As for a purchase: the price the merchant was shown must still be the price.
+  if (acceptPrice !== undefined) {
+    const { price } = await quoteRenewal(row, years);
+    const same = (a, b) => (a === null && b === null) || (a && b && a.amount === b.amount && a.currency === b.currency);
+    if (!same(price, acceptPrice)) throw new AppError('DOMAIN_PRICE_CHANGED', 'The price changed — check it and confirm again', 409, { price });
+  }
   try {
     await renewRow(row, years);
   } catch (err) {
@@ -173,7 +218,8 @@ function mount(router) {
     asyncHandler(async (req, res) => res.status(201).json(await purchase(req.tenant.workspaceId, req.body, req)))
   );
   router.patch('/purchases/:purchaseId', validate({ params: withId, body: Joi.object({ autoRenew: Joi.boolean().required() }) }), asyncHandler(async (req, res) => res.json(await setAutoRenew(req.tenant.workspaceId, req.params.purchaseId, req.body.autoRenew, req))));
-  router.post('/purchases/:purchaseId/renew', validate({ params: withId, body: Joi.object({ years: Joi.number().integer().min(1).max(10).default(1) }) }), requireLive, asyncHandler(async (req, res) => res.json(await renewNow(req.tenant.workspaceId, req.params.purchaseId, req.body.years, req))));
+  router.get('/purchases/:purchaseId/renew-quote', validate({ params: withId, query: Joi.object({ years: Joi.number().integer().min(1).max(10).default(1) }) }), asyncHandler(async (req, res) => res.json(await renewQuote(req.tenant.workspaceId, req.params.purchaseId, req.query.years))));
+  router.post('/purchases/:purchaseId/renew', validate({ params: withId, body: Joi.object({ years: Joi.number().integer().min(1).max(10).default(1), acceptPrice: money.allow(null) }) }), requireLive, asyncHandler(async (req, res) => res.json(await renewNow(req.tenant.workspaceId, req.params.purchaseId, req.body.years, req, req.body.acceptPrice))));
 }
 
 module.exports = { mount, search, purchase, renewDue, candidates };
