@@ -2677,3 +2677,21 @@ Body for create / edit / preview:
 - Customers → «حسابات الآجل» / "On-account balances": the list with owed / overdue / next due date, filter «المتأخرين بس» / "Overdue only".
 - Checkout (signed-in approved shopper): a method «ادفع آجل (خلال 30 يوم)» / "Pay later on account (30 days)" with «المتاح: …» / "Available: …".
 - Storefront account → «حسابي الآجل» / "My account balance": owed, available, orders with due dates.
+
+## 230. Stock lots with expiry dates — UI: pending
+
+### `/api/v1/workspaces/:ws/stock-lots` (read `inventory.view`, change `inventory.manage`)
+- `GET ?variantId=&status=active|expiring|expired|empty&withinDays=&limit=` → `{ alertDays, lots: [{ id, variantId, productName, sku, locationId, lotCode, expiresOn, quantityReceived, quantityRemaining, purchaseOrderId, note, writtenOffAt, expired, createdAt }] }` — first expiring first. `expiring` = not expired and within `withinDays` (default the alert days).
+- `POST /` `{ variantId, lotCode ≤ 60, expiresOn: "YYYY-MM-DD" | null, quantity, addToStock = true, locationId?, purchaseOrderId?, note? }` → 201 `{ lot }`. `addToStock: true` adds the units to stock; `false` only labels units already on hand (422 `quantity` «فيه بس N قطعة من غير دفعة» / "Only N units are on hand without a lot").
+- `PATCH /:lotId` `{ lotCode?, expiresOn?, note? }`.
+- `POST /:lotId/write-off` `{ quantity?, reason? }` → `{ lot, writtenOff }` — the units leave stock (all that's left when no quantity). 422 `LOT_NOT_ENOUGH`.
+- `PUT /settings` `{ alertDays: 1–365 }` (default 30).
+- Automatic: when an order ships (or is delivered/collected without a shipment) its units come off the lots, first expiring first, once per order. A daily check sends the bell/email notification **`stock.lot_expiring`** «N دفعة قربت تنتهي صلاحيتها» once per lot.
+- Pick list (item 226): each line now has `lots: [{ lotId, lotCode, expiresOn, take, expired }]` and the PDF prints «LOT A-10 exp 2026-10-16: 5 · LOT B-60 …: 2».
+
+### Screens
+- Inventory → «الدفعات والصلاحية» / "Lots & expiry": tabs «شغالة» / "Active", «قربت تنتهي» / "Expiring soon", «منتهية» / "Expired", «خلصت» / "Used up"; columns product, lot, expiry (red when expired), remaining / received.
+- «استلام دفعة» / "Receive a lot": product, lot code, expiry date, quantity, location, «ضيفها للمخزون» / "Add to stock" (off = label existing stock), link to a purchase order.
+- Row actions: edit, «إعدام / شطب» / "Write off" (quantity, reason) with confirm «الكمية دي هتخرج من المخزون» / "These units leave stock".
+- Product variant page: its lots (first to go first). Pick list view: the lot to take under each line.
+- Settings: «نبّهني قبل الانتهاء بـ … يوم» / "Warn me … days before expiry".

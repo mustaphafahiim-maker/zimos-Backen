@@ -70,6 +70,8 @@ async function build(workspaceId, { orderIds, readyToShip, locationId }) {
     line.quantity += it.quantity;
     line.orders.push({ orderId: o.id, orderNumber: o.orderNumber, quantity: it.quantity });
   }
+  // Which lots to take each line from, first expiring first (stockLots/, item 230).
+  for (const lines of groups.values()) for (const line of lines.values()) if (line.variantId) line.lots = await require('../stockLots').suggest(workspaceId, line.variantId, line.quantity);
   const optText = (opts) => Object.values(opts || {}).join(' / ');
   return {
     orderCount: picked.length,
@@ -107,6 +109,8 @@ async function pdfOf(list) {
       let y = drawText(doc, [line.name, opts].filter(Boolean).join(' — '), { x: left + 64, y: top, width: width - 64 - 110, size: 10, align: 'left' });
       doc.font('Helvetica').fontSize(9).fillColor('#444').text(line.sku || '', left + width - 105, top, { width: 105, align: 'right', lineBreak: false });
       const orders = line.orders.map((o) => (o.quantity > 1 ? `${o.orderNumber} (${o.quantity})` : o.orderNumber)).join(', ');
+      const lots = (line.lots || []).map((l) => `LOT ${l.lotCode}${l.expiresOn ? ` exp ${l.expiresOn}` : ''}: ${l.take}${l.expired ? ' (EXPIRED)' : ''}`).join('  ·  ');
+      if (lots) { doc.font('Helvetica-Bold').fontSize(8).fillColor('#8a4b00').text(lots, left + 64, y, { width: width - 64 }); y = doc.y; }
       doc.font('Helvetica').fontSize(7).fillColor('#777').text(orders, left + 64, y, { width: width - 64 });
       y = doc.y;
       doc.fillColor('#000');

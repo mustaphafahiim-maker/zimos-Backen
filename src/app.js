@@ -282,6 +282,7 @@ v1.use('/workspaces/:workspaceId/price-lists', require('./modules/priceLists').s
 v1.use('/workspaces/:workspaceId/stock-locations', require('./modules/stockLocations').router);
 // Suppliers, purchase orders and stock counts (spec-gaps item 207).
 v1.use('/workspaces/:workspaceId/stock-forecast', require('./modules/stockForecast').router);
+v1.use('/workspaces/:workspaceId/stock-lots', require('./modules/stockLots').router);
 v1.use('/workspaces/:workspaceId/purchasing', require('./modules/purchasing').router);
 // Free gift with purchase (spec-gaps item 208).
 v1.use('/workspaces/:workspaceId/free-gifts', require('./modules/freeGifts').router);
