@@ -417,6 +417,10 @@ async function createOrder(
     // Quantity bundles (modules/bundles): lowers the totals of the lines they
     // cover, before anything else looks at the subtotal.
     const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
+    // A VIP tier with free shipping (vipTiers/, item 218) sets this on the checkout's payload: every line ships free.
+    if (payload[Symbol.for('zimos.freeShipping')]) {
+      for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+    }
 
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     const productIds = pricedLines.map((l) => l.productId);

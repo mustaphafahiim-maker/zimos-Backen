@@ -68,7 +68,9 @@ async function earnForOrder(event) {
     if (await db.LoyaltyTransaction.count({ where: { orderId: order.id, kind: 'earn' }, transaction })) return;
     const paidByPoints = Number(await db.Payment.sum('amount', { where: { orderId: order.id, providerCode: 'loyalty', status: ['captured', 'partially_refunded'] }, transaction })) || 0;
     const base = Number(order.totalAmount) - Number(order.shippingAmount) - Number(order.amountRefunded) - paidByPoints;
-    const points = Math.floor((Math.max(0, base) / 100) * s.earnPointsPerUnit);
+    // A VIP tier may multiply the points (vipTiers/, item 218).
+    const multiplier = await require('../vipTiers').pointsMultiplier(workspace, order.customerId);
+    const points = Math.floor((Math.max(0, base) / 100) * s.earnPointsPerUnit * multiplier);
     if (points <= 0) return;
     await move(order.customerId, points, 'earn', { orderId: order.id, note: order.orderNumber ? String(order.orderNumber).slice(0, 200) : null }, transaction);
   });

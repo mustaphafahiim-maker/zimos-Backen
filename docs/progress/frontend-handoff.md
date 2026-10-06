@@ -2413,3 +2413,26 @@ Uses Google's own "Sign in with Google" button (Google Identity Services); the b
 ### Screens
 - Settings → Customer accounts: «الدخول بحساب جوجل» / "Sign in with Google" toggle + client id field with a short guide link, and a note when the platform has none.
 - Storefront sign-in sheet: the Google button above the phone/email code form.
+
+## 218. VIP tiers — UI: pending
+
+Customers move up by what they spent — or how many orders they placed — on **delivered** orders, over a window or ever.
+Perks apply to **signed-in** shoppers (`X-Shopper-Token`) at checkout.
+
+### Settings — `/api/v1/workspaces/:ws/vip-tiers`
+- `GET` (`customers.view`) / `PUT` (`discounts.manage`):
+```json
+{ "enabled": true, "basis": "spent", "windowDays": 365,
+  "tiers": [{ "id": "…", "name": { "ar": "ذهبي", "en": "Gold" }, "threshold": 500000, "percentOff": 10, "freeShipping": true, "pointsMultiplier": 2 }] }
+```
+  basis `spent` (threshold in minor units, net of refunds) or `orders` (count); windowDays 30–1825 or null (ever); ≤6 tiers with different thresholds; percentOff 0–50; pointsMultiplier 1–5. Enabled with no tiers → 422.
+- `GET /customers/:customerId` (`customers.view`) → `{ tier | null, next: { id, name, missing } | null, standing: { basis, value, spent, orders } }`.
+
+### Storefront
+- `GET /store/:ws/account/vip` (X-Shopper-Token) → `{ enabled, basis, tier, next: { id, name, missing }, standing: { value }, tiers: [{ id, name, threshold, percentOff, freeShipping, pointsMultiplier }] }`.
+- Checkout with `X-Shopper-Token`: plain lines priced `percentOff` lower (the lowest of normal, price list, VIP), free shipping when the tier has it, loyalty points × multiplier on delivery. Funnel checkouts keep their own prices. The shipping quote endpoint doesn't know the tier: show «شحن مجاني لعملاء VIP» / "Free shipping for VIP" from `/account/vip` instead.
+
+### Screens
+- Customers → «مستويات VIP» / "VIP tiers": basis switch «حسب المبلغ» / "By amount spent" / «حسب عدد الطلبات» / "By number of orders", window, tier rows (name ar/en, threshold, % off, free shipping, points ×).
+- Customer page: tier badge + «فاضل 3 طلبات لـ Platinum» / "3 more orders to Platinum".
+- Storefront account: «مستواك: ذهبي» / "Your level: Gold" with perks and progress to the next; checkout line «خصم VIP ‎10%» / "VIP 10% off".
