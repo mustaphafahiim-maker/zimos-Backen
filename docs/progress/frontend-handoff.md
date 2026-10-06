@@ -2168,3 +2168,32 @@ their own prices.
 - Customer page: hint that the tag gives wholesale prices «العميل ده بياخد أسعار: Wholesale» / "This customer gets: Wholesale prices".
 - Storefront product page (signed-in, tiers present): «سعرك: 200 ج.م بدل 250» / "Your price: EGP 200 instead of 250" and the tier table
   «من 5 قطع: 180 ج.م» / "From 5 pieces: EGP 180"; cart lines show the reduced price.
+
+## 206. Multiple stock locations — UI: pending
+
+Warehouses / shops with their own stock. The store's sellable stock is unchanged (the variant's total). Locations split
+it: each non-default location keeps its own count; **the default location holds the rest**. A second location needs the
+plan feature `multi_warehouse` (403 `FEATURE_NOT_IN_PLAN`). The first one is free and becomes the default.
+
+### Endpoints — `/api/v1/workspaces/:ws/stock-locations` (read `inventory.view`, change `inventory.manage`)
+- `GET /` → `{ locations: [{ id, name, address, isDefault, priority, isActive, totals: { units }, createdAt }], multiWarehouse }`
+- `POST /` `{ name (1–120), address? (≤300), priority? (0–1000, lower ships first) }` → 201 location (max 50).
+- `PATCH /:id` `{ name?, address?, priority?, isActive?, isDefault: true? }` — making a location the default re-splits the counts so every location keeps its units. The default cannot be switched off.
+- `DELETE /:id` → 204; 409 `LOCATION_HAS_STOCK` (transfer it first), 409 `LOCATION_IS_DEFAULT` (make another the default first).
+- `GET /:id/stock?productId=&q=` → `{ location, variants: [{ variantId, productId, productName, sku, optionValues, onHand, reserved, available }] }` (500 max).
+- `GET /by-variant?variantIds=a,b` → `{ variants: [{ variantId, locations: [{ locationId, name, isDefault, onHand, reserved, available }] }] }` — for the product page.
+- `POST /:id/adjust` `{ variantId, delta (±, not 0), reason (1–200) }` → the variant's by-variant view. Receiving or writing off stock at a location: the store total moves with it (a stock movement named "<location>: <reason>"). 422 `INSUFFICIENT_STOCK` below 0.
+- `POST /transfers` `{ fromLocationId, toLocationId, lines: [{ variantId, quantity }] (≤500), note? }` → 201 `{ transfer }`; at most what is free (on hand − reserved) at the source, else 422 `INSUFFICIENT_STOCK` with `details[0].available`. The store total doesn't change.
+- `GET /transfers` → `{ transfers: [{ id, fromLocationId, toLocationId, lines, note, actorUserId, createdAt }] }` (200 latest).
+- `PUT /orders/:orderId` (`orders.manage`) `{ locationId }` → `{ orderId, location }`: where the order ships from.
+
+Orders: `order.stockLocationId` (null = the default). A new order is assigned automatically to the first active location by
+`priority` that has every line free; otherwise the default.
+
+### Screens
+- Settings → «المخازن» / "Locations": list with units, add/edit (name, address, priority «الأولوية في الشحن» / "Shipping priority"), «اجعله الأساسي» / "Make default", active toggle; upgrade prompt when `multiWarehouse` is false and one exists.
+- Location page: stock table (on hand / reserved / available) with search, «استلام / خصم» / "Receive / write off" (delta + reason).
+- «نقل مخزون» / "Transfer stock": from → to, variant lines with quantities (show available at source), note; transfers history.
+- Product page (dashboard): stock per location under each variant.
+- Order page: «بيتشحن من» / "Ships from" select (PUT /orders/:id); print it on the packing slip.
+- Negative `available` at a location = more reserved there than on hand: show a warning «محتاج نقل مخزون» / "Needs a transfer".

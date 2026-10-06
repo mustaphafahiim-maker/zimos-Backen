@@ -276,6 +276,8 @@ v1.use('/workspaces/:workspaceId/loyalty', require('./modules/loyalty').staff);
 v1.use('/workspaces/:workspaceId/store-credit', require('./modules/storeCredit').staff);
 // Wholesale price lists by customer tag (spec-gaps item 205).
 v1.use('/workspaces/:workspaceId/price-lists', require('./modules/priceLists').staff);
+// Multiple stock locations (spec-gaps item 206).
+v1.use('/workspaces/:workspaceId/stock-locations', require('./modules/stockLocations').router);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
