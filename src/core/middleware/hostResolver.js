@@ -37,8 +37,12 @@ const hostResolver = asyncHandler(async (req, res, next) => {
       if (ws) workspaceId = ws.id;
     }
   } else {
-    const domain = await db.Domain.findOne({ where: { hostname: host }, attributes: ['workspaceId', 'status'] });
-    if (domain) {
+    // Several stores may have an unverified row for one host (migration 211):
+    // the verified one wins. A suspended domain is not served.
+    const domain =
+      (await db.Domain.findOne({ where: { hostname: host, status: ['verified', 'active'] }, attributes: ['workspaceId', 'status', 'suspendedAt'] })) ||
+      (await db.Domain.findOne({ where: { hostname: host }, attributes: ['workspaceId', 'status', 'suspendedAt'] }));
+    if (domain && !domain.suspendedAt) {
       if (domain.status === 'verified' || domain.status === 'active') {
         workspaceId = domain.workspaceId;
       } else {

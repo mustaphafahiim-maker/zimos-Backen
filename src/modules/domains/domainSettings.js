@@ -38,6 +38,8 @@ function present(domain, funnel) {
     sslProvider: domain.sslProvider || null,
     sslCheckedAt: domain.sslCheckedAt || null,
     sslDetail: domain.sslDetail || null,
+    suspended: Boolean(domain.suspendedAt),
+    suspendedReason: domain.suspendedReason || null,
     homeFunnel: funnel ? { id: funnel.id, name: funnel.name, status: funnel.status } : null,
     // The two records the merchant creates at their DNS provider: the TXT on
     // its own name, since nothing else may sit beside a CNAME.
@@ -300,7 +302,8 @@ async function rememberDeletion(domain, err) {
 async function resolveHost(rawHost) {
   const host = bare(String(rawHost || '').split(':')[0]);
   if (!host) throw new NotFoundError('Host');
-  const domain = await db.Domain.findOne({ where: { hostname: host, status: USABLE } });
+  // A suspended domain (store suspended, plan without custom_domain) is not served.
+  const domain = await db.Domain.findOne({ where: { hostname: host, status: USABLE, suspendedAt: null } });
   if (!domain) {
     // A store's platform subdomain: only its primary domain is asked for, so the
     // storefront's proxy can send the shopper on to it.
