@@ -1318,3 +1318,60 @@ Wording:
 | Google Maps | خرائط جوجل |
 | Google API key | مفتاح Google API |
 | Google bills your Google Cloud account for these lookups. | جوجل بتحاسب حساب Google Cloud بتاعك على عمليات البحث دي. |
+
+## 185. Shopper accounts: sign in with a code, orders, saved addresses, reorder — UI: pending
+
+### Dashboard — Store settings → Customer accounts (permission `website.edit`)
+- **GET `/workspaces/:ws/shopper-accounts`** → `{ "enabled": false, "channels": ["sms"] }`
+- **PUT** same `{ "enabled": true, "channels": ["sms", "email"] }` (channels: sms|email, at least one, unique) → same shape.
+- Card: switch "Let customers sign in to see their orders"; checkboxes "Phone (SMS code)" / "Email code".
+  Note: "SMS codes are sent through your SMS provider."
+
+### Storefront — all under `/store/:ws/account`, token in header **`X-Shopper-Token`**
+- **GET `/config`** → `{ "enabled": true, "channels": ["sms","email"] }`. Hide every account link when `enabled` is false
+  (all other routes then answer 404 `SHOPPER_ACCOUNTS_OFF`).
+- **POST `/code`** `{ "phone": "010…" }` or `{ "email": "…" }` (exactly one) + optional `"locale": "ar"|"en"` →
+  `{ "sent": true, "channel": "sms", "target": "01******003", "expiresInSeconds": 600, "resendAfterSeconds": 60 }`.
+  Same answer whether the address is known or not (an unknown email simply gets no code). Errors: 429 `TOO_MANY_CODES`
+  `details.retryAfterSeconds` (60 s between codes, 5/hour, 10/day per address, 20/hour per IP); 422 `INVALID_PHONE`;
+  422 `SHOPPER_CHANNEL_OFF` ("Sign in with your phone/email").
+- **POST `/verify`** `{ "phone"|"email", "code": "123456" }` →
+  `{ "token": "…", "expiresInSeconds": 2592000, "customer": { "id", "fullName", "phone", "email", "marketingConsent", "ordersCount" }, "addresses": [...] }`.
+  Errors 422 `INVALID_CODE` (`details.attemptsLeft`), 422 `CODE_EXPIRED`, 429 `TOO_MANY_ATTEMPTS` (5 wrong → ask again).
+  A phone that never ordered becomes a contact on first sign-in. Keep the token (30 days) in localStorage; any 401
+  `SHOPPER_NOT_SIGNED_IN` → drop it and show sign in.
+- **GET `/me`** → `{ customer, addresses }`. **PATCH `/me`** `{ fullName?, email?, marketingConsent? }` → same.
+- **POST `/sign-out-everywhere`** → `{ "signedOut": true }` (all devices). Plain "Sign out" = forget the token locally.
+- **GET `/orders?before=<ISO date>`** → `{ "orders": [ { "id", "orderNumber", "createdAt", "stage": 0, "totalAmount": "50000", "currency": "EGP", "itemsCount": 2, "firstItemName": "Demo T-Shirt" } ], "nextBefore": null }`
+  (20 per page; `stage` as the tracking page: 0 placed, 1 confirmed, 2 shipped, 3 delivered).
+- **GET `/orders/:orderId`** → `{ "order": { "id", "createdAt", "paymentMethod", "shippingAddress", …everything the tracking page shows (stage, steps, items, amounts, courier, waybill, downloads, notes) } }`.
+- **POST `/orders/:orderId/reorder`** →
+  `{ "lines": [ { "variantId", "productId", "name", "quantity": 2, "unitPrice": "25000", "available": true, "reason": null } ] }`
+  `reason`: null | `low_stock` (quantity lowered to what is left) | `out_of_stock` | `unavailable`. Put the available lines in the
+  cart and open it; list the others as "No longer available".
+- **Addresses**: **GET `/addresses`**; **POST `/addresses`** `{ label?, fullName?, phone?, country (2 letters, required), province?, city (required), area?, addressLine (required), postalCode?, placeId?, isDefault? }` → 201 `{ addresses }`;
+  **PATCH `/addresses/:id`** (any field) → `{ addresses }`; **DELETE `/addresses/:id`** → `{ addresses }`. Max 10 (422
+  `TOO_MANY_ADDRESSES`); exactly one `isDefault`.
+
+### Storefront screens
+- Header: "Sign in" / account icon when `enabled`.
+- Sign in: phone (or email tab when allowed) → "Send code" → 6-digit code input with resend countdown → signed in.
+- Account: tabs "My orders" (list → order page with the tracking timeline and "Order again"), "Addresses" (list, add/edit form,
+  set default, delete), "Profile" (name, email, marketing checkbox, "Sign out", "Sign out of all devices").
+- Checkout when signed in: prefill contact from `/me`, address picker of saved addresses (default selected), "Save this address".
+
+Wording:
+| en | ar |
+|---|---|
+| Sign in | تسجيل الدخول |
+| We'll send you a code | هنبعتلك كود |
+| Send code | ابعت الكود |
+| Enter the 6-digit code sent to {target} | اكتب الكود اللي اتبعت على {target} |
+| Resend in {s}s | إعادة الإرسال بعد {s} ث |
+| My orders | طلباتي |
+| Order again | اطلب تاني |
+| No longer available | مبقاش متاح |
+| Addresses | العناوين |
+| Default | الافتراضي |
+| Sign out of all devices | الخروج من كل الأجهزة |
+| Let customers sign in to see their orders | خلّي العملاء يدخلوا يشوفوا طلباتهم |

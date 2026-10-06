@@ -1404,7 +1404,12 @@ Integrations (interface + sandbox + README):
   - Verified: platform list (زايد, مدينه نصر, giza), store list with an added area (ar/en), Google on a mock (no key, bad key, suggest, details matched to the store's Nasr City), off.
 
 What the platform still lacks (the owner's "كل حاجه ناقصه"):
-- [ ] 185. Shopper accounts: sign in by phone or email code, with order history, saved addresses and reorder.
+- [x] 185. Shopper accounts: sign in by phone or email code, with order history, saved addresses and reorder. (backend done, UI in frontend-handoff.md)
+  - `shopperAccounts/`: passwordless codes in `shopper_login_codes` (migration 461; HMAC per row, 10 min, 5 tries, superseded by the next; limits per address and per IP counted in the table). Unknown email gets no code and the same answer; a new phone becomes a contact on its first right code (customer.created).
+  - Token = signed `ws.customer.accountVersion.expiry` (30 days), header X-Shopper-Token; "sign out everywhere" bumps `customers.account_version`. No server sessions.
+  - Orders: own orders only (customer + store, not test, not archived), tracking-page view reused (presentTrackedOrder/trackingStage exported). Reorder returns cart lines with availability; the frontend fills the cart (no order is placed by the backend).
+  - Addresses in `customers.saved_addresses` (max 10, one default). Off by default: `settings.shopper_accounts` (website.edit). Email/SMS use the store's name (new `shopper_login_code` email template).
+  - Verified: off 404, codes + cooldown 429, wrong code count, verify, reuse refused, me/patch, addresses CRUD + default, orders/detail/reorder, foreign order 404, email sign-in, sign-out-everywhere 401, new phone contact.
 - [ ] 186. Shopper returns: ask for a return from the order tracking page, which feeds the existing returns flow.
 - [ ] 187. Import contacts from CSV, with tags and marketing consent.
 - [ ] 188. A wishlist for signed-in shoppers.
