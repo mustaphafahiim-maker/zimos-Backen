@@ -78,7 +78,7 @@ async function call(measurementId, apiSecret, body) {
  * sent by the storefront with the checkout (marketing/pixelMatching.js) —
  * joins the purchase to their GA4 session; without it the pseudo id below.
  */
-async function sendPurchase({ measurementId, secrets, order, eventId, matching = {} }) {
+async function sendPurchase({ measurementId, secrets, order, eventId, matching = {}, eventName = 'purchase' }) {
   if (!measurementId || !secrets || !secrets.googleApiSecret) {
     throw new AppError('GOOGLE_NOT_CONFIGURED', 'GA4 measurement id or API secret is not configured', 422);
   }
@@ -86,7 +86,8 @@ async function sendPurchase({ measurementId, secrets, order, eventId, matching =
     client_id: matching.gaClientId || pseudoClientId(order.id),
     events: [
       {
-        name: 'purchase',
+        // 'generate_lead' for a store or funnel that reports leads (marketing/conversionEvent.js).
+        name: eventName,
         params: {
           currency: order.currency,
           value: Number(order.totalAmount) / 100,

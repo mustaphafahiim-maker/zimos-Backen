@@ -1314,7 +1314,10 @@ Commerce:
   - Copies take the default "(copy)" name and a fresh subdomain, and count against the plan like single copies.
 
 Tracking and analytics:
-- [ ] 167. "Send Lead instead of Purchase" per funnel and store (COD stores optimising on leads).
+- [x] 167. "Send Lead instead of Purchase" per funnel and store (COD stores optimising on leads). (backend done, UI in frontend-handoff.md)
+  - Store: `settings.conversion_event` (purchase default | lead), saved with the purchase-timing settings. Funnel: `settings.conversionEvent` (null = store's), on the funnel settings endpoint; the order's funnel wins.
+  - Only the event name changes (`marketing/conversionEvent.js` holds each platform's names: Meta Lead, TikTok SubmitForm, Snapchat SIGN_UP, GA4 generate_lead, Pinterest lead); timing, value, event id, the once-only claim and the log stay as they are. The log records `lead` or `purchase`.
+  - The providers take an optional `eventName`, defaulting to their purchase name, so nothing else that calls them changes.
 - [ ] 168. Pinterest Conversions API, using an ad account id and token. This reverses item 154's browser-only decision at the owner's request.
 - [ ] 169. Google Ads purchase conversions with a conversion label (`send_to AW-…/label`).
 - [ ] 170. Google Tag Manager: a ready-made container to import (triggers and tags for the store's events), with the dataLayer events listed.

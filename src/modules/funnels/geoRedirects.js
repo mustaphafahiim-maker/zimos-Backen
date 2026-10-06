@@ -162,6 +162,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   bodyCode: null,
   shippingProfileId: null,
   freeShippingThresholdAmount: null,
+  // null = the store's; 'purchase' | 'lead' (marketing/conversionEvent.js).
+  conversionEvent: null,
 });
 const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const amount = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -177,6 +179,7 @@ function resolveSettings(funnel) {
     bodyCode: text(s.bodyCode),
     shippingProfileId: text(s.shippingProfileId),
     freeShippingThresholdAmount: amount(s.freeShippingThresholdAmount),
+    conversionEvent: ['purchase', 'lead'].includes(s.conversionEvent) ? s.conversionEvent : null,
   };
 }
 
@@ -240,6 +243,7 @@ const schemas = {
       bodyCode: Joi.string().max(20000).allow(null, '').optional(),
       shippingProfileId: uuid.allow(null, '').optional(),
       freeShippingThresholdAmount: Joi.number().integer().min(0).max(100000000).allow(null).optional(),
+      conversionEvent: Joi.string().valid('purchase', 'lead').allow(null, '').optional(),
     }).min(1),
   },
 };

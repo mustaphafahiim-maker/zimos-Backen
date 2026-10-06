@@ -61,7 +61,7 @@ async function call(pixelId, accessToken, body) {
  * (marketing/pixelMatching.js): the click id and _scid cookie, hashed name /
  * city / postcode / country / external id (Snap follows Meta's rules), lines.
  */
-async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, eventSourceUrl, matching = {} }) {
+async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, eventSourceUrl, matching = {}, eventName = 'PURCHASE' }) {
   if (!pixelId || !secrets || !secrets.snapchatAccessToken) {
     throw new AppError('SNAPCHAT_NOT_CONFIGURED', 'Snapchat pixel id or access token is not configured', 422);
   }
@@ -69,7 +69,8 @@ async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAg
   const body = {
     data: [
       {
-        event_name: 'PURCHASE',
+        // 'SIGN_UP' for a store or funnel that reports leads (marketing/conversionEvent.js).
+        event_name: eventName,
         event_time: Math.floor(Date.now() / 1000),
         event_id: eventId,
         action_source: 'WEB',

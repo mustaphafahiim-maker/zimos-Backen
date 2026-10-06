@@ -68,7 +68,7 @@ async function call(accessToken, body) {
  * the hashed external id and the order's lines. TikTok's name/address fields
  * are not sent: their hashing rules could not be confirmed from its docs.
  */
-async function sendPurchase({ pixelCode, secrets, order, eventId, clientIp, userAgent, eventSourceUrl, matching = {} }) {
+async function sendPurchase({ pixelCode, secrets, order, eventId, clientIp, userAgent, eventSourceUrl, matching = {}, eventName = 'CompletePayment' }) {
   if (!pixelCode || !secrets || !secrets.tiktokAccessToken) {
     throw new AppError('TIKTOK_NOT_CONFIGURED', 'TikTok pixel code or access token is not configured', 422);
   }
@@ -78,7 +78,8 @@ async function sendPurchase({ pixelCode, secrets, order, eventId, clientIp, user
     event_source_id: pixelCode,
     data: [
       {
-        event: 'CompletePayment',
+        // 'SubmitForm' for a store or funnel that reports leads (marketing/conversionEvent.js).
+        event: eventName,
         event_time: Math.floor(Date.now() / 1000),
         event_id: eventId,
         user: {

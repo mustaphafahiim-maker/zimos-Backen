@@ -156,7 +156,10 @@ async function publicTracking(workspaceId) {
   // Purchase itself with on_order (marketing/purchaseTiming.js).
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['settings'] });
   const purchaseEventTiming = require('../marketing/purchaseTiming').timingOf(workspace && workspace.settings);
-  return { tracking, trackingPixels, purchaseEventTiming };
+  // purchase | lead: which event the store's browser pixels send for an order (marketing/conversionEvent.js);
+  // a funnel's own choice is in its settings.conversionEvent.
+  const conversionEvent = require('../marketing/conversionEvent').storeKindOf(workspace && workspace.settings);
+  return { tracking, trackingPixels, purchaseEventTiming, conversionEvent };
 }
 
 const PUBLIC_COLLECTION_FIELDS = ['id', 'name', 'slug', 'description', 'seo', 'parentId', 'position', 'imageUrl', 'showInHeader'];

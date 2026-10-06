@@ -68,7 +68,7 @@ async function call(pixelId, accessToken, body) {
  * `matching` (hashed name, city, postcode, country and external ids; the
  * order's lines) come from marketing/pixelMatching.js.
  */
-async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, fbp, fbc, eventSourceUrl, matching = {} }) {
+async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAgent, fbp, fbc, eventSourceUrl, matching = {}, eventName = 'Purchase' }) {
   if (!pixelId || !secrets || !secrets.metaAccessToken) {
     throw new AppError('META_NOT_CONFIGURED', 'Meta pixel id or access token is not configured', 422);
   }
@@ -91,7 +91,8 @@ async function sendPurchase({ pixelId, secrets, order, eventId, clientIp, userAg
   const body = {
     data: [
       {
-        event_name: 'Purchase',
+        // 'Lead' for a store or funnel that reports leads (marketing/conversionEvent.js).
+        event_name: eventName,
         event_time: Math.floor(Date.now() / 1000),
         event_id: eventId,
         action_source: 'website',

@@ -96,17 +96,22 @@ async function run(workspaceId, trigger, orderId) {
   // platforms' browser ids, hashed name / city / country, the lines.
   const matching = pixelMatching.matchingFor(order);
   const seen = { clientIp: matching.clientIp, userAgent: matching.userAgent, matching };
+  // Purchase, or Lead for a store or funnel that reports leads (conversionEvent.js).
+  const conversion = require('./conversionEvent');
+  const funnel = order.funnelId ? await db.Funnel.findOne({ where: { id: order.funnelId, workspaceId }, attributes: ['id', 'settings'] }) : null;
+  const kind = conversion.kindFor(workspace && workspace.settings, funnel && funnel.settings);
+  const nameFor = (platform) => conversion.eventNameFor(platform, kind);
 
   // The providers keep their original signature (a `secrets` blob with one
   // named key per platform); each pixel's own token is handed to them in that
   // shape. Several pixels of one platform get the same event id.
   const SENDERS = {
     meta: ({ pixel, token }) =>
-      metaCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { metaAccessToken: token, metaTestEventCode: pixel.testEventCode || undefined }, order, eventId, eventSourceUrl, ...seen, fbp: matching.fbp, fbc: matching.fbc }),
-    tiktok: ({ pixel, token }) => tiktokCapi.sendPurchase({ pixelCode: pixel.pixelId, secrets: { tiktokAccessToken: token }, order, eventId, eventSourceUrl, ...seen }),
-    snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl, ...seen }),
+      metaCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { metaAccessToken: token, metaTestEventCode: pixel.testEventCode || undefined }, order, eventId, eventSourceUrl, ...seen, fbp: matching.fbp, fbc: matching.fbc, eventName: nameFor('meta') }),
+    tiktok: ({ pixel, token }) => tiktokCapi.sendPurchase({ pixelCode: pixel.pixelId, secrets: { tiktokAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: nameFor('tiktok') }),
+    snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: nameFor('snapchat') }),
     google: ({ pixel, token }) =>
-      isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId, matching }) : null,
+      isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId, matching, eventName: nameFor('google') }) : null,
   };
 
   const results = [];
@@ -118,12 +123,12 @@ async function run(workspaceId, trigger, orderId) {
       const result = await SENDERS[platform](target);
       logger.info(`[pixelEvents] ${platform} purchase sent`, { workspaceId, orderId, platform, pixelId: pixel.pixelId, eventId });
       await trackingPixelService.recordSendResult(pixel, { ok: true });
-      await pixelEventLog.record({ pixel, eventName: 'purchase', eventId, orderId, ok: true });
+      await pixelEventLog.record({ pixel, eventName: kind, eventId, orderId, ok: true });
       results.push({ platform, pixelId: pixel.pixelId, ok: true, result });
     } catch (err) {
       logger.error(`[pixelEvents] ${platform} purchase failed: ${err.message}`, { workspaceId, orderId, platform, pixelId: pixel.pixelId, eventId, code: err.code });
       await trackingPixelService.recordSendResult(pixel, { ok: false, error: err.message });
-      await pixelEventLog.record({ pixel, eventName: 'purchase', eventId, orderId, ok: false, error: err.message });
+      await pixelEventLog.record({ pixel, eventName: kind, eventId, orderId, ok: false, error: err.message });
       results.push({ platform, pixelId: pixel.pixelId, ok: false, error: err.message });
     }
   }

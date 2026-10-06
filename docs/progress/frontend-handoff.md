@@ -547,3 +547,48 @@ Wording:
 | {ok} done, {failed} failed | {ok} اتعملوا، {failed} ماتعملوش |
 | These funnels were not changed | الفانلز دي ماتغيرتش |
 | Up to 50 at a time | لحد ٥٠ مرة واحدة |
+
+---
+
+## 167. "Send Lead instead of Purchase" per store and funnel — UI: pending
+
+An order's conversion can be reported as a **Lead** instead of a Purchase (COD stores optimising on leads).
+Same moment (purchase timing), same value, same event id (browser + server still dedup), sent once.
+
+### Store setting (permission `workspace.manage`, existing endpoint)
+**GET `/workspaces/:ws/tracking-pixels/settings`** →
+```json
+{ "purchaseEventTiming": "on_order", "options": ["on_order", "on_confirmed", "on_delivered"],
+  "conversionEvent": "purchase", "conversionEvents": ["purchase", "lead"] }
+```
+**PUT `/workspaces/:ws/tracking-pixels/settings`** — now any of `{ "purchaseEventTiming"?, "conversionEvent"? }` (at least one) → same shape.
+
+### Funnel override (permission `funnels.manage`, existing endpoint)
+**PATCH `/workspaces/:ws/funnels/:funnelId/settings`** `{ "conversionEvent": "lead" | "purchase" | null }`
+(`null`/`""` = use the store's). Returned in `settings.conversionEvent`, also in the public funnel payload's `settings`.
+
+### Event names per platform (browser pixels must use the same)
+| kind | Meta | TikTok | Snapchat | Google (GA4) | Pinterest |
+|---|---|---|---|---|---|
+| purchase | `Purchase` | `CompletePayment` | `PURCHASE` | `purchase` | `checkout` |
+| lead | `Lead` | `SubmitForm` | `SIGN_UP` | `generate_lead` | `lead` |
+Keep value, currency, `content_ids` and the order id as event id in both cases.
+
+### Storefront
+- `GET /store/:ws` → `store.conversionEvent` (`purchase` | `lead`); a funnel's public payload `settings.conversionEvent`
+  overrides it when not null. In `lib/track.ts`, where the order's Purchase fires (only with `purchaseEventTiming = on_order`),
+  fire the "lead" names above instead when the effective kind is `lead`.
+
+### Dashboard
+- **Marketing → Pixels → Settings**: a radio "Report orders as: Purchase / Lead" under the existing timing choice,
+  with the hint "Lead suits cash-on-delivery stores that optimise ads on orders placed."
+- **Funnel → Settings → Tracking**: select "Report orders as: Store default ({current}) / Purchase / Lead".
+- Pixel event log: the event name column shows `lead` for these.
+
+Wording:
+| en | ar |
+|---|---|
+| Report orders as | سجّل الطلبات كـ |
+| Purchase / Lead | شراء (Purchase) / عميل محتمل (Lead) |
+| Store default ({value}) | زي المتجر ({value}) |
+| Lead suits cash-on-delivery stores that optimise ads on orders placed. | الـ Lead مناسب لمتاجر الدفع عند الاستلام اللي بتحسّن الإعلانات على الطلبات. |

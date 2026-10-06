@@ -36,7 +36,8 @@ module.exports = {
   list: { params: Joi.object(workspaceParam) },
   updateSettings: {
     params: Joi.object(workspaceParam),
-    body: Joi.object({ purchaseEventTiming: Joi.string().valid(...TIMINGS).required() }),
+    // conversionEvent: report orders as Purchase or Lead (conversionEvent.js).
+    body: Joi.object({ purchaseEventTiming: Joi.string().valid(...TIMINGS).optional(), conversionEvent: Joi.string().valid(...require('./conversionEvent').KINDS).optional() }).min(1),
   },
   events: {
     params: Joi.object(workspaceParam),
