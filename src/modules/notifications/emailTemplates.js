@@ -242,6 +242,11 @@ ${paragraphs}
     };
   },
 
+  // An email campaign (modules/emailCampaigns): the same frame as the store's order emails, with its unsubscribe link.
+  campaign_email(data = {}) {
+    return templates.order_email(data);
+  },
+
   // An automation's email step (modules/automations): the merchant's own
   // subject and text, to their customer, signed with the store's name.
   automation_message(data = {}) {

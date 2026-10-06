@@ -37,7 +37,7 @@ const { trackingLimiter } = require('../../core/middleware/rateLimiters');
 
 const MODES = ['off', 'password', 'coming_soon'];
 const TOKEN_TTL_MS = 30 * 864e5;
-const OPEN = /^\/(gate|visitor-context|events|fonts|custom-code|downloads|learn|subscriptions|affiliate)(\/|$|\?)|^\/orders\//;
+const OPEN = /^\/(gate|visitor-context|events|fonts|custom-code|downloads|learn|subscriptions|affiliate)(\/|$|\?)|^\/orders\/|^\/marketing\/unsubscribe/;
 
 function settingsOf(workspace) {
   const s = (workspace && workspace.settings && workspace.settings.store_gate) || {};
