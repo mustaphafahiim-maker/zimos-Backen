@@ -484,3 +484,25 @@ Wording:
 | In 1 hour / Tonight 8 pm / Tomorrow 10 am / Tomorrow 5 pm | بعد ساعة / النهارده ٨ بالليل / بكرة ١٠ الصبح / بكرة ٥ العصر |
 | Call back {time} | يتكلم تاني {time} |
 | Callback due | معاد المكالمة جه |
+
+---
+
+## Frontend request — error messages in the reader's language — done
+
+From `docs/ux/backend-requests.md` (U-02, U-03). Every API answer with `{ error: { code, message } }` now
+returns `message` in **Arabic or French** when the request asks for it, for ~60 codes a shopper or a
+signing-in merchant meets (validation, sign-in/OTP, rate limits, cart, stock, payment method, delivery area,
+discount codes, minimum order, offers/upsells, refused order, uploads, unexpected error).
+
+- Language: `X-Store-Locale` header first (the storefront already sends it), else the first `Accept-Language`
+  tag (browsers send it; the dashboard can set it from the user's language). `ar` / `fr` translate; anything else
+  is unchanged English.
+- `code` and `details` never change. When translated, the English original is kept as `error.messageEn`
+  (useful for logs/support; `VALIDATION_ERROR`'s translated message is generic — show `details` per field).
+- Codes not in the list keep their English message — keep mapping the ones the UI knows.
+- The list lives in `src/core/errors/errorMessages.js` (`MESSAGES`); ask for more codes in backend-requests.md.
+
+Example (`Accept-Language: ar-EG`): `{"error":{"code":"INVALID_CREDENTIALS","message":"البريد أو كلمة المرور غير صحيحة.","messageEn":"Invalid email or password","requestId":"…"}}`
+
+UI: send `Accept-Language` (dashboard: the user's UI language) on every API call; storefront: nothing to do
+(X-Store-Locale is already sent). Show `error.message` for unmapped codes.

@@ -89,6 +89,8 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 app.use(requestId);
+// Error messages in Arabic or French when the request asks (core/errors/errorMessages.js).
+app.use(require('./core/errors/errorMessages').translateErrors);
 app.use(helmet());
 // Any origin for the public /api/v1/store API, the CORS_ORIGINS allowlist
 // everywhere else (see core/middleware/cors.js).
