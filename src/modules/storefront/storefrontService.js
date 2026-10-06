@@ -37,7 +37,8 @@ function wantsListing(query) {
  * relies on; anything from LISTING_PARAMS goes to productSearch.
  */
 async function listProducts(workspaceId, query = {}) {
-  if (wantsListing(query)) return productSearch.searchProducts(workspaceId, query);
+  // A search that finds nothing tries the merchant's synonyms (searchInsights/, item 211).
+  if (wantsListing(query)) return require('../searchInsights').searchWithSynonyms(workspaceId, query, (q) => productSearch.searchProducts(workspaceId, q));
 
   const { collectionId, tag, limit = 24, cursor } = query;
   // A hidden product opens by its link only (page_settings.hidden).

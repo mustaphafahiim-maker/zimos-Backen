@@ -1569,4 +1569,8 @@ centre, no unofficial WhatsApp. Outside services are an interface + `sandbox` ad
   - modules/sizeCharts + migration 480 (size_charts with product_ids / collection_ids arrays). Cells are text, so "S", "38–40" and "96" all fit; the unit says what the numbers are in, and the storefront converts for the shopper.
   - Resolution: a chart on the product beats one on its collections; among several, the newest. Public endpoint cached 5 minutes.
   - Verified: row/column check, none, by collection, own wins, update, delete falls back to the collection's.
-- [ ] 211. Storefront search analytics: what shoppers search, searches with no results, the results clicked, and merchant-set synonyms used by the store search.
+- [x] 211. Storefront search analytics: what shoppers search, searches with no results, the results clicked, and merchant-set synonyms used by the store search. (backend done, UI in frontend-handoff.md)
+  - modules/searchInsights + migration 481 (search_queries, one row per first-page search, click columns on the same row). Logged in the listing controller after the storefront cache, so cached answers still count. Visitor id only, no personal data; kept 180 days (daily prune).
+  - Synonyms are a fallback, not query expansion: they are tried only when the words themselves find nothing, so existing results never change. The served term is reported (servedAs) and kept on the log. Saving synonyms clears the store cache.
+  - Clicks: the first per search, within an hour, only for a product of that store.
+  - Verified: search id on page 1 only (also on cache hits), zero results, synonym fallback, duplicate-term refusal, click counted once, report totals/top/no-results/clicked.

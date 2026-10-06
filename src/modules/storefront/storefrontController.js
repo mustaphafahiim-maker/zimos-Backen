@@ -41,6 +41,8 @@ const listProducts = asyncHandler(async (req, res) => {
   const ws = req.tenant.workspaceId;
   const result = await cache.cached(ws, `products?${cache.queryKey(req.query)}`, () => service.listProducts(ws, req.query));
   if (result && Array.isArray(result.products)) await i18n.localizeProducts(req, result.products);
+  // A search's first page is logged (after the cache, so every search counts); the click comes back with its id (item 211).
+  if (req.query.search) return res.json({ ...result, searchId: await require('../searchInsights').record(ws, req.query, result, req.headers['x-visitor-id']) });
   res.json(result);
 });
 const getProduct = asyncHandler(async (req, res) => {

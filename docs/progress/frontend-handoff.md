@@ -2287,3 +2287,27 @@ All under `/api/v1/workspaces/:ws/customer-notes` (`customers.view` unless noted
 - Products → «جداول المقاسات» / "Size charts": list + editor (a grid: add/remove rows and columns, headings in ar/en, unit, note, picture, attach to products and/or collections).
 - Product page (dashboard): which chart applies, «من مجموعة Tops» / "from collection Tops".
 - Storefront product page: link «دليل المقاسات» / "Size guide" opening a sheet with the table in the shopper's language, a cm/inch switch (convert numeric cells ×/÷ 2.54, one decimal; leave text cells as they are), the note and picture.
+
+## 211. Storefront search analytics and synonyms — UI: pending
+
+### Storefront
+- `GET /store/:ws/products?search=…` (first page) now also returns **`searchId`** (null on later pages) and, when the words
+  found nothing but a synonym did, **`servedAs`** (the term searched instead).
+- `POST /store/:ws/search/click` `{ searchId, productId }` → 204 — call when the shopper opens a result (first click counts, within an hour). Send `X-Visitor-Id` on the search to count searchers.
+- When `servedAs` is set, show «نتايج عن "t-shirt"» / "Showing results for "t-shirt"".
+
+### Staff — `/api/v1/workspaces/:ws/search-insights`
+- `GET /?from=&to=` (`analytics.view`, default last 30 days) →
+```json
+{ "range": { "from": "…", "to": "…" },
+  "totals": { "searches": 5, "searchers": 3, "noResults": 2, "clicks": 1, "clickRate": 33.3 },
+  "topSearches": [{ "query": "shirt", "searches": 2, "avgResults": 1, "clicks": 1, "clickRate": 50, "servedAs": null }],
+  "noResults": [{ "query": "jeans", "searches": 1, "lastAt": "…" }],
+  "topClickedProducts": [{ "productId": "…", "name": "Demo T-Shirt", "clicks": 1 }] }
+```
+  (`clickRate` = clicks ÷ searches that had results, %.) Searches are kept 180 days.
+- `GET /synonyms` (`products.view`) → `{ groups: [["تيشيرت", "t-shirt", "tee"]] }`; `PUT /synonyms` (`products.manage`) `{ groups }` — 2–10 terms per group (≤60 chars), ≤200 groups, a term in only one group (422).
+
+### Screens
+- Analytics → «البحث في المتجر» / "Store search": totals cards, top searches table (searches, results, clicks, rate), «بحث من غير نتايج» / "Searches with no results" with a quick «أضف مرادف» / "Add a synonym" action, top clicked products.
+- Products → «مرادفات البحث» / "Search synonyms": groups of words as chips; hint «لو حد دوّر على كلمة ومالقاش، بنجرّب مرادفاتها» / "When a word finds nothing, we try its synonyms".
