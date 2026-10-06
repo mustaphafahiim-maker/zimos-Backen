@@ -15,6 +15,8 @@ const ws = { workspaceId: Joi.string().uuid().required() };
 const keyParams = Joi.object({ ...ws, key: Joi.string().valid(...service.KEYS).required() });
 const subject = Joi.string().trim().max(200);
 const body = Joi.string().trim().max(10000);
+// The block designer's blocks (emailBlocks.js).
+const blocks = require('./emailBlocks').blocksSchema;
 const email = typeof joiEmail === 'function' ? joiEmail() : joiEmail.joiEmail();
 const wid = (req) => req.tenant.workspaceId;
 
@@ -31,20 +33,20 @@ router.get('/', validate({ params: Joi.object(ws) }), asyncHandler(async (req, r
 
 router.put(
   '/:key',
-  validate({ params: keyParams, body: Joi.object({ isEnabled: Joi.boolean(), subject: subject.allow(null, ''), body: body.allow(null, '') }).min(1) }),
+  validate({ params: keyParams, body: Joi.object({ isEnabled: Joi.boolean(), subject: subject.allow(null, ''), body: body.allow(null, ''), blocks: blocks.allow(null) }).min(1) }),
   asyncHandler(async (req, res) => res.json({ template: await service.update(wid(req), req.params.key, req.body, req) }))
 );
 
 // The unsaved text may be sent along, so the editor previews as the merchant types.
 router.post(
   '/:key/preview',
-  validate({ params: keyParams, body: Joi.object({ subject: subject.allow(''), body: body.allow('') }).default({}) }),
+  validate({ params: keyParams, body: Joi.object({ subject: subject.allow(''), body: body.allow(''), blocks: blocks.allow(null) }).default({}) }),
   asyncHandler(async (req, res) => res.json(await service.preview(wid(req), req.params.key, req.body)))
 );
 
 router.post(
   '/:key/test',
-  validate({ params: keyParams, body: Joi.object({ to: email, subject: subject.allow(''), body: body.allow('') }).default({}) }),
+  validate({ params: keyParams, body: Joi.object({ to: email, subject: subject.allow(''), body: body.allow(''), blocks: blocks.allow(null) }).default({}) }),
   asyncHandler(async (req, res) => res.json(await service.sendTest(wid(req), req.params.key, req.body, req)))
 );
 

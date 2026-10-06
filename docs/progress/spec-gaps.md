@@ -1344,7 +1344,10 @@ Email:
   - `emailDomains/`: a provider interface, a sandbox adapter and a README. The sandbox hands out SPF/DKIM/return-path/DMARC records and checks them with real DNS lookups; reserved test TLDs always verify. A Brevo adapter (the platform's mail service) is described in the README, to be checked against the owner's account.
   - Stored in `settings.email_sending_domain` (no migration); one domain per store, refused when another store has it.
   - Only a verified domain changes the From address (`orderEmailSender.senderFor` → `notify.email` → Brevo `sender.email`); a later failed check falls back to the platform's address.
-- [ ] 174. A block email designer (heading, text, button, image, order table, divider) for order emails and cart recovery.
+- [x] 174. A block email designer (heading, text, button, image, order table, divider) for order emails and cart recovery. (backend done, UI in frontend-handoff.md)
+  - Blocks are JSON on the existing template row (`order_email_templates.blocks`, migration 455); null keeps the plain body, so nothing changes for stores that do not use it.
+  - Rendered only on the server (`notifications/emailBlocks.js`): every text escaped after the {{variables}} are filled, links limited to http(s) or a variable, so no merchant HTML reaches a customer.
+  - The order table reads the order's own lines (or the cart's, for recovery), with shipping and total; previews and tests use sample lines. The branded header, footer and unsubscribe line wrap blocks as they wrap text.
 - [ ] 175. Order emails chosen per funnel or store, instead of one set per store.
 
 Domains and developers:

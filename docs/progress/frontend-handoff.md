@@ -840,3 +840,53 @@ Wording:
 | DNS changes can take up to 48 hours | تغييرات الـ DNS ممكن تاخد لحد ٤٨ ساعة |
 | Customer emails are sent from {address} | إيميلات العملاء بتتبعت من {address} |
 | Another store already sends from this domain | متجر تاني بيبعت من الدومين ده |
+
+---
+
+## 174. Block email designer for order emails and cart recovery — UI: pending
+
+Any order email template (`order_confirmation`, `order_shipped`, …, `abandoned_cart`) can be built from blocks instead of
+the plain body. The server renders and escapes them (no raw HTML from the merchant).
+
+### Blocks (JSON, 1–40 per email)
+| type | fields |
+|---|---|
+| `heading` | `text` (≤5000, `{{variables}}`), `size?`: `lg`\|`md`, `align?` |
+| `text` | `text` (blank line = new paragraph), `align?` |
+| `button` | `label` (≤80), `url` (https://… or a variable like `{{order_link}}`, `{{recovery_link}}`, `{{tracking_url}}`), `color?` `#RRGGBB`, `align?` |
+| `image` | `url` (https), `alt?`, `link?` (https or variable), `width?` 40–600, `align?` |
+| `order_table` | — (the order's lines × qty with totals, shipping and total; for cart recovery the cart's lines) |
+| `divider` | — |
+`align`: `start` \| `center` \| `end` (the email is RTL). Unknown fields per type → 422 (`"blocks[0].text" is not allowed`);
+bad link → 422 "Use a link starting with https:// or a link variable such as order_link".
+
+### Endpoints (existing, permission `workspace.manage`)
+- **PUT `/workspaces/:ws/order-emails/:key`** — now also `{ "blocks": [...] | null }` (null/[] = back to the plain body).
+  The template answer has `blocks` (null when not used); `isCustomised` is true when blocks are set.
+- **POST `…/:key/preview`** and **POST `…/:key/test`** accept unsaved `blocks` too (preview uses sample lines:
+  two products, shipping, total).
+```json
+{ "blocks": [
+  { "type": "heading", "text": "شكرًا {{customer_name}}", "align": "center" },
+  { "type": "text", "text": "طلبك {{order_number}} وصلنا.\n\nهنكلمك قريب." },
+  { "type": "order_table" },
+  { "type": "button", "label": "تابع طلبك", "url": "{{order_link}}" },
+  { "type": "divider" } ] }
+```
+The store logo/colour header, sender name, sending domain (item 173) and the unsubscribe line (cart recovery) stay as today.
+
+### Dashboard — Settings → Emails → (template) → "Design"
+- Two modes per template: "Simple text" (today's subject + body) and "Designer" (blocks). Switching to Designer seeds
+  heading + text from the current body; switching back sends `blocks: null`.
+- Designer: block list with drag to reorder, add-block menu (Heading, Text, Button, Image, Order table, Divider), a side
+  form per block (fields above; variable chips from `tokens`), image from the media library.
+- Live preview pane (POST preview with the unsaved blocks, debounced), mobile/desktop width toggle, "Send test".
+
+Wording:
+| en | ar |
+|---|---|
+| Simple text / Designer | نص بسيط / مصمم |
+| Add block | ضيف بلوك |
+| Heading / Text / Button / Image / Order table / Divider | عنوان / نص / زرار / صورة / جدول الطلب / فاصل |
+| Button link | لينك الزرار |
+| Send test | ابعت تجربة |
