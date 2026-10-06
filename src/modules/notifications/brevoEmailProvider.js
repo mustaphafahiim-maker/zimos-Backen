@@ -55,14 +55,15 @@ async function sendOnce(payload, apiKey) {
   return res.json().catch(() => ({}));
 }
 
-async function sendEmail({ to, subject, html, text, fromName: senderName, replyTo }) {
+async function sendEmail({ to, subject, html, text, fromName: senderName, replyTo, fromAddress: ownAddress }) {
   const { apiKey, fromAddress, fromName } = env.notifications.brevo;
   if (!apiKey || !fromAddress) {
     throw new Error('Brevo email provider is not configured (BREVO_API_KEY / EMAIL_FROM_ADDRESS)');
   }
 
   // A store's email to its own customer goes out under the store's name (same sending address).
-  const payload = buildPayload({ to, subject, html, text, fromAddress, fromName: senderName || fromName, replyTo });
+  // A store's verified sending domain (emailDomains/sendingDomain.js) replaces the platform's address.
+  const payload = buildPayload({ to, subject, html, text, fromAddress: ownAddress || fromAddress, fromName: senderName || fromName, replyTo });
   const { value, attempts } = await withRetry(() => sendOnce(payload, apiKey), { delays: RETRY_DELAYS });
 
   return { messageId: value.messageId || null, attempts };

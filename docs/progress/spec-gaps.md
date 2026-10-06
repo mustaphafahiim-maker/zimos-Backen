@@ -1340,7 +1340,10 @@ Tracking and analytics:
   - A website filter counts events from raw rows (the daily rollup is per store and funnel only). Filtered views keep the quick profit estimate, as funnels do.
 
 Email:
-- [ ] 173. A sending domain for customer emails: DNS records shown, then verified (interface + sandbox).
+- [x] 173. A sending domain for customer emails: DNS records shown, then verified (interface + sandbox). (backend done, UI in frontend-handoff.md)
+  - `emailDomains/`: a provider interface, a sandbox adapter and a README. The sandbox hands out SPF/DKIM/return-path/DMARC records and checks them with real DNS lookups; reserved test TLDs always verify. A Brevo adapter (the platform's mail service) is described in the README, to be checked against the owner's account.
+  - Stored in `settings.email_sending_domain` (no migration); one domain per store, refused when another store has it.
+  - Only a verified domain changes the From address (`orderEmailSender.senderFor` → `notify.email` → Brevo `sender.email`); a later failed check falls back to the platform's address.
 - [ ] 174. A block email designer (heading, text, button, image, order table, divider) for order emails and cart recovery.
 - [ ] 175. Order emails chosen per funnel or store, instead of one set per store.
 

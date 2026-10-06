@@ -793,3 +793,50 @@ Wording:
 | Product / Store | المنتج / المتجر |
 | Visits are for the whole store | الزيارات للمتجر كله |
 | Clear filters | امسح الفلاتر |
+
+---
+
+## 173. A sending domain for customer emails — UI: pending
+
+The store sends its customer emails from its own domain (`orders@mystore.com`) once DNS records are added and verified.
+Contract and adapters: `src/modules/emailDomains/README.md` (sandbox by default: real DNS checks, nothing registered;
+`.test`/`.example` domains always verify).
+
+### Endpoints (permission `workspace.manage`, under the order-emails router)
+**GET `/workspaces/:ws/order-emails/sending-domain`** → `{ "sendingDomain": null | {…} }`
+```json
+{ "sendingDomain": { "domain": "mystore.com", "localPart": "orders", "fromAddress": "orders@mystore.com",
+  "status": "pending", "provider": "sandbox", "lastCheckedAt": null, "verifiedAt": null,
+  "records": [
+    { "purpose": "spf", "type": "TXT", "name": "mystore.com", "value": "v=spf1 include:spf.mail.zimos.example ~all" },
+    { "purpose": "dkim", "type": "TXT", "name": "zimos._domainkey.mystore.com", "value": "v=DKIM1; k=rsa; p=…" },
+    { "purpose": "return_path", "type": "CNAME", "name": "bounces.mystore.com", "value": "bounces.mail.zimos.example" },
+    { "purpose": "dmarc", "type": "TXT", "name": "_dmarc.mystore.com", "value": "v=DMARC1; p=none" } ] } }
+```
+**PUT `…/sending-domain`** `{ "domain": "mystore.com", "localPart": "orders" }` — adds (or replaces) the domain → status `pending`.
+422 "Enter a domain like mystore.com"; 409 `EMAIL_DOMAIN_TAKEN` when another store uses it. `localPart`: letters, digits, `.` `_` `-` (default `orders`).
+**PATCH `…/sending-domain`** `{ "localPart": "shop" }` — changes the address only.
+**POST `…/sending-domain/verify`** — checks DNS now; each record gets `ok: true|false`; status → `verified` when SPF, DKIM and
+return-path are found (DMARC is advised only); a verified domain that later fails a check → `failed` (emails go back to the platform address).
+**DELETE `…/sending-domain`** → `{ "sendingDomain": null }`.
+
+Once `verified`, order emails and cart-recovery emails go out From `<localPart>@<domain>` with the store's sender name
+(the existing sender name / Reply-To settings stay).
+
+### Dashboard — Settings → Emails → "Sending domain"
+- Empty: input "Your domain" + "Email address" (localPart + "@domain" preview) + "Add domain".
+- Pending/failed: table of records (Type, Name/Host, Value with copy buttons, status tick/cross per record after a check),
+  "Verify" button with last-checked time, note "DNS changes can take up to 48 hours", "Remove domain".
+- Verified: green badge, "Customer emails are sent from {fromAddress}", change address, remove.
+
+Wording:
+| en | ar |
+|---|---|
+| Sending domain | دومين الإرسال |
+| Send customer emails from your own domain | ابعت إيميلات العملاء من الدومين بتاعك |
+| Add these records at your domain provider | ضيف السجلات دي عند مزوّد الدومين |
+| Verify | تحقق |
+| Pending / Verified / Failed | في الانتظار / متأكد / فشل |
+| DNS changes can take up to 48 hours | تغييرات الـ DNS ممكن تاخد لحد ٤٨ ساعة |
+| Customer emails are sent from {address} | إيميلات العملاء بتتبعت من {address} |
+| Another store already sends from this domain | متجر تاني بيبعت من الدومين ده |

@@ -62,7 +62,7 @@ async function sendEmail({ recipient, template, data, workspaceId = null, orderI
     if (provider === 'console') {
       logger.info(`[notification:email] ${template} -> ${recipient} :: ${subject}`, { data: loggable(data) });
     } else if (provider === 'brevo') {
-      const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text, fromName: data && data.fromName ? String(data.fromName).slice(0, 100) : undefined, replyTo: data && data.replyTo ? String(data.replyTo) : undefined });
+      const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text, fromName: data && data.fromName ? String(data.fromName).slice(0, 100) : undefined, replyTo: data && data.replyTo ? String(data.replyTo) : undefined, fromAddress: data && data.fromAddress ? String(data.fromAddress) : undefined });
       attempts = sent.attempts || attempts;
     } else {
       throw new Error(`Email provider "${provider}" is not configured`);

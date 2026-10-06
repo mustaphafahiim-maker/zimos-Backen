@@ -37,7 +37,9 @@ function read(settings) {
 async function senderFor(workspaceId) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['name', 'settings'] });
   const own = read(workspace && workspace.settings);
-  return { fromName: own.fromName || (workspace ? workspace.name : ''), ...(own.replyTo ? { replyTo: own.replyTo } : {}) };
+  // A verified sending domain of the store's own replaces the platform's address (emailDomains/sendingDomain.js).
+  const fromAddress = await require('../emailDomains/sendingDomain').fromAddressFor(workspaceId);
+  return { fromName: own.fromName || (workspace ? workspace.name : ''), ...(own.replyTo ? { replyTo: own.replyTo } : {}), ...(fromAddress ? { fromAddress } : {}) };
 }
 
 async function get(workspaceId) {

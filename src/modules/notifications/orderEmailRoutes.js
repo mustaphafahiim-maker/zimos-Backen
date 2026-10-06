@@ -24,6 +24,8 @@ const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.WORKSPACE_MANAGE));
 // The sender name and Reply-To (orderEmailSender.js), ahead of the /:key routes.
 router.use(require('./orderEmailSender').router);
+// The store's own sending domain: DNS records, verify, remove (emailDomains/sendingDomain.js).
+router.use(require('../emailDomains/sendingDomain').router);
 
 router.get('/', validate({ params: Joi.object(ws) }), asyncHandler(async (req, res) => res.json(await service.list(wid(req)))));
 
