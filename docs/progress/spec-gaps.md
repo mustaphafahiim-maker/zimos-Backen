@@ -1565,5 +1565,8 @@ centre, no unofficial WhatsApp. Outside services are an interface + `sandbox` ad
   - modules/customerNotes + migration 479 (customer_notes, customer_followups). Writing notes and follow-ups needs only customers.view (support staff take notes); deleting a follow-up needs customers.manage, and only the author or a manager edits a note.
   - Reminders: a 5-minute schedule claims each due follow-up (notified_at) and sends the new merchant notification type customer.followup to the assignee (or the whole team when unassigned). Moving the time or the assignee re-arms it.
   - Verified: notes (author, edit, pin order, delete), assignee check, overdue flag, my list and overdue count, notification sent once over two runs, done.
-- [ ] 210. Size charts: reusable size tables (rows/columns, cm/inch), attached to products or collections, shown on the product page.
+- [x] 210. Size charts: reusable size tables (rows/columns, cm/inch), attached to products or collections, shown on the product page. (backend done, UI in frontend-handoff.md)
+  - modules/sizeCharts + migration 480 (size_charts with product_ids / collection_ids arrays). Cells are text, so "S", "38–40" and "96" all fit; the unit says what the numbers are in, and the storefront converts for the shopper.
+  - Resolution: a chart on the product beats one on its collections; among several, the newest. Public endpoint cached 5 minutes.
+  - Verified: row/column check, none, by collection, own wins, update, delete falls back to the collection's.
 - [ ] 211. Storefront search analytics: what shoppers search, searches with no results, the results clicked, and merchant-set synonyms used by the store search.

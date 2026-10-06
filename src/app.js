@@ -284,6 +284,8 @@ v1.use('/workspaces/:workspaceId/purchasing', require('./modules/purchasing').ro
 v1.use('/workspaces/:workspaceId/free-gifts', require('./modules/freeGifts').router);
 // Notes and follow-ups on customers (spec-gaps item 209).
 v1.use('/workspaces/:workspaceId/customer-notes', require('./modules/customerNotes').router);
+// Size charts (spec-gaps item 210).
+v1.use('/workspaces/:workspaceId/size-charts', require('./modules/sizeCharts').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
@@ -361,6 +363,7 @@ v1.use('/store/:workspaceId/account/wishlist', require('./modules/shopperAccount
 v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').account);
 v1.use('/store/:workspaceId/account/store-credit', require('./modules/storeCredit').account);
 v1.use('/store/:workspaceId/price-list', require('./modules/priceLists').store);
+v1.use('/store/:workspaceId/size-chart', require('./modules/sizeCharts').store);
 v1.use('/store/:workspaceId/loyalty', require('./modules/loyalty').store);
 v1.use('/store/:workspaceId/account', require('./modules/shopperAccounts').store);
 // Returns asked for by the shopper (item 186).

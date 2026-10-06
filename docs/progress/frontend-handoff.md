@@ -2265,3 +2265,25 @@ All under `/api/v1/workspaces/:ws/customer-notes` (`customers.view` unless noted
 - Customer page: «ملاحظات» / "Notes" (add box, pin toggle, edit/delete own), «متابعات» / "Follow-ups" (add: title, date/time, assignee; tick done; overdue in red «متأخرة» / "Overdue").
 - Dashboard home / Customers: «متابعاتي» / "My follow-ups" list with the overdue count badge; «كل الفريق» / "Whole team" toggle (`all=true`).
 - Notification preferences: the new type «متابعة عميل» / "Customer follow-up".
+
+## 210. Size charts — UI: pending
+
+### Staff — `/api/v1/workspaces/:ws/size-charts` (read `products.view`, change `products.manage`)
+- `GET /` → `{ sizeCharts: [Chart] }`; `GET /:id`; `POST /` (201); `PUT /:id` (full); `DELETE /:id` → 204.
+```json
+{ "name": "T-shirts", "unit": "cm",
+  "columns": [{ "ar": "المقاس", "en": "Size" }, { "ar": "الصدر", "en": "Chest" }, { "ar": "الطول", "en": "Length" }],
+  "rows": [["S", "96", "68"], ["M", "102", "70"]],
+  "note": { "ar": "المقاسات بالسنتيمتر", "en": "Sizes in cm" }, "imageUrl": "https://…/how-to-measure.jpg",
+  "productIds": ["…"], "collectionIds": ["…"] }
+```
+  Rules: 1–12 columns (ar and/or en, ≤60), 1–40 rows, every row one cell per column (cells text ≤40), unit `cm`|`inch`, https image, products/collections must be the store's (422 otherwise).
+
+### Storefront
+- `GET /store/:ws/size-chart?productId=` → `{ sizeChart: { id, name, unit, columns, rows, note, imageUrl } | null }` (5-min cache).
+  A chart attached to the product wins; else the newest chart on one of its collections.
+
+### Screens
+- Products → «جداول المقاسات» / "Size charts": list + editor (a grid: add/remove rows and columns, headings in ar/en, unit, note, picture, attach to products and/or collections).
+- Product page (dashboard): which chart applies, «من مجموعة Tops» / "from collection Tops".
+- Storefront product page: link «دليل المقاسات» / "Size guide" opening a sheet with the table in the shopper's language, a cm/inch switch (convert numeric cells ×/÷ 2.54, one decimal; leave text cells as they are), the note and picture.
