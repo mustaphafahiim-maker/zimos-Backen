@@ -84,3 +84,86 @@ Wording:
 | All texts use the default wording | كل النصوص على الكلام الافتراضي |
 | Saved | اتحفظ |
 | Placeholders: {n} | المتغيرات: {n} |
+
+---
+
+## 161. Store scripts by position and page type — UI: pending
+
+Named snippets of the merchant's own code, each placed in `<head>`, right
+after `<body>` opens, or before `</body>`, and run only on the page types it
+names. Same safety rules as the existing custom code: `website.publish` to read
+or write, every change audited, never served to a staff preview, run only on
+the store's own host and never on the card payment pages.
+
+### Endpoints (permission `website.publish`)
+
+**GET `/workspaces/:workspaceId/custom-code/store-scripts`**
+
+```json
+{
+  "scripts": [
+    { "id": "025235b84454", "name": "Hotjar", "position": "head", "pages": ["all"], "code": "<script>…</script>",
+      "isActive": true, "sortOrder": 1, "updatedAt": "2026-10-06T18:16:29.230Z", "updatedBy": "<userId>" }
+  ],
+  "options": { "positions": ["head", "body_start", "body_end"],
+    "pageTypes": ["all", "home", "collection", "product", "page", "funnel", "cart", "checkout", "thank_you"],
+    "maxScripts": 30, "maxCodeLength": 50000 }
+}
+```
+
+**POST `/workspaces/:workspaceId/custom-code/store-scripts`** → 201 `{ "script": {…} }`
+
+```json
+{ "name": "Chat widget", "position": "body_end", "pages": ["product", "checkout"], "code": "<script>…</script>", "isActive": true }
+```
+- `name` 1–60 chars (required); `position` one of `options.positions` (required);
+  `pages` non-empty unique subset of `options.pageTypes` (default `["all"]`;
+  `"all"` with others collapses to `["all"]`); `code` ≤ 50 000 chars, stored
+  as typed (required, may be `""`); `isActive` (default true); `sortOrder`
+  0–10000 (default: after the last).
+- 422 `VALIDATION_ERROR` "A store keeps at most 30 scripts".
+
+**PATCH `/workspaces/:workspaceId/custom-code/store-scripts/:id`** — any of the
+fields above (at least one) → `{ "script": {…} }`. 404 `NOT_FOUND` when unknown.
+
+**DELETE `/workspaces/:workspaceId/custom-code/store-scripts/:id`** → `{ "deleted": true, "id": "…" }`
+
+**GET `/store/:workspaceId/custom-code`** (public) now also returns
+`scripts: [{ id, position, pages, code }]` — active, non-empty, in order;
+`[]` in a preview.
+
+### Storefront
+- Where the store's custom code is injected today, also inject each script
+  whose `pages` contains `"all"` or the current page type: `home` (store home),
+  `collection`, `product`, `page` (merchant's custom pages), `funnel` (funnel
+  steps), `cart`, `checkout`, `thank_you` (store or funnel thank-you).
+- `head` → in `<head>`; `body_start` → first thing in `<body>`; `body_end` →
+  before `</body>`. Run inline scripts the same way the existing `head`/`js`
+  slots are run (re-created `<script>` elements so they execute). Same host
+  and payment-page guards as the existing custom code.
+
+### Dashboard screen — Settings → Custom code → "Scripts" tab (`website.publish`)
+- Table: name, position, pages (chips), active toggle, updated date; row
+  actions edit / delete (confirm). "Add script" button (disabled at 30 with
+  the reason). Up/down to reorder (PATCH `sortOrder`).
+- Drawer/modal form: name, position (radio: Head / Body start / Body end),
+  pages (checkbox list with "All pages" that disables the others), code
+  (monospace textarea, counter vs 50 000), active switch.
+- Warning banner: code runs on the live store only, not in preview.
+- States: loading, error, empty ("No scripts yet"), no permission.
+
+Wording:
+| en | ar |
+|---|---|
+| Scripts | السكريبتات |
+| Add your own code to the store and choose where and on which pages it runs. | ضيف كود بتاعك للمتجر واختار مكانه والصفحات اللي يشتغل فيها. |
+| Add script | إضافة سكريبت |
+| Position | المكان |
+| Head | داخل head |
+| Body start | أول الـ body |
+| Body end | آخر الـ body |
+| Pages | الصفحات |
+| All pages / Home / Collection / Product / Custom pages / Funnel steps / Cart / Checkout / Thank you | كل الصفحات / الرئيسية / المجموعة / المنتج / الصفحات الخاصة / خطوات الفانل / السلة / إتمام الطلب / صفحة الشكر |
+| Code runs only on your live store, not in the editor preview. | الكود بيشتغل على المتجر الحقيقي بس، مش في المعاينة. |
+| No scripts yet | مفيش سكريبتات لسه |
+| A store keeps at most 30 scripts | المتجر ياخد ٣٠ سكريبت بالكتير |

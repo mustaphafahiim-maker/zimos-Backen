@@ -12,6 +12,8 @@ module.exports = (sequelize, DataTypes) => {
       html: { type: DataTypes.TEXT, allowNull: false, defaultValue: '' },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_active' },
       updatedBy: { type: DataTypes.UUID, allowNull: true, field: 'updated_by' },
+      // A store script's name, position and page types (customCode/storeScripts.js).
+      options: { type: DataTypes.JSONB, allowNull: true },
     },
     {
       tableName: 'workspace_custom_code',

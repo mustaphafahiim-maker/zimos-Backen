@@ -1277,7 +1277,11 @@ Design (page builder):
   - Keys are checked by shape (2–4 dot parts), not against a list: the dictionary lives in the frontend repo and changes there; the storefront ignores unknown keys.
   - PUT replaces the whole object; a blank text drops the override. Plain text only, 500 characters, 400 per language; `{arg}` placeholders kept for function entries.
   - `GET /store/:ws` exposes every language as `storefrontTexts` (small, cached 60 s like `customFonts`); the storefront picks the shopper's.
-- [ ] 161. Store scripts targeted by position (head, body start, body end) and by page type (all, home, collection, product, checkout, thank you).
+- [x] 161. Store scripts targeted by position (head, body start, body end) and by page type (all, home, collection, product, checkout, thank you). (backend done, UI in frontend-handoff.md)
+  - Each script is a `workspace_custom_code` row (slot `ss:<id>`), with name/position/pages/sort order in a new `options` JSONB column (migration 450), so the custom code's rules (website.publish, audit, no preview, own host only, never on payment pages) apply unchanged.
+  - Page types add `page` (custom pages), `funnel` (funnel steps) and `cart` to Lightfunnels' list; `"all"` sent with others collapses to `["all"]`.
+  - At most 30 scripts, 50 000 characters each (the slot limit); the count is checked under the workspace lock.
+  - The public custom-code read returns them as `scripts` beside the existing `slots`; the existing fixed slots stay as they are.
 
 Commerce:
 - [ ] 162. Smart collections by product tags (any/all), and a default "all products" collection.
