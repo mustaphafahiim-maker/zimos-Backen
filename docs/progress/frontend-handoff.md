@@ -1771,3 +1771,29 @@ Wording:
 | Connect Make | اربط ميك |
 | Create an API key with the Webhooks scope, then paste it in Zapier | اعمل مفتاح API بصلاحية الـ Webhooks، وبعدين الصقه في زابير |
 | Your automations | الأتمتة بتاعتك |
+
+## 194. Back-in-stock alerts — UI: pending
+
+### Storefront
+- **POST `/store/:ws/stock-alerts`** `{ "variantId", "email" | "phone" (exactly one), "locale"?: ar|en|fr }` → 201
+  `{ "subscribed": true, "channel": "email" | "sms" }`. Asking twice is fine (one alert per variant and address).
+  409 `IN_STOCK` when the variant can be bought (refresh the page state); 404 for a product not for sale; 422
+  `INVALID_PHONE`; 429 after 20 alerts an hour from one visitor.
+- Product page / quick view: when the selected variant is sold out (and no overselling), replace "Add to cart" with
+  "Notify me when it's back" → email (or phone) field → "Notify me" → "We'll tell you once when it's back".
+- The shopper gets one email ("{product} is back in stock", "Order now" button to the product page) or SMS when the
+  variant's stock goes from 0 to available. Nothing else is sent to that address.
+
+### Dashboard — Products (permission `products.view`)
+- **GET `/workspaces/:ws/stock-alerts`** → `{ "variants": [ { "productId", "productName", "variantId", "sku", "optionValues": { "Size": "M" }, "waiting": 2, "notified": 0, "lastRequestAt" } ] }`
+  (most waited first, 200 rows).
+- A "Waiting for restock" card on Products/Inventory and a badge "{n} waiting" next to sold-out variants; restocking
+  (any stock edit, import or return that makes the variant available) sends the alerts by itself.
+
+Wording:
+| en | ar |
+|---|---|
+| Notify me when it's back | بلغني لما يرجع |
+| We'll tell you once when it's back | هنبلغك مرة واحدة لما يرجع |
+| Waiting for restock | مستنيين يرجع |
+| {n} waiting | {n} مستني |

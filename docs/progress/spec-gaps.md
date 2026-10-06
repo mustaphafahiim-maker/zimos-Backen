@@ -1468,7 +1468,11 @@ interface + `sandbox` adapter + README; migrations stay in 450–499; no prices 
   - Subscribe/unsubscribe already existed (public `POST/DELETE /webhooks`, scope webhooks:write). Added `GET /webhooks/samples/:event` built with the real delivery builder (webhookFanout.build, now exported) from recent domain events, with a marked fallback sample; `store` on `/me` for the connection label.
   - Endpoint limit 10 → 25 (one subscription per trigger). Zapier and Make app cards (standard). The Zapier/Make developer-console entries are the owner's to publish; README maps triggers/actions.
   - Verified with a real API key: /me, order.created samples from a real order, review fallback sample, unknown 404, subscribe/unsubscribe, app cards. Test orders and keys removed.
-- [ ] 194. Back-in-stock alerts: a shopper leaves an email/phone on a sold-out variant; they are told once when stock returns; the merchant sees the demand.
+- [x] 194. Back-in-stock alerts: a shopper leaves an email/phone on a sold-out variant; they are told once when stock returns; the merchant sees the demand. (backend done, UI in frontend-handoff.md)
+  - `stockAlerts/` + `stock_alerts` (migration 467, one waiting alert per variant and address). Accepted only for a sold-out variant without overselling; 20 an hour per IP.
+  - A ProductVariant afterUpdate hook (like product.low_stock) records `variant.back_in_stock` when available stock crosses from ≤0 to >0 and someone is waiting; the consumer re-checks stock and tells each shopper once (email template `back_in_stock` or SMS with the product link), then marks them notified.
+  - No marketing consent is implied: the address is used for that one message. Merchant summary per variant (waiting/notified).
+  - Verified: in-stock refused, email + phone subscribe, duplicate no-op, both fields refused, summary, restock → both notified once. Variant stock restored, alerts removed.
 - [ ] 195. Pre-orders: a sold-out variant can be sold as a pre-order with an expected ship date and an optional limit; the order and the shopper see it.
 - [ ] 196. Cookie consent: the store's consent banner settings, and pixels (browser and server events) sent only with the shopper's consent where the store asks for it.
 - [ ] 197. Store gates: a password-protected or "coming soon" store with an email sign-up, and an optional age check.

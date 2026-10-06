@@ -259,6 +259,7 @@ v1.use('/workspaces/:workspaceId/wishlists', require('./modules/shopperAccounts/
 v1.use('/workspaces/:workspaceId/gift-cards', require('./modules/giftCards').staff);
 v1.use('/workspaces/:workspaceId/blog', require('./modules/blog').staff);
 v1.use('/workspaces/:workspaceId/marketplace', require('./modules/marketplace').merchant);
+v1.use('/workspaces/:workspaceId/stock-alerts', require('./modules/stockAlerts').staff);
 v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/fonts', require('./modules/fonts/storeFonts').staff);
 v1.use('/workspaces/:workspaceId/storefront-texts', require('./modules/storefront/storefrontTexts').router);
@@ -340,6 +341,8 @@ v1.use('/store/:workspaceId/returns', require('./modules/returns/shopperReturns'
 v1.use('/store/:workspaceId/gift-cards', require('./modules/giftCards').store);
 // The store's blog (item 190).
 v1.use('/store/:workspaceId/blog', require('./modules/blog').store);
+// Back-in-stock alerts (item 194).
+v1.use('/store/:workspaceId/stock-alerts', require('./modules/stockAlerts').store);
 // The visitor's country and device, for element display rules (item 191).
 v1.get('/store/:workspaceId/visitor-context', require('./core/middleware/publicWorkspace').resolvePublicWorkspace, (req, res, next) => require('./modules/pages/displayRules').visitorContext(req).then((ctx) => res.set('Cache-Control', 'private, no-store').json(ctx), next));
 v1.use('/store/:workspaceId/fonts', require('./modules/fonts/storeFonts').store);
