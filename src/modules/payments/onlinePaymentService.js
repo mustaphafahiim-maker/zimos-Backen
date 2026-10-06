@@ -731,6 +731,8 @@ function assertAwaiting(order) {
   if (status === 'expired') throw new AppError('ORDER_PAYMENT_EXPIRED', 'The time to pay for this order has run out', 409);
   if (status === 'cancelled') throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
   if (status === 'cod') throw new AppError('ORDER_IS_COD', 'This order is already cash on delivery', 409);
+  // Paid by hand (InstaPay, a wallet): proven with a screenshot, never retried online (manualPayments).
+  if (order.paymentMethod === 'bank_transfer') throw new AppError('ORDER_IS_MANUAL', 'This order is paid by transfer', 409);
   if (order.paymentExpiresAt && new Date(order.paymentExpiresAt) < new Date()) {
     throw new AppError('ORDER_PAYMENT_EXPIRED', 'The time to pay for this order has run out', 409);
   }
@@ -835,4 +837,6 @@ module.exports = {
   switchToCod,
   shopperStatusOf,
   hashToken,
+  newPaymentToken,
+  tokenMatches,
 };

@@ -13,6 +13,7 @@ const orderStock = require('../inventory/orderStock');
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { QUEUE_DEFAULT_SORT, orderSort, orderByClause, afterAnchorClause, anchorValue } = require('../orders/orderSort');
 const wallet = require('../billing/walletService');
+const manualPayments = require('../manualPayments/manualPaymentService');
 
 /*
  * Task lifecycle
@@ -127,6 +128,12 @@ async function loadTasks(workspaceId, ids, transaction) {
   const tasks = ids.map((id) => byId.get(id)).filter(Boolean).map(serializeTask);
   // The agent confirms the customer's photos and texts on the call too.
   for (const task of tasks) if (task.order) await presentOrderItems(workspaceId, task.order.items);
+  // An order paid by InstaPay / a wallet: the payer's number and screenshot, and whether it waits for review.
+  for (const task of tasks) {
+    if (task.order && task.order.paymentMethod === manualPayments.MANUAL_ORDER_METHOD) {
+      task.order.manualPayment = await manualPayments.presentForStaff(workspaceId, task.order.id, transaction);
+    }
+  }
   return tasks;
 }
 
@@ -445,7 +452,7 @@ async function confirmFromOrder(workspaceId, orderId, { notes, channel }, req) {
     const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!order) throw new NotFoundError('Order');
     assertOrderOpen(order);
-    if (order.paymentMethod !== 'cod') {
+    if (order.paymentMethod !== 'cod' && !(await manualPayments.hasManualPayment(order, transaction))) {
       throw new AppError('ORDER_NOT_COD', 'Only cash-on-delivery orders are confirmed by phone', 409);
     }
     if (order.confirmationState === 'confirmed') {

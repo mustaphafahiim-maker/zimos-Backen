@@ -10,6 +10,7 @@ const { saveCheckoutAnswers } = require('./checkoutForm');
 const methodsService = require('../payments/paymentMethodsService');
 const { readVisitorId } = require('../customerUploads/customerUploadService');
 const online = require('../payments/onlinePaymentService');
+const manualPayments = require('../manualPayments/manualPaymentService');
 const { resolveOrderBumpItem } = require('./orderBump');
 const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
 const productTests = require('../catalog/productTests');
@@ -43,7 +44,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -51,7 +52,14 @@ const checkout = asyncHandler(async (req, res) => {
   // cart work so a rejected checkout costs nothing.
   assertRequiredCheckoutFields(workspace, req.body);
 
-  const isOnline = orderBody.paymentMethod !== 'cod';
+  // One of the store's manual methods: placed like cash on delivery, unpaid,
+  // with a token the shopper's browser uses to send the transfer proof.
+  const manualMethod =
+    orderBody.paymentMethod === manualPayments.MANUAL_ORDER_METHOD
+      ? await manualPayments.resolveForCheckout(workspaceId, manualPaymentMethodId)
+      : null;
+  const manualToken = manualMethod ? online.newPaymentToken() : null;
+  const isOnline = orderBody.paymentMethod !== 'cod' && !manualMethod;
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -60,7 +68,7 @@ const checkout = asyncHandler(async (req, res) => {
   let prepared = null;
   if (isOnline) {
     prepared = await online.prepareOnlineCheckout(workspace, { ...orderBody, paymentProvider, returnUrl }, req);
-  } else if (env.payments.onlineEnabled) {
+  } else if (env.payments.onlineEnabled && !manualMethod) {
     // The merchant may have switched cash on delivery off.
     await methodsService.resolveStorefrontMethod(workspace, { paymentMethod: 'cod' }, {
       preview: methodsService.isPreviewRequest(req, workspaceId),
@@ -127,6 +135,7 @@ const checkout = asyncHandler(async (req, res) => {
       // funnel_upsell_merge on): nobody confirms the order until the shopper
       // is past them, so an accepted offer can still join it.
       confirmationAvailableAt: await offerWindowEnd(workspace, orderBody.funnelId),
+      manualPayment: manualMethod ? { method: manualMethod, tokenHash: manualToken.hash } : null,
     });
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets
@@ -134,6 +143,10 @@ const checkout = asyncHandler(async (req, res) => {
     await saveCheckoutAnswers(order, workspace, formFields);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     await afterOrderCompleted(workspaceId, order, context);
+    if (manualMethod) {
+      const manualPayment = await manualPayments.getForShopper(workspaceId, order.id, manualToken.token);
+      return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, manualPayment, paymentToken: manualToken.token });
+    }
     return res.status(201).json({ order: { ...order.toJSON(), items: orderItems } });
   }
 

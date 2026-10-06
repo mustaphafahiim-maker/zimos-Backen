@@ -251,6 +251,9 @@ async function createOrder(
     shippingOverride = null,
     chargeFee = true,
     source = null,
+    // { method, tokenHash }: a storefront order paid with one of the store's
+    // manual methods (manualPayments) — unpaid, confirmed only once approved.
+    manualPayment = null,
   } = {}
 ) {
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
@@ -528,6 +531,7 @@ async function createOrder(
               },
             }
           : {}),
+        ...(manualPayment ? { paymentTokenHash: manualPayment.tokenHash } : {}),
       },
       { transaction }
     );
@@ -563,7 +567,9 @@ async function createOrder(
       await attachUploads(line.customizations, orderItems[orderItems.length - 1].id, transaction);
     }
 
-    if (paymentMethod === 'cod') {
+    if (manualPayment) await require('../manualPayments/manualPaymentService').recordForOrder(order, manualPayment.method, transaction);
+    // A manually paid order waits in the queue too, flagged until its proof is approved.
+    if (paymentMethod === 'cod' || manualPayment) {
       // `confirmationAvailableAt`: a funnel order waits for the funnel's offer
       // window before anyone may confirm it (funnels/funnelOfferMerge.js).
       await db.ConfirmationTask.create(
@@ -830,6 +836,10 @@ async function getOrder(workspaceId, orderId) {
   const json = order.toJSON();
   // Shoppers' photos are shown through short-lived signed links, made per read.
   await presentOrderItems(workspaceId, json.items);
+  // Paid by InstaPay / a wallet: the payer's number, the screenshot's signed link and the review (manualPayments).
+  if (order.paymentMethod === 'bank_transfer') {
+    json.manualPayment = await require('../manualPayments/manualPaymentService').presentForStaff(workspaceId, order.id);
+  }
   // A funnel offer the shopper took after this order had left its offer
   // window is an order of its own: both ends name the other.
   const linkedOrders = await db.Order.findAll({
