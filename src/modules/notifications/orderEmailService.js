@@ -116,7 +116,7 @@ function view(key, row) {
     body: (row && row.body) || base.body,
     isCustomised: Boolean(row && (row.subject || row.body || row.blocks)),
     // The block designer's blocks (emailBlocks.js); null = the plain body is used.
-    blocks: (row && row.blocks) || null,
+    blocks: row && Array.isArray(row.blocks) && row.blocks.length ? row.blocks : null,
     defaults: { subject: base.subject, body: base.body },
     updatedAt: row ? row.updatedAt : null,
   };
@@ -143,7 +143,8 @@ function merged(storeRow, scopedRow) {
     isEnabled: scopedRow.isEnabled,
     subject: scopedRow.subject || s.subject || null,
     body: scopedRow.body || s.body || null,
-    blocks: scopedRow.blocks || s.blocks || null,
+    // An override's blocks: null = the store's; [] = its own plain subject + body (frontend request).
+    blocks: Array.isArray(scopedRow.blocks) ? (scopedRow.blocks.length ? scopedRow.blocks : null) : s.blocks || null,
     updatedAt: scopedRow.updatedAt,
   };
 }
@@ -201,7 +202,8 @@ async function update(workspaceId, key, patch, req, scope = {}) {
     if (patch.isEnabled !== undefined) next.isEnabled = patch.isEnabled;
     if (patch.subject !== undefined) next.subject = patch.subject && patch.subject !== base.subject ? patch.subject : null;
     if (patch.body !== undefined) next.body = patch.body && patch.body !== base.body ? patch.body : null;
-    if (patch.blocks !== undefined) next.blocks = patch.blocks && patch.blocks.length ? patch.blocks : null;
+    // On an override, `blocks: null` (or []) means its own plain body, kept as [] so the store's blocks do not come back.
+    if (patch.blocks !== undefined) next.blocks = patch.blocks && patch.blocks.length ? patch.blocks : sk ? [] : null;
     await row.update(next, { transaction });
     await recordAudit({
       workspaceId,
