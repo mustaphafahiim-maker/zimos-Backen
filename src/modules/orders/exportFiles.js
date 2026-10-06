@@ -46,7 +46,10 @@ function serialize(row) {
 
 /** POST /exports/orders: the same options as GET /orders/export, built in the background. */
 async function startOrdersExport(workspaceId, userId, body, req) {
-  const { columns, rowPer, lang, format, ...filters } = body;
+  const { columns, rowPer: askedRowPer, lang, format, preset: presetId, ...filters } = body;
+  // A courier's layout is copied now: editing it later leaves this file as asked (exportPresets.js).
+  const preset = presetId ? await require('./exportPresets').layoutOf(workspaceId, presetId) : null;
+  const rowPer = preset ? preset.rowPer : askedRowPer;
   const stamp = new Date().toISOString().slice(0, 10);
   const row = await db.sequelize.transaction(async (transaction) => {
     const created = await db.ExportFile.create(
@@ -56,7 +59,7 @@ async function startOrdersExport(workspaceId, userId, body, req) {
         kind: 'orders',
         format,
         // Decided by who asks: the file is built later, without their session (SPEC §3.4 #8).
-        params: { filters, columns: columns || null, rowPer, lang, maskPhones: !(req && req.tenant && req.tenant.hasPermission('customers.reveal_sensitive')) },
+        params: { filters, columns: columns || null, rowPer, lang, layout: preset ? preset.columns : null, maskPhones: !(req && req.tenant && req.tenant.hasPermission('customers.reveal_sensitive')) },
         fileName: `orders-${stamp}.${format}`,
       },
       { transaction }
@@ -69,17 +72,17 @@ async function startOrdersExport(workspaceId, userId, body, req) {
     actorUserId: userId,
     action: 'order.export',
     entityType: 'Order',
-    metadata: { filters, rowPer, format, columns: columns || 'default', background: true, exportId: row.id },
+    metadata: { filters, rowPer, format, columns: columns || 'default', preset: presetId || null, background: true, exportId: row.id },
     req,
   });
   return serialize(row);
 }
 
 async function build(row) {
-  const { filters, columns, rowPer, lang, maskPhones } = row.params || {};
+  const { filters, columns, rowPer, lang, maskPhones, layout } = row.params || {};
   const workspace = await db.Workspace.findByPk(row.workspaceId, { attributes: ['timezone'] });
   // An export started before phones were masked has no flag: it is masked too.
-  const options = { columns: columns || undefined, rowPer, lang, timezone: (workspace && workspace.timezone) || 'UTC', maskPhones: maskPhones !== false };
+  const options = { columns: columns || undefined, rowPer, lang, timezone: (workspace && workspace.timezone) || 'UTC', maskPhones: maskPhones !== false, layout: layout || undefined };
   if (row.format === 'xlsx') {
     const rows = await exportService.tableRows(row.workspaceId, filters || {}, options);
     return buildXlsx(rows, { sheetName: lang === 'ar' ? 'الأوردرات' : 'Orders', rtl: lang === 'ar' });

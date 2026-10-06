@@ -36,6 +36,8 @@ router.get('/pipeline', validate(schemas.pipeline), requirePermission(PERMISSION
 // '/:orderId' for the same reason as '/pipeline'.
 router.get('/export/columns', validate(exportSchemas.columns), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.columns);
 router.get('/export', validate(exportSchemas.exportCsv), requirePermission(PERMISSIONS.ORDERS_VIEW), exportController.exportCsv);
+// Courier export layouts: GET/PUT /export/presets, DELETE /export/presets/:presetId (exportPresets.js).
+router.use(require('./exportPresets').router);
 // Printed paper for many orders: labels (A4 ×4 or 10×15 cm) and the courier
 // handover manifest. And a courier's sheet of waybill numbers and statuses.
 router.post(
