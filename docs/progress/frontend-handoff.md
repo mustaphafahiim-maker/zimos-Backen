@@ -974,3 +974,27 @@ Wording:
 | Renew now | جدّد دلوقتي |
 | The price changed — check it and confirm again | السعر اتغير — راجعه وأكّد تاني |
 | Your store is live on {domain} | متجرك شغال على {domain} |
+
+---
+
+## 177. "Redirect to the primary domain" per domain — UI: pending
+
+Until now every other domain of a store always sent visitors to the primary domain. Now each domain has a switch.
+
+- **PATCH `/workspaces/:ws/domains/:domainId`** (permission `domain.manage`, existing) also takes `{ "redirectToPrimary": false }`
+  (default `true` for every domain, old and new — nothing changes until a merchant turns it off).
+- **GET `/workspaces/:ws/domains/overview`** — each domain has `redirectToPrimary`.
+- **GET `/store/resolve-host?host=…`** (public, the storefront proxy) — for a domain with the switch off, `primaryHost` is
+  `null` and `redirectToPrimary: false`, so the proxy serves the store on that domain. **The current proxy needs no change**
+  (it only redirects when `primaryHost` is set and differs from the host).
+- The platform subdomain (`<slug>.zimos…`) still always moves to the primary domain; the www/root counterpart setting is unchanged.
+
+### Dashboard — Settings → Domains (each non-primary domain)
+- A switch "Redirect visitors to the primary domain" (on by default), with the hint
+  "Off: the store opens on this domain too (useful for a domain dedicated to a funnel)". Hidden on the primary domain.
+
+Wording:
+| en | ar |
+|---|---|
+| Redirect visitors to the primary domain | حوّل الزوار للدومين الأساسي |
+| Off: the store opens on this domain too | لو مقفول: المتجر بيفتح على الدومين ده كمان |

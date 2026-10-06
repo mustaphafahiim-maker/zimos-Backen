@@ -1359,7 +1359,10 @@ Domains and developers:
   - Prices are only the registrar's (sandbox: an env table); the merchant confirms the shown price and a different quote stops the purchase (409). Charging for the domain is left to billing (SPEC §22); nothing here takes money.
   - A bought domain is recorded in `domain_purchases` (migration 457), added to the store's domains and marked verified, since we set its DNS (routing records + the verification TXT). The plan's domain limit applies as for connected domains.
   - Auto-renew on by default; the daily `domains.renew_due` job renews in the last 30 days and marks lapsed ones expired.
-- [ ] 177. "Redirect to the primary domain" per domain.
+- [x] 177. "Redirect to the primary domain" per domain. (backend done, UI in frontend-handoff.md)
+  - `domains.redirect_to_primary` (migration 458), true by default so today's behaviour (every domain moves to the primary one) stays until a merchant turns it off.
+  - Off: resolve-host answers no primary host for that domain, so the storefront proxy serves the store there with no proxy change; canonical links still name the primary domain.
+  - The platform subdomain keeps moving to the primary domain; the www/root counterpart switch is unchanged.
 - [ ] 178. Webhooks: custom headers per endpoint, plus the topics `funnel.created/updated/deleted`, `payment.paid` and `contact.updated`.
 - [ ] 179. An MCP server for the store, used by Claude, ChatGPT or any MCP client with an API key: list products and orders, check pages for problems, create a draft funnel.
 

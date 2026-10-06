@@ -25,6 +25,8 @@ module.exports = (sequelize, DataTypes) => {
       homeFunnelId: { type: DataTypes.UUID, allowNull: true, field: 'home_funnel_id' },
       // Its www / root counterpart sent to it (migration 435, domains/rootDomains.js).
       counterpart: { type: DataTypes.JSONB, allowNull: true },
+      // Send visits on this domain to the store's primary one (migration 458); false serves the store here.
+      redirectToPrimary: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'redirect_to_primary' },
     },
     { tableName: 'domains', indexes: [{ unique: true, fields: ['hostname'] }, { fields: ['website_id'] }] }
   );

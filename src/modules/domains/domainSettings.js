@@ -57,6 +57,7 @@ function present(domain, workspace, funnel) {
     sslProvider: domain.sslProvider || null,
     sslCheckedAt: domain.sslCheckedAt || null,
     homeFunnel: funnel ? { id: funnel.id, name: funnel.name, status: funnel.status } : null,
+    redirectToPrimary: domain.redirectToPrimary !== false,
     isRoot: rootDomains.isRoot(domain.hostname),
     // The records the merchant creates at their DNS provider: the TXT, the
     // routing ones, and the counterpart's when it is sent here.
@@ -210,7 +211,7 @@ async function updateDomain(workspaceId, domainId, patch, req) {
   return db.sequelize.transaction(async (transaction) => {
     const domain = await db.Domain.findOne({ where: { id: domainId, workspaceId }, transaction });
     if (!domain) throw new NotFoundError('Domain');
-    const before = { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId, counterpart: domain.counterpart };
+    const before = { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId, counterpart: domain.counterpart, redirectToPrimary: domain.redirectToPrimary };
 
     if (patch.isPrimary === true) {
       if (!USABLE.includes(domain.status)) {
@@ -234,6 +235,9 @@ async function updateDomain(workspaceId, domainId, patch, req) {
         domain.counterpart = null;
       }
     }
+
+    // Item 177: whether a visit here moves to the primary domain.
+    if (patch.redirectToPrimary !== undefined) domain.redirectToPrimary = patch.redirectToPrimary;
 
     if (patch.homeFunnelId !== undefined) {
       if (patch.homeFunnelId === null) {
@@ -260,7 +264,7 @@ async function updateDomain(workspaceId, domainId, patch, req) {
       entityType: 'Domain',
       entityId: domain.id,
       before,
-      after: { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId, counterpart: domain.counterpart },
+      after: { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId, counterpart: domain.counterpart, redirectToPrimary: domain.redirectToPrimary },
       req,
       transaction,
     });
@@ -385,7 +389,9 @@ async function resolveHost(rawHost) {
     slug: workspace.slug,
     homeFunnel,
     // The store's canonical host (primaryHost.js): only a primary domain with a certificate.
-    primaryHost: await primaryHost.primaryHostOf(workspace.id),
+    // A domain set not to redirect (item 177) answers none, so the proxy serves the store here.
+    primaryHost: domain.redirectToPrimary === false ? null : await primaryHost.primaryHostOf(workspace.id),
+    redirectToPrimary: domain.redirectToPrimary !== false,
     sslStatus: domain.sslStatus,
   };
 }
@@ -423,6 +429,8 @@ const schemas = {
       homeFunnelId: uuid.allow(null).optional(),
       // Send the www / root counterpart here (rootDomains.js).
       redirectCounterpart: Joi.boolean().optional(),
+      // Send visits on this domain to the primary one (default true).
+      redirectToPrimary: Joi.boolean().optional(),
     }).min(1),
   },
   one: { params: domainParams },
