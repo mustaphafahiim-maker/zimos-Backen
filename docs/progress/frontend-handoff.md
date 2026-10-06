@@ -1457,3 +1457,48 @@ Wording:
 | From customer | من العميل |
 | Let customers ask for a return | خلّي العملاء يطلبوا مرتجع |
 | Days after delivery | عدد الأيام بعد الاستلام |
+
+## 187. Import contacts from CSV / Excel, with tags and marketing consent — UI: pending
+
+Permission `customers.manage`.
+- **GET `/workspaces/:ws/contacts/import/template`** → a CSV file (UTF-8 with BOM): `phone,name,email,tags,marketing_consent`
+  and one example row. Link "Download the template".
+- **POST `/workspaces/:ws/contacts/import`** — multipart: `file` (.csv or .xlsx, ≤5MB, ≤5000 rows), `mode` = `update` (default:
+  a phone already in the store gets the sheet's name/email/consent and the tags added) | `skip` (left alone), `tags` (optional,
+  comma-separated, added to every imported contact, e.g. "imported-oct"), `dryRun` = `true` to check without saving.
+  →
+```json
+{ "total": 5, "created": 3, "updated": 0, "skipped": 0, "unchanged": 0, "invalid": 1, "dryRun": true,
+  "columns": { "phone": "الموبايل", "fullName": "الاسم", "email": "البريد", "tags": "التاجات", "consent": "موافقة_التسويق" },
+  "errors": [ { "row": 4, "field": "phone", "message": "\"not-a-phone\" is not a phone number" },
+              { "row": 3, "field": "email", "message": "\"bad-email\" is not an email (the row is imported without it)" } ],
+  "moreErrors": 0 }
+```
+  Columns are matched by name, English or Arabic: phone (phone, mobile, الموبايل, الهاتف…, **required**), name (name, full_name,
+  الاسم), email (email, البريد, الإيميل), tags (tags, التاجات — separated by `,` `;` `|` `،`), marketing consent
+  (marketing_consent, accepts_marketing, consent, موافقة_التسويق — yes/no, نعم/لا, true/false, 1/0). `columns` shows which column
+  was used for each field (null = not found). Only `field: "phone"` errors skip the row; other errors import the row without
+  that value. The same phone twice: one contact, later values win, tags add up.
+  422 `INVALID_FILE` (no phone column / unreadable), 413 `FILE_TOO_LARGE`, 422 `NO_FILE`.
+- **Marketing consent is never turned on for everyone**: only a row saying yes turns it on (no means off, empty leaves it).
+  New contacts get `source: "import"`, and sync to email lists (182) and webhooks like any new contact.
+
+### Screen — Contacts → Import
+1. Upload the file, choose "Update existing contacts" / "Skip existing contacts", optional "Add these tags", then
+   "Check file" (dryRun) → summary: "{created} new, {updated} updated, {skipped} skipped, {invalid} rows without a valid phone"
+   with the matched columns and the errors table (row, field, message).
+2. "Import" (same file, dryRun false) → same summary as done.
+- A note: "Only mark marketing consent yes for people who agreed to receive your offers."
+
+Wording:
+| en | ar |
+|---|---|
+| Import contacts | استيراد العملاء |
+| Download the template | نزّل النموذج |
+| Update existing contacts | حدّث العملاء الموجودين |
+| Skip existing contacts | سيب العملاء الموجودين زي ما هم |
+| Add these tags to everyone | ضيف التاجات دي للكل |
+| Check file | راجع الملف |
+| {n} new, {m} updated, {s} skipped | {n} جديد، {m} اتحدّث، {s} اتساب |
+| {i} rows without a valid phone | {i} صف من غير رقم صحيح |
+| Only mark marketing consent yes for people who agreed to receive your offers. | علّم موافقة التسويق بـ"نعم" بس للناس اللي وافقوا يستقبلوا عروضك. |

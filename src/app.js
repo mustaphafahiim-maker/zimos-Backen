@@ -176,6 +176,8 @@ v1.use('/workspaces', workspaceRoutes);
 v1.use('/workspaces/:workspaceId/catalog', catalogRoutes);
 v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
+// Contacts from a CSV / Excel sheet (item 187), ahead of /contacts/:customerId.
+v1.use('/workspaces/:workspaceId/contacts/import', require('./modules/contacts/contactImport').router);
 v1.use('/workspaces/:workspaceId/contacts', contactRoutes.staff);
 v1.use('/workspaces/:workspaceId/duplicate', storesRoutes.duplicate);
 v1.use('/me/stores', storesRoutes.me);

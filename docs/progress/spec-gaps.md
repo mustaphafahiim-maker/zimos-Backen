@@ -1415,7 +1415,11 @@ What the platform still lacks (the owner's "كل حاجه ناقصه"):
   - Off by default: `settings.shopper_returns` { enabled, windowDays 14, photoRequiredFor [damaged, defective] } (orders.manage). Window counts from the delivered shipment (or the fulfilled order). Returnable = ordered − quantities in other non-rejected returns.
   - Photos reuse customer uploads (same visitor id, attached on request); staff lists get signed photo links. Outbox `return.requested`.
   - Verified: off, not delivered, eligible, photo required, wrong visitor refused, request with photo, returnable shrinks, over-quantity refused, staff sees source + photo, all requested, window closed, bad token 404.
-- [ ] 187. Import contacts from CSV, with tags and marketing consent.
+- [x] 187. Import contacts from CSV, with tags and marketing consent. (backend done, UI in frontend-handoff.md)
+  - `contacts/contactImport.js` on the shared sheet reader (CSV or xlsx, 5000 rows, 5MB): columns by English or Arabic name, phone required, invalid emails/consent values reported but the row kept, duplicate phones merged. No migration.
+  - Modes update (default) / skip; tags only added, never removed; extra tags for the whole file; dryRun for "Check file". New contacts `source: import` + customer.created; changes go through the model so contact.updated fires.
+  - Consent only from each row (yes/no/empty) — never a switch that consents everyone.
+  - Verified: template, missing phone column, Arabic headers, dry run saves nothing, real import, update + unchanged, skip mode.
 - [ ] 188. A wishlist for signed-in shoppers.
 - [ ] 189. Gift cards: issue, sell as a product, redeem at checkout, check the balance.
 - [ ] 190. A blog: a posts index, categories, and the latest posts on the home page.
