@@ -57,12 +57,17 @@ function orderColumns() {
 }
 
 /** Every number of one window, plus its per-day rows. */
-async function collectWindow(workspaceId, { start, end, tz, funnelId }) {
+async function collectWindow(workspaceId, { start, end, tz, funnelId, productId = null, websiteId = null }) {
   const cols = orderColumns();
-  const replacements = { workspaceId, start, end, tz, funnelId: funnelId || null };
+  const replacements = { workspaceId, start, end, tz, funnelId: funnelId || null, productId, websiteId };
   const run = (sql) => db.sequelize.query(sql, { replacements, type: db.Sequelize.QueryTypes.SELECT });
-  const orderFunnel = funnelId ? 'AND o.funnel_id = :funnelId' : '';
-  const eventFunnel = funnelId ? 'AND e.funnel_id = :funnelId' : '';
+  // Product (orders with a line of it) and website (one of the store's sites) filters, beside the funnel one.
+  const orderFunnel = [
+    funnelId ? 'AND o.funnel_id = :funnelId' : '',
+    productId ? 'AND EXISTS (SELECT 1 FROM order_items pi WHERE pi.order_id = o.id AND pi.product_id = :productId)' : '',
+    websiteId ? 'AND o.website_id = :websiteId' : '',
+  ].join(' ');
+  const eventFunnel = [funnelId ? 'AND e.funnel_id = :funnelId' : '', websiteId ? 'AND e.website_id = :websiteId' : ''].join(' ');
   const sale = countsAsSaleSql('o');
   const live = "(o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected')";
 
@@ -92,7 +97,11 @@ async function collectWindow(workspaceId, { start, end, tz, funnelId }) {
       count(*) FILTER (WHERE stage IN ${SHIPPED_STAGES}) AS shipped,
       count(*) FILTER (WHERE stage = 'delivered') AS delivered`;
   // A funnel checkout stores its funnel in the session's attribution.
-  const lostFunnel = funnelId ? "AND c.attribution->>'funnelId' = :funnelId" : '';
+  const lostFunnel = [
+    funnelId ? "AND c.attribution->>'funnelId' = :funnelId" : '',
+    productId ? "AND c.items @> jsonb_build_array(jsonb_build_object('productId', CAST(:productId AS text)))" : '',
+    websiteId ? "AND c.attribution->>'websiteId' = :websiteId" : '',
+  ].join(' ');
   const LOST = `
     SELECT to_char(c.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day
       FROM checkout_sessions c
@@ -100,7 +109,7 @@ async function collectWindow(workspaceId, { start, end, tz, funnelId }) {
        AND c.status = 'abandoned' ${lostFunnel}`;
 
   // Event numbers: whole days from analytics_daily, the edges from raw events (analyticsDaily.js).
-  const events = require('./analyticsDaily').eventNumbers(workspaceId, { start, end, tz, funnelId });
+  const events = require('./analyticsDaily').eventNumbers(workspaceId, { start, end, tz, funnelId, websiteId });
   const [[orderTotals], orderDays, [eventTotals], eventDays, lostDays, [customers], [profit]] = await Promise.all([
     run(`WITH ord AS (${ORDERS}) SELECT ${ORDER_AGG} FROM ord`),
     run(`WITH ord AS (${ORDERS}) SELECT day, ${ORDER_AGG} FROM ord GROUP BY day`),
@@ -301,20 +310,29 @@ async function getOverview(workspaceId, query = {}) {
     const funnel = await db.Funnel.findOne({ where: { id: funnelId, workspaceId }, attributes: ['id'] });
     if (!funnel) throw new ValidationError([{ field: 'funnelId', message: 'unknown funnel' }], 'Invalid query');
   }
+  // Product and store (website) filters (item 172).
+  const productId = query.productId || null;
+  const websiteId = query.websiteId || null;
+  if (productId && !(await db.Product.findOne({ where: { id: productId, workspaceId }, attributes: ['id'] }))) {
+    throw new ValidationError([{ field: 'productId', message: 'unknown product' }], 'Invalid query');
+  }
+  if (websiteId && !(await db.Website.findOne({ where: { id: websiteId, workspaceId }, attributes: ['id'] }))) {
+    throw new ValidationError([{ field: 'websiteId', message: 'unknown website' }], 'Invalid query');
+  }
   const compare = query.compare !== 'none';
   const span = end.getTime() - start.getTime();
   const previousWindow = { start: new Date(start.getTime() - span), end: start };
 
   const [current, previous] = await Promise.all([
-    collectWindow(workspaceId, { start, end, tz, funnelId }),
-    compare ? collectWindow(workspaceId, { ...previousWindow, tz, funnelId }) : Promise.resolve(null),
+    collectWindow(workspaceId, { start, end, tz, funnelId, productId, websiteId }),
+    compare ? collectWindow(workspaceId, { ...previousWindow, tz, funnelId, productId, websiteId }) : Promise.resolve(null),
   ]);
   const breakdowns = await collectBreakdowns(current.sql);
 
   // Net profit is the real one (modules/profit): delivered revenue after goods,
   // both shipping legs, fees and ad spend. The P&L has no funnel split, so a
   // funnel-filtered overview keeps the simple estimate computed above.
-  if (!funnelId) {
+  if (!funnelId && !productId && !websiteId) {
     const { getPnl } = require('../profit/pnlService');
     const [now, before] = await Promise.all([
       getPnl(workspaceId, { from: start, to: end }),
@@ -367,6 +385,10 @@ async function getOverview(workspaceId, query = {}) {
       ? { from: previousWindow.start.toISOString(), to: previousWindow.end.toISOString() }
       : null,
     funnelId,
+    productId,
+    websiteId,
+    // Visits, carts and checkouts cannot be told apart by product: with a product filter they stay the whole store's.
+    eventScope: productId ? 'store' : 'filtered',
     currency,
     baseCurrency,
     moneyMetrics: MONEY_METRICS,

@@ -762,3 +762,34 @@ Wording:
 | Last {n} minutes | آخر {n} دقيقة |
 | Nobody on the store in the last {n} minutes | مفيش حد في المتجر آخر {n} دقيقة |
 | Unknown location | مكان غير معروف |
+
+---
+
+## 172. Dashboard home: filter by product and by store — UI: pending
+
+**GET `/workspaces/:ws/analytics/overview`** (permission `analytics.view`, existing) now also takes:
+- `productId` — only orders with a line of that product (sales, orders, AOV, confirmation/delivery rates, series,
+  top lists) and abandoned checkouts holding it. Visits/carts/checkouts can't be split by product, so they stay the
+  whole store's: the answer says `"eventScope": "store"`.
+- `websiteId` — one website (store) of the workspace: its orders, its visits/events, its checkouts (`eventScope: "filtered"`).
+- Combinable with `funnelId`, `from`/`to`, `compare`, `currency`. 422 `unknown product` / `unknown website` when not the store's.
+- With any of the three filters, net profit is the quick estimate (the full P&L has no product/site split), as with funnels.
+- The answer echoes `productId`, `websiteId`, `eventScope`.
+```json
+{ "overview": { "funnelId": null, "productId": "db50…", "websiteId": null, "eventScope": "store",
+                "metrics": { "orders": { "value": 1, "previous": 0 }, "sales": { "value": 25000, "previous": 0 } }, … } }
+```
+
+### Dashboard — Home
+- Beside the funnel filter: a **Product** picker (search over `GET /catalog/products?q=`) and a **Store** picker
+  (`GET /websites`; hide when the workspace has one website). Keep the choice with the remembered period (item 156).
+- When `eventScope = "store"`, show a small note on the visits/conversion cards: "Visits are for the whole store".
+- "Clear filters" chip.
+
+Wording:
+| en | ar |
+|---|---|
+| All products / All stores | كل المنتجات / كل المتاجر |
+| Product / Store | المنتج / المتجر |
+| Visits are for the whole store | الزيارات للمتجر كله |
+| Clear filters | امسح الفلاتر |

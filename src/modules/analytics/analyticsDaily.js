@@ -38,16 +38,16 @@ const zero = () => Object.fromEntries(FIELDS.map((f) => [f, 0]));
 const metricsOf = (row) => Object.fromEntries(FIELDS.map((f) => [f, Number((row && row[f]) || 0)]));
 
 /** Raw events of [from, to), per store day. */
-function rawDays(workspaceId, { from, to, tz, funnelId }) {
+function rawDays(workspaceId, { from, to, tz, funnelId, websiteId }) {
   return query(
     `WITH ev AS (
        SELECT coalesce(e.session_id, e.visitor_id) AS sid, e.event_name, e.metadata,
               to_char(e.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day
          FROM analytics_events e
         WHERE e.workspace_id = :workspaceId AND e.created_at >= :from AND e.created_at < :to
-              ${funnelId ? 'AND e.funnel_id = :funnelId' : ''})
+              ${funnelId ? 'AND e.funnel_id = :funnelId' : ''} ${websiteId ? 'AND e.website_id = :websiteId' : ''})
      SELECT day, ${AGG} FROM ev GROUP BY day`,
-    { workspaceId, from, to, tz, funnelId: funnelId || null }
+    { workspaceId, from, to, tz, funnelId: funnelId || null, websiteId: websiteId || null }
   ).then((rows) => rows.map((r) => ({ day: r.day, ...metricsOf(r) })));
 }
 
@@ -109,7 +109,14 @@ function nextDay(day) {
  * The overview's event numbers for [start, end): `total` and one row per
  * store day, in the overview's column names (visits, add_to_cart, …).
  */
-async function eventNumbers(workspaceId, { start, end, tz, funnelId }) {
+async function eventNumbers(workspaceId, { start, end, tz, funnelId, websiteId }) {
+  // One website of the store: the daily rows are per store and funnel only, so it is counted from the events.
+  if (websiteId) {
+    const days = await rawDays(workspaceId, { from: start, to: end, tz, funnelId, websiteId });
+    const total = zero();
+    for (const d of days) for (const f of FIELDS) total[f] += d[f];
+    return { total, days };
+  }
   // The store's first midnight after `start` and last midnight before `end`.
   const [cut] = await query(
     `SELECT (date_trunc('day', CAST(:start AS timestamptz) AT TIME ZONE :tz) + interval '1 day') AT TIME ZONE :tz AS first_mid,

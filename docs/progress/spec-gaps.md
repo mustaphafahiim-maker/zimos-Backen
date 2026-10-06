@@ -1334,7 +1334,10 @@ Tracking and analytics:
   - One read (`analytics/liveMap.js`), computed live from analytics sessions/events, open checkouts and sale orders; window 1–60 minutes, funnel filter as on the realtime page.
   - Aggregated by country and place, not per person: no coordinates or ids leave the server. Egyptian governorates and Saudi regions carry the platform place code, so Arabic and English names of one place merge and the dashboard can place a dot without a geocoder.
   - The dashboard draws its own map from ISO codes; no map-tile provider is added.
-- [ ] 172. Dashboard home: filter by product and by store, beside the funnel filter.
+- [x] 172. Dashboard home: filter by product and by store, beside the funnel filter. (backend done, UI in frontend-handoff.md)
+  - "Store" is a website of the workspace (`orders.website_id`, `analytics_events.website_id`); the workspace itself is already the store the dashboard shows, and switching workspaces stays the way to see another one.
+  - Product: orders with a line of it, abandoned checkouts holding it. Visits and funnel steps cannot be split by product, so they stay store-wide and the answer says `eventScope: "store"`.
+  - A website filter counts events from raw rows (the daily rollup is per store and funnel only). Filtered views keep the quick profit estimate, as funnels do.
 
 Email:
 - [ ] 173. A sending domain for customer emails: DNS records shown, then verified (interface + sandbox).

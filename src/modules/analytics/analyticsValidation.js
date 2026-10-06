@@ -41,6 +41,9 @@ module.exports = {
     query: rangeQuery.keys({
       compare: Joi.string().valid('previous', 'none').optional(),
       funnelId: Joi.string().uuid().optional(),
+      // Item 172: one product, one website (store) of the workspace.
+      productId: Joi.string().uuid().optional(),
+      websiteId: Joi.string().uuid().optional(),
       currency: Joi.string().length(3).uppercase().optional(),
     }),
   },
