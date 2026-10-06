@@ -184,4 +184,4 @@ async function resendOrders(workspaceId, orderIds, { endpointId = null } = {}) {
   return { orders: orderIds.length - missing.length, deliveries, missing };
 }
 
-module.exports = { fanOut, handleDomainEvent, resendOrders, orderSubject };
+module.exports = { fanOut, handleDomainEvent, resendOrders, orderSubject, build };

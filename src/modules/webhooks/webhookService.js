@@ -19,7 +19,8 @@ const { normaliseFilter } = require('./webhookFilter');
  * we need it back, to sign every request.
  */
 
-const MAX_ENDPOINTS_PER_WORKSPACE = 10;
+// Each Zapier / Make trigger is one subscription (item 193), so a store needs room for several.
+const MAX_ENDPOINTS_PER_WORKSPACE = 25;
 
 function serializeEndpoint(endpoint) {
   return {

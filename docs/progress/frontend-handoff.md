@@ -1744,3 +1744,30 @@ Wording:
 | Withdraw | اسحبه |
 | {n} pages · used {m} times | {n} صفحات · اتستخدم {m} مرة |
 | Products and offers are not copied — pick yours after | المنتجات والعروض مش بتتنقل — اختار بتوعك بعدين |
+
+## 193. Zapier and Make — UI: pending
+
+Connection is an API key (existing Settings → Developers → API keys) on the public API; the mapping to enter in Zapier's /
+Make's developer consoles is in `src/modules/publicApi/integrations/README.md`.
+- **GET `/api/public/v1/me`** now also returns `store: { id, name, currency }` (the connection label).
+- **GET `/api/public/v1/webhooks/samples/:event?limit=3`** (scope `webhooks:write`) → an array of the store's latest real
+  payloads of that event, newest first, in the exact delivery shape `{ id, type, createdAt, workspaceId, data }`; with none
+  yet, one marked `sample: true`. 404 for an unknown event. Works for every event of `GET /webhooks/events`, including
+  `order.created` and `order.status_changed`.
+- Subscribe / unsubscribe are the existing `POST /webhooks` `{ url, events }` and `DELETE /webhooks/:id`. A store can now hold
+  **25** webhook subscriptions (was 10), since every trigger is one.
+- App store: **Zapier** and **Make** cards (category Orders, available to every store) open Settings → Developers.
+
+### Dashboard
+- App cards Zapier / Make → a short guide page: "1. Create an API key with the Webhooks scope (and Orders read for order
+  fields). 2. In Zapier/Make, search Zimos and paste the key." with a "Create API key" button preselecting the scopes
+  `webhooks:write`, `orders:read`.
+- Settings → Developers → Webhooks: endpoints whose URL is on hooks.zapier.com or hook.*.make.com get a "Zapier"/"Make" badge.
+
+Wording:
+| en | ar |
+|---|---|
+| Connect Zapier | اربط زابير |
+| Connect Make | اربط ميك |
+| Create an API key with the Webhooks scope, then paste it in Zapier | اعمل مفتاح API بصلاحية الـ Webhooks، وبعدين الصقه في زابير |
+| Your automations | الأتمتة بتاعتك |

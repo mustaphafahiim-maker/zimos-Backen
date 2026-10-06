@@ -11,6 +11,8 @@ const me = asyncHandler(async (req, res) => {
     workspaceId: wid(req),
     apiKey: { id: req.apiKey.id, name: req.apiKey.name, keyPrefix: req.apiKey.keyPrefix, scopes: req.apiKey.scopes },
     actingAs: { id: req.user.id, fullName: req.user.fullName },
+    // The store's name, for the connection label in Zapier / Make (item 193).
+    store: await require('../../db/models').Workspace.findByPk(wid(req), { attributes: ['id', 'name', 'defaultCurrency'] }).then((w) => (w ? { id: w.id, name: w.name, currency: w.defaultCurrency || null } : null)),
   });
 });
 

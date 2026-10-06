@@ -1464,7 +1464,10 @@ merchants compare it with (Zapier/Make app, stock alerts, pre-orders, consent, s
 estimates, campaigns, reports). Only what is not in the code is listed. SPEC §21 still holds; outside services are an
 interface + `sandbox` adapter + README; migrations stay in 450–499; no prices in code.
 
-- [ ] 193. Zapier / Make: REST-hook subscribe/unsubscribe on the public API (order created/paid/shipped, lead created, contact updated), sample-data endpoints for setting up a Zap, API-key auth and scopes.
+- [x] 193. Zapier / Make: REST-hook subscribe/unsubscribe on the public API (order created/paid/shipped, lead created, contact updated), sample-data endpoints for setting up a Zap, API-key auth and scopes. (backend done, UI in frontend-handoff.md)
+  - Subscribe/unsubscribe already existed (public `POST/DELETE /webhooks`, scope webhooks:write). Added `GET /webhooks/samples/:event` built with the real delivery builder (webhookFanout.build, now exported) from recent domain events, with a marked fallback sample; `store` on `/me` for the connection label.
+  - Endpoint limit 10 → 25 (one subscription per trigger). Zapier and Make app cards (standard). The Zapier/Make developer-console entries are the owner's to publish; README maps triggers/actions.
+  - Verified with a real API key: /me, order.created samples from a real order, review fallback sample, unknown 404, subscribe/unsubscribe, app cards. Test orders and keys removed.
 - [ ] 194. Back-in-stock alerts: a shopper leaves an email/phone on a sold-out variant; they are told once when stock returns; the merchant sees the demand.
 - [ ] 195. Pre-orders: a sold-out variant can be sold as a pre-order with an expected ship date and an optional limit; the order and the shopper see it.
 - [ ] 196. Cookie consent: the store's consent banner settings, and pixels (browser and server events) sent only with the shopper's consent where the store asks for it.
