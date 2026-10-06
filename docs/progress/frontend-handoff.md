@@ -2474,3 +2474,29 @@ Proof of ownership: `X-Shopper-Token` of the order's customer, **or** the order'
 ### Screens
 - Settings → Orders: «العميل يقدر يلغي الطلب» / "Customers can cancel" + minutes; «العميل يقدر يغيّر العنوان» / "Customers can change the address" + minutes.
 - Tracking page / account order page: buttons «إلغاء الطلب» / "Cancel order" (reason, confirm) and «تغيير العنوان» / "Change address" (address form), shown from `canCancel` / `canChangeAddress`, with «متاح لحد 3:15 م» / "Available until 3:15 PM" from the `…Until` fields.
+
+## 221. Delivery date and time slots — UI: pending
+
+### Settings — `/api/v1/workspaces/:ws/delivery-slots` (read `orders.view`, save `workspace.manage`)
+- `GET` / `PUT` body:
+  ```json
+  { "enabled": true, "required": true, "leadDays": 1, "cutoffTime": "18:00", "sameDayNoticeMinutes": 120, "horizonDays": 7,
+    "weekly": { "0": [{ "id": "morning", "from": "10:00", "to": "14:00", "capacity": 20 }, { "from": "16:00", "to": "20:00", "capacity": null }], "5": [] },
+    "closedDates": ["2026-10-08"], "note": { "ar": "التوصيل من 10 الصبح", "en": "Delivery from 10am" } }
+  ```
+- `weekly` keys `"0"`–`"6"` (0 = Sunday), up to 12 slots a day; `from`/`to` `HH:MM` store time, `to` after `from` (422 `weekly.<day>.<i>.to`); `capacity` 1–10000 or null (unlimited). A slot without `id` gets one (send it back unchanged on later saves, so booked orders keep pointing at it). `leadDays` 0–30 (0 = same day), `cutoffTime` `HH:MM` or null (after it, the earliest day moves one day later), `sameDayNoticeMinutes` 0–1440, `horizonDays` 1–60, `closedDates` `YYYY-MM-DD` list.
+- `GET /schedule?from=YYYY-MM-DD&to=YYYY-MM-DD` (≤ 62 days) → `{ days: [{ date, slots: [{ slotId, from, to, orders: [{ id, orderNumber, totalAmount, currency, customerName }] }] }] }` — cancelled orders left out.
+- `PUT /orders/:orderId` (`orders.manage`) `{ date, slotId, force? }` moves an order; `{ date: null }` removes its slot. 409 `DELIVERY_SLOT_FULL` unless `force: true` → `{ deliverySlot }`.
+
+### Storefront
+- `GET /api/v1/store/:ws/delivery-slots` → 404 when off, else
+  `{ required, note, timezone, days: [{ date: "2026-10-09", weekday: 5, slots: [{ id, from, to, available }] }] }` (only days with slots; full slots come back `available: false` — show them disabled).
+- Checkout body: `deliverySlot: { date, slotId }`. Errors: 422 `deliverySlot` «اختار يوم وميعاد التوصيل» / "Choose a delivery day and time" (when `required`); 409 `DELIVERY_SLOT_UNAVAILABLE` «الميعاد ده مش متاح — اختار ميعاد تاني» / "This delivery time isn't offered — choose another"; 409 `DELIVERY_SLOT_FULL` «الميعاد ده اتحجز بالكامل — اختار ميعاد تاني» / "This delivery time is fully booked — choose another" (reload the slots).
+- The order carries `shippingSnapshot.deliverySlot = { date, slotId, from, to }`; the waybill prints «DELIVER ON / التوصيل: 2026-10-09 10:00-14:00».
+
+### Screens
+- Settings → Shipping → «مواعيد التوصيل» / "Delivery times": on/off, required, earliest day («أقرب يوم: بكرة» / "Earliest: tomorrow"), cutoff time, days ahead, a weekly grid of slots with capacity («عدد الطلبات في الميعاد» / "Orders per slot", empty = unlimited), closed days calendar, note (ar/en).
+- Checkout: day chips («الخميس 9 أكتوبر») then slot chips («10:00 – 14:00»), full ones disabled «محجوز» / "Full"; the note under them.
+- Order page: «ميعاد التوصيل» / "Delivery time" with «تغيير» / "Change" (day + slot, confirm «الميعاد مليان — احجز برضه؟» / "This slot is full — book anyway?" → `force`).
+- Orders → «جدول التوصيل» / "Delivery schedule": per day and slot, the orders booked, count vs capacity.
+- Thank-you page / tracking page: «هيوصلك يوم الخميس 9 أكتوبر بين 10:00 و 14:00» / "Arriving Thursday 9 October, 10:00–14:00".

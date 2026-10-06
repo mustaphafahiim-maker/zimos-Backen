@@ -46,7 +46,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, trackingConsent, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, trackingConsent, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -165,6 +165,8 @@ const checkout = asyncHandler(async (req, res) => {
   // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (giftOptions, item 214).
   const giftChoice = await require('../giftOptions').prepare(workspace, gift);
   if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
+  // The delivery day and time slot: a place is held now and given to the order once it exists (deliverySlots/, item 221).
+  const slotBooking = await require('../deliverySlots').hold(workspace, deliverySlot);
 
   // The gateway takes the order's currency, or the order is not created (payments/methodCurrency.js).
   if (isOnline) {
@@ -204,6 +206,7 @@ const checkout = asyncHandler(async (req, res) => {
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
     await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
+    await require('../deliverySlots').attach(order, slotBooking);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     // Tags from the website page's buy button or order form the shopper used (contacts/pageTags.js).
     await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
@@ -236,6 +239,7 @@ const checkout = asyncHandler(async (req, res) => {
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
   await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
+    await require('../deliverySlots').attach(order, slotBooking);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
   await require('../contacts/pageTags').tagFromPages(workspaceId, order, pageTags);
 
