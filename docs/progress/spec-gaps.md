@@ -1420,7 +1420,11 @@ What the platform still lacks (the owner's "كل حاجه ناقصه"):
   - Modes update (default) / skip; tags only added, never removed; extra tags for the whole file; dryRun for "Check file". New contacts `source: import` + customer.created; changes go through the model so contact.updated fires.
   - Consent only from each row (yes/no/empty) — never a switch that consents everyone.
   - Verified: template, missing phone column, Arabic headers, dry run saves nothing, real import, update + unchanged, skip mode.
-- [ ] 188. A wishlist for signed-in shoppers.
+- [x] 188. A wishlist for signed-in shoppers. (backend done, UI in frontend-handoff.md)
+  - `shopperAccounts/wishlist.js` + `wishlist_items` (migration 463, unique per customer/product/variant with a COALESCE index), max 200. Needs shopper accounts on (185).
+  - Guests keep hearts in the browser and merge them after sign-in (only products still for sale). Archived/out-of-stock items stay listed as unavailable; deleted products go by cascade.
+  - Merchant `/wishlists/top` (products.view): most wished products by distinct shoppers.
+  - Verified: off 404, no token 401, add, add twice no-op, variant entry, bad product 404, merge, top, remove, remove twice 404.
 - [ ] 189. Gift cards: issue, sell as a product, redeem at checkout, check the balance.
 - [ ] 190. A blog: a posts index, categories, and the latest posts on the home page.
 - [ ] 191. Element display rules: show between dates, and by device, country or UTM source.

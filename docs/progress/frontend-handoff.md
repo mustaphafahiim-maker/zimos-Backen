@@ -1502,3 +1502,38 @@ Wording:
 | {n} new, {m} updated, {s} skipped | {n} جديد، {m} اتحدّث، {s} اتساب |
 | {i} rows without a valid phone | {i} صف من غير رقم صحيح |
 | Only mark marketing consent yes for people who agreed to receive your offers. | علّم موافقة التسويق بـ"نعم" بس للناس اللي وافقوا يستقبلوا عروضك. |
+
+## 188. Wishlist for signed-in shoppers — UI: pending
+
+Works when the store has shopper accounts on (185); otherwise 404 `SHOPPER_ACCOUNTS_OFF`. Header `X-Shopper-Token` (401
+`SHOPPER_NOT_SIGNED_IN` without a valid one).
+- **GET `/store/:ws/account/wishlist`** →
+```json
+{ "items": [ { "id": "d5da…", "productId": "db50…", "variantId": null, "addedAt": "2026-10-06T20:30:12Z",
+  "product": { "name": "Demo T-Shirt", "slug": "demo-t-shirt", "imageUrl": null },
+  "price": { "amount": "25000", "compareAt": null, "currency": "EGP" }, "available": true } ], "count": 1 }
+```
+  Newest first. `available: false` = archived, out of stock or no longer for sale (keep showing it greyed, "Unavailable").
+- **POST `/store/:ws/account/wishlist`** `{ "productId", "variantId"? }` → 201 + the list. Adding the same product (and
+  variant) again is a no-op. 404 for a product not for sale; 422 `WISHLIST_FULL` (200 items).
+- **DELETE `/store/:ws/account/wishlist/:itemId`** → the list (404 if not theirs).
+- **POST `/store/:ws/account/wishlist/merge`** `{ "items": [ { "productId", "variantId"? } ] }` → the list. For guests:
+  keep hearts in localStorage, send them here right after sign-in, then clear them; products no longer for sale are ignored.
+- Merchant: **GET `/workspaces/:ws/wishlists/top?limit=20`** (products.view) →
+  `{ "products": [ { "productId", "name", "slug", "status", "shoppers": 12, "lastAddedAt" } ] }`.
+
+### Screens
+- Storefront: heart button on product cards and the product page (filled when on the list; a guest's tap fills it locally
+  and offers "Sign in to keep your wishlist"); account tab "Wishlist" with add-to-cart and remove.
+- Dashboard: Products → a "Most wished" card/list (product, shoppers count).
+
+Wording:
+| en | ar |
+|---|---|
+| Wishlist | المفضلة |
+| Add to wishlist | ضيف للمفضلة |
+| Remove from wishlist | شيل من المفضلة |
+| Sign in to keep your wishlist | سجّل دخول عشان تحفظ مفضلتك |
+| Unavailable | مش متاح |
+| Most wished | الأكتر في المفضلة |
+| {n} shoppers | {n} عميل |
