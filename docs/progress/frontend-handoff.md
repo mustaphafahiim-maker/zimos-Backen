@@ -3563,3 +3563,82 @@ Everything else stays open (domain list and settings, members, the analytics sum
 - **Wherever the gated actions are** (Domains → add / verify / buy, Team → invite, Analytics → Website traffic): on 403 `PLAN_FEATURE_REQUIRED` show «باقتك مش فيها {label.ar} — رقّي باقتك عشان تستخدمها» / "Your plan doesn't include {label.en} — upgrade your plan to use it" with «شوف الباقات» / "See plans" → the Subscription section. Website traffic shows it in place of the charts.
 - **Console → Plans → edit**: tick features from `featureCatalog` with `label.ar` / `label.en`; a key with `available: false` is disabled with «غير متاحة حاليًا» / "Not available yet", unless the plan already lists it (then it can be unticked, not re-ticked). Show `PLAN_FEATURE_NOT_AVAILABLE` details under the features. The list is in display order now.
 - **Console → Store → Features**: use `label` for each row's name and mark `available: false` rows «غير متاحة حاليًا» / "Not available yet".
+
+## 334. Paying the subscription by InstaPay or a wallet with a transfer proof, the platform's payment methods and their review in the console — UI: pending
+
+No new environment variable. Online payment still needs `ONLINE_BILLING_ENABLED=true` and the `FAWATERAK_*` keys (docs/billing-fawaterak.md); a transfer needs a manual method turned on in the console with its number. Everything under `/workspaces/:workspaceId/billing` is Bearer + `billing.manage`; amounts are minor units; the dashboard never sends a price (`expectedAmount` is only compared). The whole contract is in docs/billing-payment-methods.md.
+
+### Endpoints (merchant)
+- **GET `/workspaces/:workspaceId/billing/payment-methods`** → 200, never cached:
+  ```json
+  {
+    "methods": [
+      { "code": "instapay", "kind": "manual", "label": { "ar": "إنستا باي", "en": "InstaPay" },
+        "accountNumber": "zimos@instapay", "paymentLink": "https://ipn.eg/S/zimos/instapay/abc",
+        "note": { "ar": "حوّل المبلغ بالضبط", "en": "Send the exact amount" } },
+      { "code": "fawaterak", "kind": "gateway", "label": { "ar": "فواتيرك", "en": "Card / Fawry" } }
+    ],
+    "currency": "EGP",
+    "contactSupport": false
+  }
+  ```
+  In the console's order. A manual method is listed only for a plan in EGP and only with its number; `paymentLink` is `null` when none is set (show the number only); `note.ar` / `note.en` may be `null`. A gateway is listed only while it is turned on and configured. `methods: []` with `contactSupport: true` when there is no way to pay.
+- **POST `/workspaces/:workspaceId/billing/invoices/open`** (no body) → always 200, writes nothing:
+  ```json
+  {
+    "invoice": { "id": "next", "status": "pending", "periodStart": "2026-10-07T07:44:10Z", "periodEnd": "2026-11-07T07:44:10Z",
+                 "grossAmount": 29900, "discountAmount": 0, "amountDue": 29900, "amountPaid": null, "currency": "EGP",
+                 "paidAt": null, "paymentSource": null, "createdAt": null },
+    "created": false,
+    "written": false,
+    "methods": [ …as GET /payment-methods… ]
+  }
+  ```
+  `written: true` (and the charge's real `id` and `createdAt`) when a charge is already open; `id: "next"` otherwise — the charge is written only when a proof is sent. `amountDue` is what to transfer. 409 `NO_PAYMENT_METHOD` "There is no way to pay online or by transfer right now. Contact support."; 409 `NO_PLAN`, `PLAN_IS_FREE`.
+- **POST `/workspaces/:workspaceId/billing/invoices/:invoiceId/payment-proofs`** — `multipart/form-data`, `:invoiceId` = the `invoice.id` from `/invoices/open` (`next` or a charge id):
+  - `methodCode` (required): a manual method's `code`;
+  - `senderPhone` (required): the Egyptian mobile number the money came from (`01012345678`, `0101 234 5678`, `+201012345678`);
+  - `file` (required): the screenshot, JPEG, PNG or WebP, up to 8 MB;
+  - `expectedAmount` (send it): the `amountDue` shown.
+  → 201 `{ "proof": { "id": "a6a8…", "purpose": "invoice", "invoiceId": "e552…", "method": { "code": "instapay", "label": { "ar": "إنستا باي", "en": "InstaPay" } }, "senderPhone": "201012345678", "amount": 29900, "currency": "EGP", "status": "pending", "reviewNote": null, "createdAt": "…", "reviewedAt": null } }`.
+  Errors: 409 `CHARGE_AMOUNT_CHANGED` `details: { "amountDue": 30900, "currency": "EGP" }` (show the new amount and ask again; nothing was written); 422 `PAYMENT_METHOD_NOT_AVAILABLE` (field `methodCode`); 422 `INVALID_SENDER_PHONE` (field `senderPhone`); 422 `NO_FILE`; 415 `UNSUPPORTED_MEDIA_TYPE`; 413 `FILE_TOO_LARGE`; 409 `PROOF_IMAGE_DUPLICATE`; 409 `PROOF_ALREADY_OPEN`; 409 `TOO_MANY_OPEN_PROOFS` (3 waiting per store); 409 `CHARGE_NOT_PENDING`; 409 `MANUAL_PAYMENT_CURRENCY_UNSUPPORTED`; 409 `NOTHING_TO_PAY`; 404 `NOT_FOUND` (an unknown charge id); 429 `RATE_LIMITED` (10 an hour per account).
+- **GET `/workspaces/:workspaceId/billing/payment-proofs`** → 200 `{ "proofs": [ …the proof above… ] }`, the latest 20, newest first; `status` `pending` | `approved` | `rejected`; `reviewNote` is set only on a rejected one (the console's note, for the merchant).
+- **POST `/workspaces/:workspaceId/billing/payments`** (the Pay button) takes an optional `"method": "fawaterak"`: a gateway from the list. Without it, Fawaterak as today. 404 `PAYMENT_METHOD_NOT_AVAILABLE` for a code that isn't an offered gateway.
+
+### Endpoints (console)
+- **GET `/admin/payment-methods`** (payments.record) → 200
+  ```json
+  {
+    "methods": [
+      { "id": "aad8…", "code": "instapay", "kind": "manual", "labelAr": "إنستا باي", "labelEn": "InstaPay", "sortOrder": 10, "enabled": true,
+        "accountNumber": "zimos@instapay", "paymentLink": "https://ipn.eg/S/zimos/instapay/abc", "noteAr": "حوّل المبلغ بالضبط", "noteEn": "Send the exact amount",
+        "offered": true, "updatedAt": "…" },
+      { "id": "6f99…", "code": "fawaterak", "kind": "gateway", "labelAr": "Fawaterak", "labelEn": "Fawaterak", "sortOrder": 30, "enabled": true,
+        "gateway": { "name": "Fawaterak", "adapterInstalled": true, "configured": false,
+                     "missing": ["ONLINE_BILLING_ENABLED", "FAWATERAK_CLIENT_ID", "FAWATERAK_CLIENT_SECRET", "FAWATERAK_HASH_KEY", "FAWATERAK_WEBHOOK_TOKEN"],
+                     "currencies": ["EGP"] },
+        "offered": false, "updatedAt": "…" }
+    ],
+    "gatewaysNotAdded": [{ "code": "fawaterak", "name": "Fawaterak", "configured": false, "missing": ["…"], "currencies": ["EGP"] }]
+  }
+  ```
+  `missing` holds variable names only. A gateway in `gatewaysNotAdded` has no row yet: turning it on (PATCH below) adds it.
+- **PATCH `/admin/payment-methods/:code`** (payment_methods.manage) `{ "enabled": true, "labelAr": "…", "labelEn": "…" }` (any of them) → 200 `{ "method": { …one row as above… } }`. 409 `PAYMENT_METHOD_NEEDS_NUMBER` "Set the number this method sends money to before turning it on."; 404 for an unknown code.
+- **PUT `/admin/payment-methods/order`** (payment_methods.manage) `{ "codes": ["wallet", "instapay"] }` → 200, the GET answer. 422 `UNKNOWN_PAYMENT_METHOD`.
+- **PATCH `/admin/payment-methods/:code/account`** (payment_methods.edit_numbers) `{ "accountNumber": "zimos@instapay", "paymentLink": "https://ipn.eg/S/zimos/instapay/abc", "noteAr": "…", "noteEn": "…" }` (any of them; `""` clears one, `paymentLink: null` too) → 200 `{ "method": … }`. 422 `VALIDATION_ERROR` field `paymentLink` (not https); 409 `PAYMENT_METHOD_NEEDS_NUMBER` "Turn this method off before removing its number."; 409 `NOT_A_MANUAL_METHOD` (a gateway).
+- **GET `/admin/payment-proofs?status=pending&page=1&pageSize=20`** (payments.record; `status` pending | approved | rejected | all; pageSize ≤ 50) → 200 `{ "proofs": [{ "id": "…", "purpose": "invoice", "workspace": { "id": "…", "name": "Demo Store", "slug": "demo-store" }, "invoiceId": "…", "method": { "code": "instapay", "labelAr": "إنستا باي", "labelEn": "InstaPay" }, "receivingNumber": "zimos@instapay", "senderPhone": "201012345678", "requestedAmount": 29900, "receivedAmount": null, "currency": "EGP", "status": "pending", "reviewNote": null, "reviewedBy": null, "reviewedAt": null, "submittedBy": { "id": "…", "fullName": "Demo", "email": "demo@zimos.test" }, "createdAt": "…" }], "page": 1, "pageSize": 20, "total": 1 }`. Waiting ones oldest first, the rest newest first.
+- **GET `/admin/payment-proofs/:proofId`** (payments.record) → 200 `{ "proof": { … }, "invoice": { "id": "…", "status": "pending", "amountDue": 29900, "currency": "EGP", "periodStart": "…", "periodEnd": "…", "paidAt": null }, "approvalBlockers": [], "image": { "url": "https://api…/api/v1/payment-proofs/…/image?expires=…&signature=…", "expiresAt": "…", "mime": "image/jpeg" } }`. `image.url` works in an `<img>` without the token for 5 minutes (load the proof again for a new one). `approvalBlockers`: `CHARGE_ALREADY_PAID`, `CHARGE_REPRICED`.
+- **POST `/admin/payment-proofs/:proofId/approve`** (payments.record) `{ "receivedAmount": 29900 }` → 200, the GET answer plus `"alreadyApproved": false` (`true` when it was already approved: nothing done again). 422 `RECEIVED_AMOUNT_MISMATCH` `details: { "requestedAmount": 29900, "receivedAmount": 29899, "currency": "EGP" }`; 409 `CHARGE_ALREADY_PAID`, `CHARGE_REPRICED`, `PROOF_ALREADY_REVIEWED`.
+- **POST `/admin/payment-proofs/:proofId/reject`** (payments.record) `{ "note": "…" }` (3–1000 characters, the merchant reads it) → 200, the GET answer plus `"alreadyRejected"`. 409 `PROOF_ALREADY_REVIEWED` (approved).
+- The two new platform keys `payment_methods.manage` and `payment_methods.edit_numbers` are held through `*` (the creator) unless granted: show them in the permission editor like the others.
+
+### Screens
+- **Merchant dashboard → Settings → Subscription → «ادفع» / "Pay"** opens a dialog from POST `/invoices/open`:
+  - The amount «المبلغ المطلوب» / "Amount due" (`amountDue`, with the discount line when `discountAmount > 0`) and the period «الفترة» / "Period".
+  - One tab or radio per method in `methods`. A gateway: «ادفع أونلاين» / "Pay online" → POST `/billing/payments` `{ lang, method: code }` and the existing redirect.
+  - A manual method: «حوّل {amountDue} على {label.ar}» / "Transfer {amountDue} via {label.en}", the number «رقم التحويل» / "Send to" with a copy button «نسخ» / "Copy", «افتح لينك الدفع» / "Open the payment link" when `paymentLink` is set, the note. Then a form: «رقم الموبايل اللي حوّلت منه» / "The mobile number you sent from", «صورة التحويل (سكرين شوت)» / "Transfer screenshot" (JPEG, PNG or WebP, up to 8 MB), and «أرسل إثبات التحويل» / "Send the transfer proof" → the multipart POST with `expectedAmount`. Success: «وصلنا إثبات التحويل — هنراجعه ونأكدلك» / "We received your transfer proof — we'll check it and confirm".
+  - Empty (`NO_PAYMENT_METHOD` / `contactSupport`): «مفيش طريقة دفع متاحة دلوقتي — تواصل مع الدعم» / "No way to pay is available right now — contact support" with «افتح تذكرة دعم» / "Open a support ticket".
+  - Errors: `CHARGE_AMOUNT_CHANGED` «المبلغ اتغير لـ {amountDue} — راجعه وابعت تاني» / "The amount changed to {amountDue} — check it and send again" (update the amount shown); `INVALID_SENDER_PHONE` «اكتب رقم موبايل مصري صحيح» / "Enter a valid Egyptian mobile number"; `NO_FILE` «ارفع صورة التحويل» / "Attach the transfer screenshot"; `UNSUPPORTED_MEDIA_TYPE` «الصورة لازم تكون JPEG أو PNG أو WebP» / "The screenshot must be JPEG, PNG or WebP"; `FILE_TOO_LARGE` «الصورة أكبر من 8 ميجا» / "The screenshot is larger than 8 MB"; `PROOF_IMAGE_DUPLICATE` «الصورة دي اتبعتت قبل كده — ابعت صورة التحويل ده» / "This screenshot was already sent — send the screenshot of this transfer"; `PROOF_ALREADY_OPEN` «فيه إثبات تحويل للفاتورة دي مستني المراجعة» / "A proof for this charge is already waiting for review"; `TOO_MANY_OPEN_PROOFS` «عندك 3 إثباتات مستنية المراجعة — استنى لما نراجعها» / "You have 3 proofs waiting for review — wait until we check them"; `RATE_LIMITED` «محاولات كتير — جرّب بعد شوية» / "Too many tries — try again later"; `PAYMENT_METHOD_NOT_AVAILABLE` «طريقة الدفع دي مش متاحة دلوقتي» / "This payment method isn't available right now" (reload the methods).
+- **Settings → Subscription → «إثباتات التحويل» / "Transfer proofs"**: from GET `/payment-proofs` — date, method, amount, status «في المراجعة» / "Under review" · «اتقبل» / "Approved" · «اترفض» / "Rejected"; a rejected one shows «سبب الرفض: {reviewNote}» / "Reason: {reviewNote}" and «ادفع تاني» / "Pay again". Empty: «مفيش إثباتات تحويل» / "No transfer proofs".
+- **Console → Billing → «طرق الدفع» / "Payment methods"**: a list in order with drag or up/down to reorder (PUT order); per row the labels, kind «تحويل يدوي» / "Manual transfer" · «بوابة دفع» / "Gateway", a switch «مفعّلة» / "On" (disabled without `payment_methods.manage`). A manual row: «الرقم» / "Number", «لينك الدفع (اختياري)» / "Payment link (optional)" (https only: «اللينك لازم يبدأ بـ https://» / "The link must start with https://"), «ملاحظة بالعربي» / "Note in Arabic", «ملاحظة بالإنجليزي» / "Note in English", editable with `payment_methods.edit_numbers` only. A gateway row: «مضبوطة» / "Configured" or «ناقصها: {missing}» / "Missing: {missing}". `gatewaysNotAdded` rows show «إضافة» / "Add" (PATCH with `enabled`). `PAYMENT_METHOD_NEEDS_NUMBER`: «حط الرقم الأول قبل ما تفعّلها» / "Set the number before turning it on" / «اقفلها الأول قبل ما تمسح الرقم» / "Turn it off before removing the number".
+- **Console → Billing → «إثباتات التحويل» / "Transfer proofs"**: tabs «في الانتظار» / "Waiting" · «مقبولة» / "Approved" · «مرفوضة» / "Rejected" · «الكل» / "All", paged; columns store, method, sent to, sender, amount, date. A proof page: the screenshot (`image.url`), the charge, the blockers «الفاتورة اتدفعت خلاص» / "The charge is already paid" · «سعر الفاتورة اتغير» / "The charge was re-priced"; «قبول» / "Approve" with «المبلغ اللي وصل» / "Amount received" (prefilled empty; must equal the requested amount — `RECEIVED_AMOUNT_MISMATCH` «المبلغ اللي وصل لازم يساوي المطلوب بالظبط — ارفض الإثبات بملاحظة» / "The amount received must equal the amount asked — reject the proof with a note"); «رفض» / "Reject" with a required note «سبب الرفض (هيظهر للتاجر)» / "Reason (the merchant sees it)".
