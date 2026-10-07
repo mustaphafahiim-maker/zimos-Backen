@@ -1718,3 +1718,16 @@ review requests sent to many customers at once. Migrations 495–499 are the las
 - [x] 237. RFM customer scores: recency, frequency and money scores 1–5 per customer from delivered orders, the usual labels (champions, loyal, at risk, lost…), counts per label, and a filter in the customer list. (backend done, UI in frontend-handoff.md)
   - rfm/index.js; no migration: one SQL (shared STAGE_SQL, delivered orders only, refunds off, test/cancelled out) with NTILE(5) per dimension and a fixed label table. Summary per label, filtered/sorted customer list, one customer.
   - Verified with 8 customers of different patterns: champions, cant_lose, at_risk, new, lost ×2, need_attention ×2; label filter; bad label 422.
+
+## Eleventh pass (2026-10-07) — reports gap pass
+
+How the list was made: the analytics reports (sales, products, delivery, customers with monthly cohorts, insights),
+profit, stock forecast and RFM were read first. The gaps are reports a merchant needs for accounts and stock
+decisions. All of them read existing tables: no migration (only 499 is left of this pass's range; a new range is the
+owner's call and is noted in LANES when given).
+
+- [ ] 238. Tax report: tax collected per month and per rate/governorate for delivered and paid orders, refunds taken off, tax-exempt orders counted apart, with CSV.
+- [ ] 239. Inventory valuation: on-hand units × unit cost per variant and per stock location, the total, and the variants without a cost; CSV.
+- [ ] 240. Slow-moving and dead stock: variants with stock but no sale in 30/60/90 days, units and value tied up, last sale date; CSV.
+- [ ] 241. Discount code performance: per code — uses, orders, revenue, discount given, average order, new vs returning customers, and cancellations; for a date range.
+- [ ] 242. Orders by weekday and hour: a 7×24 heatmap of orders and revenue in the store's time zone, for planning confirmation calls and stock.
