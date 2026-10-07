@@ -31,6 +31,8 @@ const logger = require('../../core/utils/logger');
  */
 
 const FREE_SHIPPING = Symbol.for('zimos.freeShipping');
+// The chosen place, on the order from the moment it exists (item 282): the assignment job never moves it.
+const PICKUP = Symbol.for('zimos.pickup');
 
 function settingsOf(workspace) {
   const s = (workspace && workspace.settings && workspace.settings.click_and_collect) || {};
@@ -72,6 +74,7 @@ async function prepare(workspace, pickupLocationId, body, orderBody) {
   delete orderBody.shippingAddress;
   delete orderBody.shippingOption;
   orderBody[FREE_SHIPPING] = true;
+  orderBody[PICKUP] = { locationId: location.id, name: location.name, address: location.address, isDefault: location.isDefault };
   return location;
 }
 

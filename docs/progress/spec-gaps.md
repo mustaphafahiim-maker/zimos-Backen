@@ -1928,7 +1928,9 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
   - The slot calendar is read before the hold opens its transaction; inside it, the advisory lock, the recount and the booking all run on the one connection.
   - Found while checking it: the supplier rules of item 263 asked for the connected suppliers outside the order's transaction (`dropshipOrders.connectedRows` and the app-gate check now take the caller's transaction). That alone emptied the pool: 12 checkouts at once gave three 500s after 30 s.
   - Checked: 12 checkouts at once on one slot → twelve 201 in 1.5 s (before: three 500 "Operation timeout" in 31 s).
-- [ ] 282. A pickup at the default location was moved to another warehouse by the order-assignment job.
+- [x] 282. A pickup at the default location was moved to another warehouse by the order-assignment job. (backend fix; no UI change)
+  - The checkout marks the order with the chosen place (payload marker `zimos.pickup`); the order is created with `shippingSnapshot.pickup` and, for a place other than the default, its `stockLocationId` — in the order's own transaction, before order.created fires. The assignment job leaves any order with a pickup (snapshot or `order_pickups` row).
+  - Checked: default location at priority 9, a branch at priority 0 holding stock → a pickup at the default stays at the default after the job; a pickup at the branch has the branch at once; a delivered order is still assigned to the branch.
 - [ ] 283. Two click-and-collect orders at once could both take a location's last unit.
 - [ ] 284. Stock lots ignored the location: FEFO picked and consumed lots of other locations; a write-off could take a location's count below zero.
 - [x] 285. A failed checkout left its delivery-slot hold, blocking the shopper's own retry for 10 minutes. (backend fix; no UI change)

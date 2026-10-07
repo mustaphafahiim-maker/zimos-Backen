@@ -422,6 +422,8 @@ async function createOrder(
     // A quote's prices are the merchant's exact prices (quotes/, item 275): no bundle tier,
     // automatic discount or store minimum on top of them.
     const exactPrices = payload[Symbol.for('zimos.exactPrices')] === true;
+    // A click-and-collect place (clickAndCollect/, items 282–283): { locationId, name, address, isDefault }.
+    const pickupPlace = payload[Symbol.for('zimos.pickup')] || null;
     const bundleSnapshots = exactPrices ? [] : await applyBundleTiers(workspaceId, pricedLines, transaction);
     // A VIP tier with free shipping (vipTiers/, item 218) sets this on the checkout's payload: every line ships free.
     if (payload[Symbol.for('zimos.freeShipping')]) {
@@ -552,7 +554,10 @@ async function createOrder(
         // With the option the shopper picked, when not the standard one.
         shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}),
           // Free shipping a VIP tier, a referral or a pickup gave: kept when a line joins later (item 277).
-          ...(payload[Symbol.for('zimos.freeShipping')] ? { freeShippingGranted: true } : {}) },
+          ...(payload[Symbol.for('zimos.freeShipping')] ? { freeShippingGranted: true } : {}),
+          // Set with the order, so the assignment job leaves a pickup where the shopper picked it (item 282).
+          ...(pickupPlace ? { pickup: { locationId: pickupPlace.locationId, name: pickupPlace.name, address: pickupPlace.address } } : {}) },
+        ...(pickupPlace && !pickupPlace.isDefault ? { stockLocationId: pickupPlace.locationId } : {}),
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,
