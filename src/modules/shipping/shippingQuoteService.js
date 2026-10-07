@@ -61,7 +61,7 @@ async function quote(workspaceId, { country, region, items, funnelId = null, add
     bundles,
     // automaticDiscount (what a no-code discount will take off) and
     // minimumOrder (the store's minimum and how far these items are from it).
-    ...(await require('../discounts/couponExtras').quoteExtras(workspaceId, { subtotal, productIds: lines.map((l) => l.productId) })),
+    ...(await require('../discounts/couponExtras').quoteExtras(workspaceId, { subtotal, productIds: lines.map((l) => l.productId), lines })),
     // A dropshipping supplier's minimum these items don't reach yet, or null (item 263).
     supplierMinimum: await require('../dropship/supplierRules').minimumGap(workspaceId, lines),
     weightGrams: shipping.weightGrams,

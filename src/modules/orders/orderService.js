@@ -469,6 +469,8 @@ async function createOrder(
       const evaluation = await discountService.evaluate(workspaceId, discountCode, {
         subtotal,
         productIds,
+        // A product- or collection-limited code works on its lines only (item 345).
+        lines: pricedLines,
         customerId: customer.id,
         funnelId,
         transaction,
@@ -480,7 +482,7 @@ async function createOrder(
     const couponExtras = require('../discounts/couponExtras');
     if (!discountCode && !exactPrices) {
       // No code typed: the store's best automatic discount, when one applies.
-      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
+      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, lines: pricedLines, customerId: customer.id, funnelId }, transaction);
       if (automatic) {
         discountAmount = automatic.amount;
         discountRecord = automatic.discount;
@@ -798,7 +800,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
     if (discount) {
-      discountAmount = discountService.amountFor(discount, subtotal);
+      discountAmount = await discountService.amountForLines(discount, lines, transaction);
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
       await redemption.update({ amountAllocated: discountAmount }, { transaction });
     }
