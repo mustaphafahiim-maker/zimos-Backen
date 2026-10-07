@@ -406,9 +406,10 @@ async function loginWithGoogle(code, req) {
 
   // A Google account may carry an address Google never verified (item 347):
   // it proves nothing about owning it, so it neither links to the account
-  // with that address nor makes a new one. A Google id linked before keeps
-  // signing in: the link itself is the proof.
-  if (!user && !profile.emailVerified) {
+  // with that address nor makes a new one. A Google id already linked is
+  // refused too: before item 347 such an address linked by email, so the
+  // link itself proves nothing.
+  if (!profile.emailVerified) {
     throw new AuthenticationError('Your Google account has no verified email', 'GOOGLE_EMAIL_UNVERIFIED');
   }
 

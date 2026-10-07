@@ -4077,7 +4077,7 @@ Google sign-in still starts with a full-page visit to `GET /api/v1/auth/google` 
 ### New `error` values on `/auth/callback`
 | `error` | When | Arabic | English |
 |---|---|---|---|
-| `GOOGLE_EMAIL_UNVERIFIED` | The Google account's email is not verified by Google (only for a first sign-in with that Google account) | «إيميل حساب جوجل ده مش متأكد. أكّده عند جوجل أو ادخل بالإيميل وكلمة السر» | "This Google account's email isn't verified. Verify it with Google, or sign in with your email and password" |
+| `GOOGLE_EMAIL_UNVERIFIED` | The Google account's email is not verified by Google (any sign-in, also with a Google account linked before) | «إيميل حساب جوجل ده مش متأكد. أكّده عند جوجل أو ادخل بالإيميل وكلمة السر» | "This Google account's email isn't verified. Verify it with Google, or sign in with your email and password" |
 | `GOOGLE_STATE_MISMATCH` | The sign-in was not started from this browser, or took over 10 minutes | «انتهت محاولة الدخول بجوجل. جرّب تاني» | "The Google sign-in expired. Please try again" |
 | `GOOGLE_LOGIN_FAILED` | Google refused the sign-in code (used twice, expired) | «الدخول بجوجل منجحش. جرّب تاني» | "Google sign-in didn't work. Please try again" |
 
