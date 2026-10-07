@@ -1753,7 +1753,9 @@ breakdowns. No migration needed for any item below.
 - [x] 243. Bulk stock and price update from a sheet: CSV/xlsx rows by SKU (stock set or ±adjust, price, compare-at, cost), a preview of every change and every unknown SKU, then apply with stock movements and an audit entry. (backend done, UI in frontend-handoff.md)
   - catalog/importExport/bulkUpdate.js (reuses sheetReader), mounted before the catalog router. Stateless: preview and apply both read the sheet; apply sets stock to the target relative to the stock at that moment (inventoryService.adjustStock), prices via variant.update (price history and cache follow).
   - Verified: case-insensitive SKU, set + adjust, prices/compare-at/cost in major units, unknown SKU, duplicates, missing SKU, preview changes nothing, multipart apply, 2 movements, price history rows, missing sku column 422.
-- [ ] 244. Packing slips: one A4/A5 slip per selected order — lines and quantities, gift message, prices hidden for gift orders that asked for it — as one PDF beside the other order documents.
+- [x] 244. Packing slips: one A4/A5 slip per selected order — lines and quantities, gift message, prices hidden for gift orders that asked for it — as one PDF beside the other order documents. (backend done, UI in frontend-handoff.md)
+  - orders/packingSlips.js, POST /orders/documents/packing-slips beside the other documents; A5/A4; prices hidden when giftOptions.hidePrices; pickup orders show the place; Arabic through bidiText; emoji stripped.
+  - Verified: gift order (Arabic name/address/message with an emoji, prices hidden) and a normal order (prices and total) rendered and checked as images; empty selection 422.
 - [ ] 245. Sales by collection: units, orders and revenue per collection in a date range (a product in several collections counts in each), with CSV.
 - [ ] 246. Sales by variant option: units and revenue per option value (e.g. size M, colour black) across products, for buying decisions; CSV.
 - [ ] 247. Returns by reason: return requests per reason and per product, the return rate per product (returned units / delivered units), and refunds given; CSV.

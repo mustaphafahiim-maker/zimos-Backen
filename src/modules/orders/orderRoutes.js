@@ -54,6 +54,9 @@ router.post('/documents/invoices', validate(invoices.schema), requirePermission(
 // What to take off the shelves for a batch of orders (pickList.js, item 226).
 const pickList = require('./pickList');
 router.post('/documents/pick-list', validate(pickList.schema), requirePermission(PERMISSIONS.ORDERS_VIEW), pickList.handler);
+// One slip per order to go in the parcel (packingSlips.js, item 244).
+const packingSlips = require('./packingSlips');
+router.post('/documents/packing-slips', validate(packingSlips.schema), requirePermission(PERMISSIONS.ORDERS_VIEW), packingSlips.handler);
 router.post(
   '/documents/manifest',
   validate(schemas.manifestPdf),

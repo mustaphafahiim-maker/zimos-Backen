@@ -2898,3 +2898,12 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screen
 - Products → «تحديث جماعي من شيت» / "Bulk update from a sheet": a template download (sku, stock, stock_change, price, compare_at, cost), upload, the preview table (old → new per field, unknown SKUs and errors in their own tabs), «طبّق N تغيير» / "Apply N changes", then the result.
+
+## 244. Packing slips — UI: pending
+
+### `POST /api/v1/workspaces/:ws/orders/documents/packing-slips?size=A5|A4&as=pdf|base64` (`orders.view`)
+- Body `{ orderIds: [uuid] (1–200), note?: "شكرًا لطلبك!" ≤ 300 }` → one page per order (in the order given): store name, «PACKING SLIP · order number · date», customer and address (or the pickup place), lines with options, SKU and quantity, the gift message, and the note at the bottom. Prices and total are shown, except on gift orders whose shopper asked to hide prices (item 214). Emoji are dropped. `as=base64` → `{ filename, contentType, base64, printed }`. No matching order → 422 `NO_ORDERS_SELECTED`.
+
+### Screens
+- Orders list → bulk actions: «ورقة التجهيز للطلب» / "Packing slips" next to waybills, invoices and pick list; a dialog with the size (A5/A4) and an optional note «رسالة في آخر الورقة» / "Note at the bottom" (remember the last note in the browser).
+- Order page → «اطبع ورقة التجهيز» / "Print packing slip".
