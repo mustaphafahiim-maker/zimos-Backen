@@ -83,6 +83,7 @@ const RESERVED_EDGE_HEADERS = new Set([
   'x-signature',
   'x-kashier-signature',
   'x-hub-signature-256',
+  'x-zimos-signature',
   'x-vercel-ip-country',
   'x-vercel-ip-country-region',
   'x-vercel-ip-city',
