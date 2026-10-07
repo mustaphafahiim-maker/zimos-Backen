@@ -186,4 +186,44 @@ router.get(
   })
 );
 
+// ------------------------------------------- 241. discount code results --
+
+/*
+ * Per discount (codes and automatic ones) for orders placed in the window:
+ * orders, cancelled ones, revenue and discount given (live orders only),
+ * average order, delivered revenue, and how many orders were a customer's
+ * first (new) versus returning. Amounts in the store currency.
+ */
+router.get('/discounts', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({ params: Joi.object(ws), query: Joi.object(range) }), asyncHandler(async (req, res) => {
+  const c = await contextOf(req);
+  const rows = await run(
+    `WITH r AS (
+       SELECT d.id AS discount_id, d.code, d.type, o.id AS order_id, o.customer_id, o.created_at, coalesce(o.fx_rate_to_base, 1) AS fx,
+              o.total_amount AS total, o.amount_refunded AS refunded, dr.amount_allocated AS given,
+              (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live, o.stage,
+              NOT EXISTS (SELECT 1 FROM orders p WHERE p.customer_id = o.customer_id AND p.workspace_id = o.workspace_id
+                           AND p.cancelled_at IS NULL AND p.is_test = false AND p.created_at < o.created_at) AS first_order
+         FROM discount_redemptions dr
+         JOIN discounts d ON d.id = dr.discount_id
+         JOIN (SELECT o.*, ${STAGE_SQL} AS stage FROM ${ORDERS_WITH_STAGE_FROM} WHERE o.workspace_id = :ws AND o.created_at >= :from AND o.created_at < :to) o ON o.id = dr.order_id
+        WHERE dr.workspace_id = :ws AND o.is_test = false AND o.created_at >= :from AND o.created_at < :to)
+     SELECT discount_id AS "discountId", code, type,
+            COUNT(DISTINCT order_id)::int AS orders,
+            COUNT(DISTINCT order_id) FILTER (WHERE NOT live)::int AS cancelled,
+            COALESCE(ROUND(SUM(total * fx) FILTER (WHERE live)), 0)::bigint AS revenue,
+            COALESCE(ROUND(SUM((total - refunded) * fx) FILTER (WHERE live AND stage = 'delivered')), 0)::bigint AS "deliveredRevenue",
+            COALESCE(ROUND(SUM(given * fx) FILTER (WHERE live)), 0)::bigint AS "discountGiven",
+            COUNT(DISTINCT order_id) FILTER (WHERE live AND first_order)::int AS "newCustomers",
+            COUNT(DISTINCT order_id) FILTER (WHERE live AND NOT first_order)::int AS "returningCustomers"
+       FROM r GROUP BY 1, 2, 3 ORDER BY revenue DESC`,
+    { ws: c.ws, from: c.from, to: c.to }
+  );
+  const list = rows.map((r) => {
+    const live = r.orders - r.cancelled;
+    return { ...r, code: r.code || null, automatic: !r.code, revenue: String(r.revenue), deliveredRevenue: String(r.deliveredRevenue), discountGiven: String(r.discountGiven), averageOrder: live ? String(Math.round(Number(r.revenue) / live)) : '0', cancelRate: r.orders ? Math.round((r.cancelled / r.orders) * 1000) / 10 : 0 };
+  });
+  if (req.query.format === 'csv') return sendCsv(res, 'discount-results', ['code', 'type', 'orders', 'cancelled', 'revenue', 'deliveredRevenue', 'discountGiven', 'averageOrder', 'newCustomers', 'returningCustomers'], list.map((r) => ({ ...r, code: r.code || 'automatic' })));
+  return res.json({ from: c.from, to: c.to, currency: c.currency, discounts: list });
+}));
+
 module.exports = { router, contextOf, sendCsv, run, ws, range };

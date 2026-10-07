@@ -2859,3 +2859,18 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screen
 - Reports → «البضاعة الراكدة» / "Slow-moving stock": chips «30 يوم» «60 يوم» «90 يوم» «180 يوم», cards «فلوس محبوسة في المخزون» / "Money tied up", «عمرها ما اتباعت» / "Never sold"; table (product, free units, value, «آخر بيع» / "Last sold", «من كام يوم» / "Days ago"); row actions as links: «اعمل تخفيض مجدول» / "Schedule a sale" (item 227) and «اعرض المنتج» / "Open product"; «تنزيل CSV».
+
+## 241. Discount code results — UI: pending
+
+### `GET /api/v1/workspaces/:ws/store-reports/discounts?from=&to=&format=json|csv` (`analytics.view`)
+```json
+{ "from": "…", "to": "…", "currency": "EGP",
+  "discounts": [{ "discountId": "…", "code": "ZZTEN", "automatic": false, "type": "percentage",
+    "orders": 3, "cancelled": 1, "cancelRate": 33.3, "revenue": "45000", "deliveredRevenue": "22500",
+    "discountGiven": "5000", "averageOrder": "22500", "newCustomers": 1, "returningCustomers": 1 }] }
+```
+- Orders placed in the window that used each discount (codes, and automatic discounts with `code: null`). `revenue`, `discountGiven`, `averageOrder`, new/returning count live orders (not cancelled/rejected); `deliveredRevenue` = delivered, refunds off. New = the customer's first order in the store. Highest revenue first.
+
+### Screens
+- Marketing → Discounts list: columns «طلبات» / "Orders", «مبيعات» / "Revenue", «خصم مدفوع» / "Discount given", «إلغاء» / "Cancelled %" from this report for the chosen range.
+- Discount page: the same numbers, plus «عملاء جداد» / "New customers" vs «عملاء قدام» / "Returning", «اتسلّم فعلًا» / "Delivered revenue"; «تنزيل CSV».

@@ -1735,5 +1735,7 @@ owner's call and is noted in LANES when given).
 - [x] 240. Slow-moving and dead stock: variants with stock but no sale in 30/60/90 days, units and value tied up, last sale date; CSV. (backend done, UI in frontend-handoff.md)
   - storeReports /slow-stock. Free units (on hand − reserved) with no live order line in the window; value at cost; never-sold flagged; variants younger than the window skipped unless includeNew. Window limited to 30/60/90/180.
   - Verified: never-sold and sold-75-days-ago show at 60 days, only never-sold at 90, recently sold left out, bad window 422, CSV with ISO dates.
-- [ ] 241. Discount code performance: per code — uses, orders, revenue, discount given, average order, new vs returning customers, and cancellations; for a date range.
+- [x] 241. Discount code performance: per code — uses, orders, revenue, discount given, average order, new vs returning customers, and cancellations; for a date range. (backend done, UI in frontend-handoff.md)
+  - storeReports /discounts from discount_redemptions × orders (stage via the shared STAGE_SQL in a subquery). Live-order revenue and discount given, delivered revenue net of refunds, cancellations, new vs returning by the customer's earlier non-cancelled orders.
+  - Verified: 3 orders with ZZTEN (one cancelled, one delivered, one by a returning customer) → orders 3, cancelled 1, revenue 450, delivered 225, discount 50, new 1 / returning 1, CSV.
 - [ ] 242. Orders by weekday and hour: a 7×24 heatmap of orders and revenue in the store's time zone, for planning confirmation calls and stock.
