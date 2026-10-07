@@ -72,9 +72,17 @@ const PAID_STATES = ['paid', 'partially_paid', 'refunded', 'partially_refunded']
 const OPEN_ATTEMPT = 'initialized';
 const EXPIRED_REASON = 'payment_expired';
 
-/** Cancels the order's open attempts (but `keepId`) and, once that commits, closes them at the gateway (item 300). */
-async function cancelOpenAttempts(order, transaction, keepId = null) {
-  const where = { orderId: order.id, status: OPEN_ATTEMPT, ...(keepId ? { id: { [Op.ne]: keepId } } : {}) };
+/**
+ * Cancels the order's open attempts (but `keepId`) and, once that commits, closes them at the gateway (item 300).
+ * `gatewayOnly`: only card / wallet attempts; a bank-transfer receipt waiting for review stays open (item 357 review).
+ */
+async function cancelOpenAttempts(order, transaction, keepId = null, { gatewayOnly = false } = {}) {
+  const where = {
+    orderId: order.id,
+    status: OPEN_ATTEMPT,
+    ...(keepId ? { id: { [Op.ne]: keepId } } : {}),
+    ...(gatewayOnly ? { providerCode: gateways.listAdapters().map((a) => a.code) } : {}),
+  };
   // Only rows still open when the update runs are cancelled and closed (item 319): one that just turned
   // failed or paid is left as it is.
   const [, cancelled] = await db.Payment.update({ status: 'cancelled' }, { where, transaction, returning: true });
