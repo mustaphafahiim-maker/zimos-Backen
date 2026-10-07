@@ -4062,3 +4062,23 @@ A teammate with `users.manage` / `roles.manage` (the Admin, or a custom role) ca
 - **Members list**: for a caller who is not an Owner, hide or disable "Change role" and "Remove" on rows whose role is Owner (`role.key === "owner"`), with the tooltip «بس المالك يقدر يغيّر صلاحيات المالك» / "Only an Owner can change an Owner's access". In the role picker, leave the Owner role out unless the caller is an Owner.
 - **Create role / partial invite**: untick and disable permissions the caller does not hold (`GET /team/access-options` already lists them; compare with the caller's own role).
 - **Error `ROLE_ABOVE_YOURS`**: toast «مينفعش تدّي أو تغيّر صلاحيات أعلى من صلاحياتك» / "You can't give or change access above your own"; for the Owner case «بس المالك يقدر يدّي أو يغيّر أو يشيل صلاحيات المالك» / "Only an Owner can give, change or remove Owner access".
+
+## 347. Google sign-in: verified email only, two-step sign-in, and the OAuth state — UI: pending
+
+Google sign-in still starts with a full-page visit to `GET /api/v1/auth/google` and comes back to the dashboard's `/auth/callback` page. Nothing new to call; the callback page gets new query values.
+
+### What changed in the flow
+- `GET /auth/google` now sets a short httpOnly cookie (`zimos_gstate`, 10 minutes) and sends a `state` to Google. The sign-in must start and finish in the same browser: always open `/auth/google` with a full-page navigation (no `fetch`, no new browser), as today.
+- An account with two-step sign-in on (authenticator app, email code or WhatsApp code) is no longer signed in straight away by Google. The callback redirects to:
+  `/auth/callback?twoFactorRequired=true&challengeToken=<uuid>&channel=totp` (or `channel=email&sentTo=m***@company.com`, `channel=whatsapp|sms&sentTo=+20•••••5678`, and `codeNotSent=true` when too many codes went out — a backup code still works).
+  Show the same "Enter your code" step as after a password sign-in and finish with the existing **POST `/api/v1/auth/two-factor/verify`** (no auth; same permission as today) `{ "challengeToken": "<uuid>", "code": "123456", "rememberDevice": true }` → 200 `{ "user": {…}, "accessToken": "…", "refreshToken": "…" }` (refresh token in the cookie in cookie mode, as usual); 401 `INVALID_TWO_FACTOR_CODE`, 429 `TOO_MANY_ATTEMPTS`.
+- Without two-step sign-in nothing changes: `?status=ok` (cookie mode) or `?accessToken=…&refreshToken=…`.
+
+### New `error` values on `/auth/callback`
+| `error` | When | Arabic | English |
+|---|---|---|---|
+| `GOOGLE_EMAIL_UNVERIFIED` | The Google account's email is not verified by Google (only for a first sign-in with that Google account) | «إيميل حساب جوجل ده مش متأكد. أكّده عند جوجل أو ادخل بالإيميل وكلمة السر» | "This Google account's email isn't verified. Verify it with Google, or sign in with your email and password" |
+| `GOOGLE_STATE_MISMATCH` | The sign-in was not started from this browser, or took over 10 minutes | «انتهت محاولة الدخول بجوجل. جرّب تاني» | "The Google sign-in expired. Please try again" |
+| `GOOGLE_LOGIN_FAILED` | Google refused the sign-in code (used twice, expired) | «الدخول بجوجل منجحش. جرّب تاني» | "Google sign-in didn't work. Please try again" |
+
+Each error screen shows a «جرّب تاني» / "Try again" button that opens `/api/v1/auth/google` again, and a link back to the sign-in page. `ACCOUNT_SUSPENDED` / `ACCOUNT_DELETED` are unchanged.

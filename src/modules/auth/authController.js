@@ -82,17 +82,29 @@ const choosePlan = [
   }),
 ];
 
+// The OAuth state ties the callback to the browser that started the sign-in (googleState.js).
 const googleRedirect = asyncHandler(async (req, res) => {
-  res.redirect(authService.getGoogleAuthUrl());
+  res.redirect(authService.getGoogleAuthUrl(require('./googleState').issue(res)));
 });
 
 const googleCallback = asyncHandler(async (req, res) => {
   const back = (params) => res.redirect(`${env.frontendUrl}/auth/callback?${new URLSearchParams(params).toString()}`);
 
+  const stateOk = require('./googleState').consume(req, res);
   if (req.query.error) return back({ error: req.query.error });
+  // Not started from this browser, or started over 10 minutes ago (item 347).
+  if (!stateOk) return back({ error: 'GOOGLE_STATE_MISMATCH' });
 
   try {
-    const { accessToken, refreshToken } = await authService.loginWithGoogle(req.query.code, req);
+    const result = await authService.loginWithGoogle(req.query.code, req);
+    // Two-step sign-in on: the dashboard asks for the code and finishes with
+    // POST /auth/two-factor/verify, as after a password sign-in.
+    if (result.twoFactorRequired) {
+      const params = {};
+      for (const [k, v] of Object.entries(result)) if (['string', 'boolean', 'number'].includes(typeof v)) params[k] = String(v);
+      return back(params);
+    }
+    const { accessToken, refreshToken } = result;
     // No token in the URL (history, logs, Referer): the refresh token goes
     // into the httpOnly cookie and the dashboard asks for an access token.
     if (env.authCookie.enabled) {

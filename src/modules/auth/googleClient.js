@@ -9,9 +9,9 @@ function client() {
   return new OAuth2Client(env.google.clientId, env.google.clientSecret, env.google.redirectUri);
 }
 
-/** URL of Google's consent screen. */
-function getAuthUrl() {
-  return client().generateAuthUrl({ access_type: 'offline', prompt: 'select_account', scope: SCOPES });
+/** URL of Google's consent screen. `state` comes back on the callback (googleState.js). */
+function getAuthUrl(state) {
+  return client().generateAuthUrl({ access_type: 'offline', prompt: 'select_account', scope: SCOPES, ...(state ? { state } : {}) });
 }
 
 /**

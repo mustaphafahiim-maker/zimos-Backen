@@ -373,9 +373,9 @@ async function takeOverUnconfirmed(user, transaction) {
   };
 }
 
-/** URL to send the browser to for Google's consent screen. */
-function getGoogleAuthUrl() {
-  return googleClient.getAuthUrl();
+/** URL to send the browser to for Google's consent screen; `state` from googleState.issue. */
+function getGoogleAuthUrl(state) {
+  return googleClient.getAuthUrl(state);
 }
 
 /**
@@ -383,15 +383,34 @@ function getGoogleAuthUrl() {
  * - known googleId  -> log that user in
  * - known email     -> link googleId to that account, then log in
  * - neither         -> create a new active, email-verified, passwordless user
+ * Linking and creating need an address Google itself verified. An account
+ * with two-step sign-in on answers its challenge, as a password sign-in does
+ * (POST /auth/two-factor/verify finishes it through completeLogin).
  */
 async function loginWithGoogle(code, req) {
-  const profile = await googleClient.fetchProfile(code);
+  // A code Google refuses (used, expired, forged) sends the browser back with
+  // an error instead of an error page.
+  let profile;
+  try {
+    profile = await googleClient.fetchProfile(code);
+  } catch (err) {
+    logger.warn('Google sign-in: the code exchange failed', { message: err.message });
+    throw new AuthenticationError('Google sign-in failed. Try again.', 'GOOGLE_LOGIN_FAILED');
+  }
   if (!profile.googleId || !profile.email) {
     throw new AuthenticationError('Google did not return a usable profile', 'GOOGLE_PROFILE_INCOMPLETE');
   }
 
   let user = await db.User.findOne({ where: { googleId: profile.googleId } });
   let action = 'user.login.google';
+
+  // A Google account may carry an address Google never verified (item 347):
+  // it proves nothing about owning it, so it neither links to the account
+  // with that address nor makes a new one. A Google id linked before keeps
+  // signing in: the link itself is the proof.
+  if (!user && !profile.emailVerified) {
+    throw new AuthenticationError('Your Google account has no verified email', 'GOOGLE_EMAIL_UNVERIFIED');
+  }
 
   let linkMetadata = null;
   if (!user) {
@@ -439,6 +458,19 @@ async function loginWithGoogle(code, req) {
   }
 
   assertMaySignIn(user);
+
+  // Two-step sign-in (item 347): Google stands in for the password only. The
+  // account's own second step (authenticator, email or WhatsApp code) is
+  // still asked from a browser it does not remember; the new-device email
+  // code is not, since Google has just proved the address. A link or a new
+  // account is recorded now; the sign-in itself when the code is verified.
+  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req);
+  if (challenge) {
+    if (action !== 'user.login.google') {
+      await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, metadata: linkMetadata, req });
+    }
+    return challenge;
+  }
 
   await user.update({ lastLoginAt: new Date() });
   await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, metadata: linkMetadata, req });
