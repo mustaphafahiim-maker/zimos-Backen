@@ -86,6 +86,9 @@ async function listEndpoints(workspaceId) {
 
 async function createEndpoint(workspaceId, { url, events, isActive = true, filter = null, customHeaders = [] }, req) {
   const cleanUrl = checkUrl(url);
+  // Tied to the key only when an installed app holds it (items 266, 270): a merchant's own
+  // integration key can be rotated without switching its webhooks off.
+  const appKeyId = req && req.apiKey && (await db.WorkspaceApp.count({ where: { workspaceId, kind: 'external', status: 'installed', apiKeyId: req.apiKey.id } })) > 0 ? req.apiKey.id : null;
   return db.sequelize.transaction(async (transaction) => {
     const count = await db.WebhookEndpoint.count({ where: { workspaceId }, transaction });
     if (count >= MAX_ENDPOINTS_PER_WORKSPACE) {
@@ -98,8 +101,8 @@ async function createEndpoint(workspaceId, { url, events, isActive = true, filte
     const signingSecret = generateSecret();
     const endpoint = await db.WebhookEndpoint.create(
       { workspaceId, url: cleanUrl, events: normaliseEvents(events), signingSecret, isActive, filter: normaliseFilter(filter), customHeaders: require('./customHeaders').normalise(customHeaders),
-        // Created through the public API: tied to that key (item 266).
-        apiKeyId: req && req.apiKey ? req.apiKey.id : null },
+        // Created by an installed app through the public API: tied to its key (items 266, 270).
+        apiKeyId: appKeyId },
       { transaction }
     );
     await recordAudit({

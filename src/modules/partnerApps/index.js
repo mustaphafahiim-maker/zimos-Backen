@@ -268,8 +268,11 @@ async function exchange({ code, client_id: clientId, client_secret: clientSecret
   if (!member) throw new AppError('invalid_grant', 'The person who approved is no longer on the store', 400);
   const req = { user: { id: user.id }, headers: {}, ip: null };
   const { apiKey, secret } = await apiKeyService.createKey(row.workspaceId, { name: `App: ${app.name}`.slice(0, 150), scopes: row.scopes }, req);
-  // Approving again replaces the store's install and its token.
-  for (const old of await installsOf(app.id, { workspaceId: row.workspaceId })) await removeInstall(old, user.id, 'reauthorized');
+  // Approving again replaces the store's install and its token; the webhooks it subscribed move to the new token (item 270).
+  for (const old of await installsOf(app.id, { workspaceId: row.workspaceId })) {
+    if (old.apiKeyId) await db.WebhookEndpoint.update({ apiKeyId: apiKey.id }, { where: { workspaceId: row.workspaceId, apiKeyId: old.apiKeyId } });
+    await removeInstall(old, user.id, 'reauthorized');
+  }
   const record = await db.WorkspaceApp.create({
     workspaceId: row.workspaceId, kind: 'external',
     external: { name: app.name, description: app.description, icon: app.iconUrl, partnerAppId: app.id, clientId: app.clientId, embedded: Boolean(app.appUrl), scopes: row.scopes },
