@@ -22,7 +22,6 @@ const notify = require('../notifications/notify');
 const billingService = require('../billing/billingService');
 const entitlements = require('../billing/entitlementsService');
 const publicPlans = require('../billing/publicPlansService');
-const { isVerified } = require('../auth/signupPolicy');
 const env = require('../../config/env');
 const { assertBumpOfferUsable } = require('../checkout/orderBump');
 
@@ -422,10 +421,12 @@ async function inviteMember({ workspaceId, email, roleId }, req) {
 
   if (user) {
     // An existing account becomes a member at once, so it must have confirmed
-    // its email (or phone): with SIGNUP_CONFIRM_BY_CODE a new account is
-    // signed in before it does, and anyone can sign up with an address they
-    // don't own (spec-gaps item 330). This also covers /team/invite.
-    if (!isVerified(user)) {
+    // its email: with SIGNUP_CONFIRM_BY_CODE a new account is signed in
+    // before it does, and anyone can sign up with an address they don't own
+    // (spec-gaps item 330). The email itself, not a phone: it was found by
+    // the email, and a squatter can confirm their own phone. This also
+    // covers /team/invite.
+    if (!user.emailVerifiedAt) {
       throw new ConflictError(
         "That person's account hasn't confirmed its email yet. Ask them to confirm it, then invite them again.",
         'INVITEE_NOT_CONFIRMED'

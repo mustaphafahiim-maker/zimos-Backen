@@ -405,9 +405,11 @@ async function loginWithGoogle(code, req) {
       // Google has already verified this email, so a still-`pending_verification`
       // password account gets activated here too — otherwise it stays stuck as
       // pending forever (Google login never goes through resend-verification).
-      // One that never confirmed its email or phone is taken over
-      // (takeOverUnconfirmed); a confirmed account keeps its password.
-      const unconfirmed = !byEmail.emailVerifiedAt && !byEmail.phoneVerifiedAt;
+      // One that never confirmed its email is taken over
+      // (takeOverUnconfirmed); a confirmed account keeps its password. A
+      // confirmed phone does not count: whoever signed up with the address
+      // could have confirmed their own phone (spec-gaps item 330).
+      const unconfirmed = !byEmail.emailVerifiedAt;
       await db.sequelize.transaction(async (transaction) => {
         await byEmail.update(
           {
@@ -722,8 +724,9 @@ async function confirmVerificationCode(user, code, req) {
 // --- Confirming a signed-in account's email --------------------------------
 // An account signed in before confirming its email (SIGNUP_CONFIRM_BY_CODE,
 // or an older account) confirms it with the same codes, limits included, from
-// the dashboard's banner. Confirmed by email or by phone counts, as everywhere
-// (signupPolicy.isVerified).
+// the dashboard's banner. An account confirmed by phone only may still confirm
+// its email here: being invited or given a console role needs the email
+// itself (spec-gaps item 330).
 
 function alreadyConfirmed() {
   return new ConflictError('This account is already confirmed.', 'ALREADY_VERIFIED');
@@ -731,7 +734,7 @@ function alreadyConfirmed() {
 
 /** POST /auth/me/email/send-code */
 async function sendAccountCode(user, { locale } = {}, req) {
-  if (signupPolicy.isVerified(user)) throw alreadyConfirmed();
+  if (user.emailVerifiedAt) throw alreadyConfirmed();
   if (!verificationCodes.emailReady()) {
     throw new AppError('EMAIL_UNAVAILABLE', 'Codes cannot be sent by email right now. Try again later.', 503);
   }
@@ -741,7 +744,7 @@ async function sendAccountCode(user, { locale } = {}, req) {
 
 /** POST /auth/me/email/confirm — no new tokens: the session goes on as it is. */
 async function confirmAccountCode(user, code, req) {
-  if (signupPolicy.isVerified(user)) throw alreadyConfirmed();
+  if (user.emailVerifiedAt) throw alreadyConfirmed();
   const { channel } = await verificationCodes.confirmCode(user, code, { req });
   await markConfirmed(user, channel, {}, req);
   return { user: user.toSafeJSON(), confirmed: true };

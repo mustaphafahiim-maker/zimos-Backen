@@ -10,7 +10,6 @@ const {
   ValidationError,
 } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { isVerified } = require('../auth/signupPolicy');
 const {
   ALL_PLATFORM_PERMISSIONS,
   PLATFORM_PERMISSIONS,
@@ -218,8 +217,9 @@ async function grantRoleInTransaction({ email, role: roleKey, permissions }, req
   }
   // Active is not enough: with SIGNUP_CONFIRM_BY_CODE a new account is active
   // before its email is confirmed, and anyone can sign up with an address
-  // they don't own (spec-gaps item 330).
-  if (user.status !== 'active' || !isVerified(user)) {
+  // they don't own (spec-gaps item 330). The email itself, not a phone: the
+  // account was found by its email, and a squatter can confirm their phone.
+  if (user.status !== 'active' || !user.emailVerifiedAt) {
     throw new ConflictError(
       user.status === 'suspended'
         ? 'That account is suspended and cannot be given console access.'

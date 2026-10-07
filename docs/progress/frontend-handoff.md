@@ -3404,7 +3404,8 @@ Two server switches, both off unless set to exactly `true`. Read them from **GET
   - With `confirmByCode` the 201 answer is `{ "user": { "status": "active", … }, "accessToken": "…", "refreshToken": "…", "sessionId": "…", "expiresAt": "…", "emailCode": { "sent": true, "channel": "email", "target": "m***@gmail.com", "expiresAt": "2026-10-07T07:00:00Z", "resendAvailableAt": "2026-10-07T06:51:00Z" } }`. `emailCode` is `{ "sent": false }` when no code could be sent. Today's "register, then log in with the same credentials" keeps working.
 - **GET `/auth/me`** adds `"confirmed": true|false`: the email (or phone) is confirmed.
 - **POST `/auth/me/email/send-code`** (Bearer) `{ "locale": "ar" }` → 200 `{ "sent": true, "channel": "email", "target": "m***@gmail.com", "expiresAt": "…", "resendAvailableAt": "…" }`.
-  - Errors: 409 `ALREADY_VERIFIED`; 503 `EMAIL_UNAVAILABLE`; 429 `RESEND_TOO_SOON` (`details.retryAfterSeconds`); 429 `VERIFICATION_LIMIT_REACHED`.
+  - Works for an account confirmed by phone only (`confirmed` true, `user.emailVerifiedAt` null): it needs its email confirmed before it can be invited or given a console role, so offer "Send me a code" in account settings while `emailVerifiedAt` is null.
+  - Errors: 409 `ALREADY_VERIFIED` (the email itself is confirmed); 503 `EMAIL_UNAVAILABLE`; 429 `RESEND_TOO_SOON` (`details.retryAfterSeconds`); 429 `VERIFICATION_LIMIT_REACHED`.
 - **POST `/auth/me/email/confirm`** (Bearer) `{ "code": "123456" }` → 200 `{ "user": { …, "emailVerifiedAt": "…" }, "confirmed": true }`. No new tokens: the session goes on.
   - Errors: 422 `INVALID_CODE` (`details.attemptsLeft`); 422 `CODE_EXPIRED`; 422 `NO_ACTIVE_CODE`; 429 `TOO_MANY_ATTEMPTS`; 409 `ALREADY_VERIFIED`.
 - **403 `EMAIL_NOT_VERIFIED`** `{ "error": { "code": "EMAIL_NOT_VERIFIED", "message": "Confirm your email address first. We can send you a code.", "details": { "email": "m***@gmail.com" } } }`. It is checked before the draft-store check. It comes from:
@@ -3413,9 +3414,9 @@ Two server switches, both off unless set to exactly `true`. Read them from **GET
   - `POST /workspaces/:ws/funnels/:funnelId/publish`, `/revisions/:revisionId/rollback` and `/resume`;
   - `POST /workspaces/:ws/funnels/bulk` with `action` `publish` or `resume`.
   - The quickstart HTML form asks for the code itself (nothing to build).
-- **409 `INVITEE_NOT_CONFIRMED`** on `POST /workspaces/:ws/members` and `POST /workspaces/:ws/team/invite`, when the email belongs to an account that hasn't confirmed yet.
+- **409 `INVITEE_NOT_CONFIRMED`** on `POST /workspaces/:ws/members` and `POST /workspaces/:ws/team/invite`, when the email belongs to an account that hasn't confirmed its email yet (a confirmed phone is not enough).
 - **Store transfer** (`/workspaces/:ws/ownership-transfer`): `GET /candidates` leaves out members who haven't confirmed. `POST` → 409 `NEW_OWNER_NOT_CONFIRMED`.
-- **Console** `POST /admin/admins`: 409 `USER_NOT_ACTIVE` now also for an active account that hasn't confirmed, with the message "That account has not confirmed its email yet. Try again once it has."
+- **Console** `POST /admin/admins`: 409 `USER_NOT_ACTIVE` now also for an active account that hasn't confirmed its email (a confirmed phone is not enough), with the message "That account has not confirmed its email yet. Try again once it has."
 - **Google** `/auth/google/callback` → `/auth/callback?error=ACCOUNT_SUSPENDED` now also for a suspended account that was never linked to Google.
 
 ### Screens (merchant dashboard)

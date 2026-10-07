@@ -65,7 +65,9 @@ const authLimiter = rateLimit({
   skip,
   // Per IP and the account named: the email, or the email or username typed
   // into the sign-in's `identifier` (spec-gaps item 330), case folded.
-  keyGenerator: (req) => `${ipKeyGenerator(clientIp(req))}:${req.body ? String(req.body.email || req.body.identifier || '').trim().toLowerCase() : ''}`,
+  // `identifier` first, as auth/authService findForSignIn picks it: a sign-in
+  // sending both must be counted against the account it is checked against.
+  keyGenerator: (req) => `${ipKeyGenerator(clientIp(req))}:${req.body ? String(req.body.identifier || req.body.email || '').trim().toLowerCase() : ''}`,
   handler,
 });
 
