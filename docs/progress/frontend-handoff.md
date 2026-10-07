@@ -3248,3 +3248,8 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 - Partner apps gain `uninstallUrl` (https; private addresses refused in production, like webhooks) in `POST / PATCH /api/v1/partner-apps` and in every app answer.
 - When a store uninstalls the app (Apps page, the platform suspending it, the developer deleting it, or the app's own revoke), ZIMOS POSTs `{ event: "app.uninstalled", store_id, install_id, reason, uninstalled_at }` with `X-Zimos-Hmac-Sha256` = hex HMAC-SHA256 of the raw body with the client secret; retried for up to a day until it answers 2xx. Not sent on a re-approval. `reason`: `uninstalled_by_store` | `suspended_by_platform` | `app_deleted` | `revoked_by_app`.
 - Screen: the developer's app form — «لينك إلغاء التثبيت» / "Uninstall URL" with the hint «بنبعتله لما متجر يشيل تطبيقك» / "We call it when a store removes your app" (+ link to the README).
+
+## 269. WhatsApp sign-in — changes to item 262 — UI: pending
+
+- `POST /auth/login/whatsapp/request` now always answers 200 `{ challengeToken, channel: "phone", sentTo }` — no 429/503 any more (the limit and a failed delivery answer the same way, nothing sent). Wording: «بعتنا كود على واتساب أو رسالة لـ {sentTo}» / "We sent a code by WhatsApp or SMS to {sentTo}".
+- `POST /auth/login/whatsapp/verify` can now also answer `{ twoFactorRequired, challengeToken, channel: "email" }` for a browser new to the account (the same new-device email code as the password sign-in) → finish with `POST /auth/two-factor/verify`. A new-sign-in alert email goes out as for a password sign-in.
