@@ -305,6 +305,8 @@ async function createOrder(
       if (limitPhone) await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `purchase-limits:${workspaceId}:${limitPhone}` }, transaction });
       // A follow-on add-on order (an upsell placed as its own order) counts toward the per-customer limit only (item 321).
       await require('../catalog/purchaseLimits').assertWithin(workspaceId, items.filter((i) => !i[Symbol.for('zimos.freeGift')]), contact, transaction, { perOrder: orderSource !== 'upsell' });
+      // A free trial's line, once per phone, checked again under the same lock (subscriptions/trialCheckout.js).
+      await require('../subscriptions/trialCheckout').assertStillFree(workspaceId, items, contact, transaction);
     }
     const customer = await customerService.findOrCreateByPhone(workspaceId, contact, transaction);
 
