@@ -2,6 +2,7 @@
 
 const db = require('../../db/models');
 const { AppError } = require('../../core/errors/AppError');
+const { isUuid } = require('../../core/utils/workspaceSlug');
 
 /**
  * A storefront checkout, shipping quote or coupon preview that names a
@@ -16,24 +17,31 @@ const { AppError } = require('../../core/errors/AppError');
  * split tests running on its steps:
  *   - each page's product (builderData.productId);
  *   - every product, variant or offer an element names, at any depth
- *     (productId / variantId / offerId and their plural lists);
+ *     (productId / altProductId / variantId / offerId and their plural
+ *     lists); a product named by slug (showcase elements take either) is
+ *     looked up by slug;
  *   - each step's offer (upsell, downsell) and order bump.
  *
  * A page that shows the catalogue rather than set products — a product list,
- * a collection band, a gallery, a shoppable image, or a product element with
- * no product while the page has none (the storefront then shows the store's
+ * a collection band or rail, a gallery, a shoppable image, or a product
+ * element (a buy button, a variant or bundle picker) with no product while
+ * the page has none (the storefront then shows the store's
  * newest) — sells whatever the store sells, so such a funnel takes any of the
  * store's products. Lines the server adds itself (order bumps, product bumps,
  * gift wrap, free gifts) are not checked here: callers pass the shopper's
  * own lines.
  */
 
-const ONE_ID_KEYS = new Set(['productId', 'variantId', 'offerId']);
+// Prop key -> the refs set it names.
+const ONE_ID_KEYS = new Map([['productId', 'productIds'], ['altProductId', 'productIds'], ['variantId', 'variantIds'], ['offerId', 'offerIds']]);
 const ID_LIST_KEYS = new Set(['productIds', 'variantIds', 'offerIds']);
 // Elements that show one product: with no product of their own, the page's.
-const ONE_PRODUCT_ELEMENTS = new Set(['cod_form', 'product_card', 'price', 'product_3d']);
+const ONE_PRODUCT_ELEMENTS = new Set(['cod_form', 'product_card', 'price', 'product_3d', 'variant_selector', 'bundle_selector', 'image_gallery']);
+const BUYING_BUTTON_ACTIONS = new Set(['add_to_cart', 'buy_now']);
 // Elements that show the catalogue (a source, a collection, hotspots).
-const CATALOGUE_ELEMENTS = new Set(['product_list', 'product_cards', 'product_shelf', 'orbit_gallery', 'shoppable_image']);
+const CATALOGUE_ELEMENTS = new Set([
+  'product_list', 'product_cards', 'product_shelf', 'product_rail', 'bundle_cards', 'orbit_gallery', 'shoppable_image',
+]);
 const CATALOGUE_KEYS = new Set(['collection', 'collectionId', 'collectionIds', 'bundleId', 'bundleIds']);
 
 const filled = (v) => typeof v === 'string' && v.trim() !== '';
@@ -50,8 +58,8 @@ function readPage(tree, refs) {
       return;
     }
     for (const [key, value] of Object.entries(node)) {
-      if (ONE_ID_KEYS.has(key) && filled(value)) found.push([key, value]);
-      else if (ID_LIST_KEYS.has(key) && Array.isArray(value)) value.filter(filled).forEach((v) => found.push([key.slice(0, -1), v]));
+      if (ONE_ID_KEYS.has(key) && filled(value)) found.push([ONE_ID_KEYS.get(key), value]);
+      else if (ID_LIST_KEYS.has(key) && Array.isArray(value)) value.filter(filled).forEach((v) => found.push([key, v]));
       else if (CATALOGUE_KEYS.has(key) && (filled(value) || (Array.isArray(value) && value.some(filled)))) refs.open = true;
       else idsIn(value, depth + 1, found);
     }
@@ -65,9 +73,10 @@ function readPage(tree, refs) {
     if (typeof node.type === 'string' && node.props && typeof node.props === 'object') {
       const found = [];
       idsIn(node.props, 0, found);
-      for (const [key, id] of found) refs[`${key}s`].add(id);
+      for (const [set, id] of found) refs[set].add(id);
       if (CATALOGUE_ELEMENTS.has(node.type)) refs.open = true;
-      if (ONE_PRODUCT_ELEMENTS.has(node.type) && found.length === 0 && !pageProduct) refs.open = true;
+      const showsOne = ONE_PRODUCT_ELEMENTS.has(node.type) || (node.type === 'button' && BUYING_BUTTON_ACTIONS.has(node.props.action));
+      if (showsOne && found.length === 0 && !pageProduct) refs.open = true;
     }
     for (const [key, value] of Object.entries(node)) if (key !== 'props') walk(value, depth + 1);
   };
@@ -116,6 +125,16 @@ async function sellsOf(workspaceId, funnel, snapshot, transaction) {
     for (const v of test.variants || []) if (v && v.data && v.data.builderData) readPage(v.data.builderData, refs);
   }
   if (refs.open) return refs;
+  // Showcase elements may name a product by slug; ids that are not UUIDs
+  // never match a variant or offer.
+  const slugs = [...refs.productIds].filter((ref) => !isUuid(ref));
+  slugs.forEach((ref) => refs.productIds.delete(ref));
+  if (slugs.length) {
+    const bySlug = await db.Product.findAll({ where: { workspaceId, slug: slugs }, attributes: ['id'], transaction });
+    bySlug.forEach((p) => refs.productIds.add(p.id));
+  }
+  [...refs.variantIds].filter((ref) => !isUuid(ref)).forEach((ref) => refs.variantIds.delete(ref));
+  [...refs.offerIds].filter((ref) => !isUuid(ref)).forEach((ref) => refs.offerIds.delete(ref));
   if (refs.variantIds.size) {
     const variants = await db.ProductVariant.findAll({ where: { workspaceId, id: [...refs.variantIds] }, attributes: ['productId'], transaction });
     variants.forEach((v) => refs.productIds.add(v.productId));
