@@ -489,6 +489,17 @@ async function createOrder(
         discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
       }
     }
+    // A limited code's uses held by orders still awaiting their online payment count too, under a lock
+    // on the code (item 366): a typed code that has none left is refused, an automatic one is dropped.
+    if (discountRecord && (discountRecord.usageLimit !== null || discountRecord.perCustomerLimit !== null)) {
+      const full = await discountService.roomFor(discountRecord.id, customer.id, transaction);
+      if (full && discountCode) throw full;
+      if (full) {
+        discountAmount = 0;
+        discountRecord = null;
+        discountsSnapshot = [];
+      }
+    }
     // A free-shipping code (item 353): every line ships free, as a VIP tier's free shipping does,
     // and the order keeps it when a line joins later or its items are edited (freeShippingGranted below).
     const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping');

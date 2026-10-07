@@ -179,6 +179,50 @@ function amountFor(discount, subtotal) {
 }
 
 /**
+ * Whether a limited code still has a use free for a new order (item 366).
+ * An order paid online redeems its code only when the payment lands
+ * (orders/orderCompletion.js, allowOverLimit), so until then the uses it will
+ * take are held by it: the open orders awaiting payment that carry this code
+ * (completion_context.discount, not completed, not cancelled, payment window
+ * still open) count against usageLimit, and the shopper's own against
+ * perCustomerLimit, next to the redemptions already made. Locks the discount
+ * row for the rest of the order's transaction, so two checkouts racing for
+ * the last use wait for each other. Returns null when there is room, else the
+ * AppError to refuse the code with.
+ */
+async function roomFor(discountId, customerId, transaction) {
+  const discount = await db.Discount.findByPk(discountId, { lock: transaction.LOCK.UPDATE, transaction });
+  if (!discount) return null;
+  const perCustomer = discount.perCustomerLimit !== null && customerId;
+  if (discount.usageLimit === null && !perCustomer) return null;
+  const awaiting = {
+    workspaceId: discount.workspaceId,
+    completedAt: null,
+    cancelledAt: null,
+    paymentExpiresAt: { [db.Sequelize.Op.gt]: new Date() },
+    completionContext: { discount: { discountId: discount.id } },
+  };
+  if (discount.usageLimit !== null) {
+    const held = await db.Order.count({ where: awaiting, transaction });
+    if (discount.usageCount + held >= discount.usageLimit) {
+      return held > 0
+        ? new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'The last uses of this discount code are held by orders awaiting payment', 422)
+        : new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'Discount code has reached its usage limit', 422);
+    }
+  }
+  if (perCustomer) {
+    const used = await db.DiscountRedemption.count({ where: { discountId: discount.id, customerId }, transaction });
+    const held = await db.Order.count({ where: { ...awaiting, customerId }, transaction });
+    if (used + held >= discount.perCustomerLimit) {
+      return held > 0
+        ? new AppError('DISCOUNT_PER_CUSTOMER_LIMIT_REACHED', 'This discount code is already on one of your orders awaiting payment', 422)
+        : new AppError('DISCOUNT_PER_CUSTOMER_LIMIT_REACHED', 'You have already used this discount code', 422);
+    }
+  }
+  return null;
+}
+
+/**
  * Redeems a discount inside the caller's transaction: increments usageCount
  * and inserts a DiscountRedemption row, using SELECT ... FOR UPDATE on the
  * discount row so two concurrent checkouts racing for the last remaining
@@ -194,6 +238,13 @@ async function redeem(discountId, { orderId, customerId, amountAllocated }, tran
   if (!allowOverLimit && discount.usageLimit !== null && discount.usageCount >= discount.usageLimit) {
     throw new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'Discount code has reached its usage limit', 422);
   }
+  // Counted under the row lock, so two orders by one shopper at once can't both pass (item 366).
+  if (!allowOverLimit && discount.perCustomerLimit !== null && customerId) {
+    const used = await db.DiscountRedemption.count({ where: { discountId, customerId }, transaction });
+    if (used >= discount.perCustomerLimit) {
+      throw new AppError('DISCOUNT_PER_CUSTOMER_LIMIT_REACHED', 'You have already used this discount code', 422);
+    }
+  }
   await discount.update({ usageCount: discount.usageCount + 1 }, { transaction });
   await db.DiscountRedemption.create(
     { workspaceId: discount.workspaceId, discountId, orderId, customerId, amountAllocated },
@@ -201,4 +252,4 @@ async function redeem(discountId, { orderId, customerId, amountAllocated }, tran
   );
 }
 
-module.exports = { evaluate, redeem, amountFor, amountOn, amountForLines, eligibleProducts, eligibleSubtotal, buyXGetYConfig, buyXGetY };
+module.exports = { evaluate, redeem, roomFor, amountFor, amountOn, amountForLines, eligibleProducts, eligibleSubtotal, buyXGetYConfig, buyXGetY };
