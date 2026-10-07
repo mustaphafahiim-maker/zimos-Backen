@@ -1,5 +1,6 @@
 'use strict';
 
+const env = require('../../config/env');
 const db = require('../../db/models');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
@@ -80,7 +81,8 @@ function assertTransition(from, to) {
  * last row (orderStatusHistory.sync). Called, in the caller's transaction, by
  * everything that changes an order's state — the three setters below, the
  * shipment lifecycle, cancellation, the online payment paths. `enforce`
- * refuses a move the table above does not allow.
+ * refuses a move the table above does not allow, unless ORDER_STATUS_GUARDS
+ * is "false" (env.orderStatusGuards, item 342).
  */
 async function trackStage(
   workspaceId,
@@ -94,7 +96,7 @@ async function trackStage(
     // PATCH /orders/:id/status carries the merchant's reason on the request,
     // so the row is written with it whichever setter records the move first.
     reason: reason || (req && req.stageChangeReason) || null,
-    guard: enforce ? assertTransition : null,
+    guard: enforce && env.orderStatusGuards ? assertTransition : null,
   });
 }
 

@@ -591,6 +591,13 @@ const env = {
     lockTtlMinutes: Math.max(1, parseInt(process.env.CONFIRMATION_LOCK_TTL_MINUTES || '15', 10) || 15),
   },
 
+  // A shipment status set by hand that would move the order to a stage the
+  // table in orders/orderStateService.js does not allow is refused with 409
+  // (item 342). On unless ORDER_STATUS_GUARDS is exactly "false" (Ziad's
+  // default): then it is recorded in the history like any other move.
+  // PATCH /orders/:id/status checks the table either way.
+  orderStatusGuards: (process.env.ORDER_STATUS_GUARDS || '').trim() !== 'false',
+
   // Background work (core/queue, core/outbox, src/worker.js). The queue runs on
   // PostgreSQL unless REDIS_URL is set, then on BullMQ. While inProcess is on,
   // the API process is its own worker — nothing else to deploy; turn it off

@@ -59,6 +59,10 @@ async function start() {
   if (String(process.env.CERTIFICATE_PROVIDER || '').trim().toLowerCase() === 'cloudflare' && !(env.customDomains.cloudflare.apiToken && env.customDomains.cloudflare.zoneId)) {
     logger.error('CERTIFICATE_PROVIDER=cloudflare needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID: no certificate can be requested until both are set');
   }
+  // Item 342: Ziad's setting, the order stage table not checked for a shipment status set by hand.
+  if (!env.orderStatusGuards) {
+    logger.warn('ORDER_STATUS_GUARDS=false: a shipment status set by hand is not checked against the order stage table');
+  }
   // Item 339: on with no origin listed refuses every beacon (403).
   if (env.siteAnalytics.enabled && env.siteAnalytics.origins.length === 0) {
     logger.warn('SITE_ANALYTICS_ENABLED is on but SITE_ANALYTICS_ORIGINS is empty: every site event is refused (403 ORIGIN_NOT_ALLOWED)');
