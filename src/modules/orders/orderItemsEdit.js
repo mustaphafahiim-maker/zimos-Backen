@@ -202,6 +202,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
       await redemption.update({ amountAllocated: discountAmount }, { transaction });
     }
+  } else {
+    redeemedDiscount = await orderService.placedDiscount(order, transaction);
   }
   discountAmount = Math.min(discountAmount, subtotal);
 

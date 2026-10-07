@@ -747,6 +747,18 @@ async function createOrder(
  *
  * @returns {Promise<{ order, item, before }>} before: the totals it replaced
  */
+/**
+ * The discount an order was placed with when it has no redemption yet: an order still awaiting its
+ * online payment keeps its code in completionContext.discount until it is paid, and an automatic
+ * discount names itself in discountsSnapshot. Tax spreads it over the lines it covers (item 356 review).
+ */
+async function placedDiscount(order, transaction) {
+  const pending = order.completionContext && order.completionContext.discount;
+  const automatic = (order.discountsSnapshot || []).find((d) => d && d.kind !== 'bundle' && d.discountId);
+  const discountId = (pending && pending.discountId) || (automatic && automatic.discountId) || null;
+  return discountId ? db.Discount.findByPk(discountId, { transaction }) : null;
+}
+
 async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = false, actorUserId = null } = {}, transaction) {
   const before = {
     subtotalAmount: Number(order.subtotalAmount),
@@ -837,6 +849,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
       await redemption.update({ amountAllocated: discountAmount }, { transaction });
     }
+  } else {
+    redeemedDiscount = await placedDiscount(order, transaction);
   }
 
   const address = order.shippingAddressSnapshot || null;
@@ -1545,6 +1559,7 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
 module.exports = {
   createOrder,
   addLineToOpenOrder,
+  placedDiscount,
   getOrder,
   getOrderRef,
   applySearchAndDates,
