@@ -2003,3 +2003,23 @@ The review of the bulk update, packing slips and customer merge (items 243, 244,
   - A damaged .xlsx (bad offsets, broken compression, an out-of-range character) answers 422 with "This .xlsx file is damaged or not a spreadsheet".
   - Checked: a semicolon CSV with price "249,50" and compare_at_price "1.299,00" → 24950 / 129900, `name` listed as ignored; "1.299" refused; a junk .xlsx → 422.
 
+## Twenty-third pass (2026-10-07) — review of items 160–202
+
+Three reviews of the features built in passes four to six (integrations, storefront and shopper features, funnels, emails and payments); each finding was checked against the code before being queued. Most severe first.
+
+- [x] 298. The test send of an order email went to any address with any subject, text and buttons, through the platform's mail account with the store's sender name: unlimited branded phishing for anyone with a store. Send tests only to the signed-in user or a member of the store's team, with a daily cap per store. (backend fix; UI note in frontend-handoff.md)
+  - `POST /order-emails/:key/test` sends only to the signed-in user (the default) or an active member of the store (any case of the address); another address answers 422 on `to`. At most 50 test sends a day per store (counted from the audit log): 429 TOO_MANY_TEST_EMAILS.
+  - Checked: to a stranger with a "your account is locked" text → 422; with no `to` → sent to the signed-in user; the own address in capitals → sent.
+- [ ] 299. Gateway refunds: two equal partial refunds within a minute shared one duplicate-request key at Stripe/PayPal, so the second was answered with the first and stayed pending for ever (blocking further refunds); Stripe and PayPal refunds that start pending were never settled (the sweep asked with the refund id as if it were a payment).
+- [ ] 300. Stripe: a webhook that failed while being recorded was never retried (no transaction re-check), and a cancelled attempt's Checkout Session stayed payable at Stripe; PayPal's token cache was keyed by the (public) client id only, so a store could connect with another store's client id and any secret while that store's token was cached.
+- [ ] 301. A scheduled report whose build or send failed kept its claim, so that period was never sent; using a marketplace template created a funnel past the creation lock (suspended or unpaid stores).
+- [ ] 302. Checkout sessions keep no funnel or website: cart-recovery emails never used a funnel's or website's own template, and the dashboard and Live View filters counted no checkouts.
+- [ ] 303. Smaller: the GTM container repeated the store's own GA4 / Google Ads tags (counted twice) and ignored a pixel's funnel or product scope; marketplace snapshots copied SEO settings the reviewer never sees, and product ids nested in other elements.
+- [ ] 304. Webhook custom headers: a value with a non-Latin or control character passed the check but made the sender throw, which failed the whole delivery batch for every store (rows never counted, the endpoint never switched off); "Send test" and "Redeliver" answered 500.
+- [ ] 305. Domain purchase: the sandbox registrar had no production guard, accepted any subdomain (e.g. shop.someone-else.com) and the bought domain was marked verified without the TXT proof — a store could claim hostnames it doesn't own.
+- [ ] 306. MCP server: a JSON-RPC batch ran any number of calls at once under one rate-limit hit (a 2 MB body ≈ 20k page checks), and create_draft_funnel skipped the creation lock.
+- [ ] 307. Sending an order to Shopify / WooCommerce took no local claim: a double click or a manual push racing the automatic one made two remote orders (the remote duplicate check only looks at the newest 50 / 250 orders).
+- [ ] 308. Unsubscribes never reached Mailchimp / Klaviyo: the email unsubscribe link, a WhatsApp STOP and an erase changed the customer without the contact.updated event the sync listens to.
+- [ ] 309. Merchant-supplied store addresses (Shopify / WooCommerce forwarding, and an IP-literal address in the Shopify link importer) were fetched without the URL guard and without a size cap on the answer.
+- [ ] 310. Smaller: address details kept using the store's Google key after it switched back to the built-in list; an unverified sending-domain claim blocked the real owner for ever; converting a lost order left the shopper's uploaded photo pending, so it was swept away.
+

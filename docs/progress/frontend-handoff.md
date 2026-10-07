@@ -3305,3 +3305,8 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - Every `/workspaces/:ws/store-reports/*` report now takes `from` / `to` as a day: `?from=2026-09-01&to=2026-09-30` means 1–30 September in the store's time zone, both days included. Send the date picker's days as YYYY-MM-DD (no time, no "Z"). Full ISO timestamps still work as before (`to` exclusive).
 - `from` after `to` → 422 `VALIDATION_ERROR` on `from`: «تاريخ البداية بعد تاريخ النهاية» / "The start date is after the end date".
+
+## 298. Order email test sends — UI: pending (small)
+
+- `POST /workspaces/:ws/order-emails/:key/test` `{ to? }`: `to` must be your own email or a team member's; otherwise 422 on `to`: «الإيميل التجريبي بيروح لك أو لحد من فريق المتجر بس» / "Test emails go to you or a member of your team". Prefill `to` with the signed-in user's email (or a team picker).
+- 429 `TOO_MANY_TEST_EMAILS` after 50 a day: «وصلت لحد الإيميلات التجريبية النهارده» / "You've reached today's test email limit".
