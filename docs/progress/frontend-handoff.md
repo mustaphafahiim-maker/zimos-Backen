@@ -4280,3 +4280,17 @@ Both storefront sign-ups make a contact with marketing consent, so a script coul
 - On 429 `RATE_LIMITED`: «محاولات كتير، جرّب تاني بعد دقيقة» / "Too many tries, please try again in a minute", keeping what was typed.
 - A spin answered with `sliceId: null` shows the wheel's "better luck next time" result: «حظ أوفر المرة الجاية» / "Better luck next time".
 - No settings change in the dashboard.
+
+## 364. COD settlement shows what each line actually added to the order — UI: pending
+
+Confirming a courier settlement used to add every line's collected cash to its order again, even when the order had been marked paid another way (the courier integration's "cash collected", or a teammate's captured payment) after the draft was made, or had been cancelled. Now each line adds only what the order still owes at confirm time; a paid, refunded or cancelled order gets nothing. The settlement's own totals stay as the courier reported them. The detail now says, per line, how much was really added.
+
+### Endpoints (dashboard, `financial_reports.view` to read, `refunds.manage` to confirm)
+- **POST `/api/v1/workspaces/:workspaceId/settlements/:settlementId/confirm`** (unchanged request, still 409 `SETTLEMENT_CONFIRMED` the second time) and **GET `/api/v1/workspaces/:workspaceId/settlements/:settlementId`**: each line has a new `appliedAmount` (null while the settlement is a draft):
+  `{ "settlement": { "status": "confirmed", "collectedAmount": 2000, "lines": [ { "orderNumber": "1001", "collectedAmount": 500, "feeAmount": 20, "appliedAmount": 0, "financialState": "paid" }, { "orderNumber": "1002", "collectedAmount": 500, "feeAmount": 20, "appliedAmount": 300, "financialState": "paid" }, { "orderNumber": "1003", "collectedAmount": 500, "feeAmount": 20, "appliedAmount": 500, "financialState": "paid" } ] } }`
+- The confirm audit row (`settlement.confirm`) carries `metadata.notApplied`: the lines that added less than collected, with `orderNumber`, `collectedAmount`, `appliedAmount`, `financialState` and `cancelled`.
+
+### Screens (dashboard → Finance → COD settlements → a settlement)
+- Confirmed settlement, lines table: add a column «اتسجل على الطلب» / "Added to order" showing `appliedAmount`.
+- When `appliedAmount` is less than `collectedAmount`, show a muted note on the line: «الطلب كان مدفوع أو ملغي قبل التأكيد، فاتسجل الباقي بس» / "The order was already paid or cancelled before confirming, so only what it still owed was added".
+- Draft settlement: no change (hide the column while `appliedAmount` is null).

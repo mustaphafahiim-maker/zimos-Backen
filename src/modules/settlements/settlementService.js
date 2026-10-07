@@ -68,6 +68,12 @@ async function detail(workspaceId, settlementId) {
     include: [{ model: db.CodSettlementLine, as: 'lines', include: [{ model: db.Order, as: 'order', attributes: ['id', 'orderNumber', 'contactSnapshot', 'totalAmount', 'financialState'] }] }],
   });
   if (!s) throw new NotFoundError('Settlement');
+  // What confirm actually added to each order (less than collected when the order was paid another way first).
+  const applied = {};
+  if (s.status === 'confirmed') {
+    const pays = await db.Payment.findAll({ where: { workspaceId, providerReference: `settlement:${s.id}` }, attributes: ['orderId', 'amount'], raw: true });
+    for (const p of pays) applied[p.orderId] = (applied[p.orderId] || 0) + n(p.amount);
+  }
   return {
     id: s.id,
     carrierCode: s.carrierCode,
@@ -91,6 +97,7 @@ async function detail(workspaceId, settlementId) {
       financialState: l.order ? l.order.financialState : null,
       collectedAmount: n(l.collectedAmount),
       feeAmount: n(l.feeAmount),
+      appliedAmount: s.status === 'confirmed' ? applied[l.orderId] || 0 : null,
     })),
   };
 }
@@ -211,20 +218,38 @@ async function confirm(workspaceId, settlementId, req) {
     const lines = await db.CodSettlementLine.findAll({ where: { settlementId: s.id }, transaction });
     if (lines.length === 0) throw new AppError('SETTLEMENT_EMPTY', 'Add at least one order before confirming', 422);
 
+    // The draft priced each line from what was due then. The order may have been
+    // paid (cod-collected, a captured payment), cancelled or refunded since, so
+    // each line adds only what the order still owes now and never pays it twice.
+    const skipped = [];
     for (const line of lines) {
       const order = await db.Order.findOne({ where: { id: line.orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
       if (!order || n(line.collectedAmount) <= 0) continue;
+      const owing = !order.cancelledAt && ['pending', 'partially_paid'].includes(order.financialState);
+      const applied = owing ? Math.min(n(line.collectedAmount), Math.max(0, n(order.totalAmount) - n(order.amountPaid))) : 0;
+      if (applied < n(line.collectedAmount)) skipped.push({ orderId: order.id, orderNumber: order.orderNumber, collectedAmount: n(line.collectedAmount), appliedAmount: applied, financialState: order.financialState, cancelled: Boolean(order.cancelledAt) });
+      if (applied <= 0) continue;
       await db.Payment.create(
-        { workspaceId, orderId: order.id, providerCode: 'cod', status: 'captured', amount: line.collectedAmount, currency: order.currency, providerReference: `settlement:${s.id}` },
+        { workspaceId, orderId: order.id, providerCode: 'cod', status: 'captured', amount: applied, currency: order.currency, providerReference: `settlement:${s.id}` },
         { transaction }
       );
-      const paid = n(order.amountPaid) + n(line.collectedAmount);
+      const paid = n(order.amountPaid) + applied;
       await order.update({ amountPaid: paid }, { transaction });
       await setFinancialState(workspaceId, order.id, paid >= n(order.totalAmount) ? 'paid' : 'partially_paid', req, transaction);
     }
 
     await s.update({ status: 'confirmed', confirmedAt: new Date(), confirmedByUserId: req.user.id }, { transaction });
-    await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'settlement.confirm', entityType: 'CodSettlement', entityId: s.id, after: { netAmount: n(s.netAmount), orders: lines.length }, req, transaction });
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'settlement.confirm',
+      entityType: 'CodSettlement',
+      entityId: s.id,
+      after: { netAmount: n(s.netAmount), orders: lines.length },
+      metadata: skipped.length ? { notApplied: skipped } : null,
+      req,
+      transaction,
+    });
     return s.id;
   });
 }
