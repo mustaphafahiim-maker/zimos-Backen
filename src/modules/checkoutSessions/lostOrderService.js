@@ -94,7 +94,7 @@ function trafficSourceOf(attribution) {
   } catch {
     referrerHost = null;
   }
-  const clickSource = touch.fbclid ? 'facebook' : touch.ttclid ? 'tiktok' : touch.gclid ? 'google' : touch.scCid ? 'snapchat' : null;
+  const clickSource = touch.fbclid ? 'facebook' : touch.ttclid ? 'tiktok' : touch.gclid ? 'google' : touch.scCid ? 'snapchat' : require('../marketing/adClickIds').platformOfClick(touch);
   return {
     source: touch.source || clickSource || referrerHost || null,
     medium: touch.medium || (clickSource ? 'paid' : null),

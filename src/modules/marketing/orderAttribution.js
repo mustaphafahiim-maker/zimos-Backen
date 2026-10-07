@@ -19,7 +19,8 @@ const logger = require('../../core/utils/logger');
  */
 
 // adId: the ad_id URL parameter the suggested ad links carry (profit/adIdMatching.js).
-const TOUCH_KEYS = ['source', 'medium', 'campaign', 'content', 'term', 'adId', 'fbclid', 'ttclid', 'gclid', 'scCid', 'ref', 'referrer', 'landingPage', 'at'];
+// twclid, rdt_cid, msclkid, tblci: the other platforms' click ids (adClickIds.js, item 254).
+const TOUCH_KEYS = ['source', 'medium', 'campaign', 'content', 'term', 'adId', 'fbclid', 'ttclid', 'gclid', 'scCid', ...require('./adClickIds').EXTRA_KEYS, 'ref', 'referrer', 'landingPage', 'at'];
 
 function cleanTouch(touch) {
   if (!touch || typeof touch !== 'object') return null;
@@ -43,6 +44,7 @@ function touchFromSession(attribution) {
     fbclid: clicks.fbclid,
     ttclid: clicks.ttclid,
     gclid: clicks.gclid,
+    ...Object.fromEntries(require('./adClickIds').EXTRA_KEYS.map((k) => [k, clicks[k]])),
   });
 }
 

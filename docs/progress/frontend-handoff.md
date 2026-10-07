@@ -3093,3 +3093,11 @@ These pixels carry `events`: our event → the platform's name, `null` = don't s
 ### Screens
 - Marketing → «عروض السلة» / "Cart offers": the list of rules (name, product, «خصم ٢٠٪» or «بـ ٤٠ ج.م», condition, dates, on/off), and an editor: product + variant picker, «نوع الخصم» / "Discount" (percent / fixed price), «أقصى كمية بالسعر ده» / "Max quantity at this price", «يظهر لما» / "Show when": «السلة فيها منتج من دول» / "the cart has one of these products" and/or «السلة توصل لـ» / "the cart reaches", start/end.
 - Storefront cart drawer / cart page: a card per offer — image, name, «بدل {regularPrice}» struck through, «{offerPrice}», «ضيف للسلة» / "Add to cart" (or «في السلة ✓» / "In your cart" when `inCart`); a note when `overMaxQuantity`: «السعر المخفض لأول {maxQuantity} بس» / "The offer price is for up to {maxQuantity}"; locked offers as a progress hint.
+
+## 254. Attribution and ad spend for the new ad platforms — UI: pending
+
+No new endpoints; new values in existing ones.
+- Ad spend (`/workspaces/:ws/profit/ad-spend`, `…/import`): `platform` also takes `pinterest`, `x`, `taboola`, `outbrain`, `kwai`, `reddit`, `microsoft` (before `other`). The CSV import maps «Bing» / «Microsoft Ads» → `microsoft`, «Twitter» → `x`. Labels: Pinterest, X (Twitter), Taboola, Outbrain, Kwai, Reddit, Microsoft Ads (Bing).
+- Attribution / campaigns reports: orders from these platforms now come back under those platform keys — give each a logo/colour in the source lists and charts.
+- Storefront (`lib/touches.ts` and the events batch): also keep the click ids `twclid`, `rdt_cid`, `msclkid`, `tblci` from the landing URL — in `touches.first/last`, in `attribution.clickIds`, and in the checkout-session `touch`, like `fbclid`/`ttclid`/`gclid`. The server reads them from the event URL too.
+- Ad link builder (if shown): suggest `utm_source=taboola|outbrain|kwai|reddit|x|bing` for those platforms; Outbrain and Kwai links need `utm_source` (they add no click id).

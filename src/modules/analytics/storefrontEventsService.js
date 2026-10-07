@@ -109,7 +109,7 @@ function derivePage({ url, hostname, referrer }) {
       content: q.get('utm_content'),
       term: q.get('utm_term'),
     },
-    clickIds: { gclid: q.get('gclid'), fbclid: q.get('fbclid'), ttclid: q.get('ttclid') },
+    clickIds: { gclid: q.get('gclid'), fbclid: q.get('fbclid'), ttclid: q.get('ttclid'), ...Object.fromEntries(require('../marketing/adClickIds').EXTRA_KEYS.map((k) => [k, q.get(k)])) },
   };
 }
 

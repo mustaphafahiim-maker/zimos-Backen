@@ -1802,3 +1802,10 @@ The owner, 2026-10-07: "شوف لايت فانل شغال ازاي واعمل ز
   - Rules in settings.cart_offers (no migration), the free-gift pattern: percent off or a fixed offer price, a trigger (products and/or the rest of the cart's subtotal), dates, on/off.
   - The offered product never counts toward its own rule, so buying it alone gets the normal price. The offer price covers a line up to maxQuantity; above it the whole line is back at the normal price (simpler and clearer than splitting a line), and the cart says so.
   - The cart prices the line through the same price map as A/B tests and price lists; the checkout pins the same price, only ever lower, before free gifts are worked out. Funnel checkouts keep their own offers. Rules that do not hold yet come back as locked with the missing amount.
+
+## Fifteenth pass (2026-10-07) — after the new ad platforms
+
+- [x] 254. Attribution and ad spend for the six new ad platforms: their utm_source spellings and click ids credit orders, lost checkouts and the campaigns report to X, Taboola, Outbrain, Kwai, Reddit and Microsoft, and ad spend can be entered or imported for them (and for Pinterest). (backend done, UI in frontend-handoff.md)
+  - Sources: twitter / x / t.co → x; bing / microsoft / msads → microsoft; taboola, outbrain, kwai, reddit, pinterest as themselves (analytics PLATFORM_OF_SOURCE, which the spend import aliases also use).
+  - Click ids kept like fbclid/ttclid/gclid: twclid (X), rdt_cid (Reddit), msclkid (Microsoft), tblci (Taboola) — on the visit (from the landing URL), on the first/last touch, on checkout sessions; a lost checkout with only a click id is credited to its platform. Outbrain and Kwai have no documented click id, so their links need utm_source. No migration (JSONB and string columns).
+- [ ] 255. Server-side conversions for Reddit, X and Microsoft Ads (interface + sandbox adapter + README each), with the same event ids as the browser tags so each platform counts once.
