@@ -93,6 +93,9 @@ async function confirm(rawToken, req) {
     const oldEmail = user.email;
     await user.update({ email: row.newEmail, emailVerifiedAt: new Date() }, { transaction });
     await row.update({ usedAt: new Date() }, { transaction });
+    // Links and codes still out for the old address, and a change by code in
+    // flight, die with it (item 332). Sessions stay, as before.
+    const closed = await require('./accountService').closeAfterEmailChange(user.id, new Date(), transaction);
     await recordAudit({
       actorUserId: user.id,
       action: 'user.email_change',
@@ -100,6 +103,7 @@ async function confirm(rawToken, req) {
       entityId: user.id,
       before: { email: oldEmail },
       after: { email: row.newEmail },
+      metadata: { by: 'link', ...closed },
       req,
       transaction,
     });

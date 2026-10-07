@@ -2,7 +2,8 @@
 
 module.exports = (sequelize, DataTypes) => {
   // A 6-digit code confirming a new account (migration 126), sent by email or
-  // SMS (otp/verificationCodeService). Only a hash of the code is stored.
+  // SMS (otp/verificationCodeService), or changing a signed-in account's
+  // email or phone (`purpose`, item 332). Only a hash of the code is stored.
   // Dead once consumed, superseded by a newer code, expired, or out of
   // attempts.
   const VerificationCode = sequelize.define(
@@ -19,6 +20,10 @@ module.exports = (sequelize, DataTypes) => {
       consumedAt: { type: DataTypes.DATE, allowNull: true, field: 'consumed_at' },
       supersededAt: { type: DataTypes.DATE, allowNull: true, field: 'superseded_at' },
       requestIp: { type: DataTypes.STRING(64), allowNull: true, field: 'request_ip' },
+      // signup | reauth | email_change | phone_change (Ziad's migration 132,
+      // item 332). Only sign-up codes count against the per-address and
+      // per-IP limits; a code only ever satisfies its own purpose.
+      purpose: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'signup' },
     },
     { tableName: 'verification_codes' }
   );

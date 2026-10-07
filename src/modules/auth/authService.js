@@ -329,7 +329,10 @@ function assertMaySignIn(user) {
  * access token: they name their session, core/security/sessionGate), its
  * remembered browsers are forgotten, sign-ins waiting for a second step are
  * closed and its two-step sign-in is turned off — from here on only the
- * Google owner signs in. Returns what the audit row records.
+ * Google owner signs in. A change of its email still pending (by link, or by
+ * an account code: item 332) and its live account codes die too, or whoever
+ * asked for them could still move the account to an address of theirs.
+ * Returns what the audit row records.
  */
 async function takeOverUnconfirmed(user, transaction) {
   const now = new Date();
@@ -341,6 +344,11 @@ async function takeOverUnconfirmed(user, transaction) {
     { mode: 'off', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: null, backupCodes: [], backupCodesCreatedAt: null },
     { where: { userId: user.id, mode: { [db.Sequelize.Op.ne]: 'off' } }, transaction }
   );
+  const [emailChangesClosed] = await db.EmailChange.update({ usedAt: now }, { where: { userId: user.id, usedAt: null }, transaction });
+  const [accountCodesClosed] = await db.VerificationCode.update(
+    { supersededAt: now },
+    { where: { userId: user.id, purpose: verificationCodes.ACCOUNT_PURPOSES, consumedAt: null, supersededAt: null }, transaction }
+  );
   return {
     unconfirmedAccount: true,
     passwordRemoved: true,
@@ -348,6 +356,8 @@ async function takeOverUnconfirmed(user, transaction) {
     devicesForgotten,
     challengesClosed,
     twoFactorReset: twoFactorReset > 0,
+    emailChangesClosed,
+    accountCodesClosed,
   };
 }
 
@@ -764,6 +774,8 @@ async function resetPasswordSms(phone, code, newPassword) {
 }
 
 module.exports = {
+  // A fresh access token and session for `user` (auth/accountService, after an email change).
+  issueTokenPair,
   register,
   sendVerificationCode,
   confirmVerificationCode,

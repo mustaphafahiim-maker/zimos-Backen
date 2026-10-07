@@ -84,6 +84,30 @@ module.exports = {
   changeUsername: {
     body: Joi.object({ username: usernameSchema.required() }),
   },
+  // Account settings (auth/accountService, item 332). The rules themselves
+  // are the service's; these only bound the input.
+  changeName: {
+    body: Joi.object({ fullName: Joi.string().max(400).required() }),
+  },
+  accountCode: {
+    body: Joi.object({ locale: Joi.string().valid('ar', 'en').optional() }),
+  },
+  emailChange: {
+    body: Joi.object({
+      newEmail: joiEmail().max(255).required(),
+      currentPassword: Joi.string().max(200).optional(),
+      reauthCode: Joi.string().trim().pattern(/^\d{6}$/).optional(),
+      locale: Joi.string().valid('ar', 'en').optional(),
+    }),
+  },
+  phoneChange: {
+    body: Joi.object({
+      newPhone: Joi.string().trim().max(32).required(),
+      currentPassword: Joi.string().max(200).optional(),
+      reauthCode: Joi.string().trim().pattern(/^\d{6}$/).optional(),
+      locale: Joi.string().valid('ar', 'en').optional(),
+    }),
+  },
   login: {
     // `identifier` is the email or the username, as typed. `email` is what
     // clients from before usernames send (the dashboard today); one of the two

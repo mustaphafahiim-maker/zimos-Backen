@@ -48,6 +48,18 @@ router.get('/me', ...controller.me);
 // choosing or changing one's own.
 router.get('/username-available', ...usernameCheckLimiter, validate(schemas.usernameAvailable), controller.usernameAvailable);
 router.patch('/me/username', authLimiter, validate(schemas.changeUsername), ...controller.changeUsername);
+// The account's own name, email and phone (auth/accountService, item 332),
+// limited per account. An email or phone change needs the current password,
+// or a code to the current email for an account without one, then a code to
+// the new address. The phone change is closed unless PHONE_CHANGE_ENABLED.
+// Our own flows stay beside these: /auth/me/profile, /auth/me/email (by
+// link, app.js) and /verify-phone below.
+router.patch('/me/name', validate(schemas.changeName), ...controller.changeName);
+router.post('/me/reauth-code', validate(schemas.accountCode), ...controller.sendReauthCode);
+router.post('/me/email-change', validate(schemas.emailChange), ...controller.requestEmailChange);
+router.post('/me/email-change/confirm', validate(schemas.verifyConfirm), ...controller.confirmEmailChange);
+router.post('/me/phone-change', validate(schemas.phoneChange), ...controller.requestPhoneChange);
+router.post('/me/phone-change/confirm', validate(schemas.verifyConfirm), ...controller.confirmPhoneChange);
 // Confirming a signed-in account's email with a code (the dashboard's
 // banner): the sign-up codes' own limits, behind the same per-IP limiters.
 router.post('/me/email/send-code', verifyCodeLimiter, authLimiter, validate(schemas.meEmailSend), ...controller.sendEmailCode);

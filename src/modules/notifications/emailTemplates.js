@@ -29,6 +29,36 @@ ${arabicHtml}<p dir="ltr" style="font-size:13px;color:#6b7280;margin:0">${SPAM_F
 const escapeHtml = (value) =>
   String(value).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
+/** A code email in the account's language, like signup_code: no link anywhere (item 332). */
+function codeEmail(data, copy) {
+  const code = String(data.code || '');
+  const minutes = Number(data.minutes) || 10;
+  const codeHtml = `<p dir="ltr" style="font-size:30px;font-weight:700;letter-spacing:8px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</p>`;
+  if (data.locale === 'en') {
+    return {
+      subject: copy.en.subject,
+      ...wrap(
+        `<p>${copy.en.intro}</p>
+${codeHtml}
+<p>It is valid for ${minutes} minutes and works once.</p>
+<p style="color:#6b7280">If you didn't ask for this code, ignore this email: nothing changes without it.</p>`,
+        `${copy.en.intro} ${code}\n\nIt is valid for ${minutes} minutes and works once.\n\nIf you didn't ask for this code, ignore this email: nothing changes without it.`
+      ),
+    };
+  }
+  return {
+    subject: copy.ar.subject,
+    ...wrap(
+      `<p>${copy.ar.intro}</p>
+${codeHtml}
+<p>الرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.</p>
+<p style="color:#6b7280">إذا لم تطلب هذا الرمز فتجاهل هذه الرسالة: لن يتغير شيء من دونه.</p>`,
+      `${copy.ar.intro} ${code}\n\nالرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.\n\nإذا لم تطلب هذا الرمز فتجاهل هذه الرسالة: لن يتغير شيء من دونه.`,
+      { dir: 'rtl', arabicFooter: true }
+    ),
+  };
+}
+
 const link = (path, token) =>
   `${env.frontendUrl.replace(/\/$/, '')}${path}?token=${encodeURIComponent(token)}`;
 
@@ -61,6 +91,49 @@ ${codeHtml}
 <p style="color:#6b7280">إذا لم تطلب هذا الرمز فتجاهل هذه الرسالة.</p>`,
         `رمز تأكيد حسابك في Zimos: ${code}\n\nالرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.\n\nإذا لم تطلب هذا الرمز فتجاهل هذه الرسالة.`,
         { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  // Account settings (auth/accountService, item 332): a code to the current
+  // email of an account with no password (made through Google), proving it is
+  // the owner before its email or phone changes; and a code to the new email.
+  // No link.
+  account_reauth_code(data = {}) {
+    return codeEmail(data, {
+      en: { subject: 'Your Zimos security code', intro: 'Your code to confirm a change to your Zimos account:' },
+      ar: { subject: 'رمز الأمان لحسابك في Zimos', intro: 'رمز تأكيد تعديل حسابك في Zimos:' },
+    });
+  },
+
+  email_change_code(data = {}) {
+    return codeEmail(data, {
+      en: { subject: 'Confirm your new email for Zimos', intro: 'Your code to make this the email of your Zimos account:' },
+      ar: { subject: 'تأكيد بريدك الإلكتروني الجديد في Zimos', intro: 'رمز اعتماد هذا البريد بريدًا لحسابك في Zimos:' },
+    });
+  },
+
+  // To the OLD address once the email has changed by a code (item 332; the
+  // link flow keeps `email_changed` below): Arabic and English together, no
+  // link at all (a link in a "your email changed" message is exactly what a
+  // phishing copy would carry), the new address masked.
+  email_changed_notice(data = {}) {
+    const to = escapeHtml(String(data.newEmailMasked || ''));
+    const when = escapeHtml(String(data.at || ''));
+    return {
+      subject: 'تم تغيير بريد حسابك في Zimos — Your Zimos email was changed',
+      ...wrap(
+        `<div dir="rtl">
+<p>تم تغيير البريد الإلكتروني لحسابك في Zimos إلى <span dir="ltr">${to}</span> (${when}). لم يعد هذا البريد يُستخدم لتسجيل الدخول.</p>
+<p>إذا لم تقم أنت بهذا التغيير، فتواصل مع دعم Zimos فورًا من صفحة الدعم في موقعنا، ولا تضغط أي رابط يصلك برسالة تدّعي ذلك.</p>
+</div>
+<hr style="border:none;border-top:1px solid #e5e5e5;margin:20px 0" />
+<div dir="ltr">
+<p>The email of your Zimos account was changed to ${to} (${when}). This address no longer signs you in.</p>
+<p>If you didn't make this change, contact Zimos support right away through the support page on our website. Don't click any link in a message claiming to fix it.</p>
+</div>`,
+        `تم تغيير البريد الإلكتروني لحسابك في Zimos إلى ${data.newEmailMasked || ''} (${data.at || ''}). لم يعد هذا البريد يُستخدم لتسجيل الدخول.\nإذا لم تقم أنت بهذا التغيير، فتواصل مع دعم Zimos فورًا من صفحة الدعم في موقعنا.\n\nThe email of your Zimos account was changed to ${data.newEmailMasked || ''} (${data.at || ''}). This address no longer signs you in.\nIf you didn't make this change, contact Zimos support right away through the support page on our website.`,
+        { arabicFooter: true }
       ),
     };
   },

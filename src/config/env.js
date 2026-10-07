@@ -307,6 +307,14 @@ const env = {
     smsEnabled: publicSwitch('PASSWORD_RESET_SMS_ENABLED', false),
   },
 
+  // Account settings (auth/accountService; item 332, Ziad's 7c061ba).
+  // Changing the phone number by an SMS code to the new number is off unless
+  // exactly "true": off, a request is answered the same way and nothing is
+  // sent or changed. Our own /auth/verify-phone is not affected.
+  account: {
+    phoneChangeEnabled: publicSwitch('PHONE_CHANGE_ENABLED', false),
+  },
+
   // How the backend recognises our own Next.js storefront server. The secret is
   // sent server-to-server only (never to a browser); a request carrying it may
   // forward the shopper's IP for rate limiting. STOREFRONT_SERVER_IP
