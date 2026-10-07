@@ -16,8 +16,9 @@ const { FEATURE_CATALOG, featureDefinition, planFeatureKeys } = require('./featu
  * judged when read, no job. Revoked ones never apply.
  *
  * Nothing is cached, so a new or revoked override counts from the next read.
- * Today no route gates on these keys (the plan's features are descriptive);
- * this is where any gate should ask — effectiveFeatures / hasFeature — and the
+ * This is where any gate asks — effectiveFeatures / hasFeature: stock
+ * locations (multi_warehouse), the storefront's branding (remove_branding),
+ * and billing/planFeatureGate while PLAN_FEATURE_ENFORCEMENT is on — and the
  * merchant's billing summary (GET /workspaces/:id/billing) carries the result.
  */
 
@@ -70,13 +71,16 @@ async function featureTable(workspaceId, { now = new Date(), transaction } = {})
     transaction,
   });
   const live = new Map(overrides.map((o) => [o.featureKey, o]));
-  return FEATURE_CATALOG.map(({ key, type }) => {
+  return FEATURE_CATALOG.map(({ key, type, available, label }) => {
     const inPlan = planKeys.has(key);
     const override = live.get(key);
     const applied = override && isApplied(override, now);
     return {
       key,
       type,
+      // The catalogue's names and whether the feature exists today, for the console.
+      available,
+      label: { ...label },
       inPlan,
       enabled: applied ? override.mode === 'grant' : inPlan,
       source: applied ? 'override' : inPlan ? 'plan' : 'none',

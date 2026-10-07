@@ -8,6 +8,7 @@ const { requirePermission, requireAnyPermission } = require('../../core/middlewa
 const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { requirePlanLimit } = require('../billing/planLimits');
+const { requirePlanFeature } = require('../billing/planFeatureGate');
 const controller = require('./workspaceController');
 const schemas = require('./workspaceValidation');
 
@@ -40,7 +41,7 @@ router.get('/:workspaceId/access', validate(schemas.listMembers), resolveTenant,
 // confirmed account (core/middleware/confirmedAccount).
 router.post(
   '/:workspaceId/start-trial',
-  validate(schemas.listMembers),
+  validate(schemas.startTrial),
   resolveTenant,
   requirePermission(PERMISSIONS.BILLING_MANAGE),
   requireConfirmedAccount,
@@ -91,6 +92,9 @@ router.post(
   validate(schemas.invite),
   resolveTenant,
   requirePermission(PERMISSIONS.USERS_MANAGE),
+  // A new invite needs staff_accounts while PLAN_FEATURE_ENFORCEMENT is on
+  // (billing/planFeatureGate); members already in, and their roles, are untouched.
+  requirePlanFeature('staff_accounts'),
   // The same seat limit as /team/invite (SPEC §17.4).
   requirePlanLimit('members'),
   controller.inviteMember

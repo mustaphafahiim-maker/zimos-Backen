@@ -3504,3 +3504,62 @@ All the endpoints below are Bearer, act on the signed-in account only, and share
   - Errors: `SAME_EMAIL` «ده بريدك الحالي بالفعل» / "This is already your email"; `INVALID_PASSWORD` under the password «كلمة المرور مش صحيحة» / "The password isn't right"; `REAUTH_CODE_REQUIRED` «اطلب رمز على بريدك الحالي واكتبه» / "Ask for a code to your current email and enter it"; `INVALID_CODE` «الرمز غلط — باقي {attemptsLeft} محاولات» / "Wrong code — {attemptsLeft} tries left"; `CODE_EXPIRED` / `NO_ACTIVE_CODE` / `TOO_MANY_ATTEMPTS` «الرمز ده مبقاش صالح — اطلب رمز جديد» / "This code is no longer valid — ask for a new one"; `EMAIL_TAKEN` «البريد ده مستخدم في حساب تاني» / "This email is used by another account"; `RESEND_TOO_SOON` «استنى شوية قبل ما تطلب رمز جديد» / "Wait a moment before asking for another code"; `VERIFICATION_LIMIT_REACHED` / `RATE_LIMITED` «طلبات كتير — جرّب بعد شوية» / "Too many requests — try again later"; `EMAIL_UNAVAILABLE` «مش قادرين نبعت رموز على البريد دلوقتي — جرّب كمان شوية» / "We can't send email codes right now — try again shortly".
 - **Account settings → Mobile number** «رقم الموبايل» / "Mobile number": when `account.phoneChange` is true, a button «تغيير الرقم» / "Change number" with the same two steps (new number «الرقم الجديد» / "New number", password or reauth code, then «بعتنا رمز في رسالة على {target}» / "We texted a code to {target}"); success «اتغير رقمك» / "Your number is changed" (no new tokens). When false, show the number as today with no change button.
   - Errors: `INVALID_PHONE` «اكتب رقم موبايل صحيح» / "Enter a valid mobile number"; `SAME_PHONE` «ده رقمك الحالي بالفعل» / "This is already your number"; `PHONE_COUNTRY_NOT_SUPPORTED` «مش بنبعت رموز للدولة دي» / "We can't send codes to this country"; `SMS_UNAVAILABLE` «مش قادرين نبعت رسائل دلوقتي — جرّب كمان شوية» / "We can't send text messages right now — try again shortly"; the password and code errors as for the email.
+
+---
+## 333. The Subscription section (plans, code preview, charges, plan change), one trial per account, the feature catalogue and its gate — UI: pending
+
+One server switch: `PLAN_FEATURE_ENFORCEMENT` (off unless exactly `true`). The UI never reads it: it handles 403 `PLAN_FEATURE_REQUIRED` wherever it can appear (below). Everything under `/workspaces/:workspaceId/billing` is Bearer + `billing.manage` (the owner and the accountant role); amounts are minor units, like everywhere else. Prices always come from the server: the dashboard never sends one.
+
+### Endpoints (merchant)
+- **GET `/workspaces/:workspaceId/billing/plans`** → 200
+  ```json
+  {
+    "subscription": { "status": "trialing", "billingCycle": "monthly", "planId": "c3bc…", "trialEndsAt": "2026-10-20T18:14:13Z", "currentPeriodEnd": "2026-10-20T18:14:13Z", "draft": false },
+    "trial": { "available": false, "used": false },
+    "planChange": "immediate",
+    "referralCode": null,
+    "plans": [
+      { "id": "6538…", "name": "Growth", "currency": "USD", "monthlyPrice": 79900, "yearlyPrice": 799000, "trialDays": 14,
+        "maxStores": null, "maxFunnelsPerMonth": null, "softOrderQuota": 2000, "features": ["custom_domain", "staff_accounts"],
+        "isCurrent": false, "isPublic": true,
+        "prices": { "monthly": { "gross": 79900, "discount": 0, "net": 79900 }, "yearly": { "gross": 799000, "discount": 0, "net": 799000 } } }
+    ]
+  }
+  ```
+  - `plans`: the plans on offer in the pricing page's order, plus the store's own first when it is a private plan (`isPublic: false` — show it, but it can't be chosen). `prices.*.discount` is what the attached referral code takes off (`referralCode` is the existing merchant view of it: `code`, `discountType`, `discountValue`, `discountCurrency`, `active`).
+  - `trial.available`: the store is a draft (REQUIRE_SUBSCRIPTION_TO_GO_LIVE) and the account never had a free trial. `trial.used`: the account had one, on any plan or store — one per account now.
+  - `planChange`: `immediate` (a draft or a trial: nothing paid yet → POST `/billing/plan`) or `support` (a paid subscription: through support).
+- **POST `/workspaces/:workspaceId/billing/code-preview`** `{ "code": "ahmed10" }` → 200 `{ "code": { "code": "AHMED10", "discountType": "percentage", "discountValue": 1000, "discountCurrency": null, "active": true }, "plans": [{ "planId": "6538…", "prices": { "monthly": { "gross": 79900, "discount": 7990, "net": 71910 }, "yearly": { "gross": 799000, "discount": 79900, "net": 719100 } } }] }`. Attaches nothing: the code is attached with the existing **POST `/billing/referral-code`**.
+  - 422 `REFERRAL_CODE_INVALID` "That referral code isn't valid. Check it and try again." (unknown or inactive, the same answer); 409 `SELF_REFERRAL` (the merchant's own code); 429 `RATE_LIMITED` (20 tries a minute per IP); 422 `VALIDATION_ERROR` (empty code).
+- **GET `/workspaces/:workspaceId/billing/invoices?page=1&pageSize=20`** (pageSize ≤ 50) → 200 `{ "invoices": [{ "id": "…", "status": "paid", "periodStart": "2026-08-01T00:00:00Z", "periodEnd": "2026-09-01T00:00:00Z", "grossAmount": 29900, "discountAmount": 0, "amountDue": 29900, "amountPaid": 29900, "currency": "USD", "paidAt": "2026-09-01T00:00:00Z", "paymentSource": "manual", "createdAt": "…" }], "page": 1, "pageSize": 20, "total": 3 }`, newest first. `status`: `pending` | `paid` | `failed`.
+- **POST `/workspaces/:workspaceId/billing/plan`** `{ "planId": "6538…", "billingCycle": "yearly" }` (`billingCycle` optional, keeps the current one) → 200 `{ "changed": true, "plans": { …the GET /billing/plans answer… } }`; `changed: false` when nothing changed. Takes effect at once; a trial keeps its end date.
+  - 409 `PLAN_CHANGE_NEEDS_SUPPORT` "Your plan can be changed through Zimos support while a paid subscription runs. Contact support."; 422 `PLAN_NOT_AVAILABLE` (field `planId`: a private, inactive or unknown plan); 409 `OPEN_CHARGE_EXISTS` "A charge is open for the current plan. Settle it before changing plan."
+- **POST `/workspaces/:workspaceId/start-trial`** now takes an optional body `{ "planId": "6538…" }` (no body = the store's own plan, as today). The store moves to that plan and its trial runs that plan's `trialDays` from now. 201 / 200 and the answer as today.
+  - 422 `PLAN_NOT_AVAILABLE` (field `planId`); 409 `TRIAL_NOT_AVAILABLE` `details: { "reason": "used" | "no_trial", "days": 14 }` — `used` now means the account had a trial on any plan; 409 `NOT_A_DRAFT`, 403 `EMAIL_NOT_VERIFIED` as before.
+- Changed shapes: **GET `/plans/public`**, **GET `/workspaces/:id/billing`** (`subscription.plan.features` and `features`) list only features that exist (today `priority_support` is never listed). The order of `/plans/public` is unchanged (display order, then price, then name).
+
+### Endpoints (console)
+- **GET `/admin/plans`** (plans.view) → 200 `{ "plans": [ … ], "featureCatalog": [{ "key": "custom_domain", "type": "boolean", "available": true, "label": { "en": "Custom domain", "ar": "نطاق خاص" } }, …, { "key": "priority_support", "type": "boolean", "available": false, "label": { "en": "Priority support", "ar": "دعم ذو أولوية" } }] }`. Plans now come in the pricing page's order (display order, then monthly price, then name), no longer by price alone. Read the feature list and its names from `featureCatalog` instead of a list in the console.
+- **POST `/admin/plans`**, **PATCH `/admin/plans/:planId`** (plans.manage): a key the plan didn't list before must be `available` → 422 `PLAN_FEATURE_NOT_AVAILABLE` "Not available yet, so it can't be added to a plan: Priority support", `details: [{ "field": "features", "key": "priority_support", "message": "\"Priority support\" isn't available yet" }]` (an unknown key: `"\"bogus\" isn't a feature"`). A key the plan already lists can stay or be removed.
+- **GET `/admin/workspaces/:workspaceId/features`**: each row of `features` adds `available` and `label { en, ar }`.
+
+### The gate (while `PLAN_FEATURE_ENFORCEMENT=true`)
+403 `{ "error": { "code": "PLAN_FEATURE_REQUIRED", "message": "Your plan doesn't include Custom domain. Upgrade your plan to use it.", "details": { "feature": "custom_domain", "label": { "en": "Custom domain", "ar": "نطاق خاص" } } } }` on:
+- `custom_domain`: **POST `/workspaces/:id/domains`**, **POST `/domains/:domainId/verify`**, **POST `/domains/purchases`**;
+- `staff_accounts`: **POST `/workspaces/:id/members`**, **POST `/workspaces/:id/team/invite`**;
+- `advanced_analytics`: **GET `/workspaces/:id/analytics/web/stats`**, `/web/series`, `/web/metrics`, `/web/weekly`, `/web/realtime`.
+Everything else stays open (domain list and settings, members, the analytics summary, overview, live view and reports). A console grant on the store lets it through without changing its plan.
+
+### Screens
+- **Merchant dashboard → Settings → Subscription** «الاشتراك» / "Subscription":
+  - A cycle switch «شهري» / "Monthly" · «سنوي (شهرين مجانًا)» / "Yearly (2 months free)"; one card per plan with its name, `prices[cycle].net` per month / year, the gross struck through when `discount > 0` with «خصم الكود {amount}» / "Code discount {amount}", the plan's limits and its features by name (the same Arabic/English names as the console catalogue).
+  - The current plan: badge «باقتك الحالية» / "Your current plan"; a private current plan shows «باقة خاصة» / "Private plan" and no button.
+  - Other plans while `planChange` is `immediate`: «اختار الباقة دي» / "Choose this plan" → POST `/billing/plan` with the plan and the switch's cycle; success toast «اتغيرت باقتك» / "Your plan is changed", redraw from `plans`. While `support`: no button, a note «لتغيير الباقة أثناء اشتراك مدفوع تواصل مع الدعم» / "To change plan while a paid subscription runs, contact support" with a link «افتح تذكرة دعم» / "Open a support ticket".
+  - While `trial.available`: on each plan with `trialDays > 0` «ابدأ تجربة مجانية {trialDays} يوم» / "Start a {trialDays}-day free trial" → POST `/start-trial` `{ planId }`. When `trial.used`: «استخدمت التجربة المجانية قبل كده» / "You've already used your free trial" and only the subscribe/pay actions.
+  - Referral code «كود الإحالة» / "Referral code": a field and «جرّب الكود» / "Try the code" (code-preview) that redraws the prices with the discount, then «استخدم الكود» / "Use this code" (the existing attach). Once attached, show it read-only with its discount.
+  - Charges «الفواتير» / "Charges": a table — period «الفترة» / "Period", amount «المبلغ» / "Amount" (gross, discount, due), paid «المدفوع» / "Paid", status «مدفوعة» / "Paid" · «في الانتظار» / "Pending" · «فشلت» / "Failed", paid on «تاريخ الدفع» / "Paid on"; paged 20 at a time, «لا توجد فواتير بعد» / "No charges yet" when empty.
+  - Errors: `REFERRAL_CODE_INVALID` «الكود ده مش صالح — راجعه وجرّب تاني» / "That code isn't valid — check it and try again"; `SELF_REFERRAL` «مينفعش تستخدم كود الإحالة بتاعك على متجرك» / "You can't use your own referral code on your store"; `RATE_LIMITED` «محاولات كتير — استنى دقيقة وجرّب تاني» / "Too many tries — wait a minute and try again"; `PLAN_NOT_AVAILABLE` «الباقة دي مش متاحة دلوقتي» / "This plan isn't available right now"; `OPEN_CHARGE_EXISTS` «فيه فاتورة مفتوحة على باقتك الحالية — ادفعها الأول» / "There's an open charge on your current plan — settle it first"; `PLAN_CHANGE_NEEDS_SUPPORT` as the note above; `TRIAL_NOT_AVAILABLE` `used` «استخدمت التجربة المجانية قبل كده» / "You've already used your free trial", `no_trial` «الباقة دي مالهاش تجربة مجانية» / "This plan has no free trial".
+- **Draft store → subscribe dialog**: may offer the other plans' trials with `planId`; the same errors.
+- **Wherever the gated actions are** (Domains → add / verify / buy, Team → invite, Analytics → Website traffic): on 403 `PLAN_FEATURE_REQUIRED` show «باقتك مش فيها {label.ar} — رقّي باقتك عشان تستخدمها» / "Your plan doesn't include {label.en} — upgrade your plan to use it" with «شوف الباقات» / "See plans" → the Subscription section. Website traffic shows it in place of the charts.
+- **Console → Plans → edit**: tick features from `featureCatalog` with `label.ar` / `label.en`; a key with `available: false` is disabled with «غير متاحة حاليًا» / "Not available yet", unless the plan already lists it (then it can be unticked, not re-ticked). Show `PLAN_FEATURE_NOT_AVAILABLE` details under the features. The list is in display order now.
+- **Console → Store → Features**: use `label` for each row's name and mark `available: false` rows «غير متاحة حاليًا» / "Not available yet".

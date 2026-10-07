@@ -99,7 +99,8 @@ const getAccess = asyncHandler(async (req, res) => {
 // POST /workspaces/:workspaceId/start-trial — a draft's free trial, from now.
 // 201 when it started, 200 when this store's trial had already started.
 const startTrial = asyncHandler(async (req, res) => {
-  const { started } = await goLive.startTrial(req.tenant.workspaceId, req);
+  // No body at all is the store's own plan (the subscribe dialog sends none).
+  const { started } = await goLive.startTrial(req.tenant.workspaceId, req, { planId: req.body ? req.body.planId : null });
   res.status(started ? 201 : 200).json({
     billing: await billingService.getWorkspaceBilling(req.tenant.workspaceId),
     access: access.serializeAccess(await access.accessFor(req.tenant.workspaceId)),

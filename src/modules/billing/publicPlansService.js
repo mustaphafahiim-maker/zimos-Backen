@@ -4,7 +4,7 @@ const db = require('../../db/models');
 const env = require('../../config/env');
 const { AppError } = require('../../core/errors/AppError');
 const { planPrice } = require('./planPricing');
-const { planFeatureKeys, featureDefinition } = require('./featureCatalog');
+const { availableFeatureKeys } = require('./featureCatalog');
 
 /**
  * The plans offered to the public — on the marketing site's pricing page and
@@ -33,18 +33,27 @@ function serializePublicPlan(plan) {
     maxStores: plan.maxStores,
     maxFunnelsPerMonth: plan.maxFunnelsPerMonth,
     softOrderQuota: plan.softOrderQuota,
-    features: planFeatureKeys(plan.features).filter((key) => featureDefinition(key)),
+    // Only features that exist today (billing/featureCatalog `available`);
+    // whatever else plans.features holds stays stored, unshown.
+    features: availableFeatureKeys(plan.features),
   };
 }
+
+/**
+ * The one order plans are listed in — here, in the Subscription section
+ * (merchantPlansService) and in the console (platformAdminService): display
+ * order, then price, then name.
+ */
+const PLAN_ORDER = Object.freeze([
+  ['displayOrder', 'ASC'],
+  ['monthlyPriceAmount', 'ASC'],
+  ['name', 'ASC'],
+]);
 
 async function loadOffered(transaction) {
   return db.Plan.findAll({
     where: { isPublic: true, isActive: true },
-    order: [
-      ['displayOrder', 'ASC'],
-      ['monthlyPriceAmount', 'ASC'],
-      ['name', 'ASC'],
-    ],
+    order: PLAN_ORDER,
     transaction,
   });
 }
@@ -77,4 +86,4 @@ async function findOfferedPlan(planId, transaction) {
   return plan;
 }
 
-module.exports = { listPublicPlans, invalidate, anyOffered, findOfferedPlan, serializePublicPlan };
+module.exports = { listPublicPlans, invalidate, anyOffered, findOfferedPlan, serializePublicPlan, PLAN_ORDER };

@@ -277,8 +277,11 @@ const params = Joi.object({ workspaceId: Joi.string().uuid().required() });
 const withId = Joi.object({ workspaceId: Joi.string().uuid().required(), purchaseId: Joi.string().uuid().required() });
 const money = Joi.object({ amount: Joi.number().integer().min(0).required(), currency: Joi.string().length(3).uppercase().required() });
 
-/** Registers the routes on the domains router (domain.manage), before /:domainId. */
-function mount(router) {
+/**
+ * Registers the routes on the domains router (domain.manage), before /:domainId.
+ * `customDomain`: the plan-feature gate (billing/planFeatureGate) the purchase takes.
+ */
+function mount(router, { customDomain = (req, res, next) => next() } = {}) {
   router.get('/search', validate({ params, query: Joi.object({ q: Joi.string().trim().min(1).max(253).required() }) }), asyncHandler(async (req, res) => res.json(await search(req.tenant.workspaceId, req.query.q))));
   router.get('/registrant', validate({ params }), asyncHandler(async (req, res) => res.json(await registrant(req.tenant.workspaceId))));
   router.get('/purchases', validate({ params }), asyncHandler(async (req, res) => res.json(await list(req.tenant.workspaceId))));
@@ -286,6 +289,7 @@ function mount(router) {
     '/purchases',
     validate({ params, body: Joi.object({ domain: Joi.string().trim().max(253).required(), years: Joi.number().integer().min(1).max(10).default(1), autoRenew: Joi.boolean().default(true), acceptPrice: money.allow(null).required(), contact: CONTACT }) }),
     requireLive,
+    customDomain,
     // A bought domain is a connected domain: the plan's number of custom domains applies (billing/planLimits.js).
     require('../billing/planLimits').requirePlanLimit('domains'),
     asyncHandler(async (req, res) => res.status(201).json(await purchase(req.tenant.workspaceId, req.body, req)))

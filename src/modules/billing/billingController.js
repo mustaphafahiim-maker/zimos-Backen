@@ -5,6 +5,7 @@ const { AppError } = require('../../core/errors/AppError');
 const service = require('./billingService');
 const { verifyGatewaySignature } = require('./gatewaySignature');
 const onlineBilling = require('./onlineBillingService');
+const merchantPlans = require('./merchantPlansService');
 
 // POST /api/v1/billing/webhook  — no auth; identity comes from the signature.
 // Verified against req.rawBody (the exact bytes the gateway signed), never the
@@ -81,7 +82,28 @@ const getOnlinePayment = asyncHandler(async (req, res) => {
   res.json(await onlineBilling.getPayment(req.tenant.workspaceId, req.params.paymentId));
 });
 
+// The Subscription section (billing/merchantPlansService; item 333).
+const listPlans = asyncHandler(async (req, res) => {
+  res.json(await merchantPlans.listPlans(req.tenant.workspaceId));
+});
+
+const previewCode = asyncHandler(async (req, res) => {
+  res.json(await merchantPlans.previewCode(req.tenant.workspaceId, req.body.code));
+});
+
+const listInvoices = asyncHandler(async (req, res) => {
+  res.json(await merchantPlans.listInvoices(req.tenant.workspaceId, req.query));
+});
+
+const changePlan = asyncHandler(async (req, res) => {
+  res.json(await merchantPlans.changePlan(req.tenant.workspaceId, req.body, req));
+});
+
 module.exports = {
+  listPlans,
+  previewCode,
+  listInvoices,
+  changePlan,
   webhook,
   fawaterakWebhook,
   startOnlinePayment,

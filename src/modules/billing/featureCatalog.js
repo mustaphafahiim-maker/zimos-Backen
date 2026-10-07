@@ -1,32 +1,54 @@
 'use strict';
 
 /**
- * The feature keys a plan can list in plans.features — the same ten the
- * platform console offers when a plan is created (apps/platform-admin
- * lib/planFeatures.ts, api-client PlanFeatureKey), now known to the backend
- * too, so an override can be refused for a key nobody defined. Every one of
+ * The feature keys a plan can list in plans.features — the one place they are
+ * defined. The platform console reads this list from GET /admin/plans (keys,
+ * names, whether each is available), the api-client keeps PlanFeatureKey in
+ * step, and an override can be refused for a key nobody defined. Every one of
  * them is an on/off feature: none carries a numeric limit today, so an
  * override's `value` must stay empty.
  *
- * Adding a key: here, in PlanFeatureKey and in the console's label list.
+ * `available` says whether the feature behind the key exists in the product
+ * today. One that doesn't:
+ *  - is left out of every plan served to merchants and visitors (the pricing
+ *    page, sign-up, the Subscription section), whatever plans.features holds;
+ *  - can't be added to a plan from the console (422 PLAN_FEATURE_NOT_AVAILABLE),
+ *    though a plan that already lists it keeps it until someone removes it.
+ * Nothing stored is changed: making a key available again shows it again.
+ * (Item 333, Ziad's 1d70df5. His list marks multi_warehouse, api_access and
+ * remove_branding unavailable; here all three exist — see each line.)
+ *
+ * Adding a key: here, and in PlanFeatureKey (packages/api-client).
  */
-const FEATURE_CATALOG = Object.freeze([
-  { key: 'custom_domain', type: 'boolean' },
-  { key: 'funnels', type: 'boolean' },
-  { key: 'whatsapp_confirmation', type: 'boolean' },
-  { key: 'abandoned_cart', type: 'boolean' },
-  { key: 'multi_warehouse', type: 'boolean' },
-  { key: 'api_access', type: 'boolean' },
-  { key: 'staff_accounts', type: 'boolean' },
-  { key: 'advanced_analytics', type: 'boolean' },
-  { key: 'remove_branding', type: 'boolean' },
-  { key: 'priority_support', type: 'boolean' },
-]);
+const FEATURE_CATALOG = Object.freeze(
+  [
+    // The API exists (modules/domains, the domains screen, buying a domain).
+    { key: 'custom_domain', available: true, label: { en: 'Custom domain', ar: 'نطاق خاص' } },
+    { key: 'funnels', available: true, label: { en: 'Sales funnels', ar: 'مسارات البيع' } },
+    // The confirmation queue's WhatsApp button and message.
+    { key: 'whatsapp_confirmation', available: true, label: { en: 'WhatsApp order confirmation', ar: 'تأكيد الطلبات عبر واتساب' } },
+    // The abandoned-checkout list and its follow-up (modules/checkoutSessions).
+    { key: 'abandoned_cart', available: true, label: { en: 'Abandoned cart recovery', ar: 'استرجاع السلات المتروكة' } },
+    // Stock locations (modules/stockLocations): a second location needs this key.
+    { key: 'multi_warehouse', available: true, label: { en: 'Multiple warehouses', ar: 'مستودعات متعددة' } },
+    // Store API keys and the public API (modules/apiKeys, modules/publicApi).
+    { key: 'api_access', available: true, label: { en: 'API access', ar: 'الوصول عبر API' } },
+    { key: 'staff_accounts', available: true, label: { en: 'Staff accounts', ar: 'حسابات الفريق' } },
+    { key: 'advanced_analytics', available: true, label: { en: 'Advanced analytics', ar: 'تحليلات متقدمة' } },
+    // The storefront hides "Powered by ZIMOS" for a store with this key (storefrontService).
+    { key: 'remove_branding', available: true, label: { en: 'Remove platform branding', ar: 'إزالة شعار المنصة' } },
+    // Every ticket opens at normal priority, whatever the plan.
+    { key: 'priority_support', available: false, label: { en: 'Priority support', ar: 'دعم ذو أولوية' } },
+  ].map((f) => Object.freeze({ ...f, type: 'boolean', label: Object.freeze(f.label) }))
+);
 
 const FEATURE_KEYS = Object.freeze(FEATURE_CATALOG.map((f) => f.key));
 const byKey = new Map(FEATURE_CATALOG.map((f) => [f.key, f]));
 
 const featureDefinition = (key) => byKey.get(key) || null;
+
+/** True for a catalogue key whose feature exists today. */
+const isAvailableFeature = (key) => Boolean(featureDefinition(key) && featureDefinition(key).available);
 
 /**
  * plans.features has been stored two ways — a { key: true } map (the first
@@ -39,4 +61,22 @@ function planFeatureKeys(features) {
   return [];
 }
 
-module.exports = { FEATURE_CATALOG, FEATURE_KEYS, featureDefinition, planFeatureKeys };
+/** A plan's keys as merchants and visitors see them: catalogue keys whose feature exists. */
+function availableFeatureKeys(features) {
+  return planFeatureKeys(features).filter(isAvailableFeature);
+}
+
+/** The whole catalogue for the console: key, names, available. */
+function catalogForAdmin() {
+  return FEATURE_CATALOG.map(({ key, type, available, label }) => ({ key, type, available, label: { ...label } }));
+}
+
+module.exports = {
+  FEATURE_CATALOG,
+  FEATURE_KEYS,
+  featureDefinition,
+  isAvailableFeature,
+  planFeatureKeys,
+  availableFeatureKeys,
+  catalogForAdmin,
+};

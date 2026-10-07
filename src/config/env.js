@@ -315,6 +315,17 @@ const env = {
     phoneChangeEnabled: publicSwitch('PHONE_CHANGE_ENABLED', false),
   },
 
+  // Plan features as a gate (billing/planFeatureGate; item 333, Ziad's
+  // b005b3f): adding or buying a custom domain, inviting a team member and
+  // the web analytics are refused (403 PLAN_FEATURE_REQUIRED) for a store
+  // whose features (plan + console overrides) lack the key. Off unless
+  // exactly "true"; off, nothing is refused for a missing feature, as before.
+  // Under NODE_ENV=test it starts off whatever the .env says; a test that
+  // needs it sets it here.
+  planFeatures: {
+    enforcement: process.env.NODE_ENV !== 'test' && process.env.PLAN_FEATURE_ENFORCEMENT === 'true',
+  },
+
   // How the backend recognises our own Next.js storefront server. The secret is
   // sent server-to-server only (never to a browser); a request carrying it may
   // forward the shopper's IP for rate limiting. STOREFRONT_SERVER_IP

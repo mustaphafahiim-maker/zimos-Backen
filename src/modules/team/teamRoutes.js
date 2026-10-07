@@ -14,6 +14,7 @@ const { ValidationError } = require('../../core/errors/AppError');
 const joiEmail = require('../../core/utils/joiEmail');
 const workspaceService = require('../workspaces/workspaceService');
 const { requirePlanLimit } = require('../billing/planLimits');
+const { requirePlanFeature } = require('../billing/planFeatureGate');
 
 /**
  * The simple way to add a teammate (SPEC §17.1): "Admin", or "Partial" with
@@ -67,6 +68,9 @@ async function roleFor(workspaceId, permissions, sections) {
 
 router.post(
   '/invite',
+  // staff_accounts while PLAN_FEATURE_ENFORCEMENT is on, as POST
+  // /workspaces/:id/members (billing/planFeatureGate; item 333).
+  requirePlanFeature('staff_accounts'),
   // The plan's team size, when it sets one (billing/planLimits.js).
   requirePlanLimit('members'),
   validate({

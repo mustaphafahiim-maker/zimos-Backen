@@ -172,6 +172,11 @@ module.exports = {
     body: Joi.object({ email: joiEmail().required(), roleId: uuid.required() }),
   },
   listMembers: { params: Joi.object({ workspaceId: uuid.required() }) },
+  // The plan to try: the store's own (omitted) or another one on offer.
+  startTrial: {
+    params: Joi.object({ workspaceId: uuid.required() }),
+    body: Joi.object({ planId: uuid.optional() }),
+  },
   resendInvite: {
     params: Joi.object({ workspaceId: uuid.required(), membershipId: uuid.required() }),
   },

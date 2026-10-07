@@ -6,6 +6,7 @@ const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
+const { requirePlanFeature } = require('../billing/planFeatureGate');
 const controller = require('./analyticsController');
 const schemas = require('./analyticsValidation');
 
@@ -22,11 +23,15 @@ router.get('/funnels', validate(schemas.funnels), controller.funnels);
 router.get('/funnels/:funnelId', validate(schemas.funnelDetail), controller.funnelDetail);
 
 // Web analytics (Umami port): pageviews/visitors/visits over analytics_events.
-router.get('/web/stats', validate(schemas.webStats), controller.webStats);
-router.get('/web/series', validate(schemas.webSeries), controller.webSeries);
-router.get('/web/metrics', validate(schemas.webMetrics), controller.webMetrics);
-router.get('/web/weekly', validate(schemas.webWeekly), controller.webWeekly);
-router.get('/web/realtime', validate(schemas.webRealtime), controller.webRealtime);
+// The advanced_analytics screens: refused without it while
+// PLAN_FEATURE_ENFORCEMENT is on (billing/planFeatureGate). The summary, the
+// funnel figures, the overview, the live view and the reports stay open.
+const advanced = requirePlanFeature('advanced_analytics');
+router.get('/web/stats', validate(schemas.webStats), advanced, controller.webStats);
+router.get('/web/series', validate(schemas.webSeries), advanced, controller.webSeries);
+router.get('/web/metrics', validate(schemas.webMetrics), advanced, controller.webMetrics);
+router.get('/web/weekly', validate(schemas.webWeekly), advanced, controller.webWeekly);
+router.get('/web/realtime', validate(schemas.webRealtime), advanced, controller.webRealtime);
 // Live View on a world map: visitors, checkouts and orders of the last minutes by place (liveMap.js).
 require('./liveMap').mount(router);
 // Live view (SPEC §15.2): the snapshot the stream pushes, and the one-minute
