@@ -223,6 +223,7 @@ function assertConfirmedOrPaid(order) {
 
 function assertReadyToShip(order) {
   assertConfirmedOrPaid(order);
+  require('./storePickup').assertCourierAllowed(order, null);
   if (!order.shippingAddressSnapshot) {
     throw new AppError('SHIPPING_ADDRESS_REQUIRED', 'This order has no shipping address', 409);
   }

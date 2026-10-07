@@ -17,6 +17,8 @@ module.exports = {
       // Answers to the product's custom fields: field id → text, or the id of
       // a photo uploaded to POST /uploads. Checked against the product.
       customizations: customizationsInputSchema.optional(),
+      // Menu options picked: [{ groupId, choiceIds }] (catalog/menuOptions.js); prices come from the server.
+      options: require('../catalog/menuOptions').optionsInputSchema.optional(),
     }),
   },
   updateItem: {

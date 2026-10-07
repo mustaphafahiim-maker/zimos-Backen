@@ -218,6 +218,14 @@ v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
 v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
+// A store's own couriers (self delivery).
+v1.use('/workspaces/:workspaceId/couriers', require('./modules/couriers/couriersRoutes'));
+// Delivery zones inside a city (self delivery).
+v1.use('/workspaces/:workspaceId/delivery-zones', require('./modules/shipping/deliveryZoneRoutes'));
+// A product's menu options (option groups and choices).
+v1.use('/workspaces/:workspaceId/product-options/:productId', require('./modules/catalog/menuOptionsRoutes'));
+// A store's suggestions to the platform (Help → Suggest a feature).
+v1.use('/workspaces/:workspaceId/suggestions', require('./modules/suggestions/suggestionRoutes'));
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);

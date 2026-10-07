@@ -89,6 +89,39 @@ const settingsBody = Joi.object({
     }),
   // 'manual' or a courier code, checked against the store's couriers by the service.
   defaultCarrierCode: Joi.string().max(50).allow(null),
+  // The only governorates the store delivers to; [] or null = everywhere (deliveryAreas.js).
+  servedGovernorates: Joi.array()
+    .items(Joi.string().valid(...GOVERNORATE_CODES))
+    .unique()
+    .max(GOVERNORATE_CODES.length)
+    .allow(null),
+  // Pickup from the store (storePickup.js); null clears it (= off).
+  storePickup: Joi.object({
+    enabled: Joi.boolean().required(),
+    address: Joi.string().trim().max(300).allow(''),
+    phone: Joi.string().trim().max(32).allow(''),
+    note: Joi.string().trim().max(300).allow(''),
+  }).allow(null),
+  // Checkout prices by the store's delivery zones (deliveryZones.js); false/null = by governorate.
+  deliveryZonesEnabled: Joi.boolean().allow(null),
+  // Opening hours in Africa/Cairo (storeHours.js); null clears them (= always open).
+  storeHours: Joi.object({
+    enabled: Joi.boolean().required(),
+    override: Joi.string().valid('auto', 'open', 'closed').default('auto'),
+    days: Joi.array()
+      .items(
+        Joi.object({
+          closed: Joi.boolean().required(),
+          open: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).required(),
+          close: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).required(),
+        })
+      )
+      .length(7)
+      .required(),
+    message: Joi.string().trim().max(300).allow(''),
+  }).allow(null),
+  // The usual delivery time shown to customers, minutes; null clears it.
+  deliveryEtaMinutes: Joi.number().integer().min(1).max(1440).allow(null),
 }).min(1);
 
 const pricingModeBody = Joi.object({

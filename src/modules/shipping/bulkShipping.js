@@ -80,6 +80,7 @@ function blockedReason(order, hasActiveShipment) {
   } catch (err) {
     return operational(err);
   }
+  if (require('./storePickup').isPickup(order)) return { code: 'PICKUP_ORDER', message: 'This order is collected from the store' };
   if (!order.shippingAddressSnapshot) return { code: 'SHIPPING_ADDRESS_REQUIRED', message: 'This order has no shipping address' };
   if (hasActiveShipment) {
     return { code: 'SHIPMENT_ALREADY_EXISTS', message: 'This order already has an active shipment. Cancel it before booking another.' };

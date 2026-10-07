@@ -62,4 +62,18 @@ function monthWindow(now = new Date(), timeZone = 'Africa/Cairo') {
   };
 }
 
-module.exports = { monthWindow, zonedParts };
+/**
+ * The calendar day `now` falls in, in `timeZone`: [start, end) and the day
+ * as YYYY-MM-DD. A day is 23 or 25 hours long when the clock changes.
+ */
+function dayWindow(now = new Date(), timeZone = 'Africa/Cairo') {
+  const p = zonedParts(now, timeZone);
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    start: zonedMidnight(p.year, p.month - 1, p.day, timeZone),
+    end: zonedMidnight(p.year, p.month - 1, p.day + 1, timeZone),
+    day: `${p.year}-${pad(p.month)}-${pad(p.day)}`,
+  };
+}
+
+module.exports = { monthWindow, dayWindow, zonedParts };

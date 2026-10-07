@@ -17,6 +17,16 @@ const { GOVERNORATES } = require('./governorates');
  *                                   of the default, rate pricing only
  *   default_carrier_code            'manual' or a courier code: preselected
  *                                   when booking; never changes a price
+ *   served_governorates             [<governorate code>] — the only ones the
+ *                                   store delivers to (deliveryAreas.js);
+ *                                   absent or empty = everywhere
+ *   store_pickup                    { enabled, address, phone, note } —
+ *                                   pickup from the store (storePickup.js)
+ *   delivery_zones_enabled          true = checkout prices by the store's
+ *                                   delivery zones (deliveryZones.js)
+ *   store_hours                     opening hours + "accepting orders"
+ *                                   switch (storeHours.js)
+ *   delivery_eta_minutes            the usual delivery time, minutes
  *
  * The first two were already writable through PATCH /workspaces/:id and
  * still are (same keys, same meaning). A key the store never set is absent,
@@ -28,6 +38,11 @@ const KEYS = Object.freeze({
   freeShippingThresholdAmount: 'free_shipping_threshold_amount',
   governorateRates: 'shipping_governorate_rates',
   defaultCarrierCode: 'default_carrier_code',
+  servedGovernorates: 'served_governorates',
+  storePickup: 'store_pickup',
+  deliveryZonesEnabled: 'delivery_zones_enabled',
+  storeHours: 'store_hours',
+  deliveryEtaMinutes: 'delivery_eta_minutes',
 });
 
 const MANUAL = carriers.MANUAL;
@@ -42,6 +57,11 @@ function view(settings) {
     freeShippingThresholdAmount: amount(s[KEYS.freeShippingThresholdAmount]),
     governorateRates: Object.fromEntries(Object.entries(rates).map(([code, value]) => [code, Number(value)])),
     defaultCarrierCode: s[KEYS.defaultCarrierCode] || null,
+    servedGovernorates: Array.isArray(s[KEYS.servedGovernorates]) ? [...s[KEYS.servedGovernorates]] : [],
+    storePickup: require('./storePickup').pickupSettings(s),
+    deliveryZonesEnabled: s[KEYS.deliveryZonesEnabled] === true,
+    storeHours: require('./storeHours').hoursSettings(s),
+    deliveryEtaMinutes: require('./storeHours').etaMinutes(s),
   };
 }
 
@@ -90,7 +110,11 @@ async function updateSettings(workspaceId, body, req) {
     for (const [field, key] of Object.entries(KEYS)) {
       if (!(field in body)) continue;
       const value = body[field];
-      const empty = value === null || (field === 'governorateRates' && Object.keys(value).length === 0);
+      const empty =
+        value === null ||
+        (field === 'governorateRates' && Object.keys(value).length === 0) ||
+        (field === 'servedGovernorates' && value.length === 0) ||
+        (field === 'deliveryZonesEnabled' && value === false);
       if (empty) delete next[key];
       else next[key] = value;
     }

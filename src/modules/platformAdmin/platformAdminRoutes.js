@@ -19,6 +19,8 @@ router.use(authenticate);
 router.use(require('./carrierMapRoutes'));
 // The console's notifications and each admin's notification settings.
 router.use(require('./platformNotificationRoutes'));
+// Merchants' suggestions: list, filter, status and reply (modules/suggestions).
+router.use(require('../suggestions/suggestionAdminRoutes'));
 // Marketing-site traffic (siteAnalytics/siteTrafficAdminRoutes).
 router.use(require('../siteAnalytics/siteTrafficAdminRoutes'));
 // The theme catalog (themes/themesCatalog.js).

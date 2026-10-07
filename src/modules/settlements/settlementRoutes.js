@@ -19,6 +19,8 @@ const line = Joi.object({
 });
 const body = {
   carrierCode: Joi.string().min(1).max(100),
+  // One of the store's own couriers (modules/couriers); its name becomes carrierCode when none is sent.
+  courierId: uuid,
   reference: Joi.string().max(120).allow('', null),
   periodStart: Joi.date().iso().allow(null),
   periodEnd: Joi.date().iso().allow(null),
@@ -39,7 +41,7 @@ router.get('/summary', READ, validate({ params: Joi.object(ws) }), asyncHandler(
 router.get(
   '/unsettled',
   READ,
-  validate({ params: Joi.object(ws), query: Joi.object({ carrierCode: Joi.string().max(100) }) }),
+  validate({ params: Joi.object(ws), query: Joi.object({ carrierCode: Joi.string().max(100), courierId: uuid }) }),
   asyncHandler(async (req, res) => res.json(await service.listUnsettled(req.tenant.workspaceId, req.query)))
 );
 router.get(
@@ -52,7 +54,7 @@ router.get('/:settlementId', READ, validate({ params: Joi.object({ ...ws, settle
 router.post(
   '/',
   WRITE,
-  validate({ params: Joi.object(ws), body: Joi.object({ ...body, carrierCode: body.carrierCode.required(), lines: body.lines.required() }) }),
+  validate({ params: Joi.object(ws), body: Joi.object({ ...body, lines: body.lines.required() }).or('carrierCode', 'courierId') }),
   asyncHandler(async (req, res) => {
     const id = await service.create(req.tenant.workspaceId, req.body, req);
     res.status(201).json({ settlement: await service.detail(req.tenant.workspaceId, id) });

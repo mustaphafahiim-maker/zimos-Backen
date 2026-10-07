@@ -7,6 +7,8 @@ module.exports = (sequelize, DataTypes) => {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       workspaceId: { type: DataTypes.UUID, allowNull: false, field: 'workspace_id' },
       carrierCode: { type: DataTypes.STRING(100), allowNull: false, field: 'carrier_code' },
+      // One of the store's own couriers (migration 216); null = a shipping company or a typed name.
+      courierId: { type: DataTypes.UUID, allowNull: true, field: 'courier_id' },
       reference: { type: DataTypes.STRING(120), allowNull: true },
       periodStart: { type: DataTypes.DATEONLY, allowNull: true, field: 'period_start' },
       periodEnd: { type: DataTypes.DATEONLY, allowNull: true, field: 'period_end' },

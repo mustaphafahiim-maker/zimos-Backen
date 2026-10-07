@@ -75,6 +75,8 @@ module.exports = (sequelize, DataTypes) => {
       // confirmation rejection, though both land on confirmationState 'rejected').
       cancelledAt: { type: DataTypes.DATE, allowNull: true, field: 'cancelled_at' },
       cancellationReason: { type: DataTypes.STRING(500), allowNull: true, field: 'cancellation_reason' },
+      // 'pickup': the customer collects it from the store (shipping/storePickup.js); null = delivered.
+      deliveryMethod: { type: DataTypes.STRING(20), allowNull: true, field: 'delivery_method' },
       // Links an appended-order (e.g. COD upsell that couldn't be merged
       // because the waybill was already created) back to the original order.
       linkedFromOrderId: { type: DataTypes.UUID, allowNull: true, field: 'linked_from_order_id' },

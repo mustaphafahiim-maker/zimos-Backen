@@ -78,6 +78,8 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
     // For the "similar products" section: products sharing a collection.
     collectionIds: (await db.ProductCollection.findAll({ where: { productId: product.id }, attributes: ['collectionId'] })).map((r) => r.collectionId),
     bundle: bundle ? bundlePricing.presentBundle(bundle, publicProduct.variants) : null,
+    // Menu options: the product's active option groups and choices ([] when it has none, catalog/menuOptions.js).
+    optionGroups: await require('../catalog/menuOptions').publicGroups(workspaceId, product.id),
     // A running A/B test: the page asks for this visitor's prices and pictures (catalog/productTests.js).
     abTest: await require('../catalog/productTests').hasRunningTest(workspaceId, product.id),
     rating,
@@ -110,6 +112,17 @@ async function getStorefront(workspaceId) {
     // fully populated — an unconfigured store gets the defaults, which are
     // what the checkout already enforced before this existed.
     checkout: resolveCheckoutSettings(w),
+    // Self delivery: the governorates the store delivers to (null = everywhere, shipping/deliveryAreas.js).
+    delivery: {
+      servedGovernorates: require('../shipping/deliveryAreas').servedGovernorates(w.settings),
+      // Pickup from the store: its address, phone and note, or null while off (shipping/storePickup.js).
+      pickup: require('../shipping/storePickup').publicPickup(w.settings),
+      // Delivery zones inside a city: the active ones while the store prices by them, else null.
+      zones: await require('../shipping/deliveryZones').publicZones(w),
+      // Opening hours, open now or not (null while off), and the usual delivery time in minutes.
+      hours: require('../shipping/storeHours').publicHours(w.settings),
+      etaMinutes: require('../shipping/storeHours').etaMinutes(w.settings),
+    },
     // What the thank-you page shows after an order (settings.thank_you_page).
     thankYou: resolveThankYouPage(w.settings),
     // Contact details and trust cards (null while switched off), which legal

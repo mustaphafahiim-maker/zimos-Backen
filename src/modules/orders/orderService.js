@@ -3,6 +3,10 @@
 const crypto = require('crypto');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
+const storePickup = require('../shipping/storePickup');
+const deliveryZones = require('../shipping/deliveryZones');
+const storeHours = require('../shipping/storeHours');
+const { DESTINATION_INDEPENDENT } = require('../shipping/shippingRules');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
@@ -61,7 +65,17 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
   });
   if (!variant) throw new NotFoundError('ProductVariant');
   // Priced custom fields the shopper filled in add to the unit price (catalog/customFieldPricing.js).
-  const fieldsDelta = require('../catalog/customFieldPricing').customFieldsDelta(variant.product.customFields, customizations);
+  const customDelta = require('../catalog/customFieldPricing').customFieldsDelta(variant.product.customFields, customizations);
+  // Menu options (catalog/menuOptions.js): checked against the product's menu and priced from the
+  // database only. Required groups bind the shopper's own orders (enforceRequiredOptions). A line an
+  // order already holds (forSale false) keeps the prices it recorded, so its menu is not read again.
+  const options = forSale
+    ? await require('../catalog/menuOptions').resolveSelection(workspaceId, variant.productId, line.options, {
+        enforceRequired: Boolean(line.enforceRequiredOptions),
+        transaction,
+      })
+    : { snapshot: null, deltaPerUnit: 0 };
+  const fieldsDelta = customDelta + options.deltaPerUnit;
 
   if (offerId) {
     const offer = await db.Offer.findOne({
@@ -107,6 +121,7 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
       lineTotalAmount: lineTotal,
       consumedInventory: consumedLines,
       customFields: variant.product.customFields || [],
+      optionsSnapshot: options.snapshot,
       currency: offer.currency,
       shippingOverride: offer.shippingOverride,
       // One bundle weighs what its offer lines weigh — not the anchor variant.
@@ -137,6 +152,7 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
     customFields: variant.product.customFields || [],
+    optionsSnapshot: options.snapshot,
     currency: variant.currency,
     shippingOverride: null,
     weightUnits: [weightUnit(variant, 1)],
@@ -256,7 +272,10 @@ async function createOrder(
     manualPayment = null,
   } = {}
 ) {
-  const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
+  const { items, contact, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
+  // Store pickup (shipping/storePickup.js): no address and no shipping fee, whatever was sent.
+  const pickup = payload.deliveryMethod === storePickup.METHOD;
+  const shippingAddress = pickup ? null : payload.shippingAddress;
 
   if (!items || items.length === 0) {
     throw new ValidationError([{ field: 'items', message: 'At least one item is required' }]);
@@ -269,6 +288,10 @@ async function createOrder(
   const isTest = orderMeta.isTestRequest(req, workspaceId);
 
   const run = async (transaction) => {
+    if (pickup) await storePickup.assertAvailable(workspaceId, transaction);
+    // Opening hours (shipping/storeHours.js): a closed store takes no shopper orders. An add-on to an
+    // order just placed, and an order staff type in, are not refused.
+    if (!req.user && !shippingOverride && source !== 'upsell') await storeHours.assertOpen(workspaceId, transaction);
     // Chosen now so the reservations below can name the order they hold stock
     // for (inventory/orderStock.js releases exactly what they reserved).
     const orderId = crypto.randomUUID();
@@ -369,7 +392,8 @@ async function createOrder(
       const isOrderBump = item.isOrderBump === true;
       const bumpFailure = (err) =>
         isOrderBump && (err instanceof NotFoundError || (err && err.code === 'INSUFFICIENT_STOCK')) ? orderBumpUnavailable() : err;
-      const line = await priceLine(workspaceId, item, transaction).catch((err) => {
+      // The shopper's own checkout must answer the product's required menu groups (catalog/menuOptions.js).
+      const line = await priceLine(workspaceId, { ...item, enforceRequiredOptions: Boolean(customFields.enforceRequired) }, transaction).catch((err) => {
         throw bumpFailure(err);
       });
       line.isOrderBump = isOrderBump;
@@ -452,6 +476,13 @@ async function createOrder(
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
     if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
+    // The governorates the store delivers to, when it limits them (shipping/deliveryAreas.js).
+    if (!req.user && !shippingOverride && !pickup) await require('../shipping/deliveryAreas').assertAreaServed(workspaceId, shippingAddress, transaction);
+    // Delivery zones inside a city (shipping/deliveryZones.js): the shopper's area prices the delivery
+    // and its minimum binds too. Read from the database only; null while the store does not use zones.
+    const zone =
+      !req.user && !shippingOverride && !pickup ? await deliveryZones.resolveForCheckout(workspaceId, payload.deliveryZoneId, transaction) : null;
+    deliveryZones.assertZoneMinimum(zone, subtotal);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
@@ -469,8 +500,15 @@ async function createOrder(
       transaction,
     });
     // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
-    const chosenShipping = await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
-    const shippingAmount = chosenShipping ? chosenShipping.amount : shipping.amount;
+    const chosenShipping =
+      pickup || zone ? null : await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
+    // A zone's fee replaces the destination price; a store-wide rule that makes shipping free (or an offer's own price) still wins.
+    const zoneAmount = zone ? (DESTINATION_INDEPENDENT.includes(shipping.rule) ? shipping.amount : zone.feeAmount) : null;
+    const shippingAmount = pickup ? 0 : zone ? zoneAmount : chosenShipping ? chosenShipping.amount : shipping.amount;
+    const etaMinutes = pickup
+      ? null
+      : (zone && zone.etaMinutes) ||
+        storeHours.etaMinutes(((await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'], transaction })) || {}).settings);
 
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
@@ -499,6 +537,7 @@ async function createOrder(
         totalAmount,
         contactSnapshot: contact,
         shippingAddressSnapshot: shippingAddress || null,
+        deliveryMethod: pickup ? storePickup.METHOD : null,
         discountsSnapshot,
         notes: notes || null,
         riskFlags,
@@ -520,7 +559,13 @@ async function createOrder(
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
         // With the option the shopper picked, when not the standard one.
-        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}) },
+        shippingSnapshot: {
+          ...shippingSnapshot(shipping),
+          ...(chosenShipping ? { option: chosenShipping.snapshot } : {}),
+          ...(zone ? { zone: { id: zone.id, name: zone.name, feeAmount: zone.feeAmount, etaMinutes: zone.etaMinutes } } : {}),
+          // The estimated delivery time the customer was shown: the zone's, else the store's.
+          ...(etaMinutes ? { etaMinutes } : {}),
+        },
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,
@@ -558,6 +603,7 @@ async function createOrder(
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,
+            optionsSnapshot: line.optionsSnapshot || null,
             isOrderBump: line.isOrderBump,
           },
           { transaction }
@@ -856,7 +902,7 @@ async function getOrder(workspaceId, orderId) {
     paymentProvider: providers.get(order.id) || null,
     stage,
     // The stages PATCH /orders/:id/status accepts from here (orderStageChange.js).
-    nextStages: nextStages(stage),
+    nextStages: storePickup.isPickup(order) ? nextStages(stage).filter((s) => !storePickup.COURIER_STAGES.includes(s)) : nextStages(stage),
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
     linkedOrders: linkedOrders.map((o) => o.toJSON()),
     linkedFromOrder: linkedFrom ? linkedFrom.toJSON() : null,
@@ -1289,6 +1335,7 @@ async function createShipment(workspaceId, orderId, data, req) {
     });
     if (!order) throw new NotFoundError('Order');
     carrierShipmentService.assertConfirmedOrPaid(order);
+    storePickup.assertCourierAllowed(order, data.carrierCode);
     await carrierShipmentService.assertNoActiveShipment(order.id, transaction);
 
     const shipment = await insertShipment(

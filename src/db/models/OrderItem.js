@@ -30,6 +30,8 @@ module.exports = (sequelize, DataTypes) => {
       // What the shopper filled in for the product's custom fields, labels
       // included as they were when ordered. Photos by upload id.
       customizations: { type: DataTypes.JSONB, allowNull: true },
+      // Menu options the line was sold with: names and prices as charged (migration 218, catalog/menuOptions.js).
+      optionsSnapshot: { type: DataTypes.JSONB, allowNull: true, field: 'options_snapshot' },
     },
     { tableName: 'order_items', indexes: [{ fields: ['order_id'] }] }
   );

@@ -9,6 +9,8 @@ const carrierShipmentService = require('../shipping/carrierShipmentService');
 const orderService = require('./orderService');
 const statusHistory = require('./orderStatusHistory');
 const { insertShipment } = require('./shipmentLifecycle');
+const storePickup = require('../shipping/storePickup');
+const couriers = require('../couriers/couriersService');
 const {
   setConfirmationState,
   setFulfillmentState,
@@ -138,8 +140,12 @@ async function reopen(workspaceId, orderId, { reason }, req) {
  * delivers by hand, or never recorded one) a manual shipment is created
  * first, so the order has something to carry the status and the dates.
  */
-async function moveShipment(workspaceId, orderId, from, to, { carrierCode, waybillNumber, trackingUrl }, req) {
+async function moveShipment(workspaceId, orderId, from, to, { carrierCode, courierId, waybillNumber, trackingUrl }, req) {
   let shipment = await latestLiveShipment(workspaceId, orderId);
+  // One of the store's own couriers, picked from its list: carried as its id and, for
+  // everything that reads the text, its name.
+  const courier = courierId ? await couriers.findForStore(workspaceId, courierId, { activeOnly: true }) : null;
+  if (courier) carrierCode = courier.name;
 
   // An order marked delivered without any shipment (fulfillment_state only).
   if (!shipment && from === 'delivered' && to === 'returned') {
@@ -159,7 +165,8 @@ async function moveShipment(workspaceId, orderId, from, to, { carrierCode, waybi
         {
           workspaceId,
           orderId: order.id,
-          carrierCode: carrierCode || 'manual',
+          carrierCode: storePickup.isPickup(order) ? storePickup.CARRIER_CODE : carrierCode || 'manual',
+          courierId: courier && !storePickup.isPickup(order) ? courier.id : null,
           waybillNumber: waybillNumber || null,
           trackingUrl: trackingUrl || null,
           status: 'created',
@@ -181,6 +188,10 @@ async function moveShipment(workspaceId, orderId, from, to, { carrierCode, waybi
     });
   }
 
+  // Handing a live own-courier parcel (not one booked with a shipping company) to another courier.
+  if (courier && shipment.courierId !== courier.id && !shipment.carrierResponse && shipment.carrierCode !== storePickup.CARRIER_CODE) {
+    await shipment.update({ courierId: courier.id, carrierCode: courier.name });
+  }
   await orderService.updateShipment(workspaceId, orderId, shipment.id, { status: SHIPMENT_STATUS_FOR[to] }, req);
 }
 
@@ -190,13 +201,21 @@ async function moveShipment(workspaceId, orderId, from, to, { carrierCode, waybi
  * @returns {Promise<object>} the order, as GET /orders/:id returns it
  */
 async function changeStage(workspaceId, orderId, data, req) {
-  const exists = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id'] });
+  const exists = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'deliveryMethod'] });
   if (!exists) throw new NotFoundError('Order');
 
   const from = await statusHistory.stageOf(orderId);
   const to = data.status;
   if (from === to) throw new AppError('STATUS_UNCHANGED', `This order is already "${to}"`, 409);
   assertManual(from, to);
+  // A pickup order goes from ready straight to delivered: it never rides with a courier.
+  if (storePickup.isPickup(exists) && storePickup.COURIER_STAGES.includes(to)) {
+    throw new AppError('INVALID_STATUS_TRANSITION', `A pickup order is not moved to "${to}"`, 409, {
+      from,
+      to,
+      allowed: nextStages(from).filter((s) => !storePickup.COURIER_STAGES.includes(s)),
+    });
+  }
 
   const reason = data.reason ? data.reason.trim() : null;
   // Read by orderStateService.trackStage: the history row carries the reason.
