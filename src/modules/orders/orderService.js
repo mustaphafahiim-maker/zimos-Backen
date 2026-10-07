@@ -151,6 +151,13 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
   };
 }
 
+// Whether the order was placed with a free-shipping code (item 353): it ships free even when an offer
+// in it sets its own shipping price, also when a line joins later or its items are edited.
+function couponShipsFree(order) {
+  return Boolean(order.shippingSnapshot && order.shippingSnapshot.freeShippingGranted === true) &&
+    (order.discountsSnapshot || []).some((d) => d && d.kind !== 'bundle' && d.type === 'free_shipping');
+}
+
 // The product's shipping mode for shippingRules.productShipping: `units` is
 // how many units of it the line ships.
 function productShippingRule(product, units) {
@@ -522,7 +529,8 @@ async function createOrder(
       address: shippingAddress || null,
       subtotal,
       totalQuantity,
-      offerShippingOverride,
+      // A free-shipping code beats an offer's own shipping price (item 353 review); an add-on's does not.
+      offerShippingOverride: couponFreeShipping && !shippingOverride ? null : offerShippingOverride,
       weightLines: pricedLines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
       productLines: pricedLines.map((l) => l.shippingRule),
       funnelId: payload.funnelId || null,
@@ -787,6 +795,10 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       : null;
     lines.push({
       productId: item.productId,
+      // A free gift (freeGifts/, item 276) never counts toward a discount, as in orderItemsEdit (item 353 review).
+      freeGift: item.isFreeGift !== null && item.isFreeGift !== undefined
+        ? item.isFreeGift === true
+        : !item.offerId && Number(item.unitPriceAmount) === 0 && Boolean(item.offerNameSnapshot),
       quantity: item.quantity,
       lineTotalAmount: Number(item.lineTotalAmount),
       shippingOverride: facts ? facts.shippingOverride : null,
@@ -834,7 +846,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     address,
     subtotal,
     totalQuantity,
-    offerShippingOverride,
+    offerShippingOverride: couponShipsFree(order) ? null : offerShippingOverride,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
     funnelId: order.funnelId || null,
@@ -1532,6 +1544,7 @@ module.exports = {
   generateOrderNumber,
   generateTrackingCode,
   priceLine,
+  couponShipsFree,
   cancelOrder,
   updateOrderLimited,
   listShipments,

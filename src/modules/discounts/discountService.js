@@ -95,7 +95,9 @@ function buyXGetY(discount, eligible, lines) {
   const groups = [];
   let units = 0;
   for (const line of Array.isArray(lines) ? lines : []) {
-    const quantity = Number(line.quantity);
+    // Product units, not offers: an offer line's quantity is the bundles bought, its shipping rule holds the units
+    // they contain (orders/orderService.priceLine; also on lines rebuilt for an edit or an upsell).
+    const quantity = Number(line.shippingRule && line.shippingRule.units) || Number(line.quantity);
     const total = Number(line.lineTotalAmount);
     if (line.freeGift || !(quantity > 0) || (eligible && !eligible.has(line.productId))) continue;
     // The line's total spread over its units in whole minor units.

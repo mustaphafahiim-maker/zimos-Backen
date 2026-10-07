@@ -186,7 +186,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
 
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
-  const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
+  // A free-shipping code beats an offer's own shipping price (item 353 review).
+  const offerShippingOverride = orderService.couponShipsFree(order) ? null : lines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
   let discountAmount = Number(order.discountAmount);
   let discountsSnapshot = [...keptBundles, ...bundleSnapshots, ...(order.discountsSnapshot || []).filter((d) => !d || d.kind !== 'bundle')];
