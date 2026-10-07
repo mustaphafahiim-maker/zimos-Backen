@@ -114,7 +114,7 @@ can exceed the safe-integer range) — `money.js` coerces this on the way in.
 
 ```bash
 npm install
-cp .env.example .env        # edit JWT secrets etc. for anything beyond local dev
+cp .env.example .env        # then set JWT_ACCESS_SECRET and DB_PASSWORD: no defaults, the app won't start without them
 createdb zimos_dev
 createdb zimos_test  # only needed to run the test suite
 npm run migrate
@@ -183,6 +183,12 @@ docker compose up --build
 Runs Postgres + the API, running migrations automatically on boot. Seed data
 is not applied automatically — run
 `docker compose exec api npx sequelize-cli db:seed:all` if you want it.
+`DB_PASSWORD`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and
+`INTEGRATIONS_ENCRYPTION_KEY` come from your shell or from `.env` next to
+`docker-compose.yml`; compose refuses to start while one is missing, and the
+API (run with `NODE_ENV=production`) also refuses a JWT secret shorter than 32
+characters. An existing `zimos_pgdata` volume keeps the password it was
+created with.
 
 ### Tests
 
@@ -330,8 +336,10 @@ email/SMS).
 
 ## Environment variables
 
-See `.env.example` for the full list with comments. Nothing in it is a real
-credential.
+See `.env.example` for the full list with comments. It holds names only: no
+secret has a value there, and the code has no fallback for `JWT_ACCESS_SECRET`
+or `DB_PASSWORD` (or the password in `DATABASE_URL`) — the app and the
+migration CLI refuse to start, in every environment, until they are set.
 
 **Database:** local dev/test use the separate `DB_HOST` / `DB_PORT` /
 `DB_NAME` / `DB_USER` / `DB_PASSWORD` vars. A managed host (Railway, Heroku,
@@ -466,5 +474,6 @@ real payment-retry scheduling.
 - A shipping carrier API (Bosta, Aramex, etc.) for `src/modules/shipping/`
   waybill creation (only rate *pricing* is implemented; carrier integration
   is a documented extension point, not yet built)
-- Production JWT secrets (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`) —
-  generate with e.g. `openssl rand -hex 32`
+- Production JWT secrets (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`), at
+  least 32 characters (the app refuses to start without them) — generate
+  with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`

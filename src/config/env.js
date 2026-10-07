@@ -15,7 +15,7 @@ function required(name, fallback) {
 
 // Production must not start on a secret anyone can read in this repository
 // (SPEC §3.4): the three keys below have to be set, at least 32 characters
-// long, and not one of the placeholders from .env.example / docker-compose.
+// long, and not one of the placeholders older copies of .env.example carried.
 // Uploads must go to R2 — the local disk of a container is lost on redeploy —
 // unless ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true says the disk is a real volume.
 function assertProductionConfig() {
@@ -51,6 +51,32 @@ if (storefrontProxySecret && storefrontProxySecret.length < 32) {
   throw new Error('STOREFRONT_PROXY_SECRET must be at least 32 characters (generate one with `openssl rand -hex 32`)');
 }
 
+// No fallback secrets (item 328, Ziad's d7ee605): the secrets the app cannot
+// run without come from the environment (.env locally) and from nowhere else,
+// in every environment, test included. Missing: refuse to start. Production's
+// length and placeholder rules stay in assertProductionConfig above. The
+// errors name the variable, never its value.
+//   JWT_ACCESS_SECRET  signs access tokens and keys every HMAC derived from it
+//                      (preview tokens, sign-up codes, shoppers' photo links
+//                      while UPLOAD_URL_SECRET is unset)
+//   DB_PASSWORD        or the password inside DATABASE_URL. Not held to 32
+//                      characters: the database issues it, we don't.
+const GENERATE_SECRET = `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`;
+const setItIn = process.env.NODE_ENV === 'production' ? 'the environment' : '.env (see .env.example)';
+const isBlank = (value) => typeof value !== 'string' || value.trim() === '';
+const jwtAccessSecret = process.env.JWT_ACCESS_SECRET;
+const dbPassword = (dbUrl && dbUrl.password) || process.env.DB_PASSWORD;
+const secretProblems = [];
+if (isBlank(jwtAccessSecret)) {
+  secretProblems.push(`JWT_ACCESS_SECRET is not set: set it in ${setItIn}. Generate one with: ${GENERATE_SECRET}`);
+}
+if (isBlank(dbPassword)) {
+  secretProblems.push(`DB_PASSWORD is not set: set it in ${setItIn}, or give DATABASE_URL a password`);
+}
+if (secretProblems.length > 0) {
+  throw new Error(`Refusing to start (NODE_ENV=${process.env.NODE_ENV || 'development'}):\n  - ${secretProblems.join('\n  - ')}`);
+}
+
 // A comma-separated env var as a list of lower-cased, trimmed entries. Unset
 // uses the fallback; set but empty is an empty list. Under NODE_ENV=test the
 // fallback always wins, so a dev .env can't change what the suite sees.
@@ -81,15 +107,18 @@ const env = {
         ? process.env.DB_NAME_TEST || 'zimos_test'
         : (dbUrl && dbUrl.name) || required('DB_NAME', 'zimos_dev'),
     user: (dbUrl && dbUrl.user) || process.env.DB_USER || 'postgres',
-    password: (dbUrl && dbUrl.password) || process.env.DB_PASSWORD || 'postgres',
+    password: dbPassword,
     ssl: dbUrl ? dbUrl.ssl || process.env.DB_SSL === 'true' : process.env.DB_SSL === 'true',
     poolMax: parseInt(process.env.DB_POOL_MAX || '10', 10),
     poolMin: parseInt(process.env.DB_POOL_MIN || '0', 10),
   },
 
+  // Refresh tokens are random strings stored hashed (core/security/tokens.js):
+  // nothing signs with JWT_REFRESH_SECRET. Production still requires it
+  // (assertProductionConfig, SPEC §3.4); it has no fallback here either.
   jwt: {
-    accessSecret: required('JWT_ACCESS_SECRET', 'dev_only_access_secret_change_me_32chars'),
-    refreshSecret: required('JWT_REFRESH_SECRET', 'dev_only_refresh_secret_change_me_32chars'),
+    accessSecret: jwtAccessSecret,
+    refreshSecret: process.env.JWT_REFRESH_SECRET || '',
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },

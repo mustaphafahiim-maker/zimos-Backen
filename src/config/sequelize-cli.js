@@ -6,7 +6,9 @@ const { parseDbUrl } = require('./parseDbUrl');
 
 const base = {
   username: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
+  // No default (item 328): DB_PASSWORD from the environment (.env locally),
+  // or the password in DATABASE_URL below.
+  password: process.env.DB_PASSWORD,
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432', 10),
   dialect: 'postgres',
