@@ -158,7 +158,9 @@ async function readSubmission({ methodCode, senderPhone, file }) {
       { field: 'methodCode', message: 'not offered' },
     ]);
   }
-  const phone = normalizePhone(senderPhone);
+  // Read as Egyptian whatever the store's country: manual methods are EGP-only, so the money
+  // always comes from an Egyptian mobile (normalizePhone would otherwise use the store's code).
+  const phone = normalizePhone(senderPhone, '20');
   if (!phone || !EGYPT_MOBILE.test(phone)) {
     throw new AppError('INVALID_SENDER_PHONE', 'Enter the Egyptian mobile number the money was sent from.', 422, [
       { field: 'senderPhone', message: 'must be an Egyptian mobile number' },
