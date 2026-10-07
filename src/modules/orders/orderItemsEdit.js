@@ -10,6 +10,7 @@ const { calculateTax } = require('../tax/taxService');
 const { recordAudit } = require('../audit/auditService');
 const { assertNotShipped } = require('./shipmentLifecycle');
 const orderService = require('./orderService');
+const { applyBundleTiers } = require('../bundles/bundlePricing');
 
 /**
  * Editing an order's items before it ships (SPEC §4.4 "Editing"): add
@@ -20,8 +21,9 @@ const orderService = require('./orderService');
  * (same variant and offer) keeps the price it was sold at, whatever the
  * catalogue says today; a new line is priced from the catalogue like any
  * order line. The order is then priced again as createOrder would price it:
- * the discount code on the new subtotal, shipping (weight, free-shipping
- * threshold), tax, total. Stock follows in the same transaction — more is
+ * quantity bundles on the new quantities, the discount code on the new
+ * subtotal, shipping (weight, free-shipping threshold, the option the shopper
+ * picked, free shipping the order was granted), tax, total. Stock follows in the same transaction — more is
  * reserved, less is released — and the invoice is brought to the new total.
  *
  * The preview is the same code run in a transaction that is rolled back, so
@@ -93,9 +95,17 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       lines.push({
         kept,
         productId: kept.productId,
+        // What decides whether a bundle tier covers the line (bundlePricing.applyBundleTiers).
+        offerId: kept.offerId,
+        isOrderBump: kept.isOrderBump,
+        isUpsell: kept.isUpsell,
+        // A free gift (freeGifts/, item 276) is stored as a labelled line at 0; it never unlocks a tier.
+        freeGift: !kept.offerId && Number(kept.unitPriceAmount) === 0 && Boolean(kept.offerNameSnapshot),
         quantity: wanted.quantity,
         unitPriceAmount: Number(kept.unitPriceAmount),
+        // Full price here; the bundle tiers below take their saving off again (item 344).
         lineTotalAmount: Number(kept.unitPriceAmount) * wanted.quantity,
+        lineDiscountAmount: 0,
         consumedInventory: facts ? facts.consumedInventory : [{ variantId: kept.variantId, quantity: wanted.quantity }],
         shippingOverride: facts ? facts.shippingOverride : null,
         weightUnits: facts
@@ -123,12 +133,22 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   }
 
   // ---- price the order again
+  // Quantity bundles and mix-and-match boxes priced again on the new quantities, as createOrder prices them
+  // (item 344); a quote's order keeps the merchant's exact prices (quotes/, item 275).
+  const fromQuote = (await db.QuoteRequest.count({ where: { orderId: order.id, workspaceId }, transaction })) > 0;
+  const bundleSnapshots = fromQuote ? [] : await applyBundleTiers(workspaceId, lines, transaction);
+  // Free shipping a VIP tier, a referral or a pickup gave the order still holds (as for an added line, item 277).
+  const keptShipping = order.shippingSnapshot || {};
+  if (keptShipping.freeShippingGranted === true) {
+    for (const line of lines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+  }
+
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
   const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
   let discountAmount = Number(order.discountAmount);
-  let discountsSnapshot = order.discountsSnapshot || [];
+  let discountsSnapshot = [...bundleSnapshots, ...(order.discountsSnapshot || []).filter((d) => !d || d.kind !== 'bundle')];
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
@@ -156,18 +176,24 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     funnelId: order.funnelId || null,
     transaction,
   });
+  // The shipping option the shopper picked, at its price for the new order; standard when the store no
+  // longer offers it (as for an added line, item 277). Shipping typed in by hand stays as typed.
+  const option = !manualShipping && keptShipping.option && keptShipping.option.key
+    ? await require('../shipping/shippingOptions').choose(workspaceId, keptShipping.option.key, shipping, transaction).catch(() => null)
+    : null;
+  const shippingAmount = option ? option.amount : shipping.amount;
   let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
-    shippingAmount: shipping.amount,
+    shippingAmount,
     transaction,
   });
   // Priced as an upsell joining the order is (item 317): a tax-exempt business order stays exempt, and the
   // payment method's own fee or discount is worked out again on the new amount instead of dropped.
   if (order.contactSnapshot && order.contactSnapshot.taxExempt === true) taxAmount = 0;
-  const paymentAdjustment = await require('../payments/paymentRulesService').adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction, order.currency);
-  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;
+  const paymentAdjustment = await require('../payments/paymentRulesService').adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shippingAmount, transaction, order.currency);
+  const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
 
   // ---- write the lines
   const keptIds = new Set(lines.filter((l) => l.kept).map((l) => l.kept.id));
@@ -180,7 +206,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   for (const [index, line] of lines.entries()) {
     if (line.kept) {
       await line.kept.update(
-        { quantity: line.quantity, lineTotalAmount: line.lineTotalAmount, unitWeightGrams: shipping.lineWeights[index] },
+        { quantity: line.quantity, lineDiscountAmount: line.lineDiscountAmount || 0, lineTotalAmount: line.lineTotalAmount, unitWeightGrams: shipping.lineWeights[index] },
         { transaction }
       );
       items.push(line.kept);
@@ -199,6 +225,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
             quantity: line.quantity,
             unitPriceAmount: line.unitPriceAmount,
             unitCostAmount: line.unitCostAmount,
+            lineDiscountAmount: line.lineDiscountAmount || 0,
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
           },
@@ -213,7 +240,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       subtotalAmount: subtotal,
       discountAmount,
       discountsSnapshot,
-      shippingAmount: shipping.amount,
+      shippingAmount,
       taxAmount,
       totalAmount,
       paymentAdjustmentAmount: paymentAdjustment.amount,
@@ -223,6 +250,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,
+      // Only the option is re-priced; the delivery slot, pickup and granted free shipping stay (item 344).
+      ...(keptShipping.option ? { shippingSnapshot: { ...keptShipping, option: option ? option.snapshot : undefined } } : {}),
     },
     { transaction }
   );
