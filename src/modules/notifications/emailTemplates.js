@@ -281,6 +281,18 @@ ${codeHtml}
       ),
     };
   },
+  store_ownership_offered(data = {}) {
+    const store = escapeHtml(data.workspaceName || 'a store');
+    const from = escapeHtml(data.fromName || 'The owner');
+    return {
+      subject: `${data.fromName || 'The owner'} wants to give you ${data.workspaceName || 'a store'} on Zimos`,
+      ...wrap(
+        `<p>Hi,</p>
+<p>${from} wants to transfer <strong>${store}</strong> to you. If you accept, you become its owner and it counts toward your plan's stores. Open Zimos to accept or decline; the offer ends in 7 days.</p>`,
+        `Hi,\n\n${data.fromName || 'The owner'} wants to transfer ${data.workspaceName || 'a store'} to you. Open Zimos to accept or decline; the offer ends in 7 days.`
+      ),
+    };
+  },
   store_ownership_given(data = {}) {
     const store = escapeHtml(data.workspaceName || 'your store');
     const to = escapeHtml(data.toName || 'the new owner');

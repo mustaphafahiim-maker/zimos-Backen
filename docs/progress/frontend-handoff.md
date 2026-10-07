@@ -4536,3 +4536,16 @@ A store can now send its alerts (new orders, suspicious orders, low stock, a fai
 
 ### Automations
 - New step type **`notify_channel`** (listed in `stepTypes` of GET `/automations`): `{ "type": "notify_channel", "teamChannelId": "<id>", "message": "طلب {{order_number}} محتاج مكالمة" }` (message up to 500, same tokens as `notify_team`). Step picker label «رسالة لقناة الفريق» / "Message a team channel", with a channel dropdown from GET `/team-channels`. The run log shows `notify_channel telegram`, or failed with "team channel "…" is paused" / "the team channel no longer exists".
+
+## 379. Store transfer needs the new owner's yes — UI: pending
+
+The transfer (handoff 252) is now an **offer** the new owner accepts.
+- **POST `/api/v1/workspaces/:ws/ownership-transfer`** (owner only; same body `{ newOwnerUserId, password, keepAs }`) → **201** `{ "offer": { "toUserId": "…", "fromUserId": "…", "keepAs": "workspace_manager", "createdAt": "…", "expiresAt": "…(7 days)", "toUser": { "userId", "fullName", "email" } } }`. The store does not move yet. The same refusals as before apply (NOT_STORE_OWNER, NEW_OWNER_NOT_CONFIRMED, PLAN_LIMIT_REACHED, wrong password). A new offer replaces the old one.
+- **GET** same path → `{ "offer": {…} | null }`; **DELETE** same path → `{ "withdrawn": true }` (owner only).
+- **GET `/api/v1/me/ownership-offers`** (any signed-in user) → `{ "offers": [{ "workspaceId", "workspaceName", "from": { "fullName", "email" }, "keepAs", "expiresAt" }] }`.
+- **POST `/api/v1/me/ownership-offers/:workspaceId/accept`** → the transfer result `{ workspace, newOwner, previousOwner, billing }`. Every check runs again at this moment. The offer gone or expired → 404. The store changed owner meanwhile → 409 `OFFER_NO_LONGER_VALID`. The new owner's plan is full → 409 `PLAN_LIMIT_REACHED`.
+- **POST `/api/v1/me/ownership-offers/:workspaceId/decline`** → `{ "declined": true }`.
+
+### Screens
+- **Store settings → «نقل ملكية المتجر» / "Transfer ownership":** after confirming, show «بعتنا عرض لـ {name} — المتجر هيتنقل لما يوافق» / "Offer sent to {name} — the store moves when they accept". Show the pending offer with its end date and «إلغاء العرض» / "Withdraw offer".
+- **For the person (dashboard home or the store switcher, from `GET /me/ownership-offers`):** a banner «{from} عايز ينقل لك ملكية {store}» / "{from} wants to give you {store}", with «موافق» / "Accept" and «رفض» / "Decline". Before accepting, add a note «المتجر هيتحسب من عدد متاجر باقتك» / "The store will count toward your plan's stores".

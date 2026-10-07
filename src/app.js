@@ -192,6 +192,8 @@ v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
 v1.use('/workspaces/:workspaceId/customer-merge', require('./modules/customers/customerMerge').router);
 // Transfer a store to another owner (storeTransfer, item 252).
 v1.use('/workspaces/:workspaceId/ownership-transfer', require('./modules/storeTransfer').router);
+// The new owner accepts or declines (item 379).
+v1.use('/me/ownership-offers', require('./modules/storeTransfer').me);
 // Customer timeline (customerTimeline, item 250).
 v1.use('/workspaces/:workspaceId/customers/:customerId/timeline', require('./modules/customerTimeline').router);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
