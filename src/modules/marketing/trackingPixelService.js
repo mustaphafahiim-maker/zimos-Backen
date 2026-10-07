@@ -53,6 +53,17 @@ const PLATFORMS = Object.freeze({
   microsoft: { idPattern: /^\d{5,12}$/, capi: true, testEventCode: false },
 });
 const PLATFORM_NAMES = Object.keys(PLATFORMS);
+
+/**
+ * Whether a platform's server events really leave the server (item 257):
+ * 'live', 'sandbox' (built and logged only, until the owner sets its
+ * *_CAPI_MODE=live after checking a real account) or null (no server API).
+ */
+const SANDBOXED = { pinterest: 'pinterestCapi', reddit: 'redditCapi', microsoft: 'microsoftCapi', x: 'xCapi' };
+function serverModeOf(platform) {
+  if (!PLATFORMS[platform] || !PLATFORMS[platform].capi) return null;
+  return SANDBOXED[platform] ? require(`./pixelProviders/${SANDBOXED[platform]}`).mode() : 'live';
+}
 const SCOPE_TYPES = ['all', 'funnels', 'products'];
 const MAX_PIXELS = 30;
 
@@ -69,6 +80,7 @@ function serialize(pixel) {
     label: pixel.label,
     capiEnabled: pixel.capiEnabled,
     capiSupported: supportsCapi(pixel.platform, pixel.pixelId),
+    serverMode: supportsCapi(pixel.platform, pixel.pixelId) ? serverModeOf(pixel.platform) : null,
     capiTokenSet: Boolean(token),
     capiTokenMask: secretBox.mask(token),
     testEventCode: pixel.testEventCode,
@@ -119,7 +131,7 @@ async function list(workspaceId) {
   const pixels = await db.TrackingPixel.findAll({ where: { workspaceId }, order: [['createdAt', 'ASC']] });
   return {
     pixels: pixels.map(serialize),
-    platforms: PLATFORM_NAMES.map((name) => ({ name, capi: PLATFORMS[name].capi, testEventCode: PLATFORMS[name].testEventCode })),
+    platforms: PLATFORM_NAMES.map((name) => ({ name, capi: PLATFORMS[name].capi, testEventCode: PLATFORMS[name].testEventCode, serverMode: serverModeOf(name) })),
     limit: MAX_PIXELS,
   };
 }

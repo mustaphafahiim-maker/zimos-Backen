@@ -3125,3 +3125,8 @@ Same endpoints as before (`/workspaces/:ws/tracking-pixels`). `reddit`, `x` and 
 
 ### Screen
 - Reports → «عروض السلة والهدايا» / "Cart offers & gifts": a row per rule with a kind chip («عرض سلة» / "Cart offer", «هدية» / "Free gift"), orders, units, «مبيعات العرض» / "Offer sales", «متوسط الطلب» / "Average order" next to the store's average (green when higher), CSV download. Link from the Cart offers and Free gifts screens («شوف النتايج» / "See results").
+
+## 257. Live or sandbox server events — UI: pending
+
+`GET /api/v1/workspaces/:ws/tracking-pixels` → `platforms[].serverMode` and every `pixels[].serverMode`: `"live"` | `"sandbox"` | `null` (no server API, or a Google `AW-` id).
+- Next to the «Conversions API» switch: `sandbox` → a grey chip «تجريبي — مش بيتبعت لسه» / "Sandbox — not sent yet" with help «الأحداث بتتجهّز وتتسجّل بس، لحد ما نفعّل المنصة دي» / "Events are built and logged only, until this platform is switched on"; `live` → nothing (or «شغال» / "Live").
