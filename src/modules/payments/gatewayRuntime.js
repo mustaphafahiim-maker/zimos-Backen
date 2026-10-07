@@ -27,9 +27,10 @@ async function contextFor(workspaceId, providerCode) {
  * Resolves { status: 'processed' | 'pending' | 'failed', providerRefundReference?, failureReason? }.
  * Throws only when the outcome is unknown (no answer, a 5xx).
  */
-async function refund(workspaceId, payment, amount) {
+async function refund(workspaceId, payment, amount, { refundId = null } = {}) {
   const ctx = await module.exports.contextFor(workspaceId, payment.providerCode);
-  return ctx.adapter.refund(ctx.credentials, { payment, amount, settings: ctx.settings });
+  // refundId: our Refund row, the gateway's duplicate-request key (item 299) — two equal refunds are two refunds.
+  return ctx.adapter.refund(ctx.credentials, { payment, amount, settings: ctx.settings, refundId });
 }
 
 module.exports = { contextFor, refund };

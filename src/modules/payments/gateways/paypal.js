@@ -218,6 +218,18 @@ async function inquire(creds, { payment }) {
   return { found: true, transaction: fromOrder(o), payload: { id: o.id, status: o.status } };
 }
 
+/** A refund's outcome by its PayPal id, for the pending-refund sweep (item 299). */
+async function inquireRefund(creds, { refundReference }) {
+  if (!refundReference) return null;
+  const r = await call(creds, 'GET', `/v2/payments/refunds/${encodeURIComponent(refundReference)}`, { what: 'the refund' }).catch((err) => {
+    if (err.notFound) return null;
+    throw err;
+  });
+  if (!r) return null;
+  const status = r.status === 'COMPLETED' ? 'processed' : ['FAILED', 'CANCELLED'].includes(r.status) ? 'failed' : 'pending';
+  return { status, transactionId: r.id || refundReference, failureReason: status === 'failed' ? 'PayPal refused the refund' : null };
+}
+
 async function inquireTransaction(creds, { transactionId, payment }) {
   if (!transactionId || (payment && transactionId === payment.providerOrderId)) return null;
   const c = await call(creds, 'GET', `/v2/payments/captures/${encodeURIComponent(transactionId)}`, { what: 'the payment' }).catch((err) => {
@@ -234,7 +246,7 @@ async function inquireTransaction(creds, { transactionId, payment }) {
   };
 }
 
-async function refund(creds, { payment, amount }) {
+async function refund(creds, { payment, amount, refundId = null }) {
   let captureId = payment.providerTransactionId && payment.providerTransactionId !== payment.providerOrderId ? payment.providerTransactionId : null;
   if (!captureId && payment.providerOrderId) {
     const o = await call(creds, 'GET', `/v2/checkout/orders/${encodeURIComponent(payment.providerOrderId)}`, { what: 'the payment' });
@@ -243,7 +255,8 @@ async function refund(creds, { payment, amount }) {
   }
   if (!captureId) throw new GatewayRejectedError('This payment has no PayPal capture to refund.');
   const r = await call(creds, 'POST', `/v2/payments/captures/${encodeURIComponent(captureId)}/refund`, {
-    requestId: `zimos-refund-${payment.id}-${amount}-${Math.floor(Date.now() / 60000)}`,
+    // Keyed by our refund row (item 299), so a second refund of the same amount is its own.
+    requestId: refundId ? `zimos-refund-${refundId}` : `zimos-refund-${payment.id}-${amount}-${Math.floor(Date.now() / 60000)}`,
     what: 'the refund',
     body: { amount: { value: decimal(amount), currency_code: payment.currency } },
   });
@@ -274,6 +287,7 @@ module.exports = {
   createPayment,
   inquire,
   inquireTransaction,
+  inquireRefund,
   refund,
   parseWebhook,
   parseRedirect,

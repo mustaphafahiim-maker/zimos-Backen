@@ -129,11 +129,12 @@ async function settlePendingRefunds({ olderThanMs = 5 * 60 * 1000, limit = 50, w
     summary.checked += 1;
     try {
       const ctx = await gatewayRuntime.contextFor(refund.workspaceId, refund.payment.providerCode);
-      if (!ctx.adapter.inquireTransaction) continue;
-      const tx = await ctx.adapter.inquireTransaction(ctx.credentials, {
-        transactionId: refund.providerRefundReference,
-        payment: refund.payment,
-      });
+      // A gateway that can look a refund up by its own id does so (Stripe, PayPal; item 299); the others
+      // answer about it through their transaction inquiry.
+      let tx;
+      if (ctx.adapter.inquireRefund) tx = await ctx.adapter.inquireRefund(ctx.credentials, { refundReference: refund.providerRefundReference, payment: refund.payment });
+      else if (ctx.adapter.inquireTransaction) tx = await ctx.adapter.inquireTransaction(ctx.credentials, { transactionId: refund.providerRefundReference, payment: refund.payment });
+      else continue;
       if (!tx || tx.status === 'pending') continue;
       const settled = await paymentService.settleRefund(refund.workspaceId, refund.id, {
         status: tx.status === 'processed' ? 'processed' : 'failed',

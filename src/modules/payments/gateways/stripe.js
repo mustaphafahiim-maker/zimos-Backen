@@ -160,6 +160,14 @@ async function inquire(creds, { payment }) {
   return { found: true, transaction: fromSession(session), payload: { id: session.id, status: session.status, payment_status: session.payment_status } };
 }
 
+/** A refund's outcome by its Stripe id (re_…), for the pending-refund sweep (item 299). */
+async function inquireRefund(creds, { refundReference }) {
+  if (!/^(re|pyr)_/.test(String(refundReference || ''))) return null;
+  const r = await call(creds, 'GET', `/v1/refunds/${encodeURIComponent(refundReference)}`, { what: 'the refund' });
+  const status = r.status === 'succeeded' ? 'processed' : r.status === 'failed' || r.status === 'canceled' ? 'failed' : 'pending';
+  return { status, transactionId: r.id || refundReference, failureReason: status === 'failed' ? r.failure_reason || 'Refund failed' : null };
+}
+
 async function inquireTransaction(creds, { transactionId, payment }) {
   if (!/^pi_/.test(String(transactionId || ''))) return null;
   const intent = await call(creds, 'GET', `/v1/payment_intents/${encodeURIComponent(transactionId)}?expand[]=latest_charge`, { what: 'the payment' });
@@ -172,15 +180,16 @@ async function inquireTransaction(creds, { transactionId, payment }) {
   };
 }
 
-async function refund(creds, { payment, amount }) {
+async function refund(creds, { payment, amount, refundId = null }) {
   let intentId = payment.providerTransactionId && /^pi_/.test(payment.providerTransactionId) ? payment.providerTransactionId : null;
   if (!intentId && payment.providerOrderId) {
     const session = await call(creds, 'GET', `/v1/checkout/sessions/${encodeURIComponent(payment.providerOrderId)}`, { what: 'the payment' });
     intentId = session.payment_intent || null;
   }
   if (!intentId) throw new GatewayRejectedError('This payment has no Stripe charge to refund.');
-  // The same refund asked twice within a minute (a double click) is made once.
-  const key = `zimos-refund-${payment.id}-${amount}-${Math.floor(Date.now() / 60000)}`;
+  // Keyed by our refund row (item 299): a repeat of the same request is made once, while a second refund
+  // of the same amount is its own. (Without a row id, the old per-minute key.)
+  const key = refundId ? `zimos-refund-${refundId}` : `zimos-refund-${payment.id}-${amount}-${Math.floor(Date.now() / 60000)}`;
   const r = await call(creds, 'POST', '/v1/refunds', { form: { payment_intent: intentId, amount: String(amount) }, idempotencyKey: key, what: 'the refund' });
   const status = r.status === 'succeeded' ? 'processed' : r.status === 'failed' || r.status === 'canceled' ? 'failed' : 'pending';
   return { status, providerRefundReference: r.id || null, failureReason: status === 'failed' ? r.failure_reason || 'Refund failed' : null };
@@ -236,6 +245,7 @@ module.exports = {
   createPayment,
   inquire,
   inquireTransaction,
+  inquireRefund,
   refund,
   parseWebhook,
   parseRedirect,
