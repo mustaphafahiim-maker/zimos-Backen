@@ -3,7 +3,7 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
-const { trackingLimiter, suggestLimiter, uploadLimiter, manualProofLimiter, checkoutOtpLimiter, depositQuoteLimiter } = require('../../core/middleware/rateLimiters');
+const { trackingLimiter, suggestLimiter, uploadLimiter, manualProofLimiter, checkoutOtpLimiter, depositQuoteLimiter, checkoutRefusalLimiter } = require('../../core/middleware/rateLimiters');
 const customerUploadController = require('../customerUploads/customerUploadController');
 const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
@@ -140,6 +140,8 @@ router.post(
 // A draft store, reachable here only through a staff preview, sells nothing.
 router.post(
   '/checkout',
+  // 20 refused checkouts a minute per IP (placed orders do not count), item 362 review.
+  checkoutRefusalLimiter,
   validate(checkoutSchemas.checkout),
   // Honeypot, time token, optional challenge — modules/risk/botProtection.
   botProtection.guardCheckout,

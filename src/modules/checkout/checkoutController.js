@@ -71,7 +71,19 @@ const checkout = asyncHandler(async (req, res) => {
   // Or one of the store's InstaPay / wallet methods (manualPayments, item 340): placed unpaid, the screenshot
   // sent afterwards with the payment token this answer carries.
   const storeManual = await require('../manualPayments/manualPaymentService').prepareCheckout(workspace, { paymentMethod: orderBody.paymentMethod, manualPaymentMethodId, funnelId: orderBody.funnelId });
-  const manualTransfer = storeManual ? null : await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
+  // A COD order's deposit reads the phone's COD record, so its refusal (DEPOSIT_REQUIRED, or the deposit's
+  // transfer details) is given only to a checkout that is otherwise whole: at the end of createOrder, which
+  // then rolls the order back (item 362 review). A phone probe with no lines, no stock or no slot learns nothing.
+  let manualTransfer = null;
+  let depositRefusal = null;
+  if (!storeManual) {
+    try {
+      manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
+    } catch (err) {
+      if (orderBody.paymentMethod !== 'cod') throw err;
+      depositRefusal = err;
+    }
+  }
   const isOnline = !['cod', 'bank_transfer', 'on_account'].includes(orderBody.paymentMethod);
   // Pay later on account (accountCredit/, item 229): the signed-in shopper is who the store approved.
   if (orderBody.paymentMethod === 'on_account') await require('../accountCredit').markCheckout(workspaceId, req.headers['x-shopper-token'], orderBody);
@@ -227,6 +239,7 @@ const checkout = asyncHandler(async (req, res) => {
       // is past them, so an accepted offer can still join it.
       confirmationAvailableAt: await offerWindowEnd(workspace, orderBody.funnelId),
       manualPayment: storeManual ? { method: storeManual.method, tokenHash: storeManual.token.hash } : null,
+      beforeCommit: depositRefusal ? () => Promise.reject(depositRefusal) : null,
     });
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets

@@ -427,13 +427,14 @@ const usernameCheckLimiter = createUsernameCheckLimiter({
  * — per address, per account, per IP per hour and day — are counted in the
  * database by otp/verificationCodeService so they hold across instances.
  */
-function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}) {
+function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false, failedOnly = false } = {}) {
   return rateLimit({
     windowMs: 60 * 1000,
     limit: max,
     standardHeaders: true,
     legacyHeaders: false,
     skip: skipAll,
+    skipSuccessfulRequests: failedOnly,
     keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
     handler,
   });
@@ -462,6 +463,9 @@ const storeGateSignupLimiter = createIpMinuteLimiter('store-gate-signup', 10, { 
 const STORE_SIGNUPS_PER_MINUTE = 6;
 const newsletterSignupLimiter = createIpMinuteLimiter('store-signup', STORE_SIGNUPS_PER_MINUTE, { skip });
 const spinWheelLimiter = createIpMinuteLimiter('spin-wheel', STORE_SIGNUPS_PER_MINUTE, { skip });
+// The storefront checkout's refusals (4xx/5xx, no order made), per IP a minute (item 362 review); placed orders do not count.
+const CHECKOUT_REFUSALS_PER_MINUTE = 20;
+const checkoutRefusalLimiter = createIpMinuteLimiter('checkout-refused', CHECKOUT_REFUSALS_PER_MINUTE, { skip, failedOnly: true });
 
 /*
  * Password reset requests, per IP per hour, keyed on the IP alone (unlike
@@ -614,6 +618,8 @@ module.exports = {
   checkoutOtpLimiter,
   DEPOSIT_QUOTES_PER_MINUTE,
   depositQuoteLimiter,
+  CHECKOUT_REFUSALS_PER_MINUTE,
+  checkoutRefusalLimiter,
   domainAddLimiter,
   domainVerifyLimiter,
   domainDnsCheckLimiter,

@@ -269,6 +269,9 @@ async function createOrder(
     // { method, tokenHash }: a storefront order paid with one of the store's InstaPay / wallet
     // methods (manualPayments, item 340) — unpaid, confirmed only once its proof is approved.
     manualPayment = null,
+    // Last check inside the transaction, once nothing else refused the order; a throw rolls it back
+    // (the storefront COD deposit, checkout/checkoutController.js, item 362 review).
+    beforeCommit = null,
   } = {}
 ) {
   // A picked place names the address it prices (places/placePricing.alignAddress, item 314).
@@ -710,6 +713,7 @@ async function createOrder(
     // They hang off the order.created event in the outbox (see each module's jobs.js).
     await outbox.record(transaction, 'order.created', { workspaceId, orderId: order.id, awaitingPayment: Boolean(awaitingPayment), isTest: Boolean(isTest) });
 
+    if (beforeCommit) await beforeCommit(order, transaction);
     return { order, items: orderItems };
   };
 

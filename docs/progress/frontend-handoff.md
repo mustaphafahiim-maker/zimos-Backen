@@ -4261,7 +4261,8 @@ The storefront asks POST `/deposit-quote` whether a cash-on-delivery order needs
   - Rule "risky shoppers only", valid token: the real answer, `required: true` with the methods, or `required: false` without `decidedAtCheckout`.
   - No rule or no transfer method: `{ "deposit": { "required": false, "amountType": null, "fixedAmount": null, "methods": [] } }` (unchanged).
   - 429 `RATE_LIMITED`: over 10 quotes a minute from one IP.
-- POST `/checkout` is unchanged: a COD order by a risky phone with no `transfer` still answers 422 `DEPOSIT_REQUIRED` `{ "error": { "code": "DEPOSIT_REQUIRED", "details": { "amountType": "shipping", "fixedAmount": null } } }`.
+- POST `/checkout`: a COD order by a risky phone with no `transfer` still answers 422 `DEPOSIT_REQUIRED` `{ "error": { "code": "DEPOSIT_REQUIRED", "details": { "amountType": "shipping", "fixedAmount": null } } }`, but now only once everything else about the order is fine (lines, stock, delivery slot, code step); any other problem is answered first, as for every phone. A wrong deposit transfer (e.g. 422 `PAYMENT_METHOD_UNAVAILABLE`) also comes last.
+  - 429 `RATE_LIMITED` (new): over 20 refused checkouts a minute from one IP (placed orders do not count). Show «محاولات كتير، جرّب تاني بعد دقيقة» / "Too many tries, please try again in a minute" and keep the form filled.
 
 ### Screens (storefront → checkout, cash on delivery)
 - `decidedAtCheckout: true`: show no deposit box yet and no warning. Don't call the quote on every phone keystroke; call it once when the shopper picks cash on delivery, and again after the code step if the checkout gave an `otpToken` (send it).
