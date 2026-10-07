@@ -1,5 +1,6 @@
 'use strict';
 
+const { Op } = require('sequelize');
 const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
@@ -21,7 +22,11 @@ async function orderIsDelivered(orderId, transaction) {
   const order = await db.Order.findByPk(orderId, { transaction });
   if (!order) return { order: null, delivered: false };
   if (order.fulfillmentState === 'fulfilled') return { order, delivered: true };
-  const deliveredShipment = await db.Shipment.count({ where: { orderId, status: 'delivered' }, transaction });
+  // A parcel delivered and then sent back still counts (its stock comes back here, not through orders/returnedStock.js).
+  const deliveredShipment = await db.Shipment.count({
+    where: { orderId, [Op.or]: [{ status: 'delivered' }, { deliveredAt: { [Op.ne]: null } }] },
+    transaction,
+  });
   return { order, delivered: deliveredShipment > 0 };
 }
 

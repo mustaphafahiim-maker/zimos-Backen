@@ -38,6 +38,8 @@ const ORDER_REFERENCE_TYPES = [
   'order_cancelled',
   'order_payment_expired',
   'order_customer_blocked',
+  'order_returned', // a returned parcel back on the shelf (orders/returnedStock.js)
+  'order_reshipped', // that order booked again (orders/returnedStock.retakeForReship)
 ];
 /** The reservations an order is placed with (its lines, then any joined upsell). */
 // An edit moves what the order is placed with, up or down.

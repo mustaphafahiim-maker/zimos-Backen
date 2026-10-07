@@ -378,6 +378,8 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       if (!order) throw new NotFoundError('Order');
       assertReadyToShip(order);
       await assertNoActiveShipment(order.id, transaction);
+      // A returned parcel that was restocked: its units are taken again before the courier is called (item 354).
+      await require('../orders/returnedStock').retakeForReship(workspaceId, order.id, req && req.user ? req.user.id : null, transaction);
 
       const address = typed || (await resolveDropOff(adapter, index, workspaceId, order.shippingAddressSnapshot, data.carrierAddress, { transaction }));
 

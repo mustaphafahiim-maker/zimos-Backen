@@ -261,6 +261,8 @@ router.get(
 router.use(require('./orderSessionDetails').router);
 // The shipping card's "Save as draft" (shipmentDraft.js).
 router.use(require('./shipmentDraft').router);
+// A returned (undelivered) parcel back on the shelf: its reserved stock given back (returnedStock.js, item 354).
+router.use(require('./returnedStock').router);
 // The Supplier card: forward to a dropshipping supplier and follow it there (dropship/dropshipOrders.js).
 router.use(require('../dropship/dropshipOrders').router);
 

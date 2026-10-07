@@ -4155,3 +4155,25 @@ A discount code of type `free_shipping` now makes the whole order ship free (shi
 - Dashboard → Discounts → new / edit discount: for the type «اشترِ X واحصل على Y» / "Buy X get Y", show three fields: «عدد القطع اللي يشتريها» / "Units to buy" (`buyQuantity`), «عدد القطع اللي ياخدها» / "Units given" (`getQuantity`), and «الخصم على القطع دي» / "Discount on those units" as a percentage (100% = «مجانًا» / "Free"; sent as `getDiscountBasisPoints` = percent × 100). Hide the value field for this type and for «شحن مجاني» / "Free shipping". Hint under the fields: «القطع الأرخص في السلة هي اللي بتتخصم» / "The cheapest units in the cart are the ones discounted". Show the 422 field error under the fields.
 - Discount list: describe a buy-X-get-Y discount as «اشترِ 2 واحصل على 1 مجانًا» / "Buy 2, get 1 free" (or «… بخصم 50%» / "… at 50% off").
 - Storefront and funnel checkout, code box: for `freeShipping: true` show «الشحن مجاني بالكود ده» / "This code gives you free shipping" and show shipping as «مجاني» / "Free" in the summary. For `DISCOUNT_QUANTITY_NOT_MET` show «زوّد {remainingUnits} قطعة كمان عشان تستخدم الكود ده» / "Add {remainingUnits} more item(s) to use this code" (from `details[0]`), and the same text on that checkout refusal.
+
+## 354. Restock a returned (undelivered) parcel — UI: pending
+
+A parcel that came back undelivered (order stage `returned`, an RTO: the COD customer refused it) kept its units reserved for good. The order page gets a "Back in stock" action that gives them back once the parcel is on the shelf. Booking the order again later takes the units again on its own.
+
+### Endpoints
+- **GET `/api/v1/workspaces/:workspaceId/orders/:orderId/restock-return`** — permission `orders.view`. What a restock would give back, or why not:
+  `{ "canRestock": true, "reason": null, "units": [{ "variantId": "…", "quantity": 2, "sku": "TS-M", "productName": "T-shirt", "optionValues": { "Size": "M" } }], "restockedAt": null }`
+  `reason` is one of `not_returned`, `was_delivered`, `shipment_active`, `nothing_held` when `canRestock` is false (then `units` is `[]`). `restockedAt` is when the order was last restocked, null if never or if it has been booked again since.
+- **POST `/api/v1/workspaces/:workspaceId/orders/:orderId/restock-return`** — permission `orders.manage`, no body. 200:
+  `{ "orderId": "…", "units": [{ "variantId": "…", "quantity": 2, "sku": "TS-M", "productName": "T-shirt", "optionValues": { "Size": "M" } }], "restockedAt": "2026-10-07T11:45:34.305Z" }`
+  - 409 `ORDER_NOT_RETURNED` — the order's parcel is not back.
+  - 409 `ORDER_WAS_DELIVERED` — the parcel was delivered before it came back; it goes through a return (POST `/orders/:orderId/returns`, then restock the return), which now accepts such an order.
+  - 409 `SHIPMENT_ALREADY_EXISTS` — the order has been booked again.
+  - 409 `ORDER_ALREADY_RESTOCKED` — nothing is held any more (restocked already).
+- **POST `/orders/:orderId/shipments`** (unchanged body), and the courier booking: for an order restocked this way, the units are reserved again before anything is booked. When they have been sold since: 409 `INSUFFICIENT_STOCK` "Insufficient stock for variant …: requested 3, available 0", and nothing is booked.
+
+### Screens (dashboard → Orders → order page)
+- When the stage is `returned`, call the GET and, if `canRestock`, show a card «الشحنة رجعت؟ رجّع المنتجات للمخزون» / "Parcel back? Put the items back in stock", listing the units (product, options, SKU, quantity) and a button «رجّع للمخزون» / "Back in stock". Confirm: «هترجع الكميات دي للمخزون المتاح للبيع. متأكد إن الشحنة وصلتك؟» / "These units go back to the stock available to sell. Is the parcel with you?".
+- Success toast: «رجعت المنتجات للمخزون» / "Items are back in stock"; then show «اترجعت للمخزون في {date}» / "Restocked on {date}" from `restockedAt`.
+- `reason: was_delivered`: «الشحنة اتسلمت قبل ما ترجع، افتح مرتجع ورجّعه للمخزون من هناك» / "This parcel was delivered before it came back. Open a return and restock it from there", with a link to the returns section.
+- Booking a restocked order again with `INSUFFICIENT_STOCK`: «المنتجات دي اتباعت بعد ما رجعت للمخزون. زوّد المخزون الأول وبعدين احجز الشحنة» / "These items were sold after they went back in stock. Add stock first, then book the shipment".
