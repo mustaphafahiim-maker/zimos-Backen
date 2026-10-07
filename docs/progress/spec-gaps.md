@@ -1826,3 +1826,15 @@ The owner, 2026-10-07: "شوف لايت فانل شغال ازاي واعمل ز
   - It is a sign-up, said so on its face: phone + a required consent tick; the person becomes a contact tagged spin_wheel (lead.created, plan lead limit, opt-out cleared) like the newsletter. One spin per phone (advisory lock + the tag); no migration — config in settings.spin_wheel, spins counted from the audit log.
 - [x] 259. Order export: an «Offer» column per line (the offer, bundle, cart offer or free gift it came from), for one-row-per-product exports. (backend done, UI in frontend-handoff.md)
   - Reads order_items.offer_name_snapshot, which funnel offers already filled and item 256 now fills for cart offers and gifts. One column added to the item columns; no other change.
+
+## Seventeenth pass (2026-10-07) — SPEC §4–§20 audit against the code
+
+An audit of every SPEC section against the code (more than 250 named capabilities checked) found these left. Not queued: a full partner OAuth app system (§16.3, P2) — it needs new tables (partner apps, grants), and migration 499 is the last of this range; it waits for the owner's new range.
+
+- [x] 260. Excel (xlsx) for lost orders and courier tracking: `format=xlsx` on the lost-orders export (§6.3) and an xlsx upload on `POST /orders/import-tracking` (§12.3, manual carriers). (backend done, UI in frontend-handoff.md)
+  - The lost-orders export builds one table for both formats; xlsx comes back base64 in the JSON like the CSV text (the dashboard builds the file), through the existing xlsx writer.
+  - Tracking import reads xlsx with the existing sheet reader (cells as text, blank rows dropped); everything after the parse is the CSV path unchanged. No migration.
+- [ ] 261. Ad accounts (§15.4): connect / list / remove an ad platform account (the merchant picks the accounts), so the daily spend sync has something to pull; pause, resume and change the budget of a campaign from ZIMOS (P2) — adapter methods with the sandbox adapter.
+- [ ] 262. Merchant sign-in with a WhatsApp code (§20.1): request a code to the verified phone, verify, get a session — with the same new-device and lockout rules as the password sign-in.
+- [ ] 263. Dropship suppliers (§16.5): "use the supplier's shipping rates" and "refuse an order below the supplier's minimum" — optional adapter methods, a provider setting, and the hooks in the shipping quote and checkout.
+- [ ] 264. Product feeds per channel (§7.8, §7.10): each channel (Google, Meta, TikTok, Snapchat) with its own on/off, collections and stock rule; optionally keep the Google feed off until the Merchant checklist passes.

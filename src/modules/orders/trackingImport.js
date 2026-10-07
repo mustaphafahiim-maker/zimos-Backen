@@ -125,8 +125,21 @@ async function applyRow(workspaceId, row, req) {
   return { orderId: order.id, changes };
 }
 
-async function importTracking(workspaceId, { csv }, req) {
-  const rows = parseCsv(csv);
+async function importTracking(workspaceId, { csv, xlsx }, req) {
+  let rows;
+  if (xlsx) {
+    // An Excel file from the courier's portal (item 260): cells read as text.
+    const { parseXlsx, SheetError } = require('../catalog/importExport/sheetReader');
+    try {
+      rows = parseXlsx(Buffer.from(xlsx, 'base64')).map((r) => r.map((v) => String(v ?? '')));
+    } catch (err) {
+      if (err instanceof SheetError || /zip|central|signature/i.test(err.message)) throw new AppError('BAD_FILE', 'This is not an Excel (.xlsx) file', 422);
+      throw err;
+    }
+    rows = rows.filter((r) => r.some((v) => v.trim() !== ''));
+  } else {
+    rows = parseCsv(csv);
+  }
   if (rows.length < 2) throw new AppError('EMPTY_FILE', 'The file has no rows under its header', 422);
   const headers = rows[0].map(normalizeHeader);
   const col = (name) => headers.indexOf(name);

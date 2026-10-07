@@ -3154,3 +3154,8 @@ Same endpoints as before (`/workspaces/:ws/tracking-pixels`). `reddit`, `x` and 
 ## 259. «Offer» column in the order export — UI: pending
 
 `GET /workspaces/:ws/orders/export/columns` now lists `offerName` («العرض» / "Offer"), an item column (with `rowPer=item`): the offer, bundle, cart offer or free gift the line came from, empty otherwise. Add it to the column picker beside Product / Variant / SKU.
+
+## 260. Excel for lost orders and courier tracking — UI: pending
+
+- `POST /api/v1/workspaces/:ws/checkout-sessions/export` (`orders.view`) takes `format: "csv" | "xlsx"` beside the filters. `xlsx` → `{ base64, contentType, count, filename: "lost-orders-YYYY-MM-DD.xlsx" }` (same columns as the CSV; phones masked the same way). Lost orders → Export: «Excel» / «CSV» choice; decode `base64` and download.
+- `POST /api/v1/workspaces/:ws/orders/import-tracking` takes `{ csv }` **or** `{ xlsx: "<base64 of the .xlsx>" }` (exactly one; ≤ ~1.5 MB). Same columns (`order_number`, `tracking_number`, `tracking_url`, `carrier`, `status`; header names any case/spaces) and the same per-row result. 422 `BAD_FILE` «الملف ده مش إكسيل (.xlsx)» / "This is not an Excel (.xlsx) file". Orders → Import tracking: accept `.csv` and `.xlsx`.
