@@ -3865,3 +3865,58 @@ Who sees which type (besides `overview.view`, which every call needs):
   - `referral_signup`: «{workspaceName} دخل بكود إحالة» / "{workspaceName} joined with a referral code".
 - **Console → Settings → Notifications**: one row per type from GET `/admin/notification-prefs` (only the ones this admin can see), the label from the table, two switches «في الكونسول» / "In the console" (`enabled`) and «بالإيميل» / "By email" (`email`). While `emailDelivery` is false, show under the email column «الإيميل لسه مش بيتبعت — اختيارك هيتحفظ» / "Email isn't sent yet — your choice is kept". Save sends the changed rows; then «تم حفظ الإعدادات» / "Settings saved".
 - Errors: «الصفحة دي محتاجة صلاحية على الكونسول» / "This page needs a console permission" (403); «حصل خطأ، جرّب تاني» / "Something went wrong, try again" for anything else.
+
+## 339. Marketing-site traffic for the console, linked to the account at sign-up — UI: pending
+
+Three places: the marketing site (zimos.co) sends anonymous beacons, the dashboard's sign-up passes on which site visit it came from, and the console shows the traffic and, per account, where it came from. Server settings (names only in `.env.example`): `SITE_ANALYTICS_ENABLED` (on only when exactly `true`; off today) and `SITE_ANALYTICS_ORIGINS` (the site's origins, comma-separated, e.g. `https://zimos.co,https://www.zimos.co`, no trailing slash). The clients need no switch of their own: while it is off the beacon answers 404 and sign-up ignores `siteSessionId`, so both can always be sent. Nothing identifies a person: no IP and no cookie is stored, only an HMAC of the browser's random id and the day.
+
+### Endpoints
+- **POST `/public/site-events`** (public, no token, no cookies; only from an origin in `SITE_ANALYTICS_ORIGINS`). Send the body as `text/plain` (no preflight) or `application/json`, at most 2 kb:
+  ```json
+  { "visitorId": "8c1f2a9e-4b7d-4c0e-9a51-2f3d6e7b8a90", "sessionId": "b2e4c6d8-1a3f-4e5b-8c7d-9e0f1a2b3c4d", "event": "view", "path": "/pricing", "locale": "ar", "referrer": "https://www.google.com/", "utmSource": "facebook", "utmMedium": "cpc", "utmCampaign": "launch" }
+  ```
+  - `visitorId`, `sessionId`: 8–64 letters, digits or `-` (a `crypto.randomUUID()` fits). `event`: `view`, `ping` or `cta_click`. `path`: starts with `/`, ≤300 (no query string needed). `locale` `ar`/`en`, `referrer` ≤500, `utm*` ≤100 each: all optional. Any other key → 422.
+  - → **204** with no body. Known crawlers also get 204 and nothing is kept.
+  - Errors (log them, never show them): 403 `ORIGIN_NOT_ALLOWED` (origin not listed, or none); 422 `VALIDATION_ERROR` (`details[].field`); 413 `PAYLOAD_TOO_LARGE`; 400 `INVALID_JSON`; 429 `RATE_LIMITED` (120 a minute per IP); 404 `ROUTE_NOT_FOUND` while the server has it off.
+- **POST `/auth/register`** adds an optional `"siteSessionId": "b2e4c6d8-1a3f-4e5b-8c7d-9e0f1a2b3c4d"` (same 8–64 rule; anything else → 422 on `siteSessionId`). The answer is unchanged; the link is made on the server and never fails the sign-up, and an unknown session just links nothing.
+- **GET `/admin/site-traffic/summary?range=today|7d|30d`** (console, `overview.view`; default `today`; anything else → 422). Days are UTC days, `today` included. → 200
+  ```json
+  {
+    "enabled": true,
+    "range": "7d",
+    "since": "2026-10-01T00:00:00.000Z",
+    "visits": 3,
+    "uniqueVisitors": 2,
+    "avgSecondsOnSite": 8,
+    "topPages": [ { "path": "/pricing", "visits": 1 }, { "path": "/features", "visits": 1 } ],
+    "topSources": [ { "source": "facebook", "sessions": 1 }, { "source": "direct", "sessions": 1 } ],
+    "funnel": { "visit": 2, "ctaClick": 1, "signup": 1 },
+    "daily": [ { "day": "2026-10-01", "visits": 0, "uniqueVisitors": 0 }, { "day": "2026-10-07", "visits": 3, "uniqueVisitors": 2 } ]
+  }
+  ```
+  `visits` counts page views; `funnel` counts sessions (viewed, clicked a sign-up button, signed up). `topSources[].source` is the session's first `utmSource`, else the referrer's host, else `direct`. Top lists hold at most 10. `daily` has one row per day of the range. Answered whether collection is on or off (`enabled`). 401 without a token, 403 `FORBIDDEN` without `overview.view`.
+- **GET `/admin/users/:userId`** (console, `workspaces.view`): `user` adds `acquisition`, `null` or
+  ```json
+  { "landingPath": "/pricing", "referrerHost": "www.google.com", "utmSource": "facebook", "utmMedium": "cpc", "utmCampaign": "launch", "firstVisitAt": "2026-10-07T08:54:11.021Z", "signedUpAt": "2026-10-07T08:54:11.542Z", "secondsBeforeSignup": 1 }
+  ```
+
+### Marketing site (zimos.co)
+- `visitorId`: made once and kept in `localStorage`. `sessionId`: made per visit and kept in `sessionStorage` (a new tab or a new day starts a new one).
+- `view` on every page shown (route changes too), with `path` and `locale`; `referrer` (`document.referrer`) and the `utm_source` / `utm_medium` / `utm_campaign` of the address only on the session's first view.
+- `ping` every 15 s while the tab is visible (`document.visibilityState === "visible"`), with the current `path`. The server counts 15 s per ping whatever the client says.
+- `cta_click` when a sign-up / "start free" button is clicked, with the current `path`.
+- Send with `navigator.sendBeacon(url, new Blob([JSON.stringify(body)], { type: "text/plain" }))` (or `fetch` with `keepalive: true`, `credentials: "omit"`, `Content-Type: text/plain`). Fire and forget; never block the page on it.
+- Every link to the dashboard's sign-up adds `?sv={sessionId}`.
+
+### Dashboard sign-up
+- Read `sv` from the address on the sign-up page (keep it in `sessionStorage` if the visitor moves between sign-up steps) and send it as `siteSessionId` on POST `/auth/register` when it matches `^[A-Za-z0-9-]{8,64}$`; otherwise leave it out. Nothing is shown to the visitor. Google sign-up does not carry it.
+
+### Screens (console)
+- **Console → Site traffic** «زيارات الموقع» / "Site traffic" (only with `overview.view`). Tabs «النهارده» / "Today", «آخر 7 أيام» / "Last 7 days", «آخر 30 يوم» / "Last 30 days" (`range`).
+  - Tiles: «الزيارات» / "Visits" (`visits`), «زوار مختلفين» / "Unique visitors" (`uniqueVisitors`, with the note «الزائر بيتحسب مرة في اليوم» / "A visitor is counted once per day"), «متوسط الوقت على الموقع» / "Average time on site" (`avgSecondsOnSite` as m:ss).
+  - Funnel: «زيارة» / "Visit" → «ضغط على زرار التسجيل» / "Clicked sign-up" → «عمل حساب» / "Signed up", with each step's share of the first.
+  - «أكتر الصفحات زيارة» / "Top pages" (path, visits) and «مصادر الزيارات» / "Top sources" (source, sessions; `direct` shown as «مباشر» / "Direct").
+  - A daily chart of visits and unique visitors from `daily`.
+  - `enabled: false`: a banner «تتبع زيارات الموقع مقفول على السيرفر — الأرقام دي من قبل ما يتقفل» / "Site traffic collection is off on the server — these numbers are from before it was turned off". Everything zero: «لسه مفيش زيارات في الفترة دي» / "No visits in this period yet".
+- **Console → Users → a user**: a card «جه منين» / "Where they came from": «أول صفحة» / "Landing page" (`landingPath`), «المصدر» / "Source" (`utmSource`, else `referrerHost`, else «مباشر» / "Direct"), «الوسيط» / "Medium" (`utmMedium`), «الحملة» / "Campaign" (`utmCampaign`), «أول زيارة» / "First visit" (`firstVisitAt`), «اتسجل بعد {duration} من أول زيارة» / "Signed up {duration} after the first visit" (`secondsBeforeSignup`). Empty fields are hidden. `acquisition: null`: «مفيش بيانات — اتسجل من غير ما يعدي على الموقع، أو قبل ما التتبع يشتغل» / "No data — signed up without going through the site, or before tracking was on".
+- Errors: «الصفحة دي محتاجة صلاحية على الكونسول» / "This page needs a console permission" (403); «حصل خطأ، جرّب تاني» / "Something went wrong, try again" for anything else.

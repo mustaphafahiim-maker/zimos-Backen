@@ -4,6 +4,7 @@ const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const { NotFoundError } = require('../../core/errors/AppError');
 const access = require('../workspaces/workspaceAccessService');
+const siteTraffic = require('../siteAnalytics/siteTrafficService');
 
 /**
  * The platform console's user search (GET /admin/users?q=). One box finds an
@@ -208,6 +209,8 @@ async function getUser(userId) {
     suspendedReason: user.suspendedReason,
     deletedAt: user.deletedAt,
     twoFactor: { mode: twoFactor ? twoFactor.mode : 'off', enabledAt: twoFactor ? twoFactor.enabledAt : null },
+    // Where the account came from on the marketing site, or null (item 339).
+    acquisition: await siteTraffic.acquisitionFor(user.id),
   };
 }
 

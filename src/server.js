@@ -51,8 +51,12 @@ async function start() {
   logger.info(
     `Public switches: shopper review form ${env.reviews.publicSubmissionEnabled ? 'open' : 'closed'}, password reset by SMS ${
       env.passwordReset.smsEnabled ? 'on' : 'off'
-    }, phone change by SMS ${env.account.phoneChangeEnabled ? 'on' : 'off'}`
+    }, phone change by SMS ${env.account.phoneChangeEnabled ? 'on' : 'off'}, marketing-site traffic ${env.siteAnalytics.enabled ? 'on' : 'off'}`
   );
+  // Item 339: on with no origin listed refuses every beacon (403).
+  if (env.siteAnalytics.enabled && env.siteAnalytics.origins.length === 0) {
+    logger.warn('SITE_ANALYTICS_ENABLED is on but SITE_ANALYTICS_ORIGINS is empty: every site event is refused (403 ORIGIN_NOT_ALLOWED)');
+  }
   if (env.isProduction && !env.frontendUrlConfigured) {
     logger.error('FRONTEND_URL is not set: password reset requests are refused (503 PASSWORD_RESET_UNAVAILABLE) until it is');
   }

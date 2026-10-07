@@ -25,6 +25,8 @@ router.use(require('./supportViewRoutes'));
 router.use(require('./carrierMapRoutes'));
 // The console's notifications and each admin's notification settings.
 router.use(require('./platformNotificationRoutes'));
+// Marketing-site traffic (siteAnalytics/siteTrafficAdminRoutes, item 339).
+router.use(require('../siteAnalytics/siteTrafficAdminRoutes'));
 // The merchants' referral program: its share and the payout requests.
 router.use(require('../referrals/merchantReferrals').admin);
 // The help center, Telegram and tutorial links the dashboard shows (educationLinks.js).

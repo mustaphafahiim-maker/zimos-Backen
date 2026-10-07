@@ -56,6 +56,9 @@ module.exports = {
       acceptTerms: Joi.boolean().optional(),
       // The language the sign-up code email and SMS are written in.
       locale: Joi.string().valid('ar', 'en').optional(),
+      // The marketing-site session the visitor came from (?sv= on the sign-up
+      // link), linked to the account while site analytics is on (item 339).
+      siteSessionId: Joi.string().pattern(/^[A-Za-z0-9-]{8,64}$/).optional(),
     }),
   },
   // POST /auth/me/plan — an account made through Google choosing its plan.

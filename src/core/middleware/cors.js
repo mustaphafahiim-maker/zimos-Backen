@@ -4,7 +4,7 @@ const cors = require('cors');
 const env = require('../../config/env');
 
 /**
- * Two CORS policies, picked per request by path.
+ * Three CORS policies, picked per request by path.
  *
  * The public storefront API (/api/v1/store and below) is called from the
  * browser on every merchant's own subdomain or custom domain, so no static
@@ -13,6 +13,9 @@ const env = require('../../config/env');
  * *without* credentials. Only the headers the storefront actually sends are
  * allowed: X-Storefront-Secret / X-Storefront-Client-IP are server-to-server
  * only (see rateLimiters.js), and a browser preflight asking for them fails.
+ *
+ * The marketing site's beacon (/api/v1/public/site-events) is open only to
+ * SITE_ANALYTICS_ORIGINS, without credentials, and only while it is on.
  *
  * Everything else (dashboard, admin, auth) keeps the CORS_ORIGINS allowlist
  * with credentials.
@@ -52,8 +55,28 @@ const allowlistCors = cors({
   credentials: true,
 });
 
-function corsPolicy(req, res, next) {
-  return isStorefrontApiPath(req.path) ? storefrontCors(req, res, next) : allowlistCors(req, res, next);
+// The marketing site's anonymous beacon (siteAnalytics/siteEventsRoutes, item
+// 339): only SITE_ANALYTICS_ORIGINS, no credentials, read per request so the
+// flag and the list can change at runtime. Off, no origin gets the headers.
+const SITE_EVENTS_PATH = `/api/${env.apiVersion}/public/site-events`;
+
+function isSiteEventsPath(p) {
+  const lower = String(p || '').toLowerCase().replace(/\/+$/, '');
+  return lower === SITE_EVENTS_PATH;
 }
 
-module.exports = { corsPolicy, isStorefrontApiPath };
+const siteEventsCors = cors({
+  origin: (origin, callback) =>
+    callback(null, Boolean(env.siteAnalytics.enabled && origin && env.siteAnalytics.origins.includes(String(origin).toLowerCase()))),
+  methods: ['POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  maxAge: 7200,
+});
+
+function corsPolicy(req, res, next) {
+  if (isStorefrontApiPath(req.path)) return storefrontCors(req, res, next);
+  if (isSiteEventsPath(req.path)) return siteEventsCors(req, res, next);
+  return allowlistCors(req, res, next);
+}
+
+module.exports = { corsPolicy, isStorefrontApiPath, isSiteEventsPath };

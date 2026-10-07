@@ -643,6 +643,17 @@ const env = {
   analytics: {
     geoHeaders: csvList(process.env.ANALYTICS_GEO_HEADERS, ''),
   },
+
+  // Anonymous visits to the marketing site (siteAnalytics/, item 339, Ziad's
+  // 3864272), shown in the console. Off unless exactly "true": POST
+  // /public/site-events then answers 404 like an unknown path and sign-up
+  // ignores siteSessionId. Under NODE_ENV=test it starts off; a test flips it
+  // on this object. Origins is the CORS allowlist for that endpoint only
+  // (e.g. https://zimos.co, no trailing slash); any other origin is refused.
+  siteAnalytics: {
+    enabled: publicSwitch('SITE_ANALYTICS_ENABLED', false),
+    origins: csvList(process.env.SITE_ANALYTICS_ORIGINS, ''),
+  },
 };
 
 module.exports = env;
