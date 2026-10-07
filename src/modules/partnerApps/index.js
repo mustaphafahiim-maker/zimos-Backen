@@ -66,7 +66,7 @@ const httpsUrl = Joi.string().trim().max(500).uri({ scheme: ['https'] });
 
 function devView(app, { secret } = {}) {
   return {
-    id: app.id, name: app.name, description: app.description, iconUrl: app.iconUrl, appUrl: app.appUrl,
+    id: app.id, name: app.name, description: app.description, iconUrl: app.iconUrl, appUrl: app.appUrl, uninstallUrl: app.uninstallUrl,
     redirectUris: app.redirectUris, scopes: app.scopes, clientId: app.clientId, status: app.status,
     createdAt: app.createdAt, updatedAt: app.updatedAt,
     ...(secret ? { clientSecret: secret } : {}),
@@ -86,7 +86,7 @@ async function removeInstall(record, actorUserId, reason) {
   await db.sequelize.transaction(async (transaction) => {
     await record.update({ status: 'uninstalled', uninstalledAt: new Date() }, { transaction });
     await recordAudit({ workspaceId: record.workspaceId, actorUserId: actorUserId || null, action: 'app.partner_uninstall', entityType: 'WorkspaceApp', entityId: record.id, before: { name: (record.external || {}).name }, after: { reason }, transaction });
-    await outbox.record(transaction, 'app.uninstalled', { workspaceId: record.workspaceId, installId: record.id, name: (record.external || {}).name }, { aggregateType: 'app', aggregateId: record.id });
+    await outbox.record(transaction, 'app.uninstalled', { workspaceId: record.workspaceId, installId: record.id, name: (record.external || {}).name, reason }, { aggregateType: 'app', aggregateId: record.id });
   });
 }
 
@@ -97,9 +97,17 @@ const appBody = {
   description: Joi.string().trim().max(500).allow('', null),
   iconUrl: httpsUrl.allow('', null),
   appUrl: httpsUrl.allow('', null),
+  // POSTed { event: "app.uninstalled", … } when a store uninstalls the app (jobs.js, item 267).
+  uninstallUrl: httpsUrl.allow('', null),
   redirectUris: Joi.array().items(Joi.string().trim().max(500)).min(1).max(10).unique(),
   scopes: Joi.array().items(Joi.string().valid(...SCOPE_NAMES)).min(1).unique(),
 };
+/** The server ZIMOS calls must be a public address (the webhooks' rules: no private networks). */
+function checkedUninstallUrl(url) {
+  if (!url) return null;
+  return require('../webhooks/webhookUrlGuard').checkUrl(url);
+}
+
 function assertRedirects(uris) {
   const bad = (uris || []).filter((u) => !redirectAllowed(u));
   if (bad.length) throw new ValidationError([{ field: 'redirectUris', message: `Use https addresses (http only for localhost), without #: ${bad.join(', ')}` }]);
@@ -123,7 +131,7 @@ developer.post('/', validate({ body: Joi.object({ ...appBody, name: appBody.name
   if ((await db.PartnerApp.count({ where: { ownerUserId: req.user.id } })) >= MAX_APPS_PER_DEVELOPER) throw new AppError('PARTNER_APP_LIMIT', `At most ${MAX_APPS_PER_DEVELOPER} apps per developer`, 409);
   const secret = newSecret();
   const app = await db.PartnerApp.create({
-    ownerUserId: req.user.id, name: req.body.name, description: req.body.description || null, iconUrl: req.body.iconUrl || null, appUrl: req.body.appUrl || null,
+    ownerUserId: req.user.id, name: req.body.name, description: req.body.description || null, iconUrl: req.body.iconUrl || null, appUrl: req.body.appUrl || null, uninstallUrl: checkedUninstallUrl(req.body.uninstallUrl),
     redirectUris: req.body.redirectUris, scopes: req.body.scopes, clientId: `zpa_${crypto.randomBytes(12).toString('hex')}`, clientSecretSealed: secretBox.seal(secret),
   });
   await recordAudit({ actorUserId: req.user.id, action: 'partner_app.create', entityType: 'PartnerApp', entityId: app.id, after: { name: app.name, scopes: app.scopes }, req });
@@ -134,6 +142,7 @@ developer.patch('/:id', validate({ params: idParam, body: Joi.object(appBody).mi
   if (req.body.redirectUris) assertRedirects(req.body.redirectUris);
   const patch = {};
   for (const k of Object.keys(appBody)) if (req.body[k] !== undefined) patch[k] = req.body[k] === '' ? null : req.body[k];
+  if (patch.uninstallUrl) patch.uninstallUrl = checkedUninstallUrl(patch.uninstallUrl);
   await app.update(patch);
   await recordAudit({ actorUserId: req.user.id, action: 'partner_app.update', entityType: 'PartnerApp', entityId: app.id, after: Object.keys(patch), req });
   res.json({ app: devView(app) });

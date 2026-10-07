@@ -11,6 +11,8 @@ module.exports = (sequelize, DataTypes) => {
       description: { type: DataTypes.STRING(500), allowNull: true },
       iconUrl: { type: DataTypes.STRING(500), allowNull: true, field: 'icon_url' },
       appUrl: { type: DataTypes.STRING(500), allowNull: true, field: 'app_url' },
+      // Called when a store uninstalls the app (migration 502, partnerApps/jobs.js).
+      uninstallUrl: { type: DataTypes.STRING(500), allowNull: true, field: 'uninstall_url' },
       redirectUris: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'redirect_uris' },
       scopes: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
       clientId: { type: DataTypes.STRING(40), allowNull: false, unique: true, field: 'client_id' },

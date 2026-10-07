@@ -22,4 +22,9 @@
 6. **Leaving a store**: `POST /api/v1/oauth/revoke { client_id, client_secret, store_id }`.
    When a store uninstalls you, the token stops working (401).
 
+7. **Uninstall notice** (optional `uninstallUrl`): when a store uninstalls you, we POST
+   `{ event: "app.uninstalled", store_id, install_id, reason, uninstalled_at }` with
+   `X-Zimos-Hmac-Sha256` (hex HMAC-SHA256 of the raw body with your client secret). Answer 2xx; we retry for
+   up to a day. Not sent when the merchant approves you again.
+
 Errors on `/oauth/token`: 401 `invalid_client`, 400 `invalid_grant`. No app charges (SPEC §17.4).

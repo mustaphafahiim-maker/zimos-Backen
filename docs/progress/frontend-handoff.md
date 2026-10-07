@@ -3242,3 +3242,9 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - Webhook endpoints (`GET /workspaces/:ws/webhooks`) gain `createdByApp: true` for ones an app created through the public API. When that app is uninstalled (or its key revoked) they turn off with `disabledReason: "api_key_revoked"`; switching one back on answers 409 `WEBHOOK_APP_REMOVED`.
 - Screen: Webhooks list — a chip «من تطبيق» / "From an app" on those; for `api_key_revoked` show «اتقفل لأن التطبيق اتشال» / "Off because the app was removed" and hide the «تشغيل» / "Turn on" switch.
+
+## 267. Uninstall notice to partner apps — UI: pending
+
+- Partner apps gain `uninstallUrl` (https; private addresses refused in production, like webhooks) in `POST / PATCH /api/v1/partner-apps` and in every app answer.
+- When a store uninstalls the app (Apps page, the platform suspending it, the developer deleting it, or the app's own revoke), ZIMOS POSTs `{ event: "app.uninstalled", store_id, install_id, reason, uninstalled_at }` with `X-Zimos-Hmac-Sha256` = hex HMAC-SHA256 of the raw body with the client secret; retried for up to a day until it answers 2xx. Not sent on a re-approval. `reason`: `uninstalled_by_store` | `suspended_by_platform` | `app_deleted` | `revoked_by_app`.
+- Screen: the developer's app form — «لينك إلغاء التثبيت» / "Uninstall URL" with the hint «بنبعتله لما متجر يشيل تطبيقك» / "We call it when a store removes your app" (+ link to the README).
