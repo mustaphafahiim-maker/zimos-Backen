@@ -151,9 +151,11 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
 
   let discountAmount = Number(order.discountAmount);
   let discountsSnapshot = [...bundleSnapshots, ...(order.discountsSnapshot || []).filter((d) => !d || d.kind !== 'bundle')];
+  let redeemedDiscount = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
+    redeemedDiscount = discount;
     if (discount) {
       // Only the lines a product- or collection-limited code covers (item 345).
       discountAmount = await discountService.amountForLines(discount, lines, transaction);
@@ -188,7 +190,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
-    lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+    // Taxed after the order's discount, as createOrder taxes it (item 356).
+    lines: await require('../tax/taxService').taxableLines(lines, discountAmount, redeemedDiscount, transaction),
     shippingAmount,
     transaction,
   });

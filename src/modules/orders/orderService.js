@@ -528,7 +528,8 @@ async function createOrder(
     let { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
-      lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+      // Taxed on what the shopper pays: the code's or automatic discount comes off first (item 356).
+      lines: await require('../tax/taxService').taxableLines(pricedLines, discountAmount, discountRecord, transaction),
       shippingAmount,
       transaction,
     });
@@ -802,9 +803,11 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   // and redeemed when the order was placed and is not checked again.
   let discountAmount = before.discountAmount;
   let discountsSnapshot = order.discountsSnapshot || [];
+  let redeemedDiscount = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
+    redeemedDiscount = discount;
     if (discount) {
       discountAmount = await discountService.amountForLines(discount, lines, transaction);
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
@@ -833,7 +836,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
-    lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+    // Taxed after the order's discount, as createOrder taxes it (item 356).
+    lines: await require('../tax/taxService').taxableLines(lines, discountAmount, redeemedDiscount, transaction),
     shippingAmount,
     transaction,
   });
