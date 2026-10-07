@@ -4428,3 +4428,32 @@ An order can now go out as several parcels: ship what is ready now and the rest 
 - Settlements → new settlement / unsettled list: a parcel row shows the waybill and «جزء من الطلب» / "Part of order {orderNumber}"; send its `shipmentId` on the line.
 - Error texts: `SHIPMENT_ITEMS_UNAVAILABLE` «القطع دي في شحنة تانية بالفعل» / "These units are already in another parcel"; `SHIPMENT_ALREADY_EXISTS` «كل قطع الطلب في شحنات بالفعل» / "Every unit of this order is already in a parcel"; `COD_EXCEEDS_DUE` «المبلغ أكبر من الباقي على العميل ({maxCodAmount})» / "That's more than the customer still owes ({maxCodAmount})"; `SHIPMENT_REQUIRED` «الطلب ده له أكتر من شحنة — اختار الشحنة» / "This order has more than one parcel — choose which".
 - No settings.
+
+## 376. Funnel paths that branch on what was bought, the order total and the payment method — UI: pending
+
+A path (edge) between funnel steps can now also check the order the visitor placed in this funnel: the products in it, its total and how it was paid. Example: buyers of the face cream go to the serum upsell, buyers of the shampoo to the conditioner upsell, orders under 500 EGP to a cheaper offer, card buyers to the one-click upsell and COD buyers to another step. The server checks this against the order in the database, never against what the browser sends; the storefront runtime needs no change.
+
+### Endpoints (as before: `funnels.manage` to edit paths, `funnels.publish` to publish)
+- **POST `/api/v1/workspaces/:workspaceId/funnels/:funnelId/edges`** and **PATCH `/edges/:edgeId`**: `condition` takes a new optional `when` object next to `type`:
+  `{ "fromStepKey": "checkout", "toStepKey": "serum-upsell", "priority": 30, "condition": { "type": "completed_checkout", "when": { "productIds": ["<face cream product id>"] } } }`
+  `{ "fromStepKey": "checkout", "toStepKey": "cheap-offer", "priority": 20, "condition": { "type": "completed_checkout", "when": { "maxTotal": 50000 } } }`
+  `{ "fromStepKey": "checkout", "toStepKey": "one-click", "priority": 10, "condition": { "type": "completed_checkout", "when": { "paymentMethods": ["card", "wallet"] } } }`
+  - `when` keys (at least one; every key given must hold):
+    - `productIds` / `variantIds`: up to 50 ids each; the order holds any of them (either list). Counted lines: the checkout order's lines, the upsells joined to it, and the follow-on upsell orders of this funnel.
+    - `minTotal` (order total ≥) and `maxTotal` (order total <), whole amounts in minor units of the funnel's currency (500 EGP = 50000). `maxTotal` must be above `minTotal`.
+    - `paymentMethods`: any of `cod`, `card`, `wallet`, `valu`, `kiosk`, `paypal`, `bank_transfer`, `on_account`.
+  - `when` works with every `type`: on a checkout step use `completed_checkout`, on an upsell `accepted_offer` / `declined_offer`, on a page `clicked_through`, or `always`. On steps after the checkout it still checks the checkout order (the session's order). Before any order exists a `when` never matches, so keep a plain path (no `when`, lowest priority) as the fallback.
+  - Paths are tried by `priority` (highest first); the first that matches wins, as before.
+  - Errors: 422 `VALIDATION_ERROR` with `details: [{ "field": "condition", "message": "…" }]`, e.g. "when needs at least one of productIds, variantIds, minTotal, maxTotal, paymentMethods", "unknown when key \"color\" …", "when.maxTotal must be a whole amount in minor units (0 or more)", "when.maxTotal must be above when.minTotal", "unknown payment method \"bitcoin\" …", "The product <id> in this path's condition is not in this store".
+- **POST `/funnels/:funnelId/publish`** and **GET `/funnels/:funnelId/issues`**: a path whose `when` is invalid or names a product or variant that is not in this store (deleted since) blocks publishing (`edges[i].condition` in the publish details; a fatal `graph` issue with field `edges.<edgeId>.condition` in the issues list).
+- **Imported funnels** (POST `/funnels/import`): the `productIds` / `variantIds` of a path come over empty (they belonged to the other store), so the issue "when.productIds must list at least one id" shows until the merchant picks their own products.
+
+### Screens
+- **Funnel map → path (edge) settings**: under the existing condition picker, a section «شروط على الطلب» / "Order conditions" with an «أضف شرط» / "Add condition" menu:
+  - «اشترى منتج» / "Bought a product": product (and optional variant) multi-picker → `productIds` / `variantIds`. Label on the path: «لو اشترى {names}» / "If they bought {names}".
+  - «إجمالي الطلب» / "Order total": «على الأقل» / "At least" → `minTotal`, «أقل من» / "Less than" → `maxTotal`, in the funnel currency (send minor units). Label: «لو الطلب أقل من {amount}» / "If the order is under {amount}".
+  - «طريقة الدفع» / "Payment method": checkboxes «الدفع عند الاستلام» / "Cash on delivery", «بطاقة» / "Card", «محفظة» / "Wallet", «فاليو» / "valU", «كشك» / "Kiosk", «باي بال» / "PayPal", «تحويل بنكي» / "Bank transfer", «على الحساب» / "On account". Label: «لو دفع {methods}» / "If they paid by {methods}".
+  - Hint under the section: «الشروط دي بتتشيك على طلب الزائر في الفانل. خلّي مسار من غير شروط كآخر اختيار.» / "These conditions check the visitor's order in this funnel. Keep one path without conditions as the last choice."
+  - A priority control (up / down) on the paths leaving a step, since the first matching path wins.
+- Issues panel: the condition messages above, pointing at the path.
+- No settings.

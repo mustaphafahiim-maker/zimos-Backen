@@ -112,6 +112,19 @@ function withoutProducts(tree) {
 }
 
 /**
+ * A path's condition, copied into another store: the products and variants
+ * its `when` names are the source store's, so the lists come over empty and
+ * the issues list (and publish) asks the merchant to pick their own.
+ */
+function importedCondition(condition) {
+  const copy = JSON.parse(JSON.stringify(condition));
+  if (copy.when && typeof copy.when === 'object') {
+    for (const key of ['productIds', 'variantIds']) if (Array.isArray(copy.when[key])) copy.when[key] = [];
+  }
+  return copy;
+}
+
+/**
  * Copies the funnel behind a share code into this workspace: its steps, their
  * pages and the links between them. Offers, order bumps, experiments, orders
  * and sessions stay with the source — an upsell step arrives without an offer
@@ -160,7 +173,7 @@ async function importFunnel(workspaceId, { shareCode, name }, req) {
           funnelId: funnel.id,
           fromStepKey: e.fromStepKey,
           toStepKey: e.toStepKey,
-          condition: e.condition ? JSON.parse(JSON.stringify(e.condition)) : null,
+          condition: e.condition ? importedCondition(e.condition) : null,
           priority: e.priority,
         },
         { transaction: t }
@@ -252,6 +265,9 @@ async function listIssues(workspaceId, funnelId) {
     const match = /^steps\.([^.]+)/.exec(p.field || '');
     issues.push({ severity: 'fatal', code: 'graph', stepKey: match ? match[1] : null, field: p.field || null, message: p.message });
   }
+  // A path's condition naming products that are not this store's (funnelRouting `when`).
+  const refs = await require('./funnelRouting').whenReferenceProblems(workspaceId, edges, { fieldOf: (i) => `edges.${edges[i].id}.condition` });
+  for (const p of refs) issues.push({ severity: 'fatal', code: 'graph', stepKey: null, field: p.field, message: p.message });
 
   for (const step of steps) {
     const elements = elementsOf(step.builderData);

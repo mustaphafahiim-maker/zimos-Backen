@@ -45,6 +45,8 @@ const condition = Joi.alternatives()
       type: Joi.string().valid('always', 'completed_checkout', 'accepted_offer', 'declined_offer', 'clicked_through').required(),
       // A link drawn from one button of the page (funnelRouting.js).
       sourceElementId: Joi.string().max(120).optional(),
+      // Branch on the session's order: products, total, payment method (funnelRouting.js checks the keys).
+      when: Joi.object().unknown(true).optional(),
     }).unknown(true)
   );
 

@@ -17,7 +17,7 @@ const {
   OFFER_STEP_TYPES,
   EMPTY_TREE,
 } = require('./funnelGraph');
-const { conditionProblem, pickNextEdge } = require('./funnelRouting');
+const { conditionProblem, pickNextEdge, hasWhen, orderContext, whenReferenceProblems } = require('./funnelRouting');
 const { assertBumpOfferUsable, bumpProblem, presentBump, BUMP_STEP_TYPES } = require('../checkout/orderBump');
 const funnelOfferMerge = require('./funnelOfferMerge');
 const entitlements = require('../billing/entitlementsService');
@@ -457,6 +457,7 @@ async function createEdge(workspaceId, funnelId, data, req) {
   }
   const condProblem = conditionProblem(data.condition);
   if (condProblem) problems.push({ field: 'condition', message: condProblem });
+  else problems.push(...(await whenReferenceProblems(workspaceId, [{ condition: data.condition }], { fieldOf: () => 'condition' })));
   if (problems.length) throw new ValidationError(problems, 'Invalid edge');
 
   const edge = await db.FunnelEdge.create({
@@ -506,6 +507,7 @@ async function updateEdge(workspaceId, funnelId, edgeId, data, req) {
   if (data.condition !== undefined) {
     const condProblem = conditionProblem(data.condition);
     if (condProblem) problems.push({ field: 'condition', message: condProblem });
+    else problems.push(...(await whenReferenceProblems(workspaceId, [{ condition: data.condition }], { fieldOf: () => 'condition' })));
     patch.condition = data.condition;
   }
   if (data.priority !== undefined) patch.priority = data.priority;
@@ -582,11 +584,9 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
     }
     const edges = toSnapshotEdges(edgeRows);
 
+    // Conditions are checked by validateGraph; the products a `when` names must be this store's.
     const problems = validateGraph(steps, edges, { requireContent: true });
-    edges.forEach((e, i) => {
-      const p = conditionProblem(e.condition);
-      if (p) problems.push({ field: `edges[${i}].condition`, message: p });
-    });
+    problems.push(...(await whenReferenceProblems(workspaceId, edges, { transaction: t })));
     for (const s of steps) {
       if (OFFER_STEP_TYPES.has(s.stepType) && s.offerId) {
         const offer = await db.Offer.findOne({
@@ -1091,7 +1091,12 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
     await require('./funnelTags').tagFromOutcome(workspaceId, currentStep, outcome, session, t);
 
     const outbound = edges.filter((e) => e.fromStepKey === session.currentStepKey);
-    const nextEdge = pickNextEdge(outbound, outcome);
+    // A path may branch on what this session's order holds, its total or how it
+    // was paid (funnelRouting `when`), read here from the database, not the client.
+    const ctx = hasWhen(outbound)
+      ? await orderContext(workspaceId, funnelId, session, { extraOrderIds: [followOn && followOn.order.id, accepted && accepted.followOn && accepted.followOn.id] }, t)
+      : {};
+    const nextEdge = pickNextEdge(outbound, outcome, ctx);
 
     session.path = [...session.path, session.currentStepKey];
     let result;
