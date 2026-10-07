@@ -104,6 +104,24 @@ const settingsBody = Joi.object({
   }).allow(null),
   // Checkout prices by the store's delivery zones (deliveryZones.js); false/null = by governorate.
   deliveryZonesEnabled: Joi.boolean().allow(null),
+  // Opening hours in Africa/Cairo (storeHours.js); null clears them (= always open).
+  storeHours: Joi.object({
+    enabled: Joi.boolean().required(),
+    override: Joi.string().valid('auto', 'open', 'closed').default('auto'),
+    days: Joi.array()
+      .items(
+        Joi.object({
+          closed: Joi.boolean().required(),
+          open: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).required(),
+          close: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).required(),
+        })
+      )
+      .length(7)
+      .required(),
+    message: Joi.string().trim().max(300).allow(''),
+  }).allow(null),
+  // The usual delivery time shown to customers, minutes; null clears it.
+  deliveryEtaMinutes: Joi.number().integer().min(1).max(1440).allow(null),
 }).min(1);
 
 const pricingModeBody = Joi.object({

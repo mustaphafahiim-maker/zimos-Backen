@@ -117,6 +117,9 @@ async function getStorefront(workspaceId) {
       pickup: require('../shipping/storePickup').publicPickup(w.settings),
       // Delivery zones inside a city: the active ones while the store prices by them, else null.
       zones: await require('../shipping/deliveryZones').publicZones(w),
+      // Opening hours, open now or not (null while off), and the usual delivery time in minutes.
+      hours: require('../shipping/storeHours').publicHours(w.settings),
+      etaMinutes: require('../shipping/storeHours').etaMinutes(w.settings),
     },
     // What the thank-you page shows after an order (settings.thank_you_page).
     thankYou: resolveThankYouPage(w.settings),

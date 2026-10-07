@@ -285,6 +285,14 @@ describe('GET/PATCH /shipping/settings', () => {
       storePickup: { enabled: false, address: '', phone: '', note: '' },
       // Delivery zones inside a city (deliveryZones.js): off.
       deliveryZonesEnabled: false,
+      // Opening hours (storeHours.js): off, every day 09:00-23:00 as the form's starting point.
+      storeHours: {
+        enabled: false,
+        override: 'auto',
+        days: Array.from({ length: 7 }, () => ({ closed: false, open: '09:00', close: '23:00' })),
+        message: '',
+      },
+      deliveryEtaMinutes: null,
     });
     expect(empty.body.governorates).toHaveLength(27);
 

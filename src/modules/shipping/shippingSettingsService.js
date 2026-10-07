@@ -24,6 +24,9 @@ const { GOVERNORATES } = require('./governorates');
  *                                   pickup from the store (storePickup.js)
  *   delivery_zones_enabled          true = checkout prices by the store's
  *                                   delivery zones (deliveryZones.js)
+ *   store_hours                     opening hours + "accepting orders"
+ *                                   switch (storeHours.js)
+ *   delivery_eta_minutes            the usual delivery time, minutes
  *
  * The first two were already writable through PATCH /workspaces/:id and
  * still are (same keys, same meaning). A key the store never set is absent,
@@ -38,6 +41,8 @@ const KEYS = Object.freeze({
   servedGovernorates: 'served_governorates',
   storePickup: 'store_pickup',
   deliveryZonesEnabled: 'delivery_zones_enabled',
+  storeHours: 'store_hours',
+  deliveryEtaMinutes: 'delivery_eta_minutes',
 });
 
 const MANUAL = carriers.MANUAL;
@@ -55,6 +60,8 @@ function view(settings) {
     servedGovernorates: Array.isArray(s[KEYS.servedGovernorates]) ? [...s[KEYS.servedGovernorates]] : [],
     storePickup: require('./storePickup').pickupSettings(s),
     deliveryZonesEnabled: s[KEYS.deliveryZonesEnabled] === true,
+    storeHours: require('./storeHours').hoursSettings(s),
+    deliveryEtaMinutes: require('./storeHours').etaMinutes(s),
   };
 }
 

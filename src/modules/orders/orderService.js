@@ -5,6 +5,7 @@ const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const storePickup = require('../shipping/storePickup');
 const deliveryZones = require('../shipping/deliveryZones');
+const storeHours = require('../shipping/storeHours');
 const { DESTINATION_INDEPENDENT } = require('../shipping/shippingRules');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
@@ -276,6 +277,9 @@ async function createOrder(
 
   const run = async (transaction) => {
     if (pickup) await storePickup.assertAvailable(workspaceId, transaction);
+    // Opening hours (shipping/storeHours.js): a closed store takes no shopper orders. An add-on to an
+    // order just placed, and an order staff type in, are not refused.
+    if (!req.user && !shippingOverride && source !== 'upsell') await storeHours.assertOpen(workspaceId, transaction);
     // Chosen now so the reservations below can name the order they hold stock
     // for (inventory/orderStock.js releases exactly what they reserved).
     const orderId = crypto.randomUUID();
@@ -488,6 +492,10 @@ async function createOrder(
     // A zone's fee replaces the destination price; a store-wide rule that makes shipping free (or an offer's own price) still wins.
     const zoneAmount = zone ? (DESTINATION_INDEPENDENT.includes(shipping.rule) ? shipping.amount : zone.feeAmount) : null;
     const shippingAmount = pickup ? 0 : zone ? zoneAmount : chosenShipping ? chosenShipping.amount : shipping.amount;
+    const etaMinutes = pickup
+      ? null
+      : (zone && zone.etaMinutes) ||
+        storeHours.etaMinutes(((await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'], transaction })) || {}).settings);
 
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
@@ -542,6 +550,8 @@ async function createOrder(
           ...shippingSnapshot(shipping),
           ...(chosenShipping ? { option: chosenShipping.snapshot } : {}),
           ...(zone ? { zone: { id: zone.id, name: zone.name, feeAmount: zone.feeAmount, etaMinutes: zone.etaMinutes } } : {}),
+          // The estimated delivery time the customer was shown: the zone's, else the store's.
+          ...(etaMinutes ? { etaMinutes } : {}),
         },
         ...(awaitingPayment
           ? {
