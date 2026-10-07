@@ -3259,3 +3259,10 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 - Changing an order's status back from cancelled / rejected (`PATCH /orders/:id/status`) or correcting a rejection to confirmed can now answer 409 `ORDER_TENDER_RETURNED` when the points, store credit or gift card it used were already given back: «النقاط / الرصيد / كارت الهدية رجعوا للعميل لما الطلب اتلغى — اعمل طلب جديد» / "The points, store credit or gift card went back to the customer when this was cancelled — place a new order".
 - A COD order rejected on the confirmation call now gives its points / credit / gift card back (it shows as refunds on the order).
 - A refund that doesn't pick a payment on a COD order is a cash refund; to give points / credit / a gift card back, pick that payment in the refund form.
+
+## 278. Verified emails for shopper sign-in — UI: pending
+
+- `GET /store/:ws/account/me` → `customer.emailVerified`. Only a verified email signs in by email code or Google.
+- `POST /store/:ws/account/email/code` `{ email, locale }` (signed in) → `{ sent, target, expiresInSeconds, resendAfterSeconds }`; `POST /store/:ws/account/email/verify` `{ email, code }` → the account (`emailVerified: true`). 422 `INVALID_CODE` / `CODE_EXPIRED`, 429 `TOO_MANY_ATTEMPTS` / `TOO_MANY_CODES`.
+- `POST /store/:ws/account/google` with the `x-shopper-token` header (signed in) links Google: `{ token, linked: true, customer }`. Without it, a Google email that isn't verified on an account answers 404 `ACCOUNT_NOT_FOUND`: «ادخل برقم موبايلك الأول، وبعدين ضيف جوجل من حسابك» / "Sign in with your phone first, then add Google from your account".
+- Screens: Account → profile: next to the email «مش متأكد» / "Not verified" + «أكّد الإيميل» / "Verify email" (code sent to it, 6-digit input) and «اربط حساب جوجل» / "Link Google"; «متأكد ✓» / "Verified" once done. Changing the email shows it unverified again.

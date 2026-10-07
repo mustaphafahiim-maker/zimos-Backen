@@ -24,6 +24,8 @@ module.exports = (sequelize, DataTypes) => {
       phoneRaw: { type: DataTypes.STRING(32), allowNull: true, field: 'phone_raw' },
       alternatePhone: { type: DataTypes.STRING(32), allowNull: true, field: 'alternate_phone' },
       email: { type: DataTypes.STRING(255), allowNull: true },
+      // Set when the shopper proved the email is theirs (migration 503, item 278); only a verified email signs in.
+      emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
       fullName: { type: DataTypes.STRING(200), allowNull: true, field: 'full_name' },
       // Loyalty points balance and last earn/spend (migration 474, modules/loyalty).
       loyaltyPoints: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'loyalty_points' },

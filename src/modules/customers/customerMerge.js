@@ -85,6 +85,8 @@ async function merge(workspaceId, keepId, duplicateId, req) {
     await keep.update({
       fullName: keep.fullName || dup.fullName,
       email: keep.email || dup.email,
+      // The email's verification travels with it (item 278).
+      emailVerifiedAt: keep.email ? keep.emailVerifiedAt : dup.emailVerifiedAt,
       alternatePhone: keep.alternatePhone || dup.phoneRaw || dup.phoneNormalized,
       companyName: keep.companyName || dup.companyName,
       taxId: keep.taxId || dup.taxId,

@@ -62,8 +62,9 @@ function targetOf({ phone, email }) {
 async function customerFor(workspaceId, { channel, target }) {
   if (channel === 'sms') return db.Customer.findOne({ where: { workspaceId, phoneNormalized: target } });
   // Several contacts may share an email: the one who ordered most, then the newest.
+  // Only a verified email (item 278): one typed at checkout next to someone's phone proves nothing.
   return db.Customer.findOne({
-    where: { workspaceId, [Op.and]: db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('email')), target) },
+    where: { workspaceId, emailVerifiedAt: { [Op.ne]: null }, [Op.and]: db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('email')), target) },
     order: [['totalOrders', 'DESC'], ['createdAt', 'DESC']],
   });
 }
@@ -145,7 +146,8 @@ async function verifyCode(workspace, body, { req = null } = {}) {
   const who = targetOf(body);
   const result = await db.sequelize.transaction(async (transaction) => {
     const row = await db.ShopperLoginCode.findOne({
-      where: { workspaceId: workspace.id, target: who.target, consumedAt: null, supersededAt: null },
+      // A sign-in code, never an email-verification one (channel email_link).
+      where: { workspaceId: workspace.id, target: who.target, channel: who.channel, consumedAt: null, supersededAt: null },
       order: [['createdAt', 'DESC']],
       lock: transaction.LOCK.UPDATE,
       transaction,
@@ -178,10 +180,50 @@ async function verifyCode(workspace, body, { req = null } = {}) {
   return { token: signToken(workspace.id, customer), expiresInSeconds: TOKEN_TTL_MS / 1000, customer };
 }
 
+// ------------------------------------------------- verifying an email (item 278) --
+
+/** A signed-in shopper asks for a code at an email, to make it their verified email. */
+async function requestEmailLink(workspace, customer, { email, locale = 'ar' }, { ip = null } = {}) {
+  const target = String(email).trim().toLowerCase();
+  const now = Date.now();
+  await assertCanSend(workspace.id, { channel: 'email', target }, ip, now);
+  const code = generateCode();
+  const id = crypto.randomUUID();
+  await db.sequelize.transaction(async (transaction) => {
+    await db.ShopperLoginCode.update({ supersededAt: new Date(now) }, { where: { workspaceId: workspace.id, target, channel: 'email_link', customerId: customer.id, consumedAt: null, supersededAt: null }, transaction });
+    await db.ShopperLoginCode.create({ id, workspaceId: workspace.id, channel: 'email_link', target, customerId: customer.id, codeHash: digest(id, code), expiresAt: new Date(now + CODE_TTL_MS), requestIp: ip }, { transaction });
+  });
+  await notify.email({ recipient: target, template: 'shopper_login_code', data: { code, minutes: CODE_TTL_MS / 60000, locale: locale === 'en' ? 'en' : 'ar', storeName: workspace.name || '' }, workspaceId: workspace.id });
+  return { sent: true, target: maskEmail(target), expiresInSeconds: CODE_TTL_MS / 1000, resendAfterSeconds: COOLDOWN_MS / 1000 };
+}
+
+/** The code from that email: it becomes the shopper's verified email. */
+async function verifyEmailLink(workspace, customer, { email, code }) {
+  const target = String(email).trim().toLowerCase();
+  const result = await db.sequelize.transaction(async (transaction) => {
+    const row = await db.ShopperLoginCode.findOne({
+      where: { workspaceId: workspace.id, target, channel: 'email_link', customerId: customer.id, consumedAt: null, supersededAt: null },
+      order: [['createdAt', 'DESC']], lock: transaction.LOCK.UPDATE, transaction,
+    });
+    if (!row) return { error: new AppError('INVALID_CODE', 'That code is not valid', 422) };
+    if (row.expiresAt.getTime() < Date.now()) return { error: new AppError('CODE_EXPIRED', 'That code has expired — ask for a new one', 422) };
+    if (!sameHex(row.codeHash, digest(row.id, String(code)))) {
+      const attempts = row.attempts + 1;
+      await row.update(attempts >= MAX_ATTEMPTS ? { attempts, supersededAt: new Date() } : { attempts }, { transaction });
+      return { error: attempts >= MAX_ATTEMPTS ? new AppError('TOO_MANY_ATTEMPTS', 'Too many wrong codes — ask for a new one', 429) : new AppError('INVALID_CODE', 'That code is not valid', 422, { attemptsLeft: MAX_ATTEMPTS - attempts }) };
+    }
+    await row.update({ consumedAt: new Date() }, { transaction });
+    await customer.update({ email: target, emailVerifiedAt: new Date() }, { transaction });
+    return { ok: true };
+  });
+  if (result.error) throw result.error;
+  return customer;
+}
+
 /** "Sign out everywhere": every token of this shopper stops working. */
 async function signOutEverywhere(customer) {
   await customer.increment('accountVersion');
   return { signedOut: true };
 }
 
-module.exports = { requestCode, verifyCode, readToken, signToken, signOutEverywhere, LIMITS };
+module.exports = { requestCode, verifyCode, readToken, signToken, signOutEverywhere, requestEmailLink, verifyEmailLink, LIMITS };

@@ -1905,7 +1905,11 @@ Not queued: points earned on an order that is returned after they were spent are
 
 A review of stock locations, purchasing, lots, shopper self-service, delivery slots, click and collect, Google sign-in and privacy requests found these; each was checked against the code before being queued. Most severe first.
 
-- [ ] 278. Shopper account takeover: a checkout with someone else's phone and the attacker's email wrote that email onto the victim's contact; Google (and email-code) sign-in then logged into the victim's account. Only verified emails may sign a shopper in.
+- [x] 278. Shopper account takeover: a checkout with someone else's phone and the attacker's email wrote that email onto the victim's contact; Google (and email-code) sign-in then logged into the victim's account. Only verified emails may sign a shopper in. (backend done, UI in frontend-handoff.md)
+  - Migration 503: customers.email_verified_at. Email-code and Google sign-in match only a contact whose email is verified. An email typed at checkout (or in the profile) is stored but unverified, so it opens nothing; a profile change to another email clears the verification.
+  - Verifying: signed in (by phone), the shopper asks for a code at an email and sends it back (POST /account/email/code, /account/email/verify; codes kept apart from sign-in codes, channel email_link, same limits), or signs in with Google while signed in (that Google email becomes the verified one). Customer merge carries the verification with the email.
+  - Existing emails start unverified: shoppers who signed in by email before verify once (or sign in by phone). Accepted, pre-launch.
+  - Checked the reported attack: the attacker's checkout put their email on the victim's contact; their Google sign-in is refused (404) and the email-code request sends nothing. The owner verifies an email and then signs in with Google; a link code can't be used to sign in.
 - [ ] 279. Google sign-in tokens for the shared platform client could be replayed on another store: bind the token to the store (a per-store nonce).
 - [ ] 280. Receiving a purchase order twice at once (double click) added the stock twice and lost one update of the received count.
 - [ ] 281. Delivery-slot hold queried outside its own transaction: ten checkouts at once could exhaust the database connection pool.

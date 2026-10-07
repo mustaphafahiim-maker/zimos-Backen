@@ -41,8 +41,17 @@ async function signIn(workspace, idToken, req) {
     throw new AppError('GOOGLE_TOKEN_INVALID', 'Google sign-in did not work — try again', 401);
   }
   if (!who.email || !who.emailVerified) throw new AppError('GOOGLE_EMAIL_UNVERIFIED', 'Your Google account has no verified email', 422);
-  const customer = await db.Customer.findOne({ where: { workspaceId: workspace.id, [db.Sequelize.Op.and]: [db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('email')), who.email)] }, order: [['createdAt', 'ASC']] });
-  if (!customer) throw new AppError('ACCOUNT_NOT_FOUND', 'No account with this email yet — place an order or sign in with your phone first', 404);
+  const auth0 = require('../shopperAuth');
+  // Already signed in (by phone): Google proves the email, which becomes this shopper's verified email (item 278).
+  const current = req && req.headers && req.headers['x-shopper-token'] ? await auth0.readToken(workspace.id, req.headers['x-shopper-token']) : null;
+  if (current) {
+    await current.update({ email: String(who.email).toLowerCase(), emailVerifiedAt: new Date(), lastLoginAt: new Date(), ...(current.fullName ? {} : who.name ? { fullName: who.name } : {}) });
+    if (req) req.shopper = current;
+    return { token: auth0.signToken(workspace.id, current), expiresInSeconds: 30 * 86400, linked: true, customer: { id: current.id, fullName: current.fullName, email: current.email } };
+  }
+  // Otherwise only a contact whose email was verified (item 278): an email typed at checkout next to someone's phone proves nothing.
+  const customer = await db.Customer.findOne({ where: { workspaceId: workspace.id, emailVerifiedAt: { [db.Sequelize.Op.ne]: null }, [db.Sequelize.Op.and]: [db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('email')), who.email)] }, order: [['createdAt', 'ASC']] });
+  if (!customer) throw new AppError('ACCOUNT_NOT_FOUND', 'No account with this email yet — sign in with your phone, then add Google from your account', 404);
   await customer.update({ lastLoginAt: new Date(), ...(customer.fullName ? {} : who.name ? { fullName: who.name } : {}) });
   const auth = require('../shopperAuth');
   if (req) req.shopper = customer;
