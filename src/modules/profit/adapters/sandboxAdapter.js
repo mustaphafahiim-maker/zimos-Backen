@@ -26,4 +26,27 @@ module.exports = {
   async fetchDailySpend() {
     return [];
   },
+
+  // Item 261: the ad accounts behind the credentials, for the merchant to pick from.
+  /** @returns {Promise<Array<{accountId: string, name: string, platform: string, currency?: string}>>} */
+  async listAdAccounts() {
+    return [
+      { accountId: 'sbx_meta_1', name: 'Sandbox Meta account', platform: 'meta', currency: 'EGP' },
+      { accountId: 'sbx_tiktok_1', name: 'Sandbox TikTok account', platform: 'tiktok', currency: 'EGP' },
+    ];
+  },
+
+  // Item 261 (SPEC §15.4, P2): pause / resume a campaign and change its daily budget.
+  // The sandbox changes nothing anywhere and answers as the platform would.
+  /** @returns {Promise<{ok: boolean, status?: string, error?: string}>} */
+  async setCampaignStatus({ accountId, campaignId, status }) {
+    require('../../../core/utils/logger').info('[ads sandbox] campaign status not sent', { accountId, campaignId, status });
+    return { ok: true, status };
+  },
+
+  /** dailyBudgetAmount: integer minor units of the ad account's currency. */
+  async setCampaignBudget({ accountId, campaignId, dailyBudgetAmount }) {
+    require('../../../core/utils/logger').info('[ads sandbox] campaign budget not sent', { accountId, campaignId, dailyBudgetAmount });
+    return { ok: true, dailyBudgetAmount };
+  },
 };

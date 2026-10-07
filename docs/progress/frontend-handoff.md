@@ -3159,3 +3159,18 @@ Same endpoints as before (`/workspaces/:ws/tracking-pixels`). `reddit`, `x` and 
 
 - `POST /api/v1/workspaces/:ws/checkout-sessions/export` (`orders.view`) takes `format: "csv" | "xlsx"` beside the filters. `xlsx` → `{ base64, contentType, count, filename: "lost-orders-YYYY-MM-DD.xlsx" }` (same columns as the CSV; phones masked the same way). Lost orders → Export: «Excel» / «CSV» choice; decode `base64` and download.
 - `POST /api/v1/workspaces/:ws/orders/import-tracking` takes `{ csv }` **or** `{ xlsx: "<base64 of the .xlsx>" }` (exactly one; ≤ ~1.5 MB). Same columns (`order_number`, `tracking_number`, `tracking_url`, `carrier`, `status`; header names any case/spaces) and the same per-row result. 422 `BAD_FILE` «الملف ده مش إكسيل (.xlsx)» / "This is not an Excel (.xlsx) file". Orders → Import tracking: accept `.csv` and `.xlsx`.
+
+## 261. Ad accounts and campaign controls — UI: pending
+
+All under `/api/v1/workspaces/:ws/profit/ads` — reads `financial_reports.view`, changes `profit.manage`.
+- `GET /adapters` → `{ adapters: [{ code, name, platforms, supportsOAuth }] }` (only `sandbox` today; real Meta/TikTok/Snapchat/Google adapters plug in later).
+- `POST /connections` `{ adapter: "sandbox", credentials: { … } }` → 201 `{ connection }`; 422 `ADS_CREDENTIALS_REJECTED`. Credentials are sealed and never returned.
+- `GET /connections` → `{ connections: [{ adapter, status, accounts: [{ accountId, name, platform, currency, selected }], campaigns: { "<accountId>:<campaignId>": { status, dailyBudgetAmount, updatedAt } }, lastVerifiedAt, lastError }] }`
+- `PUT /connections/:adapter/accounts` `{ accountIds: [...] }` → the merchant's pick (only picked accounts are synced and can be controlled); 422 for an id not in `accounts`.
+- `DELETE /connections/:adapter` → `{ disconnected: true }` (spend already recorded stays).
+- `POST /campaigns/:campaignId/status` `{ adapter, accountId, status: "paused" | "active" }` and `PUT /campaigns/:campaignId/budget` `{ adapter, accountId, dailyBudgetAmount }` (minor units) → `{ campaign: { campaignId, accountId, status?, dailyBudgetAmount?, updatedAt } }`. 422 if the account isn't picked, 422 `ADS_CHANGE_REFUSED`, 502 `ADS_PLATFORM_UNREACHABLE`.
+- `POST /profit/ads/sync` (existing) now has accounts to pull.
+
+### Screens
+- Profit → «حسابات الإعلانات» / "Ad accounts": connect (pick the platform/adapter, its key fields), then a checklist of the accounts found «اختار الحسابات اللي تتابعها» / "Pick the accounts to follow", «فصل» / "Disconnect", last sync / error.
+- Campaigns screen: per campaign row (with its `campaignId` and account) a «إيقاف / تشغيل» / "Pause / Resume" toggle and «الميزانية اليومية» / "Daily budget" edit with confirm «هيتغيّر على المنصة نفسها» / "This changes it on the ad platform". Show the last state from `connections[].campaigns`.
