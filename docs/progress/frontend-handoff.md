@@ -3388,3 +3388,57 @@ All under `/api/v1/workspaces/:ws/domains` (`domain.manage`).
 
 - A note under the form: «الدومين هيتسجل باسمك وانت صاحبه. هيوصلك إيميل من الجهة المسؤولة عن الدومينات لتأكيد الإيميل — لازم تأكده خلال 15 يوم وإلا الدومين يتوقف.» / "The domain is registered in your name and you own it. You'll get an email from the domain authority to confirm your address — confirm it within 15 days or the domain is suspended."
 - When saved details exist, show them as a summary with «تعديل» / "Edit".
+
+## 330. Sign-in by email or username, confirm the email with a code, the confirmed-account gate, phone at sign-up — UI: pending
+
+Two server switches, both off unless set to exactly `true`. Read them from **GET `/auth/signup-options`**, which now also answers `"confirmByCode": false, "phoneRequired": false`.
+- `SIGNUP_CONFIRM_BY_CODE`: a new account is active and signed in at once and confirms its email with a 6-digit code typed in the dashboard. Off (today): the account is pending until the emailed link is followed, as the dashboard handles now. `REQUIRE_SIGNUP_VERIFICATION` (`verificationRequired`) still comes first when it is on.
+- `REQUIRE_PHONE_AT_SIGNUP`: sign-up must send a phone.
+
+### Endpoints
+- **POST `/auth/login`** (public) `{ "identifier": "mona_store", "password": "…", "locale": "ar" }`. `identifier` is the email or the username, any case. The old `{ "email": "mona@gmail.com", "password": "…" }` still works. Every failure is 401 `INVALID_CREDENTIALS`, as before.
+- **POST `/auth/register`**: `phone` (string, ≤32) is required while `phoneRequired`; otherwise optional.
+  - Missing → 422 `VALIDATION_ERROR` `[{ "field": "phone", "message": "Enter your mobile number" }]`.
+  - Not a mobile number → 422 on `phone`, "Enter a valid mobile number".
+  - Stored normalised ("01012345678" → `"201012345678"`).
+  - With `confirmByCode` the 201 answer is `{ "user": { "status": "active", … }, "accessToken": "…", "refreshToken": "…", "sessionId": "…", "expiresAt": "…", "emailCode": { "sent": true, "channel": "email", "target": "m***@gmail.com", "expiresAt": "2026-10-07T07:00:00Z", "resendAvailableAt": "2026-10-07T06:51:00Z" } }`. `emailCode` is `{ "sent": false }` when no code could be sent. Today's "register, then log in with the same credentials" keeps working.
+- **GET `/auth/me`** adds `"confirmed": true|false`: the email (or phone) is confirmed.
+- **POST `/auth/me/email/send-code`** (Bearer) `{ "locale": "ar" }` → 200 `{ "sent": true, "channel": "email", "target": "m***@gmail.com", "expiresAt": "…", "resendAvailableAt": "…" }`.
+  - Errors: 409 `ALREADY_VERIFIED`; 503 `EMAIL_UNAVAILABLE`; 429 `RESEND_TOO_SOON` (`details.retryAfterSeconds`); 429 `VERIFICATION_LIMIT_REACHED`.
+- **POST `/auth/me/email/confirm`** (Bearer) `{ "code": "123456" }` → 200 `{ "user": { …, "emailVerifiedAt": "…" }, "confirmed": true }`. No new tokens: the session goes on.
+  - Errors: 422 `INVALID_CODE` (`details.attemptsLeft`); 422 `CODE_EXPIRED`; 422 `NO_ACTIVE_CODE`; 429 `TOO_MANY_ATTEMPTS`; 409 `ALREADY_VERIFIED`.
+- **403 `EMAIL_NOT_VERIFIED`** `{ "error": { "code": "EMAIL_NOT_VERIFIED", "message": "Confirm your email address first. We can send you a code.", "details": { "email": "m***@gmail.com" } } }`. It is checked before the draft-store check. It comes from:
+  - `POST /workspaces/:ws/start-trial` and `/activate-free-plan`;
+  - `POST /workspaces/:ws/websites/:websiteId/publish` and `/revisions/:revisionId/rollback`;
+  - `POST /workspaces/:ws/funnels/:funnelId/publish`, `/revisions/:revisionId/rollback` and `/resume`;
+  - `POST /workspaces/:ws/funnels/bulk` with `action` `publish` or `resume`.
+  - The quickstart HTML form asks for the code itself (nothing to build).
+- **409 `INVITEE_NOT_CONFIRMED`** on `POST /workspaces/:ws/members` and `POST /workspaces/:ws/team/invite`, when the email belongs to an account that hasn't confirmed yet.
+- **Store transfer** (`/workspaces/:ws/ownership-transfer`): `GET /candidates` leaves out members who haven't confirmed. `POST` → 409 `NEW_OWNER_NOT_CONFIRMED`.
+- **Console** `POST /admin/admins`: 409 `USER_NOT_ACTIVE` now also for an active account that hasn't confirmed, with the message "That account has not confirmed its email yet. Try again once it has."
+- **Google** `/auth/google/callback` → `/auth/callback?error=ACCOUNT_SUSPENDED` now also for a suspended account that was never linked to Google.
+
+### Screens (merchant dashboard)
+- **Sign in**: the field becomes «الإيميل أو اسم المستخدم» / "Email or username" (type text, autocomplete `username`). Send it as `identifier`.
+  - On a wrong answer: «بيانات الدخول غلط» / "Incorrect sign-in details".
+  - Offer «ابعت إيميل التأكيد تاني» / "Resend the email" only when the field has an "@".
+- **Sign up**: the phone field is «رقم الموبايل» / "Mobile number" and required while `phoneRequired`. Otherwise keep «رقم الهاتف (اختياري)» / "Phone (optional)".
+  - Show the 422 under the field: «اكتب رقم موبايل صحيح» / "Enter a valid mobile number".
+  - With `confirmByCode`, go straight in. When `emailCode.sent`, open the code dialog at once, with the code already sent.
+- **Banner** (app shell, while `confirmed === false`): «أكّد إيميلك عشان تقدر تنشر متجرك وتبدأ التجربة المجانية.» / "Confirm your email to publish your store and start your free trial." Button «ابعتلي كود» / "Send me a code" opens the dialog.
+- **Code dialog** «أكّد إيميلك» / "Confirm your email":
+  - Text: «بعتنا كود من 6 أرقام لـ {target}. صالح 10 دقايق.» / "We sent a 6-digit code to {target}. It's valid for 10 minutes."
+  - Field «الكود» / "Code" (inputmode numeric, autocomplete `one-time-code`).
+  - Buttons: «تأكيد» / "Confirm", and «ابعت كود جديد» / "Send a new code". The second is disabled until `resendAvailableAt`, with «تقدر تطلب كود جديد بعد {s} ثانية» / "You can ask for a new code in {s}s".
+  - States:
+    - wrong code: «الكود مش صحيح — فاضل {n} محاولات» / "That code isn't right — {n} tries left";
+    - expired or none: «الكود انتهى — اطلب كود جديد» / "The code has expired — ask for a new one";
+    - too many tries: «محاولات كتير — اطلب كود جديد» / "Too many tries — ask for a new one";
+    - limit: «طلبت أكواد كتير — جرّب بعد شوية» / "Too many codes requested — try again later";
+    - 503: «مش قادرين نبعت إيميلات دلوقتي — جرّب كمان شوية» / "We can't send emails right now — try again shortly".
+  - Success: toast «تم تأكيد إيميلك» / "Your email is confirmed", reload `/auth/me` and hide the banner.
+- **Any action answering `EMAIL_NOT_VERIFIED`** (go live / start the trial, publish or restore the website or a funnel, resume, bulk publish/resume): open the code dialog with `details.email` and send the same request again once confirmed.
+- **Team → Invite**: `INVITEE_NOT_CONFIRMED` → «صاحب الإيميل ده لسه مأكدش حسابه — اطلب منه يأكده وبعدين ابعت الدعوة تاني» / "That person hasn't confirmed their account yet — ask them to confirm it, then invite them again".
+- **Settings → Transfer store**: `NEW_OWNER_NOT_CONFIRMED` → «الشخص ده لسه مأكدش إيميله» / "That person hasn't confirmed their email yet".
+- **Google callback page**: `ACCOUNT_SUSPENDED` → «الحساب ده موقوف» / "This account has been suspended".
+- **Console (platform-admin) → Admins → Add**: show the `USER_NOT_ACTIVE` message as is, or «الحساب ده لسه مأكدش إيميله» / "That account hasn't confirmed its email yet".

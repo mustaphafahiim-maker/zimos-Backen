@@ -450,12 +450,21 @@ const env = {
   //   requireSubscription  a new store starts as a draft: it can be built but
   //                        not published or sell until a trial or a paid
   //                        subscription starts.
+  // Two more, from Ziad's sign-up (spec-gaps item 330), off the same way:
+  //   confirmByCode        (SIGNUP_CONFIRM_BY_CODE) with requireVerification
+  //                        off, a new account is active and signed in at once
+  //                        and confirms its email with an emailed code instead
+  //                        of the link; an account still pending is let in at
+  //                        its next sign-in. Off: pending + link, as before.
+  //   requirePhone         (REQUIRE_PHONE_AT_SIGNUP) sign-up needs a phone.
   // Under NODE_ENV=test they start off whatever the .env says; a test that
   // needs one sets it on this object at runtime.
   signup: {
     requirePlan: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_PLAN_AT_SIGNUP === 'true',
     requireVerification: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_SIGNUP_VERIFICATION === 'true',
     requireSubscription: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_SUBSCRIPTION_TO_GO_LIVE === 'true',
+    confirmByCode: process.env.NODE_ENV !== 'test' && process.env.SIGNUP_CONFIRM_BY_CODE === 'true',
+    requirePhone: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_PHONE_AT_SIGNUP === 'true',
     // Draft stores one person may hold while none of their stores is live.
     draftStoresPerUser: Math.max(1, parseInt(process.env.DRAFT_STORES_PER_USER || '1', 10) || 1),
     // Country calling codes a verification SMS may go to (digits, no "+").

@@ -6,6 +6,7 @@ const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { requireCreationAllowed, requireLive } = require('../../core/middleware/subscriptionGuard');
+const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./funnelsController');
 const schemas = require('./funnelsValidation');
@@ -42,19 +43,20 @@ router.post(
 router.delete('/:funnelId', validate(schemas.funnelIdParam), MANAGE, controller.deleteFunnel);
 
 // --- publish / revisions / rollback / pause ---
-// Putting a funnel live (publish, rollback, resume) needs a store out of
-// draft; pausing one never does.
-router.post('/:funnelId/publish', validate(schemas.publish), PUBLISH, requireLive, controller.publishFunnel);
+// Putting a funnel live (publish, rollback, resume) needs a confirmed account
+// and a store out of draft; pausing one never does.
+router.post('/:funnelId/publish', validate(schemas.publish), PUBLISH, requireConfirmedAccount, requireLive, controller.publishFunnel);
 router.get('/:funnelId/revisions', validate(schemas.funnelIdParam), MANAGE, controller.listRevisions);
 router.post(
   '/:funnelId/revisions/:revisionId/rollback',
   validate(schemas.rollback),
   PUBLISH,
+  requireConfirmedAccount,
   requireLive,
   controller.rollback
 );
 router.post('/:funnelId/pause', validate(schemas.funnelIdParam), PUBLISH, controller.pause);
-router.post('/:funnelId/resume', validate(schemas.funnelIdParam), PUBLISH, requireLive, controller.resume);
+router.post('/:funnelId/resume', validate(schemas.funnelIdParam), PUBLISH, requireConfirmedAccount, requireLive, controller.resume);
 
 // --- steps ---
 router.post('/:funnelId/steps', validate(schemas.createStep), MANAGE, controller.createStep);

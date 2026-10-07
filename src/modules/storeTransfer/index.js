@@ -12,6 +12,7 @@ const { AppError, NotFoundError, ValidationError } = require('../../core/errors/
 const { recordAudit } = require('../audit/auditService');
 const entitlements = require('../billing/entitlementsService');
 const notify = require('../notifications/notify');
+const { isVerified } = require('../auth/signupPolicy');
 
 /*
  * Transfer a store to another owner (spec-gaps item 252). Only the store's
@@ -23,6 +24,9 @@ const notify = require('../notifications/notify');
  *     leaves the team (`keepAs`);
  *   - the store must fit the new owner's plan limits (their own stores plus
  *     this one), else 409 PLAN_LIMIT_REACHED.
+ * The new owner's account must be confirmed (email or phone, spec-gaps item
+ * 330): one that isn't is left out of the candidates and refused with 409
+ * NEW_OWNER_NOT_CONFIRMED.
  * The store's plan and subscription stay with the store. Both people get an
  * email; it is audited. There is no undo other than the new owner handing
  * it back.
@@ -34,13 +38,13 @@ async function candidates(workspace) {
   const rows = await db.Membership.findAll({
     where: { workspaceId: workspace.id, status: 'active' },
     include: [
-      { model: db.User, as: 'user', attributes: ['id', 'fullName', 'email', 'status'] },
+      { model: db.User, as: 'user', attributes: ['id', 'fullName', 'email', 'status', 'emailVerifiedAt', 'phoneVerifiedAt'] },
       { model: db.Role, as: 'role', attributes: ['key', 'name'] },
     ],
     order: [['createdAt', 'ASC']],
   });
   return rows
-    .filter((m) => m.user && m.user.id !== workspace.ownerUserId && m.user.status === 'active')
+    .filter((m) => m.user && m.user.id !== workspace.ownerUserId && m.user.status === 'active' && isVerified(m.user))
     .map((m) => ({ userId: m.user.id, fullName: m.user.fullName, email: m.user.email, role: m.role ? { key: m.role.key, name: m.role.name } : null }));
 }
 
@@ -55,8 +59,11 @@ async function transfer(workspaceId, { newOwnerUserId, password, keepAs }, req) 
     if (newOwnerUserId === me.id) throw new ValidationError([{ field: 'newOwnerUserId', message: 'Pick someone else' }]);
 
     const target = await db.Membership.findOne({ where: { workspaceId, userId: newOwnerUserId, status: 'active' }, transaction, lock: transaction.LOCK.UPDATE });
-    if (target) target.user = await db.User.findByPk(newOwnerUserId, { attributes: ['id', 'email', 'fullName', 'status'], transaction });
+    if (target) target.user = await db.User.findByPk(newOwnerUserId, { attributes: ['id', 'email', 'fullName', 'status', 'emailVerifiedAt', 'phoneVerifiedAt'], transaction });
     if (!target || !target.user || target.user.status !== 'active') throw new NotFoundError('Team member');
+    if (!isVerified(target.user)) {
+      throw new AppError('NEW_OWNER_NOT_CONFIRMED', "That person's account hasn't confirmed its email yet. Ask them to confirm it first.", 409);
+    }
 
     // The store has to fit the new owner's plan limits.
     const sub = await db.Subscription.findOne({ where: { workspaceId }, include: [{ model: db.Plan, as: 'plan', attributes: ['id', 'name', 'maxStores'] }], transaction });

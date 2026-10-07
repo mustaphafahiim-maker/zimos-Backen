@@ -10,6 +10,7 @@ const {
   ValidationError,
 } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { isVerified } = require('../auth/signupPolicy');
 const {
   ALL_PLATFORM_PERMISSIONS,
   PLATFORM_PERMISSIONS,
@@ -215,11 +216,14 @@ async function grantRoleInTransaction({ email, role: roleKey, permissions }, req
       'ALREADY_PLATFORM_USER'
     );
   }
-  if (user.status !== 'active') {
+  // Active is not enough: with SIGNUP_CONFIRM_BY_CODE a new account is active
+  // before its email is confirmed, and anyone can sign up with an address
+  // they don't own (spec-gaps item 330).
+  if (user.status !== 'active' || !isVerified(user)) {
     throw new ConflictError(
       user.status === 'suspended'
         ? 'That account is suspended and cannot be given console access.'
-        : 'That account has not finished verifying its email yet. Try again once it is active.',
+        : 'That account has not confirmed its email yet. Try again once it has.',
       'USER_NOT_ACTIVE'
     );
   }

@@ -5,6 +5,7 @@ const validate = require('../../core/middleware/validate');
 const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission, requireAnyPermission } = require('../../core/middleware/rbac');
+const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { requirePlanLimit } = require('../billing/planLimits');
 const controller = require('./workspaceController');
@@ -35,12 +36,14 @@ router.patch(
 router.get('/:workspaceId/access', validate(schemas.listMembers), resolveTenant, controller.getAccess);
 
 // Taking a draft store live (billing/goLiveService): its plan's free trial, or
-// a plan that costs nothing. Whoever manages the store's billing.
+// a plan that costs nothing. Whoever manages the store's billing, with a
+// confirmed account (core/middleware/confirmedAccount).
 router.post(
   '/:workspaceId/start-trial',
   validate(schemas.listMembers),
   resolveTenant,
   requirePermission(PERMISSIONS.BILLING_MANAGE),
+  requireConfirmedAccount,
   controller.startTrial
 );
 router.post(
@@ -48,6 +51,7 @@ router.post(
   validate(schemas.listMembers),
   resolveTenant,
   requirePermission(PERMISSIONS.BILLING_MANAGE),
+  requireConfirmedAccount,
   controller.activateFreePlan
 );
 

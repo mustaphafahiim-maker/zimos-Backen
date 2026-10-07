@@ -63,7 +63,9 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip,
-  keyGenerator: (req) => `${ipKeyGenerator(clientIp(req))}:${req.body && req.body.email ? req.body.email : ''}`,
+  // Per IP and the account named: the email, or the email or username typed
+  // into the sign-in's `identifier` (spec-gaps item 330), case folded.
+  keyGenerator: (req) => `${ipKeyGenerator(clientIp(req))}:${req.body ? String(req.body.email || req.body.identifier || '').trim().toLowerCase() : ''}`,
   handler,
 });
 

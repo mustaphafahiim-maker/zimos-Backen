@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const db = require('../../db/models');
 const env = require('../../config/env');
-const { AppError, AuthenticationError } = require('../../core/errors/AppError');
+const { AppError, AuthenticationError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const publicPlans = require('../billing/publicPlansService');
 const verificationCodes = require('../otp/verificationCodeService');
@@ -35,6 +35,23 @@ const verificationCodes = require('../otp/verificationCodeService');
  *   either. Google accounts come confirmed. With no working email provider
  *   sign-up is refused (fail closed) and the boot log says why.
  *
+ * SIGNUP_CONFIRM_BY_CODE (Ziad's sign-up, spec-gaps item 330)
+ *   Only while REQUIRE_SIGNUP_VERIFICATION is off. A new account is active and
+ *   signed in at once, its email not confirmed yet: a 6-digit code (the same
+ *   codes and limits) is emailed instead of the link, and the dashboard asks
+ *   for it (POST /auth/me/email/send-code, /auth/me/email/confirm). An account
+ *   still pending from the link days is let in, active, at its next sign-in.
+ *   Off: the account is created pending, the link is emailed, and it is let in
+ *   once the link is followed — as before.
+ *   Either way, until the account is confirmed (email or phone) it cannot
+ *   start a trial, publish, be added to a store or get a console role
+ *   (core/middleware/confirmedAccount); with the switch off only an account
+ *   from before the link existed can be active without being confirmed.
+ *
+ * REQUIRE_PHONE_AT_SIGNUP
+ *   Sign-up must give a phone (422 VALIDATION_ERROR on `phone`). A phone given
+ *   is always stored normalised (core/utils/phone), on or off.
+ *
  * TERMS_VERSION is the date of the terms, refund policy and privacy policy
  * the marketing site publishes ("last updated" on those pages); it is stored
  * with each acceptance. Change both together.
@@ -52,6 +69,11 @@ async function planRequired(transaction) {
 
 const verificationRequired = () => env.signup.requireVerification === true;
 
+/** New accounts are signed in at once and confirm their email with a code (not while codes come first). */
+const confirmByCode = () => env.signup.confirmByCode === true && !verificationRequired();
+
+const phoneRequired = () => env.signup.requirePhone === true;
+
 /** GET /auth/signup-options — what the sign-up form must ask for right now. */
 async function signupOptions() {
   return {
@@ -59,6 +81,10 @@ async function signupOptions() {
     termsRequired: env.signup.requirePlan === true,
     termsVersion: TERMS_VERSION,
     verificationRequired: verificationRequired(),
+    // After sign-up, the email is confirmed with a code typed in the dashboard
+    // (true) or by the emailed link (false); see verificationRequired first.
+    confirmByCode: confirmByCode(),
+    phoneRequired: phoneRequired(),
   };
 }
 
@@ -89,7 +115,10 @@ function termsFields(acceptTerms) {
  * The plan and terms part of an email/password sign-up, checked before the
  * account exists. Returns the extra columns for the new user.
  */
-async function registrationFields({ email, planId, billingCycle, acceptTerms }) {
+async function registrationFields({ email, phone, planId, billingCycle, acceptTerms }) {
+  if (phoneRequired() && !phone) {
+    throw new ValidationError([{ field: 'phone', message: 'Enter your mobile number' }]);
+  }
   // Accepting the terms is recorded whenever the form sends it.
   const fields = termsFields(acceptTerms);
   if (env.signup.requirePlan !== true) return fields;
@@ -184,11 +213,18 @@ function logBootState(logger) {
   logger.info(
     `Sign-up: plan ${env.signup.requirePlan ? 'required' : 'not required'}, verification ${
       env.signup.requireVerification ? 'required' : 'off'
+    }, email confirmed by ${confirmByCode() ? 'code after signing in' : verificationRequired() ? 'code before signing in' : 'link'}, phone ${
+      phoneRequired() ? 'required' : 'optional'
     }, stores ${env.signup.requireSubscription ? 'start as drafts' : 'go live at once'}`
   );
   if (env.signup.requireVerification && !verificationCodes.emailReady()) {
     logger.error(
       'REQUIRE_SIGNUP_VERIFICATION is on but no email provider is configured (EMAIL_PROVIDER=brevo with BREVO_API_KEY and EMAIL_FROM_ADDRESS): new sign-ups are refused until it is'
+    );
+  }
+  if (confirmByCode() && !verificationCodes.emailReady()) {
+    logger.warn(
+      'SIGNUP_CONFIRM_BY_CODE is on but no email provider is configured: new accounts are signed in but get no code to confirm their email, so they cannot publish until one can be sent'
     );
   }
 }
@@ -197,6 +233,8 @@ module.exports = {
   TERMS_VERSION,
   planRequired,
   verificationRequired,
+  confirmByCode,
+  phoneRequired,
   signupOptions,
   isVerified,
   needsPlan,
