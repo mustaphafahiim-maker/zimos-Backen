@@ -134,7 +134,10 @@ async function receive(workspaceId, id, { lines, updateCost = true }, req) {
     const po = await findPo(workspaceId, id, transaction, true);
     if (!['ordered', 'partially_received'].includes(po.status)) throw new AppError('PO_STATUS', 'Mark the purchase order as ordered first', 409);
     const location = await db.StockLocation.findOne({ where: { id: po.locationId || null, workspaceId }, transaction }).catch(() => null);
-    const byId = new Map(po.lines.map((l) => [l.id, l]));
+    // The lines read again, locked, after the purchase order's lock (item 280): a second receive that
+    // waited on that lock must see what the first one received, not its own earlier snapshot.
+    const fresh = await db.PurchaseOrderLine.findAll({ where: { purchaseOrderId: po.id }, transaction, lock: transaction.LOCK.UPDATE });
+    const byId = new Map(fresh.map((l) => [l.id, l]));
     for (const r of lines) {
       const line = byId.get(r.lineId);
       if (!line) throw new ValidationError([{ field: 'lines', message: 'A line is not on this purchase order' }]);

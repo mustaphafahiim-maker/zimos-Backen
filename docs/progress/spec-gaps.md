@@ -1913,7 +1913,8 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
 - [x] 279. Google sign-in tokens for the shared platform client could be replayed on another store: bind the token to the store (a per-store nonce). (backend done, UI in frontend-handoff.md)
   - GET /store/:ws/account/google hands out a nonce ("<unix seconds>.<HMAC(store|time)>", 10 minutes, nothing stored); the storefront passes it to Google's button, Google signs it into the ID token, and signing in refuses a token without this store's fresh nonce (401 GOOGLE_TOKEN_INVALID). Required for every store, own client id or not.
   - Checked (sandbox tokens carry the nonce as a 4th part): no nonce 401, this store's 200, another store's 401, old/forged 401.
-- [ ] 280. Receiving a purchase order twice at once (double click) added the stock twice and lost one update of the received count.
+- [x] 280. Receiving a purchase order twice at once (double click) added the stock twice and lost one update of the received count. (backend fix; no UI change)
+  - After the purchase order's lock, its lines are read again with a lock in a new statement, so a receive that waited sees what the one before it received. Checked: two parallel "receive 8" on a line of 10 → one 200, one 422 PO_OVER_RECEIVED; stock +8, received 8.
 - [ ] 281. Delivery-slot hold queried outside its own transaction: ten checkouts at once could exhaust the database connection pool.
 - [ ] 282. A pickup at the default location was moved to another warehouse by the order-assignment job.
 - [ ] 283. Two click-and-collect orders at once could both take a location's last unit.
