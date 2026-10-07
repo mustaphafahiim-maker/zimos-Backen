@@ -40,7 +40,7 @@ const uuid = Joi.string().uuid();
 const schema = {
   params: Joi.object({ workspaceId: workspaceRef().required(), productId: uuid.required() }),
   body: Joi.object({
-    orderNumber: Joi.string().trim().min(3).max(40).required(),
+    orderNumber: Joi.string().trim().min(1).max(41).required(),
     phone: Joi.string().trim().min(6).max(32).required(),
     rating: Joi.number().integer().min(1).max(5).required(),
     comment: Joi.string().trim().max(2000).allow('', null).optional(),
@@ -56,7 +56,7 @@ async function deliveredOrder(workspaceId, productId, { orderNumber, phone }) {
   const phoneNormalized = normalizePhone(phone);
   if (!phoneNormalized) throw notVerified();
   const order = await db.Order.findOne({
-    where: { workspaceId, orderNumber: String(orderNumber).trim().toUpperCase() },
+    where: { workspaceId, orderNumber: require('../orders/orderNumbers').matching(orderNumber) },
     include: [
       { model: db.OrderItem, as: 'items', attributes: ['productId'] },
       { model: db.Shipment, as: 'shipments', attributes: ['status'], required: false },

@@ -394,7 +394,7 @@ async function createShipment(creds, input) {
       ...(contact.alternatePhone ? { secondPhone: localPhone(contact.alternatePhone) } : {}),
       ...(contact.email ? { email: contact.email } : {}),
     },
-    businessReference: order.orderNumber,
+    businessReference: require('../../orders/orderNumbers').carrierReference(order),
     ...(notes ? { notes: String(notes).slice(0, 500) } : {}),
     ...(carrierSettings.businessLocationId ? { businessLocationId: carrierSettings.businessLocationId } : {}),
     ...(webhookUrl ? { webhookUrl } : {}),

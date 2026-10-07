@@ -575,7 +575,8 @@ async function createOrder(
         websiteId: websiteId || null,
         funnelId: funnelId || null,
         customerId: customer.id,
-        orderNumber: generateOrderNumber(),
+        // The store's next short number (#1001…), taken under this transaction (orderNumbers.js, item 381).
+        orderNumber: await require('./orderNumbers').next(workspaceId, transaction),
         paymentMethod,
         currency: pricedLines[0].currency,
         subtotalAmount: subtotal,

@@ -387,7 +387,7 @@ async function createShipment(creds, input) {
   const body = [
     {
       Package_Serial: 1,
-      Reference: cut(order.orderNumber, LIMITS.reference),
+      Reference: cut(require('../../orders/orderNumbers').carrierReference(order), LIMITS.reference),
       Description: String(description || '').slice(0, 500) || 'Order',
       Service_Type: carrierSettings.serviceType || 'DTD',
       Service: carrierSettings.service || 'ND',

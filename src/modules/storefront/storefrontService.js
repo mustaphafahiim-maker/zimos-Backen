@@ -291,7 +291,7 @@ async function trackOrder(workspaceId, phone, orderNumber) {
   const order = await db.Order.findOne({
     // (workspace_id, order_number) is unique, so customerId here is an
     // authorization check rather than part of the lookup.
-    where: { workspaceId, customerId: customer.id, orderNumber: String(orderNumber).trim().toUpperCase() },
+    where: { workspaceId, customerId: customer.id, orderNumber: require('../orders/orderNumbers').matching(orderNumber) },
     include: [
       { model: db.OrderItem, as: 'items' },
       { model: db.Shipment, as: 'shipments' },

@@ -92,7 +92,7 @@ const context = () => require('../automations/automationContext');
 
 const SAMPLE_VARS = Object.freeze({
   customer_name: 'منى أحمد',
-  order_number: 'ORD-1042',
+  order_number: '#1042',
   order_total: '850 EGP',
   store_name: '',
   tracking_url: 'https://example.com/track/ZG123456789',

@@ -4557,3 +4557,18 @@ Saved cards now work on the real gateways (not only the sandbox). What the scree
 - **New error code** `SAVED_METHOD_NEEDS_SHOPPER` (422) from `POST /saved-payment-methods/:savedId/charge`: «البنك عايز العميل يأكد الدفع بنفسه — ابعتله رابط الدفع» / "The card's bank wants the customer to confirm this payment — send them the payment link". Not a decline: don't say the card was declined.
 - **Storefront upsell / funnel offer answer:** `payment: { status: 'declined', code }` can now carry `code: 'SAVED_METHOD_NEEDS_SHOPPER'` besides `SAVED_METHOD_DECLINED`; same fallback as today (the offer order stays unpaid). Message: «محتاجين تأكيد من البنك — الطلب الإضافي ما اتدفعش» / "Your bank needs you to confirm — the extra order was not charged".
 - **Saved methods list:** a saved PayPal shows `brand: 'PayPal'`, `last4: null`, `expiresAt: null` — show «PayPal» without "•••• ····". A charge to it is an order with payment method `paypal`.
+
+## 381. Short sequential order numbers (#1001) — UI: pending
+
+New orders get short store numbers: prefix + number + suffix (`#1001`, `ZM-5000-EG`, `7000`). A store that never set this numbers from **#1001**. Older orders keep their `ORD-…` numbers and are still found by them. Nothing else in the order API changes: `orderNumber` is still a string.
+- **GET `/api/v1/workspaces/:ws/order-numbers`** (orders.view) → `{ "prefix": "#", "suffix": "", "start": 1001, "isDefault": true, "lastNumber": null | 1010, "nextNumber": 1011, "nextOrderNumber": "#1011" }`.
+- **PUT** same path (workspace.manage), the whole object → the same shape:
+  `{ "prefix": "ZM-", "suffix": "-EG", "start": 5000 }`
+  - `prefix`, `suffix`: 0–10 characters, English letters, digits, `#` and `-` only; sent in lower case they are stored in upper case. Empty is allowed.
+  - `start`: whole number 1–1,000,000,000. It is the lowest number the next order may get: numbers never go back, so a start below `nextNumber` changes nothing. Show `nextOrderNumber` from the answer.
+  - Errors: 422 `VALIDATION_ERROR` with `details[].field` `prefix` / `suffix` («حروف إنجليزي وأرقام و# و- بس، لحد ١٠» / "English letters, digits, # and - only, up to 10") or `start` («رقم صحيح من ١ لـ ١٬٠٠٠٬٠٠٠٬٠٠٠» / "A whole number from 1 to 1,000,000,000"); 403 without workspace.manage.
+- Order search (orders list `q`, ⌘K, storefront tracking, public API by number, tracking import) finds a number with or without its `#` and in any case (`1003`, `#1003`, `zm-5000-eg`). The storefront tracking form now accepts `#`.
+
+### Screens
+- **Settings → Orders → «ترقيم الطلبات» / "Order numbers"**: fields «بادئة» / "Prefix" (placeholder `#`), «لاحقة» / "Suffix", «ابدأ من» / "Start at" (number); a live preview «الطلب الجاي هيبقى رقمه {nextOrderNumber}» / "Your next order will be {nextOrderNumber}" (compute prefix + max(start, nextNumber) + suffix while typing; after saving, show the server's `nextOrderNumber`). Hint under start: «الأرقام ما بترجعش لورا — لو كتبت رقم أصغر من الجاي هيفضل زي ما هو» / "Numbers never go back — a smaller start keeps the next number as it is". Hint under the fields: «الطلبات القديمة بتفضل بأرقامها» / "Existing orders keep their numbers". «حفظ» / "Save".
+- Order lists and pages: no change; show `orderNumber` as is (don't add another `#`).

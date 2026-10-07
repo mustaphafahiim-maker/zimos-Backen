@@ -55,7 +55,8 @@ module.exports = {
     params: Joi.object({ workspaceId: workspaceIdParam }),
     query: Joi.object({
       phone: Joi.string().required().regex(/^[0-9]{10,15}$/),
-      number: Joi.string().required().trim().regex(/^[A-Za-z0-9-]{3,40}$/),
+      // As printed, # included: #1001, ZM-1001, ORD-… (orders/orderNumbers.js).
+      number: Joi.string().required().trim().regex(/^[A-Za-z0-9#-]{1,41}$/),
     }),
   },
   // Shipping price for the checkout form. `items` or an X-Cart-Token header,

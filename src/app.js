@@ -351,6 +351,8 @@ v1.use('/workspaces/:workspaceId/post-purchase-survey', require('./modules/postP
 v1.use('/workspaces/:workspaceId/rfm', require('./modules/rfm').router);
 v1.use('/workspaces/:workspaceId/store-reports', require('./modules/storeReports').router);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
+// Short sequential order numbers: prefix, suffix, start (spec-gaps item 381).
+v1.use('/workspaces/:workspaceId/order-numbers', require('./modules/orders/orderNumbers').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
 // B2B quote requests (spec-gaps item 219).
