@@ -2731,3 +2731,16 @@ Body for create / edit / preview:
 
 ### Screens
 - Settings → Website → «تحويل الروابط» / "URL redirects": table (from → to, type «دائم 301» / "Permanent", «مؤقت 302» / "Temporary", source chip «تلقائي» / "Automatic", hits «عدد الزيارات»), search, add / edit / delete, «استيراد CSV» / "Import CSV" with the error lines shown.
+
+## 233. Store locator (branches) — UI: pending
+
+### Dashboard — `/api/v1/workspaces/:ws/store-locator` (`website.edit`)
+- `GET` / `PUT` `{ enabled, branches: { "<stockLocationId>": { visible, phone?, whatsapp?, hours: { ar, en }?, note: { ar, en }?, lat?, lng? } } }` — branches are the store's stock locations (Inventory → Locations); `lat` and `lng` go together (422); texts ≤ 300.
+
+### Storefront — `GET /api/v1/store/:ws/branches?lat=&lng=`
+- 404 when off. Else `{ branches: [{ id, name, address, phone, whatsapp, hours, note, lat, lng, pickup, directionsUrl, distanceKm }], nearest }` — with the shopper's coordinates (both or neither, else 422), nearest first with `distanceKm` (straight line) and `nearest` set. `pickup` = the branch takes click-and-collect orders (item 225). `directionsUrl` opens Google Maps directions.
+
+### Screens
+- Settings → Website → «فروعنا» / "Our branches": on/off; per location: show on site, phone, WhatsApp, opening hours (ar/en), note, and the map pin (lat/lng, or pick on a map).
+- Storefront page `/branches` «فروعنا» / "Our stores": list/cards with address, hours, «اتصل» / "Call", «واتساب» / "WhatsApp", «الاتجاهات» / "Directions"; a button «أقرب فرع ليا» / "Nearest to me" asks the browser for location and sorts by distance («على بعد 3.2 كم» / "3.2 km away"); a badge «استلام من الفرع» / "Pickup available" when `pickup`.
+- Footer link to the page when enabled.
