@@ -3336,3 +3336,7 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 ## 318. Send to supplier — in progress — UI: pending (small)
 
 - `POST …/dropship/…/orders/:orderId/push` can answer 409 `DROPSHIP_PUSH_IN_PROGRESS` while the same order is already being sent: «الطلب بيتبعت للمورد دلوقتي — حدّث الصفحة بعد شوية» / "This order is being sent to the supplier — refresh in a moment". The order's Supplier card may show a reference `externalOrderId: "pending"` for a few seconds: show «جاري الإرسال…» / "Sending…".
+
+## 320. Refund form — send an Idempotency-Key — UI: pending (small)
+
+- `POST /workspaces/:ws/orders/:orderId/refunds`: generate one `Idempotency-Key` (uuid) when the refund dialog opens and send it with the request (and with a retry of that same request). A double click then makes one refund. A new dialog gets a new key. 409 `IDEMPOTENCY_KEY_IN_PROGRESS`: «الاسترجاع بيتنفذ — استنى ثواني» / "The refund is being processed — wait a few seconds".
