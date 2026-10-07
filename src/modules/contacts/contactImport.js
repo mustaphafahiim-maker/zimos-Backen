@@ -103,8 +103,22 @@ async function importContacts(workspaceId, file, { mode = 'update', tags = '', d
     const chunk = entries.slice(i, i + CHUNK);
     const existing = await db.Customer.findAll({ where: { workspaceId, phoneNormalized: chunk.map((e) => e.phone) } });
     const byPhone = new Map(existing.map((c) => [c.phoneNormalized, c]));
+    // A "yes" in a sheet doesn't undo an unsubscribe (item 315): a STOP reply or an unsubscribe link on
+    // the phone or on an email of the row keeps consent off, and the row says so.
+    const emailsOf = (e, c) => [e.values.email, c && c.email].filter(Boolean).map((x) => String(x).toLowerCase());
+    const optOuts = await db.MarketingOptOut.findAll({
+      where: { workspaceId, [db.Sequelize.Op.or]: [{ phoneNormalized: chunk.map((e) => e.phone) }, { email: chunk.flatMap((e) => emailsOf(e, byPhone.get(e.phone))) }] },
+      attributes: ['phoneNormalized', 'email'],
+    });
+    const optedPhones = new Set(optOuts.map((o) => o.phoneNormalized).filter(Boolean));
+    const optedEmails = new Set(optOuts.map((o) => o.email && o.email.toLowerCase()).filter(Boolean));
     for (const e of chunk) {
       const c = byPhone.get(e.phone);
+      if (e.values.marketingConsent === true && (optedPhones.has(e.phone) || emailsOf(e, c).some((x) => optedEmails.has(x)))) {
+        e.values = { ...e.values };
+        delete e.values.marketingConsent;
+        errors.push({ row: e.row, field: 'marketing_consent', message: 'This person unsubscribed earlier — marketing consent was left off' });
+      }
       if (!c) {
         out.created += 1;
         if (!dryRun) {
@@ -119,7 +133,8 @@ async function importContacts(workspaceId, file, { mode = 'update', tags = '', d
       }
       const changes = {};
       if (e.values.fullName && e.values.fullName !== c.fullName) changes.fullName = e.values.fullName;
-      if (e.values.email && e.values.email !== c.email) changes.email = e.values.email;
+      // A new email is unverified until its owner confirms it (item 315): a verified one signs in to the account.
+      if (e.values.email && e.values.email !== c.email) Object.assign(changes, { email: e.values.email, emailVerifiedAt: null });
       if (e.values.marketingConsent !== undefined && e.values.marketingConsent !== c.marketingConsent) changes.marketingConsent = e.values.marketingConsent;
       const mergedTags = cleanTags([...(c.tags || []), ...(e.values.tags || [])]);
       if (mergedTags.length !== (c.tags || []).length) changes.tags = mergedTags;

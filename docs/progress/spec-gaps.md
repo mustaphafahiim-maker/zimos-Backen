@@ -2041,6 +2041,9 @@ Three reviews of the features built in passes four to six (integrations, storefr
   - The WhatsApp bot takes no order for a store behind a password or "coming soon" (hands the chat to the team).
   - Checked: max 2 → a "Pack of 5" × 1 refused, 2 plain units placed; max 1 per customer → two checkouts at once on one phone: one 201, one 422; a bot-path order of 3 (max 2) refused.
 - [ ] 314. Shipping was priced by the picked place while the province / city / area typed by the shopper were kept on the order (a Cairo area's price for an Aswan address).
-- [ ] 315. Contact import: a "yes" in a sheet re-subscribed people who had unsubscribed (and pushed them to Mailchimp / Klaviyo), and replacing a verified email kept it verified — whoever owns the new address could sign in to that account by email code.
+- [x] 315. Contact import: a "yes" in a sheet re-subscribed people who had unsubscribed (and pushed them to Mailchimp / Klaviyo), and replacing a verified email kept it verified — whoever owns the new address could sign in to that account by email code. (backend fix; no UI change — the rows come back in `errors`)
+  - A "yes" for a person with an opt-out (a STOP reply or an unsubscribe) on the row's phone, the row's email or the contact's current email leaves consent as it is, and the row is listed: "This person unsubscribed earlier — marketing consent was left off". New contacts likewise.
+  - An email the import changes is unverified (emailVerifiedAt cleared), as a profile change does: email-code and Google sign-in need it verified again.
+  - Checked: a verified contact with a STOP reply, a sheet giving it another email and "yes" → the email changed and unverified, consent still off, row reported; a new contact whose email unsubscribed → created without consent; another new one → with consent.
 - [ ] 316. Two shopper return requests at once could ask to return the same items twice (and restock them twice when both were approved).
 
