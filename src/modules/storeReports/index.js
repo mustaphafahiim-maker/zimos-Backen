@@ -300,4 +300,41 @@ router.get('/sales-by-collection', requirePermission(PERMISSIONS.ANALYTICS_VIEW)
   return res.json({ from: c.from, to: c.to, currency: c.currency, collections: out, uncollected: { units: u.units, revenue: String(u.revenue) } });
 }));
 
+// ---------------------------------------------- 246. sales by option --
+
+/*
+ * Units and revenue per option value across products (e.g. Size = M,
+ * Colour = Black), from the option values each order line kept
+ * (variant_options_snapshot), for live orders placed in the window. Option
+ * names and values are compared trimmed and case-insensitively, shown as
+ * first written. `option` narrows to one option name (e.g. size).
+ */
+router.get('/sales-by-option', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({ params: Joi.object(ws), query: Joi.object({ ...range, option: Joi.string().trim().max(60) }) }), asyncHandler(async (req, res) => {
+  const c = await contextOf(req);
+  const rows = await run(
+    `SELECT MIN(trim(kv.key)) AS option, MIN(trim(kv.value)) AS value, lower(trim(kv.key)) AS ok, lower(trim(kv.value)) AS ov,
+            SUM(oi.quantity)::int AS units, COUNT(DISTINCT oi.order_id)::int AS orders, COUNT(DISTINCT oi.product_id)::int AS products,
+            COALESCE(ROUND(SUM(oi.line_total_amount * coalesce(o.fx_rate_to_base, 1))), 0)::bigint AS revenue
+       FROM order_items oi
+       JOIN orders o ON o.id = oi.order_id
+       CROSS JOIN LATERAL jsonb_each_text(CASE WHEN jsonb_typeof(oi.variant_options_snapshot) = 'object' THEN oi.variant_options_snapshot ELSE '{}'::jsonb END) kv
+      WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'
+        AND o.created_at >= :from AND o.created_at < :to
+        ${req.query.option ? 'AND lower(trim(kv.key)) = lower(:option)' : ''}
+      GROUP BY ok, ov ORDER BY ok, units DESC`,
+    { ws: c.ws, from: c.from, to: c.to, option: req.query.option || null }
+  );
+  const out = rows.map((r) => ({ option: r.option, value: r.value, units: r.units, orders: r.orders, products: r.products, revenue: String(r.revenue) }));
+  if (req.query.format === 'csv') return sendCsv(res, 'sales-by-option', ['option', 'value', 'units', 'orders', 'products', 'revenue'], out);
+  const groups = new Map();
+  for (const r of out) {
+    const k = r.option.trim().toLowerCase();
+    if (!groups.has(k)) groups.set(k, { option: r.option, units: 0, values: [] });
+    const g = groups.get(k);
+    g.units += r.units;
+    g.values.push(r);
+  }
+  return res.json({ from: c.from, to: c.to, currency: c.currency, options: [...groups.values()].map((g) => ({ ...g, values: g.values.map((v) => ({ ...v, share: g.units ? Math.round((v.units / g.units) * 1000) / 10 : 0 })) })) });
+}));
+
 module.exports = { router, contextOf, sendCsv, run, ws, range };

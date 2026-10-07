@@ -1759,5 +1759,7 @@ breakdowns. No migration needed for any item below.
 - [x] 245. Sales by collection: units, orders and revenue per collection in a date range (a product in several collections counts in each), with CSV. (backend done, UI in frontend-handoff.md)
   - storeReports /sales-by-collection: order lines of live orders (stage via STAGE_SQL subquery) × product_collections; units, distinct orders and products, revenue, delivered revenue; uncollected total.
   - Verified: product in 2 collections counted in both (3 units, 2 orders, 300, delivered 200), cancelled order out, lone product in uncollected, CSV.
-- [ ] 246. Sales by variant option: units and revenue per option value (e.g. size M, colour black) across products, for buying decisions; CSV.
+- [x] 246. Sales by variant option: units and revenue per option value (e.g. size M, colour black) across products, for buying decisions; CSV. (backend done, UI in frontend-handoff.md)
+  - storeReports /sales-by-option: jsonb_each_text over order_items.variant_options_snapshot (live orders), grouped by lower(trim(name/value)); share per option; option filter.
+  - Verified: M (3 + 2 from " m " on another product) merged to 5 = 83.3%, L 1, Color and Colour kept apart, size filter case-insensitive. Note: a product created with one variant through POST /catalog/products did not keep the variant's optionValues in the test — worth a look in the catalog lane.
 - [ ] 247. Returns by reason: return requests per reason and per product, the return rate per product (returned units / delivered units), and refunds given; CSV.

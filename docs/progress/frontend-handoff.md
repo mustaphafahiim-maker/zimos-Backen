@@ -2920,3 +2920,15 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screen
 - Reports → «المبيعات حسب التشكيلة» / "Sales by collection": table + bar chart by revenue, «اتسلّم فعلًا» / "Delivered" column, a note «المنتج اللي في أكتر من تشكيلة بيتحسب في كل واحدة» / "A product in several collections counts in each", the «منتجات من غير تشكيلة» / "Not in any collection" row, «تنزيل CSV».
+
+## 246. Sales by variant option (size, colour…) — UI: pending
+
+### `GET /api/v1/workspaces/:ws/store-reports/sales-by-option?option=size&from=&to=&format=json|csv` (`analytics.view`)
+```json
+{ "currency": "EGP",
+  "options": [{ "option": "Size", "units": 6, "values": [{ "option": "Size", "value": "M", "units": 5, "orders": 2, "products": 2, "revenue": "40000", "share": 83.3 }, { "value": "L", "units": 1, "share": 16.7 }] }] }
+```
+- From the option values each order line kept, live orders in the window. Names and values are matched trimmed and case-insensitively («M» = « m »); different words stay apart («Color» ≠ «Colour»). `option` narrows to one option name. `share` = % of that option's units.
+
+### Screen
+- Reports → «المبيعات حسب المقاس واللون» / "Sales by size and colour": one card per option (Size, Colour…) with a bar per value and its share («M — 83%»), a filter by option, and «تنزيل CSV». Help text: «استخدمها وانت بتطلب من المورّد: كام من كل مقاس» / "Use it when ordering from your supplier: how many of each size".
