@@ -2979,3 +2979,41 @@ Nothing is stored between calls: the page keeps the list of scans and sends all 
 ### Screen
 - Order page and the pick list → «تغليف بالسكانر» / "Scan to pack": a big input that keeps focus (a USB/Bluetooth scanner types and presses Enter; the phone camera can also fill it), the lines with «اتسكن ١ من ٢» / "1 of 2 scanned" and a tick when done, a progress bar, a beep/red flash for «المنتج ده مش في الطلب» / "This item isn't in the order" and «زيادة عن المطلوب» / "More than ordered", an «تراجع» / "Undo last scan" button.
 - When complete: «كله تمام — تأكيد التغليف» / "All scanned — confirm packed". Otherwise «تأكيد رغم النقص» / "Confirm anyway" opens a required note «ليه؟» / "Why?". After confirm show the `packed` chip «اتغلّف» / "Packed" on the order and in the orders list (filter by tag `packed`).
+
+## 250. Customer timeline — UI: pending
+
+### `GET /api/v1/workspaces/:ws/customers/:customerId/timeline?limit=30&cursor=&kinds=` (`customers.view`)
+```json
+{ "events": [
+    { "kind": "question", "at": "2026-10-07T01:04:41.661Z", "id": "…", "orderId": null, "orderNumber": null,
+      "data": { "question": "Is it cotton?", "answer": null, "status": "pending", "productId": "…", "product": "ZZ TL Test" } },
+    { "kind": "order_cancelled", "at": "…", "id": "…", "orderId": "…", "orderNumber": "ORD-…", "data": { "reason": "customer_request" } },
+    { "kind": "order_placed", "at": "…", "id": "…", "orderId": "…", "orderNumber": "ORD-…",
+      "data": { "total": "1000", "currency": "EGP", "paymentMethod": "cod", "source": "…", "isTest": false } } ],
+  "next": "MjAyNi0xMC0w…" }
+```
+- Newest first. `limit` 1–100 (default 30). Pass `next` back as `cursor` for the next page; `next: null` = the end. A cursor stays valid when new events arrive, so «تحميل المزيد» never repeats or skips.
+- `kinds` (comma list or repeated) narrows the feed; unknown kind or bad cursor → 422; 404 customer.
+- Kinds and their `data` (amounts in minor units, as strings):
+
+| kind | data | ar / en label |
+|---|---|---|
+| `order_placed` | total, currency, paymentMethod, source, isTest | «طلب جديد» / "Order placed" |
+| `order_shipped` | carrier, waybill, trackingUrl | «اتشحن» / "Shipped" |
+| `order_delivered` | carrier, waybill | «اتسلّم» / "Delivered" |
+| `order_cancelled` | reason | «اتلغى» / "Cancelled" |
+| `return_requested` | reason, status, items | «طلب إرجاع» / "Return requested" |
+| `refund` | amount, currency, status, reason | «فلوس اترجعت» / "Refund" |
+| `note` | body, pinned, author | «ملاحظة» / "Note" |
+| `followup` | title, dueAt, doneAt, assignee | «متابعة» / "Follow-up" |
+| `review` | rating, comment, status, productId, product | «تقييم» / "Review" |
+| `question` | question, answer, status, productId, product (asked from the customer's email) | «سؤال عن منتج» / "Product question" |
+| `loyalty` | kind, points, balanceAfter, note | «نقاط» / "Points" |
+| `store_credit` | kind, amount, balanceAfter, currency, note | «رصيد» / "Store credit" |
+| `quote` | number, status, currency, validUntil | «عرض سعر» / "Quote" |
+| `privacy_request` | kind, status, completedAt | «طلب خصوصية» / "Privacy request" |
+| `referral` | status, friend, rewardedAt | «رشّح صاحبه» / "Referred a friend" |
+| `form` | form, page, message | «بعت فورم» / "Sent a form" |
+
+### Screen
+- Customer page → tab «كل اللي حصل» / "Timeline": a vertical feed with an icon per kind, the time («من ساعتين» / "2 hours ago", full date on hover), a one-line summary from `data` and a link to the order (`orderNumber`) or product; filter chips «طلبات» / "Orders" (order_* + return_requested + refund), «ملاحظات ومتابعات» / "Notes & follow-ups", «تقييمات وأسئلة» / "Reviews & questions", «نقاط ورصيد» / "Points & credit", «تاني» / "Other"; «تحميل المزيد» / "Load more" while `next` is set. Empty: «لسه مفيش حاجة مع العميل ده» / "Nothing with this customer yet".

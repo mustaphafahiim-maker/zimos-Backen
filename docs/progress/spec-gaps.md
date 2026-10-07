@@ -1781,4 +1781,7 @@ payments and courier bookings would all have to follow). No migration needed for
   - Stateless: the page sends every scan so far, the server answers per line expected/scanned/missing/over plus unknown codes — a reload or second device just resends the list; no table, no migration.
   - Codes match the variant barcode, its SKU, or the line SKU snapshot, trimmed and case-insensitive; a variant on two lines is one pile; lines with no variant are listed as manual.
   - Confirm needs a complete scan, or force with a note (an item with no barcode); it adds the tag packed through the order meta service and audits order.packed. Cancelled orders are refused.
-- [ ] 250. Customer timeline: one feed per customer of orders (placed, delivered, cancelled), returns, refunds, notes and follow-ups, reviews, questions, loyalty and store-credit movements, quotes and privacy requests, newest first, paged.
+- [x] 250. Customer timeline: one feed per customer of orders (placed, delivered, cancelled), returns, refunds, notes and follow-ups, reviews, questions, loyalty and store-credit movements, quotes and privacy requests, newest first, paged. (backend done, UI in frontend-handoff.md)
+  - Read-only: one UNION over the tables that already hold each event (orders, shipments, return requests, refunds, notes, follow-ups, reviews, questions, loyalty and credit ledgers, quotes, privacy requests, referrals, form submissions); no table, no migration.
+  - Delivered/shipped come from shipments (orders.completed_at is the checkout completion, not delivery). Product questions have no customer link, so they match the customer email.
+  - Cursor paging on (time, kind, id) with microsecond time in the cursor, so new events do not shift pages; kinds filter; customers.view.
