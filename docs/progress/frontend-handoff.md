@@ -2756,3 +2756,21 @@ Body for create / edit / preview:
 ### Screens
 - Product editor → variant → «تاريخ السعر» / "Price history": a step line chart (price and compare-at) and the list of changes with dates.
 - Storefront product page / cards, only when a variant is on sale (compare-at above price): a small line «أقل سعر في آخر 30 يوم: 90 ج» / "Lowest price in the last 30 days: EGP 90". If that lowest is below today's price, show it as is — don't hide it.
+
+## 235. Customer privacy requests (my data / delete my account) — UI: pending
+
+### Storefront — `/api/v1/store/:ws/account/privacy` (X-Shopper-Token; 401 `SHOPPER_NOT_SIGNED_IN`)
+- `GET /export` → the shopper's data as JSON (download, `Content-Disposition: attachment; filename="my-data.json"`): `{ exportedAt, profile, addresses, savedAddresses, orders: [{ orderNumber, createdAt, totalAmount, currency, paymentMethod, contact, shippingAddress, items }], loyalty: { balance, history }, storeCredit: { balance, history }, wishlist }`.
+- `POST /erase` `{ reason? ≤ 500 }` → 201 `{ request: { id, kind: "erase", status: "pending", … } }` (200 with the same pending request if asked again).
+- `GET /` → `{ requests: [{ id, kind, status, decisionNote, createdAt, completedAt }] }`.
+
+### Dashboard — `/api/v1/workspaces/:ws/privacy-requests` (read `customers.view`, act `customers.manage`)
+- `GET ?status=pending|completed|declined&kind=export|erase` → `{ requests: [{ id, customerId, kind, status, requesterLabel: "Mona A. · …2311", reason, decisionNote, completedAt, createdAt }], pending }`.
+- `POST /:requestId/complete` `{ force?, note? }` → erases the customer. 409 `CUSTOMER_HAS_OPEN_ORDERS` «العميل عنده طلبات لسه في الطريق — امسح بعد ما تتسلّم أو اختار "امسح برضه"» / "This customer has orders still on their way — erase after delivery, or force it".
+- `POST /:requestId/decline` `{ note }` (required).
+- `GET /customers/:customerId/export` → the same JSON; `POST /customers/:customerId/erase` `{ force?, note? }` → `{ erased: true }` (asked by phone, etc.; logged as a completed request).
+- What erase does: the customer becomes «Deleted customer» with no phone, email, company, tax ID or addresses; their orders keep amounts, lines and country/governorate/city but lose name, phone, email and street; saved cards, sign-in codes and wishlist are deleted; review author names hidden; the shopper is signed out. Can't be undone.
+
+### Screens
+- Storefront account → «الخصوصية» / "Privacy": «نزّل بياناتي» / "Download my data", «امسح حسابي» / "Delete my account" (reason, confirm «هنمسح بياناتك الشخصية؛ فواتيرك هتفضل محفوظة من غير اسمك» / "We'll remove your personal details; your invoices stay, without your name"), and the request status «تحت المراجعة» / "Under review", «اتمسح» / "Done", «اترفض» / "Declined" with the store's note.
+- Dashboard → Customers → «طلبات الخصوصية» / "Privacy requests" (badge with `pending`): complete (confirm, warning that it can't be undone, force option when blocked), decline with a note. Customer page: «نزّل بيانات العميل» / "Export data" and «امسح العميل» / "Erase customer".

@@ -308,6 +308,7 @@ v1.use('/workspaces/:workspaceId/product-specs', require('./modules/productSpecs
 v1.use('/workspaces/:workspaceId/redirects', require('./modules/urlRedirects').staff);
 v1.use('/workspaces/:workspaceId/store-locator', require('./modules/storeLocator').staff);
 v1.use('/workspaces/:workspaceId/price-history', require('./modules/priceHistory').staff);
+v1.use('/workspaces/:workspaceId/privacy-requests', require('./modules/privacyRequests').staff);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
@@ -394,6 +395,7 @@ v1.use('/store/:workspaceId/account/referral', require('./modules/customerReferr
 v1.use('/store/:workspaceId/referrals', require('./modules/customerReferrals').store);
 v1.use('/store/:workspaceId/account/business', require('./modules/businessCustomers').account);
 v1.use('/store/:workspaceId/account/on-account', require('./modules/accountCredit').account);
+v1.use('/store/:workspaceId/account/privacy', require('./modules/privacyRequests').account);
 v1.use('/store/:workspaceId/account/vip', require('./modules/vipTiers').account);
 v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').account);
 v1.use('/store/:workspaceId/account/store-credit', require('./modules/storeCredit').account);
