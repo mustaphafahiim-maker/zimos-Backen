@@ -8,6 +8,8 @@
  *   2. the whole app loads: every route file, model and jobs.js is required,
  *      so a missing module or a bad require fails here and not on deploy;
  *   3. docs/public-openapi.json is what scripts/build-public-openapi.js writes.
+ *   4. every model's table is classified in scripts/launch-reset-tables.js
+ *      (scripts/launch-reset.js refuses to run while a table is not).
  *
  * It needs a migrated database only for nothing: models are defined, never
  * queried. Run it locally with `node scripts/ci-check.js`.
@@ -63,6 +65,21 @@ try {
   } else console.log('openapi: up to date');
 } catch (err) {
   problems.push(`openapi: ${err.message}`);
+}
+
+// 4. the launch reset knows what to do with every model's table
+try {
+  const { sequelize } = require(path.join(root, 'src', 'db', 'models'));
+  const { TABLES } = require(path.join(root, 'scripts', 'launch-reset-tables.js'));
+  const tables = new Set(Object.values(sequelize.models).map((m) => {
+    const name = m.getTableName();
+    return typeof name === 'string' ? name : name.tableName;
+  }));
+  const missing = [...tables].filter((t) => !Object.prototype.hasOwnProperty.call(TABLES, t)).sort();
+  if (missing.length) problems.push(`launch-reset: classify these tables in scripts/launch-reset-tables.js: ${missing.join(', ')}`);
+  else console.log(`launch-reset: ${tables.size} model tables classified`);
+} catch (err) {
+  problems.push(`launch-reset: ${err.message}`);
 }
 
 if (problems.length > 0) {
