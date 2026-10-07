@@ -179,6 +179,8 @@ v1.use('/workspaces/:workspaceId/catalog', catalogRoutes);
 v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
 // Merge duplicate customers (customers/customerMerge.js, item 248).
 v1.use('/workspaces/:workspaceId/customer-merge', require('./modules/customers/customerMerge').router);
+// Transfer a store to another owner (storeTransfer, item 252).
+v1.use('/workspaces/:workspaceId/ownership-transfer', require('./modules/storeTransfer').router);
 // Customer timeline (customerTimeline, item 250).
 v1.use('/workspaces/:workspaceId/customers/:customerId/timeline', require('./modules/customerTimeline').router);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);

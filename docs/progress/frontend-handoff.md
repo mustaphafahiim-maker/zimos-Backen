@@ -3047,3 +3047,21 @@ These pixels carry `events`: our event → the platform's name, `null` = don't s
 
 ### Screen
 - Marketing → Tracking pixels → «إضافة بكسل» / "Add pixel": six new tiles with logos; the ID field with the hint per platform («رقم الحساب من Taboola Ads» / "Account ID from Taboola Ads"…); for X a small table «أكواد الأحداث» / "Event IDs" (Purchase, Lead, Add to cart, Checkout…). No «Conversions API» switch for these: a note «البكسل ده بيشتغل من المتصفح بس» / "This pixel works in the browser only".
+
+## 252. Transfer a store to another owner — UI: pending
+
+### `/api/v1/workspaces/:ws/ownership-transfer` (the store's owner only — anyone else gets 403 `NOT_STORE_OWNER`)
+- `GET /candidates` → `{ candidates: [{ userId, fullName, email, role: { key, name } }] }` — active team members with an active account (invite someone first if the person isn't on the team).
+- `POST /` `{ "newOwnerUserId": "…", "password": "…", "keepAs": "workspace_manager" | "owner" | "leave" }` (default `workspace_manager`) →
+```json
+{ "workspace": { "id": "…", "name": "Demo Store", "ownerUserId": "…" },
+  "newOwner": { "userId": "…", "fullName": "ZZ Heir", "email": "…" },
+  "previousOwner": { "userId": "…", "keptAs": "workspace_manager" },
+  "billing": { "plan": "Starter", "external": false } }
+```
+  - The new person becomes the store's owner (role Owner); the old owner becomes Store manager, stays an Owner, or leaves the team. The plan and subscription stay with the store. Both get an email.
+  - Errors: 422 `password` wrong / account has no password («اعمل باسورد لحسابك الأول» / "Set a password on your account first"); 422 picking yourself; 404 not an active team member; 409 `PLAN_LIMIT_REACHED` (`details.max`, `details.used`) when the new owner's plan has no room for another store.
+  - After `leave`, the caller has no access: send them to the store list. After `workspace_manager`, refresh the session's permissions.
+
+### Screen
+- Settings → Team (owner only) → «نقل ملكية المتجر» / "Transfer ownership" (danger zone): pick a team member, choose «أفضل في المتجر كمدير» / "Stay as store manager" · «أفضل مالك معاه» / "Stay as an owner too" · «أخرج من المتجر» / "Leave the store", type the password, and confirm with «المتجر هيبقى ملك {name} — الخطة والفريق والإعدادات معاه. مينفعش ترجّعه غير لو هو رجّعهولك» / "The store will belong to {name} — plan, team and settings. Only they can hand it back". Success toast «المتجر بقى ملك {name}» / "{name} now owns the store".

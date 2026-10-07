@@ -177,6 +177,32 @@ ${codeHtml}
     };
   },
 
+  // A store handed to another owner (modules/storeTransfer, item 252).
+  store_ownership_received(data = {}) {
+    const store = escapeHtml(data.workspaceName || 'a store');
+    const from = escapeHtml(data.fromName || 'The previous owner');
+    return {
+      subject: `You now own ${data.workspaceName || 'a store'} on Zimos`,
+      ...wrap(
+        `<p>Hi,</p>
+<p>${from} has transferred <strong>${store}</strong> to you. You are now its owner: its plan, team and settings are yours to manage.</p>`,
+        `Hi,\n\n${data.fromName || 'The previous owner'} has transferred ${data.workspaceName || 'a store'} to you. You are now its owner.`
+      ),
+    };
+  },
+  store_ownership_given(data = {}) {
+    const store = escapeHtml(data.workspaceName || 'your store');
+    const to = escapeHtml(data.toName || 'the new owner');
+    return {
+      subject: `${data.workspaceName || 'Your store'} has a new owner`,
+      ...wrap(
+        `<p>Hi,</p>
+<p>You transferred <strong>${store}</strong> to ${to}. If this wasn't you, contact support right away.</p>`,
+        `Hi,\n\nYou transferred ${data.workspaceName || 'your store'} to ${data.toName || 'the new owner'}. If this wasn't you, contact support right away.`
+      ),
+    };
+  },
+
   // The second step of a sign-in (modules/auth/twoFactorService.js).
   login_code(data = {}) {
     const code = String(data.code || '');

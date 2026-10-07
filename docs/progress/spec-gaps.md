@@ -1794,5 +1794,8 @@ The owner, 2026-10-07: "شوف لايت فانل شغال ازاي واعمل ز
   - Browser tags only: none of the six has a server API wired here (X, Reddit and Microsoft have conversion APIs; they can follow as interface + sandbox adapters when the owner wants server events for them). capiEnabled is forced off, so the relay never targets them; no migration (platform is a string column).
   - The storefront gets each pixel's event names (browserPixelEvents.js), with null where the platform has no such event, so the storefront needs no per-platform table of its own.
   - X conversions are per-pixel event ids made in X Ads Manager (config.eventIds), validated tw-<pixel>-<event>.
-- [ ] 252. Transfer a store to another owner: the owner hands the store to a member of its team (password confirmed, the new owner told by email); the old owner stays as an admin.
+- [x] 252. Transfer a store to another owner: the owner hands the store to a member of its team (password confirmed, the new owner told by email); the old owner stays as an admin. (backend done, UI in frontend-handoff.md)
+  - The owner is workspaces.owner_user_id (the account the store counts against); only that person can transfer, with their password, to an active team member — invite first, so the new owner has already accepted being on the team. No migration.
+  - The store must fit the new owner's plan limits (their stores plus this one), else 409. The plan and subscription stay with the store; the response says whether it is billed outside (external) so the UI can remind them to change the card.
+  - keepAs: workspace_manager (default), owner, or leave. Both people get an email ("if this wasn't you, contact support"); audited workspace.ownership_transfer.
 - [ ] 253. Cart offers: merchant rules that show a product in the cart ("add X for Y% off") when the cart has a product or reaches a subtotal; the offer price is honoured in the cart quote and at checkout.
