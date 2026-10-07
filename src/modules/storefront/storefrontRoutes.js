@@ -3,7 +3,7 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
-const { trackingLimiter, suggestLimiter, uploadLimiter, manualProofLimiter, checkoutOtpLimiter } = require('../../core/middleware/rateLimiters');
+const { trackingLimiter, suggestLimiter, uploadLimiter, manualProofLimiter, checkoutOtpLimiter, depositQuoteLimiter } = require('../../core/middleware/rateLimiters');
 const customerUploadController = require('../customerUploads/customerUploadController');
 const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
@@ -77,12 +77,32 @@ router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shipp
 // The payment methods the checkout offers (COD only while online payments
 // are off). A valid X-Store-Preview header adds test-mode gateway methods.
 // Whether a cash-on-delivery order by this phone needs a deposit first (payments/manualTransferService.js).
+// Under a "risky shoppers only" rule the phone's record is read only with the
+// checkout code's otpToken for that phone; without it the answer is the same
+// for every phone and the checkout decides (item 362).
 router.post(
   '/deposit-quote',
-  validate({ params: onlinePaymentSchemas.storeMethods.params, body: require('joi').object({ phone: require('joi').string().max(32).allow('', null) }) }),
-  require('express-async-handler')(async (req, res) =>
-    res.json({ deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, req.body || {}) })
-  )
+  depositQuoteLimiter,
+  validate({
+    params: onlinePaymentSchemas.storeMethods.params,
+    body: require('joi').object({
+      phone: require('joi').string().max(32).allow('', null),
+      otpToken: require('joi').string().max(512).allow('', null),
+    }),
+  }),
+  require('express-async-handler')(async (req, res) => {
+    const body = req.body || {};
+    let phone = null;
+    try {
+      phone = body.phone ? require('../../core/utils/phone').normalizePhone(body.phone) : null;
+    } catch {
+      phone = null;
+    }
+    const phoneVerified = checkoutOtp.proofValid(body.otpToken, req.publicWorkspace.id, phone);
+    res.json({
+      deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, { phone: body.phone }, { phoneVerified }),
+    });
+  })
 );
 // Display currencies and their rates — for showing converted prices only (currencies/fxService.js).
 router.get(

@@ -447,6 +447,9 @@ const manualProofLimiter = createIpMinuteLimiter('manual-payment-proof', MANUAL_
 // The checkout code step (risk/checkoutOtp.js, item 348): verify and resend share one budget per IP a minute.
 const CHECKOUT_OTP_PER_MINUTE = 10;
 const checkoutOtpLimiter = createIpMinuteLimiter('checkout-otp', CHECKOUT_OTP_PER_MINUTE, { skip });
+// The storefront deposit quote (payments/manualTransferService.depositQuote, item 362): per IP a minute.
+const DEPOSIT_QUOTES_PER_MINUTE = 10;
+const depositQuoteLimiter = createIpMinuteLimiter('deposit-quote', DEPOSIT_QUOTES_PER_MINUTE, { skip });
 // Custom domains (modules/domains, item 341): each of these asks public DNS, per IP a minute.
 const domainAddLimiter = createIpMinuteLimiter('domain-add', 10, { skip });
 const domainVerifyLimiter = createIpMinuteLimiter('domain-verify', 20, { skip });
@@ -605,6 +608,8 @@ module.exports = {
   MANUAL_PROOFS_PER_MINUTE,
   manualProofLimiter,
   checkoutOtpLimiter,
+  DEPOSIT_QUOTES_PER_MINUTE,
+  depositQuoteLimiter,
   domainAddLimiter,
   domainVerifyLimiter,
   domainDnsCheckLimiter,

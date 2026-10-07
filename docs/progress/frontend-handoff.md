@@ -4240,3 +4240,22 @@ The "Enter your code" step of a sign-in (authenticator app, email code, WhatsApp
 ### Screens
 - Sign-in → "Enter your code" step, on `TWO_FACTOR_LOCKED`: disable the code field and show «اتكتب أكواد غلط كتير على الحساب ده. استنى شوية وجرّب تاني، أو غيّر كلمة المرور» / "Too many wrong codes were entered for this account. Wait a while and try again, or reset your password", with a link «نسيت كلمة المرور؟» / "Forgot your password?" to the reset page and a "Back to sign-in" button. Don't show a countdown (the API gives none).
 - No settings change.
+
+## 362. Deposit quote: a "risky shoppers only" rule is decided at checkout unless the phone is verified — UI: pending
+
+The storefront asks POST `/deposit-quote` whether a cash-on-delivery order needs a deposit by transfer first. When the store's deposit rule is "risky shoppers only", the answer used to say whether that phone had a bad record, for any number anyone typed. Now the phone's record is read only with the checkout code's `otpToken` for that same phone; without it the answer is the same for every phone and the checkout decides. The call also has a limit of 10 a minute per IP.
+
+### Endpoint (public, no auth)
+- **POST `/api/v1/store/:workspaceId/deposit-quote`** `{ "phone": "+201001234567", "otpToken": "…" }` (`otpToken` optional: the one POST `/checkout/otp/verify` answered for this phone, valid 30 minutes).
+  - Rule "every COD order" (unchanged, token not needed): 200 `{ "deposit": { "required": true, "amountType": "shipping", "fixedAmount": null, "methods": [ { "id": "manual:…", "name": "InstaPay", "instructions": "…", "requireReceipt": true, "requireSender": false, … } ] } }`
+  - Rule "risky shoppers only", no token or a token for another phone: 200 `{ "deposit": { "required": false, "amountType": null, "fixedAmount": null, "methods": [], "decidedAtCheckout": true } }`
+  - Rule "risky shoppers only", valid token: the real answer, `required: true` with the methods, or `required: false` without `decidedAtCheckout`.
+  - No rule or no transfer method: `{ "deposit": { "required": false, "amountType": null, "fixedAmount": null, "methods": [] } }` (unchanged).
+  - 429 `RATE_LIMITED`: over 10 quotes a minute from one IP.
+- POST `/checkout` is unchanged: a COD order by a risky phone with no `transfer` still answers 422 `DEPOSIT_REQUIRED` `{ "error": { "code": "DEPOSIT_REQUIRED", "details": { "amountType": "shipping", "fixedAmount": null } } }`.
+
+### Screens (storefront → checkout, cash on delivery)
+- `decidedAtCheckout: true`: show no deposit box yet and no warning. Don't call the quote on every phone keystroke; call it once when the shopper picks cash on delivery, and again after the code step if the checkout gave an `otpToken` (send it).
+- When the checkout answers 422 `DEPOSIT_REQUIRED`: open the transfer box (the existing `TransferDetails` with the deposit notice, using the methods from GET `/payment-methods`) with «الطلب ده محتاج عربون بالتحويل قبل الدفع عند الاستلام» / "This order needs a deposit by transfer before cash on delivery", keep the form filled and let the shopper place the order again with the transfer.
+- `RATE_LIMITED` on the quote: ignore it quietly and let the checkout decide (no message).
+- No settings change in the dashboard.
