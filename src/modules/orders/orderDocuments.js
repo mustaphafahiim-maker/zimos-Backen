@@ -8,6 +8,7 @@ const { AppError } = require('../../core/errors/AppError');
 const { registerFonts, drawText, hasArabic } = require('../../core/pdf/bidiText');
 const { computeWaybillModel } = require('../waybill/waybillService');
 const { codAmountFor } = require('../shipping/carrierShipmentService');
+const { dayWindow } = require('../../core/utils/zonedMonth');
 
 /**
  * Printed paper for many orders at once (SPEC §12.4):
@@ -23,6 +24,8 @@ const { codAmountFor } = require('../shipping/carrierShipmentService');
  */
 
 const MAX_DOCUMENT_ORDERS = 200;
+// The day "today's manifest" covers is a day in Egypt, not a UTC day.
+const MANIFEST_TIME_ZONE = 'Africa/Cairo';
 const money = (minor, currency) => `${(Number(minor) / 100).toFixed(2)} ${currency || ''}`.trim();
 const mm = (n) => (n * 72) / 25.4;
 
@@ -133,19 +136,21 @@ async function waybillsPdf(workspaceId, { orderIds, format = 'a4x4' }) {
 }
 
 /**
- * The courier handover sheet. The parcels are the given orders' live
- * shipments, or — with no orders named — every shipment created on `date`
- * (UTC day, default today), optionally for one courier.
+ * The rows of the courier handover sheet. The parcels are the given orders'
+ * live shipments, or — with no orders named — every shipment created on the
+ * Africa/Cairo day `date` falls in (default today), optionally for one
+ * courier. Returns { day, rows } where day is YYYY-MM-DD (null for a named
+ * selection) and each row carries what the courier needs at the door.
  */
-async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
+async function manifestRows(workspaceId, { orderIds, date, carrier } = {}) {
   const where = { workspaceId, status: { [Op.notIn]: ['cancelled', 'returned'] } };
   let day = null;
   if (orderIds && orderIds.length) {
     where.orderId = await assertOrders(workspaceId, orderIds);
   } else {
-    day = date ? new Date(date) : new Date();
-    const start = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
-    where.createdAt = { [Op.gte]: start, [Op.lt]: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+    const window = dayWindow(date ? new Date(date) : new Date(), MANIFEST_TIME_ZONE);
+    day = window.day;
+    where.createdAt = { [Op.gte]: window.start, [Op.lt]: window.end };
   }
   if (carrier) where.carrierCode = { [Op.iLike]: carrier };
 
@@ -158,7 +163,33 @@ async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
   // One row per order: its newest live shipment.
   const byOrder = new Map();
   for (const s of shipments) byOrder.set(s.orderId, s);
-  const rows = [...byOrder.values()];
+  const rows = [...byOrder.values()].map((s) => {
+    const o = s.order;
+    const contact = o.contactSnapshot || {};
+    const address = o.shippingAddressSnapshot || {};
+    return {
+      orderId: o.id,
+      orderNumber: o.orderNumber,
+      waybill: s.waybillNumber || s.trackingCode || '',
+      customerName: contact.fullName || '',
+      phone: contact.phone || '',
+      alternatePhone: contact.alternatePhone || '',
+      governorate: address.province || '',
+      city: address.city || '',
+      addressLine: address.addressLine || '',
+      addressNotes: address.notes || '',
+      courier: s.carrierCode || '',
+      paymentMethod: o.paymentMethod,
+      collectAmount: o.paymentMethod === 'cod' ? codAmountFor(o) : 0,
+      currency: o.currency,
+    };
+  });
+  return { day, rows };
+}
+
+/** The courier handover sheet as a PDF (see manifestRows). */
+async function manifestPdf(workspaceId, selection = {}) {
+  const { day, rows } = await manifestRows(workspaceId, selection);
   if (rows.length === 0) throw new AppError('NO_SHIPMENTS', 'There are no shipments to hand over for this selection', 422);
 
   const workspace = await db.Workspace.findByPk(workspaceId);
@@ -167,23 +198,24 @@ async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
   const done = collect(doc);
   const left = doc.page.margins.left;
   const width = doc.page.width - left * 2;
-  const currency = rows[0].order.currency;
+  const currency = rows[0].currency;
+  const printedDay = day || dayWindow(new Date(), MANIFEST_TIME_ZONE).day;
 
   const cols = [
-    { title: '#', w: 22 },
-    { title: 'Order', w: 118 },
-    { title: 'Waybill', w: 92 },
-    { title: 'Customer', w: 110 },
-    { title: 'Phone', w: 78 },
-    { title: 'Governorate', w: 62 },
-    { title: 'Collect', w: width - 482 },
+    { title: '#', w: 18 },
+    { title: 'Order', w: 82 },
+    { title: 'Customer', w: 80 },
+    { title: 'Phone', w: 70 },
+    { title: 'Address', w: 160 },
+    { title: 'Courier', w: 60 },
+    { title: 'Collect', w: width - 470 },
   ];
 
   const header = () => {
     let y = drawText(doc, (workspace && workspace.name) || 'Store', { x: left, y: doc.page.margins.top, width, size: 15, bold: true, align: 'left' });
-    const couriers = [...new Set(rows.map((r) => r.carrierCode))].join(', ');
+    const couriers = [...new Set(rows.map((r) => r.courier))].join(', ');
     doc.font('Helvetica').fontSize(9).fillColor('#444');
-    y = drawText(doc, `Courier handover manifest — ${day ? day.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)} — ${couriers}`, {
+    y = drawText(doc, `Courier handover manifest — ${printedDay} — ${couriers}`, {
       x: left, y: y + 2, width, size: 9, align: 'left',
     });
     doc.fillColor('#000');
@@ -201,28 +233,26 @@ async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
 
   let y = header();
   let total = 0;
-  for (const [index, s] of rows.entries()) {
-    if (y > doc.page.height - 110) {
+  for (const [index, r] of rows.entries()) {
+    if (y > doc.page.height - 130) {
       doc.addPage();
       y = header();
     }
-    const o = s.order;
-    const contact = o.contactSnapshot || {};
-    const collectAmount = codAmountFor(o);
-    total += collectAmount;
+    total += r.collectAmount;
+    const place = [r.governorate, r.city].filter(Boolean).join(' - ');
     const cells = [
       String(index + 1),
-      o.orderNumber,
-      s.waybillNumber || s.trackingCode,
-      contact.fullName || '—',
-      contact.phone || '',
-      (o.shippingAddressSnapshot && o.shippingAddressSnapshot.province) || '',
-      o.paymentMethod === 'cod' ? money(collectAmount, '') : 'prepaid',
+      [r.orderNumber, r.waybill].filter(Boolean).join('\n'),
+      r.customerName || '—',
+      [r.phone, r.alternatePhone].filter(Boolean).join('\n'),
+      [place, r.addressLine, r.addressNotes].filter(Boolean).join('\n'),
+      r.courier,
+      r.paymentMethod === 'cod' ? money(r.collectAmount, '') : 'prepaid',
     ];
     let x = left;
     let bottom = y;
     for (const [i, c] of cols.entries()) {
-      const b = drawText(doc, String(cells[i]), { x: x + 2, y, width: c.w - 4, size: 8, align: 'left', direction: i === 4 ? 'ltr' : undefined });
+      const b = drawText(doc, String(cells[i]), { x: x + 2, y, width: c.w - 4, size: 8, align: 'left', direction: i === 3 ? 'ltr' : undefined });
       bottom = Math.max(bottom, b);
       x += c.w;
     }
@@ -243,4 +273,4 @@ async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
   return done;
 }
 
-module.exports = { MAX_DOCUMENT_ORDERS, FORMATS: Object.keys(FORMATS), waybillsPdf, manifestPdf };
+module.exports = { MAX_DOCUMENT_ORDERS, FORMATS: Object.keys(FORMATS), MANIFEST_TIME_ZONE, waybillsPdf, manifestRows, manifestPdf };
