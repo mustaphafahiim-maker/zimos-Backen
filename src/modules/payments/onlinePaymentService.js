@@ -920,6 +920,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
 
 module.exports = {
   loadOrderForShopper,
+  cancelOpenAttempts,
   FLAGS,
   EXPIRED_REASON,
   BLOCKED_REASON,

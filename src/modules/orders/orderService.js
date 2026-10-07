@@ -1300,6 +1300,9 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       { workspaceId, orderId: order.id, referenceType: 'order_cancelled', actorUserId: req.user.id },
       transaction
     );
+    // An online payment still open for it is cancelled, and closed at the gateway once this commits (item 357):
+    // the shopper's page stops taking money for a cancelled order. Required here to avoid a load cycle.
+    await require('../payments/onlinePaymentService').cancelOpenAttempts(order, transaction);
 
     // A shipment booked with a connected courier is cancelled there first. If
     // the courier refuses, this throws and the whole cancellation rolls back:
