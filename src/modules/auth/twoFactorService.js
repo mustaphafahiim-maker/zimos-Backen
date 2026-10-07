@@ -259,15 +259,28 @@ async function countTry(challengeToken, userId) {
 }
 
 /**
- * Forgets the account's wrong codes and closes its waiting sign-ins: a
+ * Closes the account's waiting sign-ins and forgets its wrong codes: a
  * password reset proves the owner, and whoever had the old password is out
- * (authService.resetPassword, resetPasswordSms).
+ * (authService.resetPassword, resetPasswordSms). The wrong codes are forgotten
+ * at most once in 24 hours (users.two_factor_forgiven_at, migration 515), so
+ * resetting again and again (a swapped SIM, a read inbox) does not restart the
+ * budget: 60 wrong codes a day at most, however many resets.
  */
 async function forgiveWrongCodes(userId, transaction) {
+  const since = new Date(Date.now() - ACCOUNT_WRONG_LIMITS[1].windowMs);
   await db.LoginChallenge.update(
-    { attempts: 0, consumedAt: db.sequelize.fn('COALESCE', db.sequelize.col('consumed_at'), db.sequelize.fn('now')) },
-    { where: { userId, createdAt: { [db.Sequelize.Op.gt]: new Date(Date.now() - ACCOUNT_WRONG_LIMITS[1].windowMs) } }, transaction }
+    { consumedAt: db.sequelize.fn('COALESCE', db.sequelize.col('consumed_at'), db.sequelize.fn('now')) },
+    { where: { userId, consumedAt: null }, transaction }
   );
+  // The row lock on the user makes two resets at once forgive only once.
+  const [forgiven] = await db.sequelize.query(
+    `UPDATE users SET two_factor_forgiven_at = now()
+      WHERE id = :userId AND (two_factor_forgiven_at IS NULL OR two_factor_forgiven_at <= :since)
+      RETURNING id`,
+    { replacements: { userId, since }, type: db.Sequelize.QueryTypes.SELECT, transaction }
+  );
+  if (!forgiven) return;
+  await db.LoginChallenge.update({ attempts: 0 }, { where: { userId, createdAt: { [db.Sequelize.Op.gt]: since } }, transaction });
 }
 
 /** The second step. Returns the user to sign in; sets the remember-me cookie when asked. */

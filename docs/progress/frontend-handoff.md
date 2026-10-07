@@ -4244,7 +4244,7 @@ The "Enter your code" step of a sign-in (authenticator app, email code, WhatsApp
   - 429 `TOO_MANY_ATTEMPTS` — 5 wrong codes on this sign-in (as before): go back to the sign-in form.
   - **new** 429 `TWO_FACTOR_LOCKED` — too many wrong codes on this account: `{ "error": { "code": "TWO_FACTOR_LOCKED", "message": "Too many wrong codes for this account. Try again later, or reset your password." } }`
 - The same 429 `TWO_FACTOR_LOCKED` can come back on the Google sign-in's code step and the WhatsApp sign-in's follow-up step, since they finish through this endpoint.
-- A password reset (`POST /auth/password-reset/confirm`, `POST /auth/password-reset/sms/confirm`) clears the lock and ends any sign-in still waiting for its code.
+- A password reset (`POST /auth/password-reset/confirm`, `POST /auth/password-reset/sms/confirm`) clears the lock once in 24 hours (a second reset within the day leaves it on until the time passes) and always ends any sign-in still waiting for its code.
 
 ### Screens
 - Sign-in → "Enter your code" step, on `TWO_FACTOR_LOCKED`: disable the code field and show «اتكتب أكواد غلط كتير على الحساب ده. استنى شوية وجرّب تاني، أو غيّر كلمة المرور» / "Too many wrong codes were entered for this account. Wait a while and try again, or reset your password", with a link «نسيت كلمة المرور؟» / "Forgot your password?" to the reset page and a "Back to sign-in" button. Don't show a countdown (the API gives none).
