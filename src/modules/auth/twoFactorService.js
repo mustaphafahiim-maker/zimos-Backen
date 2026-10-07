@@ -8,6 +8,7 @@ const secretBox = require('../../core/utils/secretBox');
 const { verifyPassword } = require('../../core/security/password');
 const { recordAudit } = require('../audit/auditService');
 const notify = require('../notifications/notify');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /**
  * Two-step sign-in (SPEC §17.2).
@@ -191,7 +192,7 @@ async function challengeIfNeeded(user, req, { locale = 'ar', newDevice = false }
   if (await isTrusted(user.id, req)) return null;
   const flag = mode !== (row && row.mode) ? { newDevice: true } : {};
 
-  const base = { userId: user.id, channel: mode, expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? req.ip : null };
+  const base = { userId: user.id, channel: mode, expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? clientIp(req) : null };
   if (mode === 'totp') {
     const challenge = await db.LoginChallenge.create(base);
     return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'totp' };

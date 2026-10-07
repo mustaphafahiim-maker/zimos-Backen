@@ -11,6 +11,7 @@ const { createIpMinuteLimiter } = require('../../core/middleware/rateLimiters');
 const { normalizePhone } = require('../../core/utils/phone');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const joiEmail = require('../../core/utils/joiEmail');
+const { clientIp: clientIpOf } = require('../../core/middleware/clientIp');
 
 /**
  * The opt-in step collects the visitor's details (SPEC §9.2: "Collect
@@ -101,7 +102,7 @@ async function optIn(workspace, funnelId, sessionId, body, req) {
         data: {},
         tags: ['opt_in'],
         marketingConsent: true,
-        ipAddress: req.ip || null,
+        ipAddress: clientIpOf(req) || null,
       },
       { transaction }
     );

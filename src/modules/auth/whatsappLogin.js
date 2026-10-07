@@ -10,6 +10,7 @@ const { authLimiter, verifyCodeLimiter } = require('../../core/middleware/rateLi
 const { AppError, AuthenticationError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
 const logger = require('../../core/utils/logger');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
  * Merchant sign-in with a WhatsApp code (spec-gaps item 262, SPEC §20.1:
@@ -56,7 +57,7 @@ async function request({ phone, locale = 'ar' }, req) {
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   const challenge = await db.LoginChallenge.create({
     userId: user.id, channel: CHANNEL, codeHash: sha256(`${user.id}:${code}`),
-    expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? req.ip : null,
+    expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? clientIp(req) : null,
   });
   const sent = await require('./twoFactorWhatsapp').sendCode(user, code, { minutes: CODE_TTL_MS / 60000, locale });
   if (!sent) {

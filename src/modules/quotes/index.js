@@ -16,6 +16,7 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
  * B2B quote requests (spec-gaps item 219).
@@ -83,7 +84,8 @@ async function request(workspace, body, req) {
   if ((await db.ProductVariant.count({ where: { id: ids, workspaceId: workspace.id }, include: [{ model: db.Product, as: 'product', where: { status: 'active' }, attributes: [] }] })) !== ids.length) {
     throw new ValidationError([{ field: 'lines', message: 'A product is not available' }]);
   }
-  if (req.ip && (await db.QuoteRequest.count({ where: { requestIp: req.ip, createdAt: { [Op.gt]: new Date(Date.now() - 3600e3) } } })) >= MAX_PER_IP_HOUR) {
+  const ip = clientIp(req);
+  if (ip && (await db.QuoteRequest.count({ where: { requestIp: ip, createdAt: { [Op.gt]: new Date(Date.now() - 3600e3) } } })) >= MAX_PER_IP_HOUR) {
     throw new AppError('TOO_MANY_REQUESTS', 'Too many quote requests — try again later', 429);
   }
   const shopper = req.headers['x-shopper-token'] ? await require('../shopperAccounts/shopperAuth').readToken(workspace.id, req.headers['x-shopper-token']) : null;
@@ -91,7 +93,7 @@ async function request(workspace, body, req) {
   const q = await db.sequelize.transaction(async (transaction) => db.QuoteRequest.create({
     workspaceId: workspace.id, number: await nextNumber(workspace.id, transaction), customerId: shopper ? shopper.id : null,
     contact: { fullName: body.contact.fullName, phone: body.contact.phone, email: body.contact.email ? body.contact.email.toLowerCase() : null, company: body.contact.company || null },
-    lines: body.lines, message: body.message || null, tokenHash: hash(token), requestIp: req.ip || null,
+    lines: body.lines, message: body.message || null, tokenHash: hash(token), requestIp: ip || null,
   }, { transaction }));
   await require('../notifications/merchantNotificationService').create(workspace.id, {
     type: 'quote.request', title: `طلب عرض سعر ${q.number}`, body: `${body.contact.fullName}${body.contact.company ? ` — ${body.contact.company}` : ''}: ${body.lines.length} منتج`, link: `/quotes/${q.id}`,

@@ -15,6 +15,7 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
  * Store gates (spec-gaps item 197). settings.store_gate =
@@ -135,7 +136,7 @@ store.post(
     if (settingsOf(req.publicWorkspace).mode === 'off') throw new AppError('STORE_OPEN', 'The store is open', 409);
     await db.StoreGateSignup.findOrCreate({
       where: { workspaceId: req.publicWorkspace.id, email: req.body.email.toLowerCase() },
-      defaults: { workspaceId: req.publicWorkspace.id, email: req.body.email.toLowerCase(), locale: req.body.locale || null, requestIp: req.ip },
+      defaults: { workspaceId: req.publicWorkspace.id, email: req.body.email.toLowerCase(), locale: req.body.locale || null, requestIp: clientIp(req) },
     });
     res.status(201).json({ signedUp: true });
   })

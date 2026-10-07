@@ -14,6 +14,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
  * Back-in-stock alerts (spec-gaps item 194).
@@ -147,7 +148,7 @@ store.post(
     params: Joi.object({ workspaceId: Joi.string().required() }),
     body: Joi.object({ variantId: Joi.string().uuid().required(), email: Joi.string().trim().email().max(255), phone: Joi.string().trim().min(6).max(32), locale: Joi.string().valid('ar', 'en', 'fr') }).xor('email', 'phone'),
   }),
-  asyncHandler(async (req, res) => res.status(201).json(await subscribe(req.publicWorkspace, req.body, req.ip)))
+  asyncHandler(async (req, res) => res.status(201).json(await subscribe(req.publicWorkspace, req.body, clientIp(req))))
 );
 
 // Mounted at /api/v1/workspaces/:workspaceId/stock-alerts (products.view).

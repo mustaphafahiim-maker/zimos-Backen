@@ -10,6 +10,7 @@ const trackingPixelService = require('./trackingPixelService');
 const pixelEventLog = require('./pixelEventLog');
 const orderAttribution = require('./orderAttribution');
 const browserEvents = require('./pixelProviders/browserEvents');
+const { clientIp: clientIpOf } = require('../../core/middleware/clientIp');
 
 /**
  * Relays storefront events to the ad platforms' server APIs (SPEC §13.2).
@@ -148,7 +149,7 @@ async function sendTest(workspaceId, trackingPixelId, req) {
     eventId: `test-${crypto.randomUUID()}`,
     occurredAt: new Date().toISOString(),
     url: workspace && workspace.slug ? `https://${workspace.slug}.${env.platformRootDomain}/` : undefined,
-    clientIp: req.ip,
+    clientIp: clientIpOf(req),
     userAgent: str(req.headers['user-agent'], 500),
     visitorId: `test-${workspaceId}`,
     browser: {},

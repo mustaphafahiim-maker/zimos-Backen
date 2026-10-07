@@ -51,6 +51,56 @@ if (storefrontProxySecret && storefrontProxySecret.length < 32) {
   throw new Error('STOREFRONT_PROXY_SECRET must be at least 32 characters (generate one with `openssl rand -hex 32`)');
 }
 
+// The client IP behind Cloudflare (core/middleware/clientIp.js; item 329,
+// Ziad's 973fc8e). Both switches are off unless set to exactly "true", and
+// always off under NODE_ENV=test. With TRUST_EDGE_CLIENT_IP on, a header name
+// that isn't ours to choose or a secret under 32 characters refuses to start:
+// a weak secret would let anyone who guesses it choose their own IP. The
+// reserved names are his list plus the request headers our own code reads
+// (the edge header is removed from req.headers once checked).
+const RESERVED_EDGE_HEADERS = new Set([
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'x-request-id',
+  'x-storefront-secret',
+  'x-storefront-client-ip',
+  'x-cart-token',
+  'x-visitor-id',
+  'x-shopper-token',
+  'x-store-preview',
+  'x-store-locale',
+  'x-store-gate',
+  'x-payment-token',
+  'x-student-token',
+  'x-affiliate-token',
+  'x-funnel-id',
+  'x-workspace-id',
+  'x-api-key',
+  'x-zimos-app',
+  'x-zimos-token-mode',
+  'x-signature',
+  'x-kashier-signature',
+  'x-hub-signature-256',
+  'x-vercel-ip-country',
+  'x-vercel-ip-country-region',
+  'x-vercel-ip-city',
+]);
+const trustEdgeClientIp = process.env.NODE_ENV !== 'test' && process.env.TRUST_EDGE_CLIENT_IP === 'true';
+const edgeSecretHeader = (process.env.EDGE_SECRET_HEADER || '').trim().toLowerCase();
+const edgeSecret = (process.env.EDGE_SECRET || '').trim();
+if (trustEdgeClientIp) {
+  if (!/^x-[a-z0-9-]+$/.test(edgeSecretHeader) || RESERVED_EDGE_HEADERS.has(edgeSecretHeader)) {
+    throw new Error(
+      'EDGE_SECRET_HEADER must name the header Cloudflare adds: "x-" then letters, digits or dashes, and not a header the app already reads (TRUST_EDGE_CLIENT_IP is on)'
+    );
+  }
+  if (edgeSecret.length < 32) {
+    throw new Error('EDGE_SECRET must be at least 32 characters while TRUST_EDGE_CLIENT_IP is on (generate one with `openssl rand -hex 32`)');
+  }
+}
+
 // No fallback secrets (item 328, Ziad's d7ee605): the secrets the app cannot
 // run without come from the environment (.env locally) and from nowhere else,
 // in every environment, test included. Missing: refuse to start. Production's
@@ -202,6 +252,16 @@ const env = {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+  },
+
+  // Where the client IP comes from (core/middleware/clientIp.js): req.ip, or
+  // with trustEdge, CF-Connecting-IP on a request that carries Cloudflare's
+  // secret header. `debug` logs what each layer said, for every request.
+  clientIp: {
+    debug: process.env.NODE_ENV !== 'test' && process.env.CLIENT_IP_DEBUG === 'true',
+    trustEdge: trustEdgeClientIp,
+    edgeHeader: edgeSecretHeader,
+    edgeSecret,
   },
 
   // Under NODE_ENV=test email and SMS are pinned to `console` (as storage is

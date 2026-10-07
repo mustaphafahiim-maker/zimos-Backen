@@ -5,6 +5,7 @@ const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { NotFoundError, ConflictError, ValidationError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { clientIp } = require('../../core/middleware/clientIp');
 const logger = require('../../core/utils/logger');
 const slugify = require('../../core/utils/slugify');
 const orderService = require('../orders/orderService');
@@ -951,7 +952,7 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
       paymentMethod: card ? 'card' : 'cod',
       funnelId,
     },
-    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
+    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? clientIp(req) : null },
     // The buyer's own accepted add-on to the order they just placed: it
     // shares that order's customer and often its variant, so duplicate_order
     // would flag (or refuse) every upsell. The original order already went

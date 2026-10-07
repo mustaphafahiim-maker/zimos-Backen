@@ -7,6 +7,7 @@ const rateLimit = require('./rateLimitStore').withSharedStore(require('express-r
 const { ipKeyGenerator } = require('express-rate-limit');
 const env = require('../../config/env');
 const { RateLimitError } = require('../errors/AppError');
+const { clientIp } = require('./clientIp');
 const { normalizePhone } = require('../utils/phone');
 const { verifyAccessToken } = require('../security/tokens');
 
@@ -36,7 +37,8 @@ function userOrIpKey(req) {
       // Not a valid access token: counted by IP below.
     }
   }
-  return ipKeyGenerator(req.ip);
+  // The library's default key, from the client IP (core/middleware/clientIp.js).
+  return ipKeyGenerator(clientIp(req));
 }
 
 const generalLimiter = rateLimit({
@@ -61,7 +63,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip,
-  keyGenerator: (req) => `${ipKeyGenerator(req.ip)}:${req.body && req.body.email ? req.body.email : ''}`,
+  keyGenerator: (req) => `${ipKeyGenerator(clientIp(req))}:${req.body && req.body.email ? req.body.email : ''}`,
   handler,
 });
 
@@ -70,9 +72,9 @@ const authLimiter = rateLimit({
  *
  * Our Next.js storefront renders store pages on its own server, so those API
  * calls all arrive from the storefront's IP, while cart/checkout calls come
- * straight from the shopper's browser. Keying on req.ip alone would put every
- * shopper of every store behind a single bucket. The shopper is identified by
- * the first of these that applies, most trusted first:
+ * straight from the shopper's browser. Keying on the client IP alone would put
+ * every shopper of every store behind a single bucket. The shopper is
+ * identified by the first of these that applies, most trusted first:
  *
  * 1. X-Storefront-Client-IP, honoured ONLY when the same request carries an
  *    X-Storefront-Secret equal to STOREFRONT_PROXY_SECRET. Trust: high. The
@@ -81,24 +83,25 @@ const authLimiter = rateLimit({
  *    X-Real-IP and CF-Connecting-IP are deliberately not used for this: our
  *    hosting edge rewrites or appends to them (and its documented behaviour has
  *    changed over time), their leftmost entry is whatever the client sent, and
- *    this API is not served behind Cloudflare (merchant custom domains are, but
- *    they reach /shop, not this API) — none of them can prove the value came
- *    from our storefront.
+ *    CF-Connecting-IP names the visitor, not our storefront — none of them can
+ *    prove the value came from our storefront.
  *
- * 2. req.ip, as Express derives it with `trust proxy` = 1 (the single hop our
- *    hosting edge reports). Trust: medium. The client cannot pick it, but many
- *    shoppers can share it (mobile carrier NAT, offices).
+ * 2. The client IP, clientIp(req) (core/middleware/clientIp.js): req.ip as
+ *    Express derives it with `trust proxy` = 1 (the single hop our hosting edge
+ *    reports), or with TRUST_EDGE_CLIENT_IP on, Cloudflare's CF-Connecting-IP
+ *    when the request proves it crossed Cloudflare. Trust: medium. The client
+ *    cannot pick it, but many shoppers can share it (mobile carrier NAT, offices).
  *
  * 3. X-Cart-Token (the 48-hex-char token cartService issues), only ever
- *    combined with req.ip, never on its own. Trust: low — the client chooses
- *    it — so it just splits shoppers who share an IP. Rotating tokens to dodge
- *    the limit is capped by the per-IP ceiling below.
+ *    combined with the client IP, never on its own. Trust: low — the client
+ *    chooses it — so it just splits shoppers who share an IP. Rotating tokens to
+ *    dodge the limit is capped by the per-IP ceiling below.
  *
  * Every request then passes two limiters:
  *   - visitor:    RATE_LIMIT_MAX per shopper as identified above;
- *   - connection: a ceiling per req.ip — STOREFRONT_IP_RATE_LIMIT_MAX normally,
+ *   - connection: a ceiling per client IP — STOREFRONT_IP_RATE_LIMIT_MAX normally,
  *     STOREFRONT_SERVER_RATE_LIMIT_MAX for our storefront server (valid secret,
- *     or req.ip listed in STOREFRONT_SERVER_IP). The server's own calls that
+ *     or a client IP listed in STOREFRONT_SERVER_IP). The server's own calls that
  *     name no shopper skip the visitor bucket and are bounded by that ceiling
  *     alone, so a gap in IP forwarding degrades to a higher shared limit rather
  *     than stopping every shopper at RATE_LIMIT_MAX. STOREFRONT_SERVER_IP never
@@ -141,7 +144,7 @@ function buildIpList(entries) {
 }
 
 function resolveStorefrontClient(req, { secretDigest, serverIps }) {
-  const connectionIp = parseIp(req.ip);
+  const connectionIp = parseIp(clientIp(req));
   const connection = connectionIp ? ipKeyGenerator(connectionIp) : 'unknown';
 
   const provided = req.headers[STOREFRONT_SECRET_HEADER];
@@ -316,7 +319,7 @@ const trackingLimiter = createTrackingLimiter({
 function createSuggestLimiter({ minuteMax, hourMax, skip: skipAll = () => false }) {
   const key = (req) => {
     const client = req.storefrontClient;
-    const who = (client && (client.visitorKey || client.connectionKey)) || `ip:${ipKeyGenerator(req.ip || '')}`;
+    const who = (client && (client.visitorKey || client.connectionKey)) || `ip:${ipKeyGenerator(clientIp(req) || '')}`;
     return `suggest:${who}`;
   };
   const bucket = (windowMs, limit, standardHeaders, prefix) =>
@@ -350,7 +353,7 @@ const suggestLimiter = createSuggestLimiter({
 const VISITOR_HEADER_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 function createUploadLimiter({ ipPerMinute, ipPerHour, visitorPerMinute, visitorPerHour, skip: skipAll = () => false }) {
-  const ipKey = (req) => `upload-ip:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`;
+  const ipKey = (req) => `upload-ip:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`;
   const visitorKey = (req) => {
     const id = req.headers['x-visitor-id'];
     return typeof id === 'string' && VISITOR_HEADER_PATTERN.test(id) ? `upload-visitor:${id}` : null;
@@ -393,7 +396,7 @@ const uploadLimiter = createUploadLimiter({
  * for a person trying a few names, not for a list.
  */
 function createUsernameCheckLimiter({ minuteMax, hourMax, skip: skipAll = () => false }) {
-  const ipKey = (req) => `username-check:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`;
+  const ipKey = (req) => `username-check:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`;
   const bucket = (windowMs, limit, prefix, standardHeaders) =>
     rateLimit({
       windowMs,
@@ -427,7 +430,7 @@ function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}
     standardHeaders: true,
     legacyHeaders: false,
     skip: skipAll,
-    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`,
+    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
     handler,
   });
 }

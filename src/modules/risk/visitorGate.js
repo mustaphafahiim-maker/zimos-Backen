@@ -5,6 +5,7 @@ const net = require('net');
 const db = require('../../db/models');
 const { AppError } = require('../../core/errors/AppError');
 const ipIntel = require('./ipIntel');
+const { clientIp: clientIpOf } = require('../../core/middleware/clientIp');
 
 /**
  * Who is on the other end of a public store request, and whether the store
@@ -36,7 +37,7 @@ function sha256(value) {
  * The shopper's IP. Server-rendered pages reach the API from the storefront
  * server, which names the shopper in X-Storefront-Client-IP and proves itself
  * with X-Storefront-Secret (the same pair core/middleware/rateLimiters
- * trusts); a browser's own call carries the shopper's address as req.ip.
+ * trusts); a browser's own call carries the shopper's address (clientIp).
  */
 function visitorIp(req) {
   if (!req) return null;
@@ -46,7 +47,7 @@ function visitorIp(req) {
     const forwarded = parseIp(req.headers[CLIENT_IP_HEADER]);
     if (forwarded) return forwarded;
   }
-  return parseIp(req.ip);
+  return parseIp(clientIpOf(req));
 }
 
 /** `{ ip, ipCountry, isVpn }` for the fraud rules and the order row. */

@@ -10,6 +10,7 @@ const {
 } = require('../../core/security/tokens');
 const { AppError, AuthenticationError, ConflictError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { clientIp } = require('../../core/middleware/clientIp');
 const notify = require('../notifications/notify');
 const googleClient = require('./googleClient');
 const otpService = require('../otp/otpService');
@@ -39,7 +40,7 @@ async function createSession(user, req) {
     userId: user.id,
     refreshTokenHash: hash,
     userAgent: req ? req.headers['user-agent'] : null,
-    ipAddress: req ? req.ip : null,
+    ipAddress: req ? clientIp(req) : null,
     expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
   });
   return { raw, session };
@@ -93,7 +94,7 @@ async function register({ email, password, fullName, phone, username, planId, bi
     }
     // Checked before the account exists, so one address or IP cannot mint
     // accounts past the code limits.
-    await verificationCodes.assertCanSend({ channel: 'email', target: String(email).toLowerCase(), ip: req ? req.ip : null });
+    await verificationCodes.assertCanSend({ channel: 'email', target: String(email).toLowerCase(), ip: req ? clientIp(req) : null });
   }
 
   const passwordHash = await hashPassword(password);
@@ -101,7 +102,7 @@ async function register({ email, password, fullName, phone, username, planId, bi
 
   if (verifying) {
     await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
-    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
     return signupPolicy.verificationResponse(user, sent);
   }
 
@@ -198,7 +199,7 @@ async function login({ email, password, locale }, req) {
     if (!signupPolicy.isVerified(user)) {
       let sent = null;
       try {
-        sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+        sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
       } catch (err) {
         if (!(err instanceof AppError) || err.statusCode !== 429) throw err;
       }
@@ -405,7 +406,7 @@ function assertUnconfirmed(user) {
 /** POST /auth/verify/send — a new code by 'email' or 'sms' (the account's own phone). */
 async function sendVerificationCode(user, { channel = 'email', locale }, req) {
   assertUnconfirmed(user);
-  const sent = await verificationCodes.sendCode(user, channel, { ip: req ? req.ip : null, locale, req });
+  const sent = await verificationCodes.sendCode(user, channel, { ip: req ? clientIp(req) : null, locale, req });
   return { sent: true, ...sent };
 }
 

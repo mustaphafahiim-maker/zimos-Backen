@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
 const env = require('./config/env');
 const requestId = require('./core/middleware/requestId');
+const { resolveClientIp, clientIp } = require('./core/middleware/clientIp');
 const { corsPolicy } = require('./core/middleware/cors');
 const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter } = require('./core/middleware/rateLimiters');
 const { errorHandler, notFoundHandler } = require('./core/middleware/errorHandler');
@@ -89,6 +90,8 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 app.use(requestId);
+// The client IP, once, before the request log and the rate limits read it.
+app.use(resolveClientIp);
 // Error messages in Arabic or French when the request asks (core/errors/errorMessages.js).
 app.use(require('./core/errors/errorMessages').translateErrors);
 app.use(helmet());
@@ -117,7 +120,7 @@ if (!env.isTest) {
   app.use((req, res, next) => {
     // Gateway callbacks carry their signature in the query string (?hmac=):
     // it never reaches a log line.
-    logger.info(`${req.method} ${redactUrl(req.originalUrl)}`, { requestId: req.id, ip: req.ip });
+    logger.info(`${req.method} ${redactUrl(req.originalUrl)}`, { requestId: req.id, ip: clientIp(req) });
     next();
   });
 }

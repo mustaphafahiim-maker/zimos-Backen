@@ -13,6 +13,7 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
  * Shopper self-service on orders (spec-gaps item 220).
@@ -68,7 +69,7 @@ function allowed(workspace, order, now = new Date()) {
 }
 
 // The merchant's cancellation reads req.user.id; a shopper has none (actor null in the audit and history).
-const shopperReq = (req) => ({ ip: req.ip, headers: req.headers, user: { id: null }, stageChangeReason: 'Cancelled by the customer' });
+const shopperReq = (req) => ({ ip: clientIp(req), headers: req.headers, user: { id: null }, stageChangeReason: 'Cancelled by the customer' });
 
 async function cancel(workspace, order, reason, req) {
   const a = allowed(workspace, order);

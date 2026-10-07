@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../../db/models');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /**
  * The only function in the codebase that writes to audit_logs. No route
@@ -27,7 +28,7 @@ async function recordAudit({
       action,
       entityType,
       entityId: entityId ? String(entityId) : null,
-      ipAddress: req ? req.ip : null,
+      ipAddress: req ? clientIp(req) : null,
       userAgent: req ? req.headers['user-agent'] : null,
       beforeState: before,
       afterState: after,
