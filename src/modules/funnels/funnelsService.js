@@ -1076,9 +1076,23 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       }
     }
     if (outcome.type === 'completed_checkout' && outcome.orderId) {
-      const [n] = await db.Order.update(
+      // Only an order placed during this session, outside any other funnel and
+      // not already another session's, joins it: paths route on it (funnelRouting `when`).
+      const claimed = outcome.orderId !== session.orderId && (await db.FunnelSession.count({
+        where: { workspaceId, orderId: outcome.orderId, id: { [Op.ne]: session.id } },
+        transaction: t,
+      }));
+      const [n] = claimed ? [0] : await db.Order.update(
         { funnelId },
-        { where: { id: outcome.orderId, workspaceId }, transaction: t }
+        {
+          where: {
+            id: outcome.orderId,
+            workspaceId,
+            createdAt: { [Op.gte]: session.createdAt },
+            [Op.or]: [{ funnelId: null }, { funnelId }],
+          },
+          transaction: t,
+        }
       );
       if (n) {
         session.orderId = outcome.orderId;

@@ -42,7 +42,7 @@ const seoToShare = (seo) => Object.fromEntries(Object.entries(seo || {}).filter(
 async function snapshotOf(workspaceId, funnelId) {
   const funnel = await db.Funnel.findOne({ where: { id: funnelId, workspaceId } });
   if (!funnel) throw new NotFoundError('Funnel');
-  const { withoutProducts } = require('../funnels/funnelExtras');
+  const { withoutProducts, importedCondition } = require('../funnels/funnelExtras');
   const [steps, edges] = await Promise.all([
     db.FunnelStep.findAll({ where: { funnelId }, order: [['createdAt', 'ASC']] }),
     db.FunnelEdge.findAll({ where: { funnelId }, order: [['priority', 'DESC'], ['createdAt', 'ASC']] }),
@@ -52,7 +52,7 @@ async function snapshotOf(workspaceId, funnelId) {
     // SEO: the title, description and share image only (item 303) — a canonical address or anything else
     // would point adopters' pages at the author's site.
     steps: steps.map((s) => ({ key: s.key, stepType: s.stepType, name: s.name, builderData: withoutProducts(s.builderData), seo: seoToShare(s.seo) })),
-    edges: edges.map((e) => ({ fromStepKey: e.fromStepKey, toStepKey: e.toStepKey, condition: e.condition || null, priority: e.priority })),
+    edges: edges.map((e) => ({ fromStepKey: e.fromStepKey, toStepKey: e.toStepKey, condition: e.condition ? importedCondition(e.condition) : null, priority: e.priority })),
   };
   if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > MAX_SNAPSHOT_BYTES) throw new AppError('VALIDATION_ERROR', 'The funnel is too large to share', 422);
   return { funnel, snapshot };
@@ -151,6 +151,8 @@ async function use(workspaceId, id, { name }, req) {
   const t = await db.MarketplaceTemplate.findOne({ where: { id, status: 'approved' } });
   if (!t) throw new NotFoundError('Template');
   const entitlements = require('../billing/entitlementsService');
+  // Templates stored before item 376: a path's `when` products are the author's, so they arrive empty.
+  const { importedCondition } = require('../funnels/funnelExtras');
   const result = await db.sequelize.transaction(async (transaction) => {
     const fid = crypto.randomUUID();
     await entitlements.recordFunnelCreation(workspaceId, fid, 'duplicate', { transaction });
@@ -159,7 +161,7 @@ async function use(workspaceId, id, { name }, req) {
       await db.FunnelStep.create({ workspaceId, funnelId: funnel.id, key: s.key, stepType: s.stepType, name: s.name, builderData: s.builderData, offerId: null, bumpOfferId: null, seo: seoToShare(s.seo) }, { transaction });
     }
     for (const e of t.snapshot.edges || []) {
-      await db.FunnelEdge.create({ workspaceId, funnelId: funnel.id, fromStepKey: e.fromStepKey, toStepKey: e.toStepKey, condition: e.condition, priority: e.priority }, { transaction });
+      await db.FunnelEdge.create({ workspaceId, funnelId: funnel.id, fromStepKey: e.fromStepKey, toStepKey: e.toStepKey, condition: e.condition ? importedCondition(e.condition) : null, priority: e.priority }, { transaction });
     }
     await t.increment('usesCount', { transaction });
     await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'marketplace.use', entityType: 'Funnel', entityId: funnel.id, after: { name: funnel.name }, metadata: { templateId: t.id }, req, transaction });

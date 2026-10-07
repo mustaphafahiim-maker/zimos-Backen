@@ -263,7 +263,10 @@ async function listIssues(workspaceId, funnelId) {
   );
   for (const p of graph) {
     const match = /^steps\.([^.]+)/.exec(p.field || '');
-    issues.push({ severity: 'fatal', code: 'graph', stepKey: match ? match[1] : null, field: p.field || null, message: p.message });
+    // An edge problem names the edge by id, not by its place in this unordered list.
+    const edge = /^edges\[(\d+)\]\.(.+)$/.exec(p.field || '');
+    const field = edge && edges[Number(edge[1])] ? `edges.${edges[Number(edge[1])].id}.${edge[2]}` : p.field || null;
+    issues.push({ severity: 'fatal', code: 'graph', stepKey: match ? match[1] : null, field, message: p.message });
   }
   // A path's condition naming products that are not this store's (funnelRouting `when`).
   const refs = await require('./funnelRouting').whenReferenceProblems(workspaceId, edges, { fieldOf: (i) => `edges.${edges[i].id}.condition` });
@@ -387,4 +390,4 @@ function mount(router, { MANAGE, requireCreationAllowed }) {
   );
 }
 
-module.exports = { mount, shareFunnel, unshareFunnel, importFunnel, getDraft, saveDraft, discardDraft, listIssues, withoutProducts };
+module.exports = { mount, shareFunnel, unshareFunnel, importFunnel, getDraft, saveDraft, discardDraft, listIssues, withoutProducts, importedCondition };
