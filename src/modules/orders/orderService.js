@@ -1338,6 +1338,23 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
   });
 }
 
+const blank = (v) => (v === undefined || v === null ? '' : String(v));
+const sameFields = (a, b, keys) => keys.every((k) => blank((a || {})[k]) === blank((b || {})[k]));
+// What a courier booking carries of the receiver: the address fields this endpoint sets
+// (orderValidation's address), and the name and phones.
+const COURIER_ADDRESS_FIELDS = ['country', 'province', 'city', 'area', 'addressLine', 'placeId', 'postalCode', 'notes'];
+const COURIER_CONTACT_FIELDS = ['fullName', 'phone', 'alternatePhone'];
+
+/** Whether an updateOrderLimited body changes what a courier was given at booking. */
+function receiverChanges(order, data) {
+  if (data.shippingAddress !== undefined && !sameFields(order.shippingAddressSnapshot, data.shippingAddress, COURIER_ADDRESS_FIELDS)) return true;
+  if (data.contact !== undefined) {
+    const next = { ...(order.contactSnapshot || {}), ...data.contact };
+    if (!sameFields(order.contactSnapshot, next, COURIER_CONTACT_FIELDS)) return true;
+  }
+  return false;
+}
+
 /**
  * The only fields a merchant may edit on an existing order: the shipping
  * address snapshot, the customer's contact details and the internal notes. Totals, line items and pricing are
@@ -1349,6 +1366,10 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
     if (!order) throw new NotFoundError('Order');
     if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
     await assertNotShipped(order, transaction);
+    // The courier delivers to the address and receiver it was given at booking (item 352):
+    // a real change to either waits for the booking to be cancelled. Notes, the email, or
+    // the same values sent again stay allowed.
+    if (receiverChanges(order, data)) await carrierShipmentService.assertNoCarrierBooking(order.id, transaction);
 
     const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes };
     const updates = {};

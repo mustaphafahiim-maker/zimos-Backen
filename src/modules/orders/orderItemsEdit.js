@@ -60,6 +60,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
   }
   await assertNotShipped(order, transaction);
+  // A courier booking would still collect the old COD amount (item 352).
+  await require('../shipping/carrierShipmentService').assertNoCarrierBooking(order.id, transaction);
   if (Number(order.amountPaid) > 0) {
     throw new AppError('ORDER_ALREADY_PAID', 'This order has been paid; correct it with a refund instead of editing its items', 409);
   }

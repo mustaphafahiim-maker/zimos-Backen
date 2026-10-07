@@ -60,9 +60,11 @@ function allowed(workspace, order, now = new Date()) {
   const age = (now - new Date(order.createdAt)) / 60000;
   const within = (x) => x.enabled && (x.minutes === null || age <= x.minutes);
   const closed = order.cancelledAt || shipped;
+  // A courier booking carries the address it was given; the store changes it with the courier (item 352).
+  const booked = (order.shipments || []).some(require('../shipping/carrierShipmentService').liveCarrierBooking);
   return {
     canCancel: Boolean(!closed && !paidOnline && order.confirmationState !== 'confirmed' && within(s.cancel)),
-    canChangeAddress: Boolean(!closed && within(s.address)),
+    canChangeAddress: Boolean(!closed && !booked && within(s.address)),
     cancelUntil: s.cancel.enabled && s.cancel.minutes !== null ? new Date(new Date(order.createdAt).getTime() + s.cancel.minutes * 60000) : null,
     addressUntil: s.address.enabled && s.address.minutes !== null ? new Date(new Date(order.createdAt).getTime() + s.address.minutes * 60000) : null,
   };

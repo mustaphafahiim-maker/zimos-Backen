@@ -4117,3 +4117,19 @@ The "Cancel shipment" action on the order page (and any status picker that sets 
 - `CARRIER_CANCEL_FAILED`: keep the shipment card as it is and show an error box «شركة الشحن رفضت إلغاء الشحنة، فالشحنة لسه شغالة. لو المندوب استلمها، كلّم شركة الشحن» / "The courier refused to cancel this shipment, so it is still live. If the courier already picked it up, contact them", with the server's message underneath and a «حدّث الحالة» / "Sync status" button (the existing POST `.../shipments/:id/sync`).
 - `CARRIER_PERMISSION_DENIED`: «حساب شركة الشحن مش مسموح له يلغي شحنات. ألغيها من لوحة شركة الشحن» / "This courier account isn't allowed to cancel shipments. Cancel it in the courier's dashboard".
 - `CARRIER_NOT_CONNECTED`: «اربط حساب شركة الشحن تاني عشان تلغي الشحنة» / "Connect the courier account again to cancel this shipment", linking to Settings → Shipping → Couriers.
+
+## 352. Editing a courier-booked order waits for the booking to be cancelled — UI: pending
+
+An order booked with Bosta, J&T, Mylerz or the sandbox courier whose shipment is still waiting for pickup (`created`) or in an exception (`failed`) can no longer have its items, address or receiver changed: the courier would still collect the old COD amount at the old address. The merchant cancels the booking first (the existing shipment cancel, item 351), edits the order, then books again. A manual shipment row does not block anything. Nothing new to call.
+
+### Endpoints (unchanged bodies, one new refusal)
+- **PUT `/api/v1/workspaces/:workspaceId/orders/:orderId/items`** and **POST `.../orders/:orderId/items/preview`** — permission `orders.manage`.
+- **PATCH `/api/v1/workspaces/:workspaceId/orders/:orderId`** — permission `orders.manage`. Refused only when `shippingAddress` changes one of country, province, city, area, addressLine, placeId, postalCode or notes, or `contact` changes fullName, phone or alternatePhone. `notes` alone, a contact email, or the same address sent again still save (200).
+- Refusal, all three: 409
+  `{ "error": { "code": "SHIPMENT_BOOKED", "message": "This order is booked with a courier. Cancel the courier booking before editing this order.", "details": { "shipmentId": "…", "carrierCode": "bosta", "waybillNumber": "12345678" } } }`
+- **GET `/api/v1/store/:workspaceId/orders/:orderId/self-service`** (storefront, shopper) — `canChangeAddress` is now `false` while such a booking is live, and POST `.../self-service/address` answers the existing 409 `ADDRESS_CHANGE_NOT_ALLOWED`.
+
+### Screens
+- Dashboard → Orders → order page → "Edit items" and "Edit address / customer": when the order has a shipment with `status` `created` or `failed` booked with a courier (it has a `waybillNumber` and a courier `carrierCode`, not `manual`), show the buttons disabled with the hint «الطلب محجوز مع شركة الشحن. ألغِ الشحنة الأول عشان تعدّل الطلب، وبعدين احجزه تاني» / "This order is booked with a courier. Cancel the shipment first to edit the order, then book it again", with a «إلغاء الشحنة» / "Cancel shipment" link to the Shipment card's cancel action.
+- On a 409 `SHIPMENT_BOOKED` from any of the three calls (another tab booked it meanwhile): keep the form open with the same message as an error box and the "Cancel shipment" link; the order is unchanged.
+- Storefront order page / tracking page: when `canChangeAddress` is false the "Change address" button stays hidden as today; if the shopper's POST gets `ADDRESS_CHANGE_NOT_ALLOWED`, show «العنوان مينفعش يتغير من هنا دلوقتي، كلّم المتجر» / "The address can no longer be changed here — contact the store".

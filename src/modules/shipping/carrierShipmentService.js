@@ -195,6 +195,28 @@ async function assertNoActiveShipment(orderId, transaction) {
   }
 }
 
+/** A courier booking the courier could still act on: 'created', or 'failed' (Bosta may re-attempt). */
+const liveCarrierBooking = (shipment) => ['created', 'failed'].includes(shipment.status) && isCarrierBooked(shipment);
+
+/**
+ * 409 SHIPMENT_BOOKED: the order is booked with a courier that will collect
+ * the COD amount and deliver to the address it was given at booking. Its
+ * items, total, address or receiver can't change under it (item 352); the
+ * booking is cancelled first (PATCH the shipment to 'cancelled'), then the
+ * order is edited and booked again.
+ */
+async function assertNoCarrierBooking(orderId, transaction) {
+  const shipments = await db.Shipment.findAll({ where: { orderId, status: ['created', 'failed'] }, transaction });
+  const booked = shipments.find(liveCarrierBooking);
+  if (booked) {
+    throw new AppError('SHIPMENT_BOOKED', 'This order is booked with a courier. Cancel the courier booking before editing this order.', 409, {
+      shipmentId: booked.id,
+      carrierCode: booked.carrierCode,
+      waybillNumber: booked.waybillNumber,
+    });
+  }
+}
+
 /**
  * A shipment we booked through a carrier adapter — as opposed to a manual
  * row whose free-text carrierCode happens to name one. Only these are synced,
@@ -764,6 +786,8 @@ module.exports = {
   assertConfirmedOrPaid,
   shouldBookWithCarrier,
   assertNoActiveShipment,
+  assertNoCarrierBooking,
+  liveCarrierBooking,
   isCarrierBooked,
   createCarrierShipment,
   applyCarrierStatus,
