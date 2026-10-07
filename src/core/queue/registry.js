@@ -13,7 +13,9 @@ const path = require('path');
  *     // Named jobs other code queues with queue.add(queue, name, payload).
  *     processors: [{ queue: 'io', name: 'orders.export', handle: async (job) => {} }],
  *     // Either may say `once: true` (never run again after its worker stopped
- *     // mid-run) and `onInterrupted` (called with the event or job when that happens).
+ *     // mid-run) and `onInterrupted` (called with the event or job when that happens);
+ *     // a processor may say `resumable: true` (safe to run again: put back in line
+ *     // when its worker stopped, even after its last attempt).
  *     // Repeatable jobs.
  *     schedules: [{ name: 'carriers.poll_status', everyMs: 30 * 60 * 1000, handle: async () => {} }],
  *   };
@@ -48,7 +50,7 @@ function load() {
   // eslint-disable-next-line global-require
   const outbox = require('../outbox/outbox');
   for (const processor of loaded.processors) {
-    queue.handle(processor.queue, processor.name, processor.handle, { once: processor.once, onInterrupted: processor.onInterrupted });
+    queue.handle(processor.queue, processor.name, processor.handle, { once: processor.once, resumable: processor.resumable, onInterrupted: processor.onInterrupted });
   }
   for (const schedule of loaded.schedules) queue.every(schedule.name, schedule.everyMs, schedule.handle);
   outbox.registerConsumers(loaded.consumers);

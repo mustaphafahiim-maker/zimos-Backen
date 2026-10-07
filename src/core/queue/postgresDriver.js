@@ -38,12 +38,17 @@ let stopped = true;
 let lastStaleSweep = 0;
 // "queue/name" of jobs that are never run again after their worker stopped
 // mid-run (a courier booking: it may have gone through), and what is told
-// when that happens (index.js). Set by configureInterruptions.
+// when that happens (index.js); and of jobs safe to run again, put back in
+// line even after their last attempt, at most RESUMES more times. Set by
+// configureInterruptions.
 let onceKeys = [];
+let resumableKeys = [];
 let onInterrupted = null;
+const RESUMES = 2;
 
-function configureInterruptions({ once = [], interrupted = null } = {}) {
+function configureInterruptions({ once = [], resumable = [], interrupted = null } = {}) {
   onceKeys = [...once];
+  resumableKeys = [...resumable];
   onInterrupted = interrupted;
 }
 
@@ -165,24 +170,41 @@ const INTERRUPTED = 'Its worker stopped while it was running; not run again';
 async function releaseStale() {
   if (Date.now() - lastStaleSweep < Math.min(60 * 1000, staleLockMs / 2)) return;
   lastStaleSweep = Date.now();
-  // Jobs that may not run twice, and jobs that had their last attempt, fail.
-  const failed = await db.sequelize.query(
-    `UPDATE queue_jobs SET status = 'failed', finished_at = NOW(), locked_at = NULL, locked_by = NULL, last_error = :message, updated_at = NOW()
-      WHERE status = 'active' AND locked_at < NOW() - (:staleMs * INTERVAL '1 millisecond')
-        AND (attempts >= max_attempts OR (queue || '/' || name) IN (:once))
-  RETURNING id, queue, name, payload, attempts, max_attempts AS "maxAttempts", workspace_id AS "workspaceId"`,
-    { replacements: { staleMs: staleLockMs, message: INTERRUPTED, once: onceKeys.length ? onceKeys : [''] }, type: QueryTypes.SELECT, logging: false }
+  // One statement, one cutoff: jobs that may not run twice, and jobs that had
+  // their last attempt (a resumable one: RESUMES more), fail; the rest go back
+  // in line. A job never goes back in line because it went stale a moment
+  // after its `once` neighbours were failed.
+  const swept = await db.sequelize.query(
+    `WITH stale AS (
+       SELECT id, ((queue || '/' || name) IN (:once)
+                   OR attempts >= max_attempts + CASE WHEN (queue || '/' || name) IN (:resumable) THEN :resumes ELSE 0 END) AS fail
+         FROM queue_jobs
+        WHERE status = 'active' AND locked_at < NOW() - (:staleMs * INTERVAL '1 millisecond')
+          FOR UPDATE SKIP LOCKED)
+     UPDATE queue_jobs j
+        SET status = CASE WHEN s.fail THEN 'failed' ELSE 'pending' END,
+            finished_at = CASE WHEN s.fail THEN NOW() ELSE j.finished_at END,
+            last_error = CASE WHEN s.fail THEN :message ELSE j.last_error END,
+            locked_at = NULL, locked_by = NULL, updated_at = NOW()
+       FROM stale s
+      WHERE j.id = s.id
+  RETURNING j.id, j.queue, j.name, j.payload, j.attempts, j.max_attempts AS "maxAttempts", j.workspace_id AS "workspaceId", s.fail`,
+    {
+      replacements: {
+        staleMs: staleLockMs,
+        message: INTERRUPTED,
+        once: onceKeys.length ? onceKeys : [''],
+        resumable: resumableKeys.length ? resumableKeys : [''],
+        resumes: RESUMES,
+      },
+      type: QueryTypes.SELECT,
+      logging: false,
+    }
   );
-  for (const job of failed) {
+  for (const job of swept.filter((row) => row.fail)) {
     logger.error(`[queue] ${job.queue}/${job.name} ${job.id} was cut off on attempt ${job.attempts} and is not run again`);
     if (onInterrupted) await onInterrupted(job);
   }
-  // The rest go back in line.
-  await db.sequelize.query(
-    `UPDATE queue_jobs SET status = 'pending', locked_at = NULL, locked_by = NULL, updated_at = NOW()
-      WHERE status = 'active' AND locked_at < NOW() - (:staleMs * INTERVAL '1 millisecond')`,
-    { replacements: { staleMs: staleLockMs }, logging: false }
-  );
 }
 
 async function poll() {

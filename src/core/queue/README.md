@@ -94,6 +94,12 @@ its worker stop (a restart, a crash):
   processor says `once: true` — work that may have gone through and cannot be
   repeated, like the automatic courier booking. `onInterrupted` (called with
   the event for a consumer, the job for a processor) tells the merchant.
+- a processor that says `resumable: true` (safe to run again: the
+  email-marketing and Sheets syncs) goes back in line even after its last
+  attempt, up to two more times, then is failed like the rest.
+
+All of this is one statement with one cutoff, so a `once` job that goes stale
+a moment later is never put back in line.
 
 ```js
 { name: 'carrier_auto_booking', queue: 'carriers', events: ['order.confirmed'], handle, once: true, onInterrupted: (event) => {} }

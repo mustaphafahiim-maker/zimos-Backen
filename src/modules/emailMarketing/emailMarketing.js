@@ -246,6 +246,15 @@ async function backfill(job) {
   return { synced, error };
 }
 
+/** A sync whose worker kept stopping (core/queue, item 365): the card stops showing "syncing". */
+async function backfillInterrupted(job) {
+  const { workspaceId, code } = job.payload || {};
+  if (!workspaceId || !code) return;
+  const row = await db.WorkspaceIntegration.findOne({ where: { workspaceId, provider: integrationKey(code) } });
+  if (!row || !row.config || !row.config.syncing) return;
+  await row.update({ lastError: 'The sync stopped before it finished. Sync again.', config: { ...row.config, syncing: false } });
+}
+
 // ----------------------------------------------------------------- routes --
 
 // Mounted at /api/v1/workspaces/:workspaceId/email-marketing.
@@ -275,4 +284,4 @@ router.patch(
 );
 router.post('/providers/:code/sync', validate({ params: Joi.object({ ...ws, code }) }), asyncHandler(async (req, res) => res.status(202).json(await startSync(wid(req), req.params.code, req))));
 
-module.exports = { router, onContactEvent, backfill, contactOf };
+module.exports = { router, onContactEvent, backfill, backfillInterrupted, contactOf };

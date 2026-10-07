@@ -21,19 +21,23 @@ const { QUEUE_NAMES } = require('./queues');
 const driver = env.queue.redisUrl ? require('./bullmqDriver') : require('./postgresDriver');
 
 const jobHandlers = new Map(); // "queue/name" → handle(job)
-const jobOptions = new Map(); // "queue/name" → { once, onInterrupted }
+const jobOptions = new Map(); // "queue/name" → { once, resumable, onInterrupted }
 const scheduleHandlers = new Map(); // name → { everyMs, handle }
 
 /**
  * Registers what runs for jobs called `name` on `queue`. One handler per pair.
  * Options: `once` — a job whose worker stopped mid-run is failed instead of
- * run again (it may have done its work: a courier booking); `onInterrupted(job)`
- * — called when that happens, to tell the merchant.
+ * run again (it may have done its work: a courier booking); `resumable` — safe
+ * to run again, so it is put back in line even after its last attempt (a sync
+ * that skips what it already did); `onInterrupted(job)` — called when a job is
+ * failed that way, to tell the merchant.
  */
 function handle(queue, name, fn, options = {}) {
   const key = `${queue}/${name}`;
   jobHandlers.set(key, fn);
-  if (options.once || options.onInterrupted) jobOptions.set(key, { once: Boolean(options.once), onInterrupted: options.onInterrupted || null });
+  if (options.once || options.resumable || options.onInterrupted) {
+    jobOptions.set(key, { once: Boolean(options.once), resumable: Boolean(options.resumable) && !options.once, onInterrupted: options.onInterrupted || null });
+  }
   else jobOptions.delete(key);
 }
 
@@ -114,7 +118,8 @@ async function start() {
   }
   if (driver.configureInterruptions) {
     const once = [...jobOptions].filter(([, options]) => options.once).map(([key]) => key);
-    driver.configureInterruptions({ once, interrupted });
+    const resumable = [...jobOptions].filter(([, options]) => options.resumable).map(([key]) => key);
+    driver.configureInterruptions({ once, resumable, interrupted });
   }
   await driver.start({ pollMs: env.queue.pollMs, concurrency: env.queue.concurrency, staleLockMs: env.queue.staleLockMs });
   logger.info(`Queue worker running on the ${driver.name} driver`, {
