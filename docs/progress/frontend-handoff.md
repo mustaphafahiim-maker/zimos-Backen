@@ -3271,3 +3271,9 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - `GET /store/:ws/account/google` now also returns `nonce`. Pass it to Google Identity Services: `google.accounts.id.initialize({ client_id, nonce, callback })`, and fetch a fresh config (nonce) each time the sign-in button is shown — it lasts 10 minutes. A token without this store's fresh nonce is refused (401 `GOOGLE_TOKEN_INVALID`: «جرّب تاني» / "Try again" → refetch the config).
 - Sandbox tokens (dev only): `sandbox:<email>:<subject>:<nonce>`.
+
+## 275. Quotes — accept once, exact prices — UI: pending (small)
+
+- `POST /store/:ws/quotes/:id/accept` answered twice (double click, a retry) now makes one order: the second answers 409 `QUOTE_NOT_OPEN`. Storefront: on that code, reload the quote (`GET /store/:ws/quotes/:id?token=…`) and, when it shows `accepted` with an `orderId`, show the success state instead of an error: «تم قبول العرض وطلبك اتسجل» / "Quote accepted — your order is placed".
+- The order's total is now exactly the quote's `totalAmount` plus shipping: the store's automatic discount and quantity-bundle tiers no longer apply on top. Any "you save" line next to the quote total can go.
+- Decline / cancel / answer on a quote that was just accepted answer 409 (`QUOTE_NOT_OPEN` for the shopper, `QUOTE_CLOSED` for the team): reload the quote and show its state.

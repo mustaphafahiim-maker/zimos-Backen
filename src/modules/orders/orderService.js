@@ -417,7 +417,10 @@ async function createOrder(
 
     // Quantity bundles (modules/bundles): lowers the totals of the lines they
     // cover, before anything else looks at the subtotal.
-    const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
+    // A quote's prices are the merchant's exact prices (quotes/, item 275): no bundle tier,
+    // automatic discount or store minimum on top of them.
+    const exactPrices = payload[Symbol.for('zimos.exactPrices')] === true;
+    const bundleSnapshots = exactPrices ? [] : await applyBundleTiers(workspaceId, pricedLines, transaction);
     // A VIP tier with free shipping (vipTiers/, item 218) sets this on the checkout's payload: every line ships free.
     if (payload[Symbol.for('zimos.freeShipping')]) {
       for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
@@ -446,7 +449,7 @@ async function createOrder(
       discountsSnapshot = [{ code: discountCode, type: evaluation.discount.type, amount: discountAmount }];
     }
     const couponExtras = require('../discounts/couponExtras');
-    if (!discountCode) {
+    if (!discountCode && !exactPrices) {
       // No code typed: the store's best automatic discount, when one applies.
       const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
       if (automatic) {
@@ -457,7 +460,7 @@ async function createOrder(
     }
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
-    if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
+    if (!req.user && !shippingOverride && !exactPrices) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
     // …and so does a dropshipping supplier's own minimum (dropship/supplierRules.js, item 263).
     if (!req.user && !shippingOverride) await require('../dropship/supplierRules').assertMinimums(workspaceId, pricedLines, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.

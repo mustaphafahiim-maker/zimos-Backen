@@ -32,10 +32,14 @@ const { trackingLimiter } = require('../../core/middleware/rateLimiters');
  */
 
 const PINNED = Symbol.for('zimos.productTestPrice');
+const EXACT_PRICES = Symbol.for('zimos.exactPrices');
+const OPEN = ['new', 'quoted'];
 const hash = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const MAX_PER_IP_HOUR = 5;
 
 async function nextNumber(workspaceId, transaction) {
+  // One number at a time per store (item 275): two requests at once would both read the same MAX.
+  await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `quote-number:${workspaceId}` }, transaction });
   const [row] = await db.sequelize.query("SELECT COALESCE(MAX(NULLIF(regexp_replace(number, '\\D', '', 'g'), '')::int), 0) + 1 AS n FROM quote_requests WHERE workspace_id = :ws", { replacements: { ws: workspaceId }, type: db.Sequelize.QueryTypes.SELECT, transaction });
   return `Q-${String(row.n).padStart(4, '0')}`;
 }
@@ -98,31 +102,50 @@ async function request(workspace, body, req) {
 }
 
 async function accept(workspace, id, { token, shippingAddress, notes }, req) {
-  const q = await findByToken(workspace.id, id, token);
-  const state = stateOf(q);
-  if (state === 'expired') throw new AppError('QUOTE_EXPIRED', 'This quote has expired — ask for a new one', 409);
-  if (state !== 'quoted') throw new AppError('QUOTE_NOT_OPEN', 'This quote cannot be accepted', 409);
-  const items = q.quotedLines.map((l) => ({ variantId: l.variantId, quantity: l.quantity, [PINNED]: l.unitPrice }));
-  const { order } = await require('../orders/orderService').createOrder(workspace.id, {
-    contact: { fullName: q.contact.fullName, phone: q.contact.phone, email: q.contact.email || undefined },
-    shippingAddress, paymentMethod: 'cod', items, notes: [`Quote ${q.number}`, notes].filter(Boolean).join(' — ').slice(0, 1000),
-  }, req);
-  await q.update({ status: 'accepted', orderId: order.id });
-  await db.Order.update({ tags: [...new Set([...(order.tags || []), 'quote'])] }, { where: { id: order.id }, hooks: false });
+  await findByToken(workspace.id, id, token);
+  // The quote is locked while its order is made, in the order's own transaction (item 275):
+  // a double click or a retry waits, then finds it accepted — one order, never two.
+  const { q, order } = await db.sequelize.transaction(async (transaction) => {
+    const locked = await db.QuoteRequest.findOne({ where: { id, workspaceId: workspace.id }, lock: transaction.LOCK.UPDATE, transaction });
+    const state = stateOf(locked);
+    if (state === 'expired') throw new AppError('QUOTE_EXPIRED', 'This quote has expired — ask for a new one', 409);
+    if (state !== 'quoted') throw new AppError('QUOTE_NOT_OPEN', 'This quote cannot be accepted', 409);
+    const items = locked.quotedLines.map((l) => ({ variantId: l.variantId, quantity: l.quantity, [PINNED]: l.unitPrice }));
+    const { order: created } = await require('../orders/orderService').createOrder(workspace.id, {
+      contact: { fullName: locked.contact.fullName, phone: locked.contact.phone, email: locked.contact.email || undefined },
+      shippingAddress, paymentMethod: 'cod', items, notes: [`Quote ${locked.number}`, notes].filter(Boolean).join(' — ').slice(0, 1000),
+      // Exactly the quoted prices: no automatic discount or bundle tier on top.
+      [EXACT_PRICES]: true,
+    }, req, { transaction });
+    await locked.update({ status: 'accepted', orderId: created.id }, { transaction });
+    await db.Order.update({ tags: [...new Set([...(created.tags || []), 'quote'])] }, { where: { id: created.id }, hooks: false, transaction });
+    return { q: locked, order: created };
+  });
   return { quote: await view(q), orderId: order.id, orderNumber: order.orderNumber, totalAmount: String(order.totalAmount) };
+}
+
+/** Closes an open quote (declined / cancelled) unless an accept or another close got there first. */
+async function close(workspaceId, id, status, code = 'QUOTE_NOT_OPEN') {
+  const [n] = await db.QuoteRequest.update({ status }, { where: { id, workspaceId, status: OPEN } });
+  if (n !== 1) throw new AppError(code, 'This quote is closed', 409);
+  return db.QuoteRequest.findOne({ where: { id, workspaceId } });
 }
 
 // ----------------------------------------------------------------- staff --
 
 async function answer(workspaceId, id, body, req) {
-  const q = await db.QuoteRequest.findOne({ where: { id, workspaceId } });
-  if (!q) throw new NotFoundError('Quote');
-  if (!['new', 'quoted'].includes(q.status)) throw new AppError('QUOTE_CLOSED', 'This quote is closed', 409);
-  const requested = new Set(q.lines.map((l) => l.variantId));
-  if (body.lines.some((l) => !requested.has(l.variantId))) throw new ValidationError([{ field: 'lines', message: 'Quote only the products that were asked for' }]);
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name', 'slug', 'defaultCurrency', 'defaultLocale'] });
-  const firstQuote = q.status === 'new';
-  await q.update({ status: 'quoted', quotedLines: body.lines, quotedNote: body.note || null, validUntil: body.validUntil, currency: workspace.defaultCurrency || 'EGP', quotedAt: new Date(), quotedBy: req.user.id });
+  // Locked, so an answer can't reopen a quote the shopper is accepting or just closed (item 275).
+  const { q, firstQuote } = await db.sequelize.transaction(async (transaction) => {
+    const row = await db.QuoteRequest.findOne({ where: { id, workspaceId }, lock: transaction.LOCK.UPDATE, transaction });
+    if (!row) throw new NotFoundError('Quote');
+    if (!OPEN.includes(row.status)) throw new AppError('QUOTE_CLOSED', 'This quote is closed', 409);
+    const requested = new Set(row.lines.map((l) => l.variantId));
+    if (body.lines.some((l) => !requested.has(l.variantId))) throw new ValidationError([{ field: 'lines', message: 'Quote only the products that were asked for' }]);
+    const first = row.status === 'new';
+    await row.update({ status: 'quoted', quotedLines: body.lines, quotedNote: body.note || null, validUntil: body.validUntil, currency: workspace.defaultCurrency || 'EGP', quotedAt: new Date(), quotedBy: req.user.id }, { transaction });
+    return { q: row, firstQuote: first };
+  });
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'quote.answer', entityType: 'QuoteRequest', entityId: q.id, after: { lines: body.lines.length, validUntil: body.validUntil }, req });
   if (firstQuote && q.contact.email) {
     try {
@@ -159,10 +182,8 @@ store.get('/:quoteId', resolvePublicWorkspace, validate({ params: qp, query: Joi
 }));
 store.post('/:quoteId/accept', resolvePublicWorkspace, validate({ params: qp, body: Joi.object({ token: Joi.string().max(100).required(), shippingAddress: Joi.object({ country: Joi.string().length(2).default('EG'), province: Joi.string().max(120).required(), city: Joi.string().max(120).required(), area: Joi.string().max(120).allow('', null), addressLine: Joi.string().max(500).required(), placeId: Joi.string().uuid() }).required(), notes: Joi.string().trim().max(500).allow('', null) }) }), asyncHandler(async (req, res) => res.status(201).json(await accept(req.publicWorkspace, req.params.quoteId, req.body, req))));
 store.post('/:quoteId/decline', resolvePublicWorkspace, validate({ params: qp, body: Joi.object({ token: Joi.string().max(100).required() }) }), asyncHandler(async (req, res) => {
-  const q = await findByToken(req.publicWorkspace.id, req.params.quoteId, req.body.token);
-  if (!['new', 'quoted'].includes(q.status)) throw new AppError('QUOTE_NOT_OPEN', 'This quote is closed', 409);
-  await q.update({ status: 'declined' });
-  res.json({ quote: await view(q) });
+  await findByToken(req.publicWorkspace.id, req.params.quoteId, req.body.token);
+  res.json({ quote: await view(await close(req.publicWorkspace.id, req.params.quoteId, 'declined')) });
 }));
 
 // Mounted at /api/v1/workspaces/:workspaceId/quotes (orders.view / orders.manage).
@@ -186,11 +207,9 @@ staff.put(
   asyncHandler(async (req, res) => res.json({ quote: await answer(req.tenant.workspaceId, req.params.quoteId, req.body, req) }))
 );
 staff.post('/:quoteId/cancel', requirePermission(PERMISSIONS.ORDERS_MANAGE), validate({ params: one }), asyncHandler(async (req, res) => {
-  const q = await db.QuoteRequest.findOne({ where: { id: req.params.quoteId, workspaceId: req.tenant.workspaceId } });
+  const q = await db.QuoteRequest.findOne({ where: { id: req.params.quoteId, workspaceId: req.tenant.workspaceId }, attributes: ['id'] });
   if (!q) throw new NotFoundError('Quote');
-  if (!['new', 'quoted'].includes(q.status)) throw new AppError('QUOTE_CLOSED', 'This quote is closed', 409);
-  await q.update({ status: 'cancelled' });
-  res.json({ quote: await view(q, { staff: true }) });
+  res.json({ quote: await view(await close(req.tenant.workspaceId, q.id, 'cancelled', 'QUOTE_CLOSED'), { staff: true }) });
 }));
 
 module.exports = { store, staff };

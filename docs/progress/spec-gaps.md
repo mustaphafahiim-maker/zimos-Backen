@@ -1895,7 +1895,11 @@ A review of the points, store credit, gift card, quote and bundle code found the
   - The three handlers act only on an order that is cancelled or rejected (a reopen that beat the job keeps the tender) and now also answer order.rejected, so a COD rejection on the call gives the points / credit / gift card back.
   - Reopening an order, or correcting a rejection to confirmed, is refused (409 ORDER_TENDER_RETURNED) once its tender went back: the courier would otherwise collect only the rest. payments/tenderReturns.js.
   - Checked: rejected order → credit back; live order → nothing; cancelled with credit back → reopen 409.
-- [ ] 275. Quotes: accepting twice (double click, retry) made two orders; the quote's "exact prices" got the store's automatic discount and bundle tiers on top; two quote requests at once could clash on the number.
+- [x] 275. Quotes: accepting twice (double click, retry) made two orders; the quote's "exact prices" got the store's automatic discount and bundle tiers on top; two quote requests at once could clash on the number. (backend fix; UI note in frontend-handoff.md)
+  - Accept locks the quote and makes the order in the same transaction (createOrder joins it), so a second accept waits and then gets 409 QUOTE_NOT_OPEN. Decline and the team's cancel close the quote only while it is still open (one conditional update); the team's answer locks it too, so none of them can undo an accept.
+  - The order is marked with the payload marker `zimos.exactPrices`: no bundle tier, no automatic discount and no store minimum on top of the quoted prices (the merchant set them). A dropshipping supplier's own minimum still applies.
+  - Quote numbers are taken under a per-store advisory lock.
+  - Checked: 5 quote requests at once → five 201, five numbers; 3 accepts at once → one 201, two 409, one order at exactly 3 × 700 with no discount, while a plain checkout of the same 3 units still got the 2-unit tier and the 10% automatic discount; accept and decline at once → the quote ends accepted with its order.
 - [ ] 276. Free-gift lines counted as units in quantity-bundle and mix-and-match tiers (a gift unlocking a tier discount).
 - [ ] 277. An upsell joined to an open order re-added tax for a tax-exempt business customer and shipping for a free-shipping (VIP / referral) order.
 
