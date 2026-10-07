@@ -1740,4 +1740,18 @@ owner's call and is noted in LANES when given).
   - Verified: 3 orders with ZZTEN (one cancelled, one delivered, one by a returning customer) → orders 3, cancelled 1, revenue 450, delivered 225, discount 50, new 1 / returning 1, CSV.
 - [x] 242. Orders by weekday and hour: a 7×24 heatmap of orders and revenue in the store's time zone, for planning confirmation calls and stock. (backend done, UI in frontend-handoff.md)
   - storeReports /order-heatmap: EXTRACT(DOW/HOUR FROM created_at AT TIME ZONE store tz) over live orders; always 168 cells; per-cell COD confirmation rate; weekday/hour totals and the busiest cell.
+  - Found afterwards: analytics/reportsService.js salesBreakdowns already returns orders by weekday × hour (`dow`, `hour`) inside the sales report. This endpoint adds revenue, the per-cell confirmation rate, CSV, totals and the busiest cell; the UI may use either. Gap passes must also read report breakdowns, not only module names.
   - Verified: two orders at 18:30/18:45 UTC on Thu 1 Oct → Thursday 21:00 Cairo, one on Sat 07:10 UTC → Saturday 10:00; rates 50% and 100%.
+
+## Twelfth pass (2026-10-07) — operations and reports gap pass
+
+How the list was made: modules searched under several spellings and the existing report breakdowns read (after
+item 242 overlapped a sales-report breakdown). Not listed because already built: product import from sheets
+(creates products), order documents (waybills, manifest, invoices, pick list), cohorts, payment-method and source
+breakdowns. No migration needed for any item below.
+
+- [ ] 243. Bulk stock and price update from a sheet: CSV/xlsx rows by SKU (stock set or ±adjust, price, compare-at, cost), a preview of every change and every unknown SKU, then apply with stock movements and an audit entry.
+- [ ] 244. Packing slips: one A4/A5 slip per selected order — lines and quantities, gift message, prices hidden for gift orders that asked for it — as one PDF beside the other order documents.
+- [ ] 245. Sales by collection: units, orders and revenue per collection in a date range (a product in several collections counts in each), with CSV.
+- [ ] 246. Sales by variant option: units and revenue per option value (e.g. size M, colour black) across products, for buying decisions; CSV.
+- [ ] 247. Returns by reason: return requests per reason and per product, the return rate per product (returned units / delivered units), and refunds given; CSV.
