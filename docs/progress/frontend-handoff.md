@@ -3288,3 +3288,9 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 - `POST /workspaces/:ws/orders/documents/packing-slips?as=base64` now answers `{ filename, contentType, base64, printed, skipped: [orderId] }` (the PDF form has the header `X-Skipped-Orders: <count>`). Cancelled orders get no slip. When `skipped` is not empty, show «اتشال {n} طلب ملغي» / "{n} cancelled order(s) left out".
 - Only cancelled orders selected → 422 `NO_ORDERS_SELECTED` (`details.skipped`): «الطلبات دي ملغية» / "These orders are cancelled".
 - The slip's price column is now «المبلغ» / "Amount" (the line's total); offer lines show their pieces and a bundle's contents. Nothing to change in the UI besides the wording if the preview labels the columns.
+
+## 295. Bulk stock and price update — safer apply — UI: pending (small)
+
+- `POST /workspaces/:ws/catalog/bulk-update/apply`: send an `Idempotency-Key: <uuid>` header (one new key per upload; reuse it on a retry). A second click with the same key gets the first answer, or 409 `IDEMPOTENCY_KEY_IN_PROGRESS` while it still runs: «لسه بيتنفذ — استنى ثواني» / "Still applying — wait a few seconds".
+- Preview: a change can carry `warnings: [{ code: "BELOW_RESERVED", reserved }]` → a yellow note on the row: «الكمية أقل من المحجوز لطلبات مفتوحة ({reserved})» / "Below what open orders hold ({reserved})". With stock locations, a row that would take the main location below zero is in `errors` with its message.
+- `stock_change` is applied as a change on the stock at that moment, so the preview's "to" can differ from the result when orders come in meanwhile.

@@ -90,7 +90,11 @@ async function plan(workspaceId, req) {
       if (!Number.isInteger(n) || n === 0) { bad('stock_change must be a whole number, not 0'); continue; }
       if (v.stockOnHand + n < 0) { bad(`stock would go below 0 (now ${v.stockOnHand})`); continue; }
       c.fields.stock = { from: v.stockOnHand, to: v.stockOnHand + n };
+      // Applied as the change itself, on the stock as it is then (item 295), not as a target.
+      c.stockChange = n;
     }
+    // Fewer on hand than open orders hold: allowed (a real count), but said (item 295).
+    if (c.fields.stock && c.fields.stock.to < Number(v.reservedStock)) c.warnings = [{ code: 'BELOW_RESERVED', reserved: Number(v.reservedStock) }];
     let failed = false;
     for (const [col, key, clearable] of [['price', 'priceAmount', false], ['compare_at', 'compareAtAmount', true], ['cost', 'costAmount', false]]) {
       if (!r[col]) continue;
@@ -103,6 +107,22 @@ async function plan(workspaceId, req) {
     }
     if (failed) continue;
     if (Object.keys(c.fields).length) changes.push(c);
+  }
+  // With stock locations, the store total lands on the default location (it holds what the others
+  // don't): a decrease can't take it below zero (item 295, as purchasing.moveStock checks).
+  const lowering = changes.filter((c) => c.fields.stock && c.fields.stock.to < c.fields.stock.from);
+  if (lowering.length) {
+    const { locations, matrix } = await require('../../stockLocations').stockMatrix(workspaceId, lowering.map((c) => c.variantId));
+    const def = locations.find((l) => l.isDefault);
+    if (def && locations.length > 1) {
+      for (const c of lowering) {
+        const cell = matrix.get(c.variantId) && matrix.get(c.variantId).get(def.id);
+        if (cell && cell.onHand + (c.fields.stock.to - c.fields.stock.from) < 0) {
+          errors.push({ row: c.row, sku: c.sku, message: `Only ${Math.max(0, cell.onHand)} at ${def.name}; change the other locations' counts there` });
+          changes.splice(changes.indexOf(c), 1);
+        }
+      }
+    }
   }
   return { rows: sheet.rows.length, changes, unknown, errors };
 }
@@ -117,7 +137,7 @@ router.post('/preview', acceptFile, validate({ params }), asyncHandler(async (re
   res.json({ ...p, summary: { rows: p.rows, changes: p.changes.length, unknown: p.unknown.length, errors: p.errors.length } });
 }));
 
-router.post('/apply', acceptFile, validate({ params }), asyncHandler(async (req, res) => {
+async function apply(req, res) {
   const workspaceId = req.tenant.workspaceId;
   const p = await plan(workspaceId, req);
   const inventory = require('../../inventory/inventoryService');
@@ -126,10 +146,14 @@ router.post('/apply', acceptFile, validate({ params }), asyncHandler(async (req,
   for (const c of p.changes) {
     try {
       if (c.fields.stock) {
-        const fresh = await db.ProductVariant.findByPk(c.variantId, { attributes: ['id', 'stockOnHand'] });
-        // The target, against the stock now (it may have moved since the preview).
-        const delta = c.fields.stock.to - fresh.stockOnHand;
-        if (delta) await inventory.adjustStock({ workspaceId, variantId: c.variantId, delta, reason: 'Bulk update from a sheet', actorUserId: req.user.id });
+        // Worked out under the variant's lock (item 295): a sale, a restock or a second apply in between
+        // is kept. `stock` sets the count; `stock_change` moves it by its own amount. moveStock keeps
+        // the default location at zero or more.
+        await db.sequelize.transaction(async (transaction) => {
+          const locked = await inventory.lockVariant(c.variantId, workspaceId, transaction);
+          const delta = c.stockChange != null ? c.stockChange : c.fields.stock.to - locked.stockOnHand;
+          if (delta) await require('../../purchasing').moveStock(workspaceId, c.variantId, delta, null, { type: 'adjustment', reason: 'Bulk update from a sheet', actorUserId: req.user.id }, transaction);
+        });
       }
       const price = {};
       for (const k of ['priceAmount', 'compareAtAmount', 'costAmount']) if (c.fields[k]) price[k] = c.fields[k].to == null ? null : Number(c.fields[k].to);
@@ -145,6 +169,12 @@ router.post('/apply', acceptFile, validate({ params }), asyncHandler(async (req,
   require('../../storefront/storefrontCache').invalidate(workspaceId);
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'catalog.bulk_update_sheet', entityType: 'Workspace', entityId: workspaceId, after: { rows: p.rows, applied, failed: failed.length, unknown: p.unknown.length, errors: p.errors.length }, req });
   res.json({ applied, failed, unknown: p.unknown, errors: p.errors });
-}));
+}
+
+// With an Idempotency-Key header a repeated apply (double click, retry after a timeout) answers the first
+// result, or 409 while the first still runs, instead of applying again (item 295). Without one it runs as before.
+const applyOnce = require('../../../core/middleware/idempotency').idempotent('catalog_bulk_update')(apply);
+const applyPlain = asyncHandler(apply);
+router.post('/apply', acceptFile, validate({ params }), (req, res, next) => (req.headers['idempotency-key'] ? applyOnce : applyPlain)(req, res, next));
 
 module.exports = { router, plan };
