@@ -12,7 +12,7 @@ const planCheckout = require('./planCheckout');
  * A subscription plan may have `trialDays`. At the store's checkout the
  * trial product's line is priced at nothing — the server-pinned price
  * orderService.priceLine already honours for product A/B tests
- * (catalog/productTests.js) — once per customer (phone) and product. The
+ * (catalog/productTests.js) — once per customer (phone) and product, for one unit on one line. The
  * order is still paid by card (planCheckout.js):
  *
  *  - anything else on it (shipping, other lines) is charged as usual, and the
@@ -54,7 +54,7 @@ async function usedTrials(workspaceId, contact, productIds) {
   return new Set(subs.map((s) => s.productId));
 }
 
-/** The checkout's lines, a trial product's priced at nothing. */
+/** The checkout's lines, one unit of a trial product priced at nothing (a single line of quantity 1). */
 async function pinTrialLines(workspaceId, items, contact) {
   const plain = items.filter((i) => i.variantId && !i.offerId);
   if (plain.length === 0) return items;
@@ -64,9 +64,16 @@ async function pinTrialLines(workspaceId, items, contact) {
   const trial = products.filter((p) => (planCheckout.publicPlan(p.billingPlan) || {}).trialDays).map((p) => p.id);
   if (trial.length === 0) return items;
   const used = await usedTrials(workspaceId, contact, trial);
+  // One unit on one line per product: a trial is a taste, not free stock. More
+  // units, or another line of the same product, are priced as usual, so
+  // trialDaysOf sees a paid line and it becomes an ordinary subscription.
+  const pinned = new Set();
   return items.map((item) => {
     const productId = !item.offerId && productOf.get(item.variantId);
-    return productId && trial.includes(productId) && !used.has(productId) ? { ...item, [PINNED_PRICE]: 0 } : item;
+    if (!productId || !trial.includes(productId) || used.has(productId) || pinned.has(productId)) return item;
+    if (Number(item.quantity || 1) !== 1) return item;
+    pinned.add(productId);
+    return { ...item, [PINNED_PRICE]: 0 };
   });
 }
 
