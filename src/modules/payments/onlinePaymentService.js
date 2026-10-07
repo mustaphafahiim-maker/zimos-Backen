@@ -74,10 +74,25 @@ const EXPIRED_REASON = 'payment_expired';
 /** Cancels the order's open attempts (but `keepId`) and, once that commits, closes them at the gateway (item 300). */
 async function cancelOpenAttempts(order, transaction, keepId = null) {
   const where = { orderId: order.id, status: OPEN_ATTEMPT, ...(keepId ? { id: { [Op.ne]: keepId } } : {}) };
-  const open = await db.Payment.findAll({ where, attributes: ['id', 'providerCode', 'providerOrderId'], transaction });
-  if (!open.length) return;
-  await db.Payment.update({ status: 'cancelled' }, { where: { id: open.map((p) => p.id) }, transaction });
-  transaction.afterCommit(() => gatewayRuntime.closeAttempts(order.workspaceId, open.map((p) => p.toJSON())).catch(() => {}));
+  // Only rows still open when the update runs are cancelled and closed (item 319): one that just turned
+  // failed or paid is left as it is.
+  const [, cancelled] = await db.Payment.update({ status: 'cancelled' }, { where, transaction, returning: true });
+  const list = (cancelled || []).map((p) => ({ id: p.id, providerCode: p.providerCode, providerOrderId: p.providerOrderId }));
+  if (list.length) afterCommitDetached(transaction, () => gatewayRuntime.closeAttempts(order.workspaceId, list));
+}
+
+/**
+ * Runs `fn` once the transaction commits without making commit() wait on it (item 319): Sequelize awaits an
+ * afterCommit hook's promise, and a gateway call has no place on the shopper's path.
+ */
+function afterCommitDetached(transaction, fn) {
+  transaction.afterCommit(() => {
+    setImmediate(() => {
+      Promise.resolve()
+        .then(fn)
+        .catch((err) => logger.warn('[payments] after-commit task failed', { reason: err.message }));
+    });
+  });
 }
 const BLOCKED_REASON = 'customer_blocked';
 // How often a shopper's status check may ask the gateway about one attempt.
@@ -551,13 +566,12 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
     await releaseStock(locked, transaction, 'order_payment_expired');
     // A gift card or points held for it go back (heldTenders.js).
     await require('./heldTenders').release(locked.id, transaction, 'payment expired');
-    const lapsed = await db.Payment.findAll({ where: { orderId: locked.id, status: OPEN_ATTEMPT }, attributes: ['id', 'providerCode', 'providerOrderId'], transaction });
-    await db.Payment.update(
+    const [, lapsed] = await db.Payment.update(
       { status: 'expired' },
-      { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction }
+      { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction, returning: true }
     );
-    // The gateway's page stops taking payment too (item 300).
-    if (lapsed.length) transaction.afterCommit(() => gatewayRuntime.closeAttempts(locked.workspaceId, lapsed.map((p) => p.toJSON())).catch(() => {}));
+    // The gateway's page stops taking payment too (items 300, 319): only the attempts this update expired.
+    if (lapsed && lapsed.length) afterCommitDetached(transaction, () => gatewayRuntime.closeAttempts(locked.workspaceId, lapsed.map((p) => ({ id: p.id, providerCode: p.providerCode, providerOrderId: p.providerOrderId }))));
     await locked.update({ cancelledAt: new Date(), cancellationReason: EXPIRED_REASON }, { transaction });
     await trackStage(locked.workspaceId, locked.id, { transaction, reason: EXPIRED_REASON });
     await recordAudit({
