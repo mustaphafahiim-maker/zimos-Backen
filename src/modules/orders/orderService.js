@@ -458,12 +458,14 @@ async function createOrder(
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
     if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
+    // …and so does a dropshipping supplier's own minimum (dropship/supplierRules.js, item 263).
+    if (!req.user && !shippingOverride) await require('../dropship/supplierRules').assertMinimums(workspaceId, pricedLines, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
     // Always priced, even without an address (amount 0 then): the weight
     // and tier are stored on the order either way.
-    const shipping = await calculateShippingAmount(workspaceId, {
+    const storeShipping = await calculateShippingAmount(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
       address: shippingAddress || null,
@@ -475,6 +477,8 @@ async function createOrder(
       funnelId: payload.funnelId || null,
       transaction,
     });
+    // An order that is all one dropshipping supplier's, with its rates on: its price (dropship/supplierRules.js, item 263).
+    const shipping = await require('../dropship/supplierRules').applyShipping(workspaceId, pricedLines, storeShipping, shippingAddress, transaction);
     // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
     const chosenShipping = await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
     const shippingAmount = chosenShipping ? chosenShipping.amount : shipping.amount;

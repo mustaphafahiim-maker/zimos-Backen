@@ -82,6 +82,22 @@ module.exports = {
     return { externalStatus };
   },
 
+  /**
+   * Optional (item 263): the supplier's shipping price for its lines to a
+   * destination, minor units. The test supplier: 60 EGP to Cairo and Giza,
+   * 75 elsewhere, plus 5 per item after the first.
+   */
+  async shippingQuote(credentials, { province, lines }) {
+    const units = (lines || []).reduce((n, l) => n + (Number(l.quantity) || 0), 0);
+    const base = /cairo|giza|القاهرة|الجيزة/i.test(String(province || '')) ? 6000 : 7500;
+    return { amount: base + Math.max(0, units - 1) * 500, currency: 'EGP' };
+  },
+
+  /** Optional (item 263): the smallest order the supplier takes, in minor units of its lines. */
+  async minimumOrder() {
+    return { amount: 30000, currency: 'EGP' };
+  },
+
   /** The provider's order status → the ZIMOS order stage it means (null = no change). */
   mapStatus(externalStatus) {
     return { received: null, confirmed: 'ready_to_ship', shipped: 'shipped', delivered: 'delivered', returned: 'returned', cancelled: 'cancelled' }[externalStatus] ?? null;

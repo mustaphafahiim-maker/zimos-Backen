@@ -3184,3 +3184,13 @@ Public, rate-limited like the other sign-in routes.
 
 ### Screen
 - Sign-in page: a third option «ادخل بكود واتساب» / "Sign in with a WhatsApp code" → phone field → «ابعت الكود» / "Send code" → «بعتنا كود لـ {sentTo}» / "We sent a code to {sentTo}" + 6-digit input, «ابعت تاني» / "Resend" after 60 s; then the usual second-step screen when asked. Hint under the phone: «لازم يكون الرقم متأكد في حسابك» / "The number must be verified on your account".
+
+## 263. Dropship suppliers: their shipping rates and minimum order — UI: pending
+
+- `PATCH /api/v1/workspaces/:ws/dropship/providers/:code/settings` (`apps.manage`) also takes `useSupplierShipping` and `enforceMinimum` (booleans); the supplier list (`GET /providers`) returns both with the other settings. 422 `DROPSHIP_NOT_SUPPORTED` when the supplier can't give shipping prices / has no minimum.
+- `useSupplierShipping`: an order whose every product is that supplier's is charged the supplier's shipping price (store free-shipping rules still win; mixed orders keep the store's rates). The shipping quote's `rule` is then `supplier_rate`.
+- `enforceMinimum`: the shopper's checkout is refused below the supplier's minimum → 422 `BELOW_SUPPLIER_MINIMUM` with `details { supplierName, minimumAmount, linesAmount, missingAmount }` «الطلب أقل من الحد الأدنى للمورّد — ضيف بـ {missingAmount} كمان» / "The order is below the supplier's minimum — add {missingAmount} more".
+- The storefront shipping quote (`POST /store/:ws/shipping-quote`) now has `supplierMinimum` (same object, or null) — show it in the cart/checkout before submit and disable «اطلب» / "Order" until it's reached.
+
+### Screen
+- Apps → the supplier's card → settings: two switches «استخدم أسعار شحن المورّد» / "Use the supplier's shipping rates" and «ارفض الطلب لو أقل من الحد الأدنى للمورّد» / "Refuse orders below the supplier's minimum" (disabled with a hint when the supplier doesn't support it).
