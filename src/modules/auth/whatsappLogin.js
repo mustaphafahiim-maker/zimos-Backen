@@ -40,12 +40,18 @@ async function request({ phone, locale = 'ar' }, req) {
   const users = normalized ? await db.User.findAll({ where: { phone: normalized }, limit: 2 }) : [];
   // Only one active account with this phone verified; anything else answers the same way and sends nothing.
   const user = users.length === 1 && users[0].phoneVerifiedAt && users[0].status === 'active' ? users[0] : null;
-  // The decoy looks like a real answer: the typed number masked the same way.
-  const decoy = { challengeToken: crypto.randomUUID(), channel: 'whatsapp', sentTo: require('./twoFactorWhatsapp').maskPhone(normalized || String(phone).replace(/\D/g, '')) };
+  // Every answer has this one shape, account or not (item 269): the typed number masked, channel "phone"
+  // (WhatsApp, or SMS when WhatsApp can't deliver), so nothing tells whether the number has an account.
+  const masked = require('./twoFactorWhatsapp').maskPhone(normalized || String(phone).replace(/\D/g, ''));
+  const decoy = { challengeToken: crypto.randomUUID(), channel: 'phone', sentTo: masked };
   if (!user) return decoy;
 
   const recent = await db.LoginChallenge.count({ where: { userId: user.id, createdAt: { [db.Sequelize.Op.gt]: new Date(Date.now() - CODE_TTL_MS) } } });
-  if (recent >= 5) throw new AppError('TOO_MANY_CODES', 'Too many codes for now. Try again in a few minutes.', 429);
+  if (recent >= 5) {
+    // No new code for now — said nowhere but the log, like any unknown number.
+    logger.warn('[whatsappLogin] code limit reached', { userId: user.id });
+    return decoy;
+  }
 
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   const challenge = await db.LoginChallenge.create({
@@ -56,29 +62,41 @@ async function request({ phone, locale = 'ar' }, req) {
   if (!sent) {
     logger.warn('[whatsappLogin] code could not be delivered', { userId: user.id });
     await challenge.update({ consumedAt: new Date() });
-    throw new AppError('CODE_NOT_DELIVERED', 'The code could not be sent. Sign in with your email and password.', 503);
+    return decoy;
   }
-  return { challengeToken: challenge.id, ...sent };
+  return { challengeToken: challenge.id, channel: 'phone', sentTo: masked };
 }
 
 /** Checks the code; answers like the password sign-in (tokens, or the second step). */
 async function verify({ challengeToken, code, locale = 'ar' }, req) {
-  const challenge = await db.LoginChallenge.findByPk(challengeToken);
-  if (!challenge || challenge.channel !== CHANNEL || challenge.consumedAt || challenge.expiresAt < new Date()) throw invalid();
-  if (challenge.attempts >= MAX_ATTEMPTS) throw new AppError('TOO_MANY_ATTEMPTS', 'Too many wrong codes. Ask for a new one.', 429);
-  const user = await db.User.findByPk(challenge.userId);
-  if (!user || user.status !== 'active' || !user.phoneVerifiedAt) throw invalid();
-  const given = sha256(`${user.id}:${String(code || '').replace(/\s/g, '')}`);
-  if (!crypto.timingSafeEqual(Buffer.from(given), Buffer.from(challenge.codeHash))) {
-    await challenge.increment('attempts');
+  // Each try is counted before the code is looked at, in one statement, so parallel
+  // requests share the same 5 tries (item 269).
+  const [counted] = await db.sequelize.query(
+    `UPDATE login_challenges SET attempts = attempts + 1
+      WHERE id = :id AND channel = :channel AND consumed_at IS NULL AND expires_at > now() AND attempts < :max
+      RETURNING user_id AS "userId", code_hash AS "codeHash"`,
+    { replacements: { id: challengeToken, channel: CHANNEL, max: MAX_ATTEMPTS }, type: db.Sequelize.QueryTypes.SELECT }
+  );
+  if (!counted) {
+    const challenge = await db.LoginChallenge.findByPk(challengeToken, { attributes: ['attempts', 'channel', 'consumedAt'] });
+    if (challenge && challenge.channel === CHANNEL && !challenge.consumedAt && challenge.attempts >= MAX_ATTEMPTS) throw new AppError('TOO_MANY_ATTEMPTS', 'Too many wrong codes. Ask for a new one.', 429);
     throw invalid();
   }
-  await challenge.update({ consumedAt: new Date() });
+  const user = await db.User.findByPk(counted.userId);
+  if (!user || user.status !== 'active' || !user.phoneVerifiedAt) throw invalid();
+  const given = sha256(`${user.id}:${String(code || '').replace(/\s/g, '')}`);
+  if (!crypto.timingSafeEqual(Buffer.from(given), Buffer.from(counted.codeHash))) throw invalid();
+  // One sign-in per code, even when two right answers arrive together.
+  const [consumed] = await db.LoginChallenge.update({ consumedAt: new Date() }, { where: { id: challengeToken, consumedAt: null } });
+  if (consumed !== 1) throw invalid();
 
-  // The account's own second step, unless it is WhatsApp (just used) or off.
+  // What a password sign-in would still ask (item 269): the account's own second step
+  // (not WhatsApp — the code just came to that phone), or, with none, the email code
+  // for a browser new to the account (newDeviceSignIn.js).
   const row = await db.UserTwoFactor.findByPk(user.id);
-  if (row && (row.mode === 'totp' || row.mode === 'email')) {
-    const challengeNext = await require('./twoFactorService').challengeIfNeeded(user, req, { locale });
+  if (!row || row.mode !== 'whatsapp') {
+    const newDevice = require('./newDeviceSignIn').needsCode(user, req);
+    const challengeNext = await require('./twoFactorService').challengeIfNeeded(user, req, { locale, newDevice });
     if (challengeNext) return challengeNext;
   }
   const { recordAudit } = require('../audit/auditService');
