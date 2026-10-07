@@ -1738,4 +1738,6 @@ owner's call and is noted in LANES when given).
 - [x] 241. Discount code performance: per code — uses, orders, revenue, discount given, average order, new vs returning customers, and cancellations; for a date range. (backend done, UI in frontend-handoff.md)
   - storeReports /discounts from discount_redemptions × orders (stage via the shared STAGE_SQL in a subquery). Live-order revenue and discount given, delivered revenue net of refunds, cancellations, new vs returning by the customer's earlier non-cancelled orders.
   - Verified: 3 orders with ZZTEN (one cancelled, one delivered, one by a returning customer) → orders 3, cancelled 1, revenue 450, delivered 225, discount 50, new 1 / returning 1, CSV.
-- [ ] 242. Orders by weekday and hour: a 7×24 heatmap of orders and revenue in the store's time zone, for planning confirmation calls and stock.
+- [x] 242. Orders by weekday and hour: a 7×24 heatmap of orders and revenue in the store's time zone, for planning confirmation calls and stock. (backend done, UI in frontend-handoff.md)
+  - storeReports /order-heatmap: EXTRACT(DOW/HOUR FROM created_at AT TIME ZONE store tz) over live orders; always 168 cells; per-cell COD confirmation rate; weekday/hour totals and the busiest cell.
+  - Verified: two orders at 18:30/18:45 UTC on Thu 1 Oct → Thursday 21:00 Cairo, one on Sat 07:10 UTC → Saturday 10:00; rates 50% and 100%.

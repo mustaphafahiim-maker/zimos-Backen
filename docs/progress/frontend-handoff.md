@@ -2874,3 +2874,16 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 ### Screens
 - Marketing → Discounts list: columns «طلبات» / "Orders", «مبيعات» / "Revenue", «خصم مدفوع» / "Discount given", «إلغاء» / "Cancelled %" from this report for the chosen range.
 - Discount page: the same numbers, plus «عملاء جداد» / "New customers" vs «عملاء قدام» / "Returning", «اتسلّم فعلًا» / "Delivered revenue"; «تنزيل CSV».
+
+## 242. Orders by weekday and hour (heatmap) — UI: pending
+
+### `GET /api/v1/workspaces/:ws/store-reports/order-heatmap?from=&to=&format=json|csv` (`analytics.view`)
+```json
+{ "timezone": "Africa/Cairo", "currency": "EGP",
+  "cells": [{ "weekday": 4, "hour": 21, "orders": 2, "revenue": "50000", "confirmationRate": 50 }],
+  "byWeekday": [0,0,0,0,2,0,1], "byHour": [/* 24 */], "busiest": { "weekday": 4, "hour": 21, "orders": 2 } }
+```
+- Always 168 cells (7 × 24), `weekday` 0 = Sunday … 6 = Saturday, hours in the store's time zone. Live orders only (not cancelled/rejected, not test). `confirmationRate` = confirmed / COD orders in that cell (null without COD orders).
+
+### Screen
+- Reports → «أوقات الطلبات» / "When orders come in": a 7×24 heatmap (rows Sat…Fri for Egypt: «السبت» … «الجمعة»; columns 12am…11pm), toggle «عدد الطلبات» / "Orders" vs «المبيعات» / "Revenue", tooltip with the confirmation rate; a line «أكتر وقت: الخميس 9 م» / "Busiest: Thursday 9 PM"; bars by weekday and by hour under it; «تنزيل CSV».

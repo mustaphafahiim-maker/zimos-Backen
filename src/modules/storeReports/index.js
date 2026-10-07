@@ -226,4 +226,38 @@ router.get('/discounts', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate
   return res.json({ from: c.from, to: c.to, currency: c.currency, discounts: list });
 }));
 
+// ------------------------------------------- 242. weekday × hour heatmap --
+
+/*
+ * Orders and revenue (live orders: not cancelled, not rejected) for each
+ * weekday × hour of the store's time zone over the window — when shoppers
+ * order, for planning confirmation calls and stock. weekday 0 = Sunday.
+ * Also the COD confirmation rate per cell, so the team sees when orders
+ * that got confirmed were placed.
+ */
+router.get('/order-heatmap', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({ params: Joi.object(ws), query: Joi.object(range) }), asyncHandler(async (req, res) => {
+  const c = await contextOf(req);
+  const rows = await run(
+    `SELECT EXTRACT(DOW FROM o.created_at AT TIME ZONE :tz)::int AS weekday, EXTRACT(HOUR FROM o.created_at AT TIME ZONE :tz)::int AS hour,
+            COUNT(*)::int AS orders, COALESCE(ROUND(SUM(coalesce(o.total_amount_base, o.total_amount))), 0)::bigint AS revenue,
+            COUNT(*) FILTER (WHERE o.payment_method = 'cod')::int AS cod,
+            COUNT(*) FILTER (WHERE o.payment_method = 'cod' AND o.confirmation_state = 'confirmed')::int AS confirmed
+       FROM orders o
+      WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'
+        AND o.created_at >= :from AND o.created_at < :to
+      GROUP BY 1, 2`,
+    { ws: c.ws, from: c.from, to: c.to, tz: c.tz }
+  );
+  const at = new Map(rows.map((r) => [`${r.weekday}:${r.hour}`, r]));
+  const cells = [];
+  for (let d = 0; d < 7; d += 1) for (let h = 0; h < 24; h += 1) {
+    const r = at.get(`${d}:${h}`);
+    cells.push({ weekday: d, hour: h, orders: r ? r.orders : 0, revenue: r ? String(r.revenue) : '0', confirmationRate: r && r.cod ? Math.round((r.confirmed / r.cod) * 1000) / 10 : null });
+  }
+  if (req.query.format === 'csv') return sendCsv(res, 'order-heatmap', ['weekday', 'hour', 'orders', 'revenue', 'confirmationRate'], cells);
+  const sumBy = (key, n) => Array.from({ length: n }, (_, i) => cells.filter((x) => x[key] === i).reduce((a, x) => a + x.orders, 0));
+  const busiest = [...cells].sort((a, b) => b.orders - a.orders)[0];
+  return res.json({ from: c.from, to: c.to, timezone: c.tz, currency: c.currency, cells, byWeekday: sumBy('weekday', 7), byHour: sumBy('hour', 24), busiest: busiest && busiest.orders ? { weekday: busiest.weekday, hour: busiest.hour, orders: busiest.orders } : null });
+}));
+
 module.exports = { router, contextOf, sendCsv, run, ws, range };
