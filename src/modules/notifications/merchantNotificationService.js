@@ -2,6 +2,7 @@
 
 const { Op } = require('sequelize');
 const db = require('../../db/models');
+const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { PERMISSIONS } = require('../../core/security/permissions');
@@ -21,6 +22,10 @@ const notify = require('./notify');
  * number to the teammate's verified phone (platformWhatsapp.js, its alert
  * template). WhatsApp is off for every type until the teammate turns it on.
  * A new channel is one more key in CHANNELS and one more branch in create().
+ *
+ * Store-wide notifications (no `userIds`) also go to the store's team
+ * channels — a Telegram group, Slack or Discord channel that asked for that
+ * type (teamChannels/, item 378).
  */
 
 const CHANNELS = ['inApp', 'email', 'push', 'whatsapp'];
@@ -111,6 +116,12 @@ async function create(workspaceId, { type, title, body = null, link = null, data
   try {
     const spec = TYPES[type];
     if (!spec) throw new Error(`unknown notification type "${type}"`);
+    if (!userIds) {
+      // Never holds up the caller (awaited under test); deliver() never throws.
+      // eslint-disable-next-line global-require
+      const toChannels = require('./teamChannels/teamChannelService').deliver(workspaceId, { type, title, body, link, localized, dedupeKey });
+      if (env.isTest) await toChannels;
+    }
 
     const where = { workspaceId, status: 'active', userId: userIds ? userIds : { [Op.ne]: null } };
     const memberships = await db.Membership.findAll({

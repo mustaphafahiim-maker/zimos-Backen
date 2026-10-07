@@ -39,6 +39,8 @@ const step = Joi.alternatives().conditional('.type', {
     { is: 'add_tag', then: Joi.object({ type: Joi.valid('add_tag').required(), tag: text(40).required() }) },
     { is: 'set_status', then: Joi.object({ type: Joi.valid('set_status').required(), status: Joi.string().valid('confirmed', 'cancelled').required() }) },
     { is: 'notify_team', then: Joi.object({ type: Joi.valid('notify_team').required(), message: text(500).required() }) },
+    // A message to one of the store's Telegram / Slack / Discord channels (item 378).
+    { is: 'notify_channel', then: Joi.object({ type: Joi.valid('notify_channel').required(), teamChannelId: uuid.required(), message: text(500).required() }) },
   ],
   otherwise: Joi.object({ type: Joi.string().valid(...STEP_TYPES).required() }),
 });

@@ -4489,3 +4489,34 @@ When a shopper who paid by card (Stripe, Apple Pay / Google Pay through Stripe, 
 
 ### Dashboard home (optional)
 - A card when `openCount > 0` from `GET /payment-disputes?status=open&limit=5`: «{openCount} نزاع مفتوح على الدفع» / "{openCount} open payment disputes", each row with the order number, amount and deadline.
+
+## 378. Team channels: alerts in Telegram, Slack and Discord — UI: pending
+
+A store can now send its alerts (new orders, suspicious orders, low stock, a failing integration, disputed payments…) to a Telegram group, a Slack channel or a Discord channel shared with its team, media buyer or fulfilment partner. A channel is not a seat: it is a place, with the alert types it asked for. Up to 10 per store. The bot token and webhook URL are stored sealed and never come back; the API shows a `hint`.
+
+### Endpoints (`workspace.manage`; routing a type also needs that type's own permission, e.g. `orders.view` for `order.new`)
+- **GET `/api/v1/workspaces/:workspaceId/team-channels`**
+  `{ "channels": [ { "id": "…", "provider": "telegram", "name": "Orders group", "hint": "-1001234567890 · ••••2345", "locale": "ar", "types": ["order.new", "stock.low"], "isActive": true, "lastStatus": "sent", "lastError": null, "lastSentAt": "2026-10-07T14:03:10.747Z", "failureCount": 0, "createdAt": "…", "updatedAt": "…" } ], "providers": ["telegram", "slack", "discord"], "types": ["order.new", "order.suspicious", "stock.low", "integration.failed", "plan.limit_reached", "automation", "quote.request", "product.question", "stock.lot_expiring", "payment.disputed"], "adapter": { "available": true, "sandbox": true } }`
+  - `types` = the alert types this person may route. `adapter.sandbox: true` (development only): show a «وضع تجريبي — الرسائل مش بتتبعت فعلاً» / "Test mode — messages are not really sent" badge. `available: false` → the section shows «غير متاح حاليًا» / "Not available yet".
+- **POST `/team-channels`** → 201 `{ "channel": {…} }`
+  - Telegram: `{ "provider": "telegram", "name": "Orders group", "locale": "ar", "types": ["order.new"], "botToken": "123456789:AAE…", "chatId": "-1001234567890" }` (`chatId` may be `@channelname`).
+  - Slack: `{ "provider": "slack", "name": "#orders", "locale": "en", "types": ["order.new", "payment.disputed"], "webhookUrl": "https://hooks.slack.com/services/T…/B…/…" }`
+  - Discord: `{ "provider": "discord", "name": "Fulfilment", "types": ["order.new"], "webhookUrl": "https://discord.com/api/webhooks/123…/abc…" }`
+  - `types` defaults to `["order.new"]`, `locale` to `ar` (the language its messages are written in), `isActive` to true. Saving sends nothing; use the test button.
+- **PATCH `/team-channels/:channelId`** `{ "name"?, "locale"?, "types"?, "isActive"?, "botToken"?, "chatId"?, "webhookUrl"? }` → `{ "channel" }`. Send only what changed; a Telegram chat can move without retyping the token. Switching a paused channel back on, or new credentials, resets `failureCount`.
+- **DELETE `/team-channels/:channelId`** → `{ "deleted": true, "id" }`
+- **POST `/team-channels/:channelId/test`** → `{ "result": { "status": "sent" } | { "status": "failed", "error": "Telegram answered 403" }, "channel": {…} }` (works on a paused channel too).
+- **GET `/team-channels/:channelId/deliveries`** → `{ "deliveries": [ { "id", "type": "order.new" | "test" | "automation_step" | …, "status": "sent" | "failed", "error", "createdAt" } ] }` (last 50, kept 30 days).
+- Errors: 422 `VALIDATION_ERROR` with `details[0].field` `botToken` («الصق التوكن اللي أداهولك @BotFather» / "Paste the token @BotFather gave you"), `chatId` («رقم الجروب أو القناة، زي ‎-1001234567890 أو ‎@mychannel» / "The group or channel id, like -1001234567890 or @mychannel"), `webhookUrl` («لينك Incoming Webhook من Slack» / "A Slack incoming-webhook URL", «لينك Webhook من Discord» / "A Discord webhook URL"), `types` («النوع ده ما ينفعش يتبعت لقناة» / "This alert can't go to a team channel"); 403 `TEAM_CHANNEL_TYPE_FORBIDDEN` («مش مسموح لك توجّه التنبيه ده» / "You can't route this alert"); 409 `TEAM_CHANNEL_LIMIT` («الحد الأقصى ١٠ قنوات» / "Up to 10 team channels"); 404; 503 `TEAM_CHANNEL_UNAVAILABLE` on test.
+
+### Screens
+- **Settings → Notifications → «قنوات الفريق» / "Team channels"**: a card per channel (provider icon, name, hint, the alert types as chips, status dot: «شغّالة» / "Working" when `lastStatus` is `sent`, «فيه مشكلة: {lastError}» / "Problem: {lastError}" when `failed`, «متوقفة» / "Paused" when `isActive` is false), a switch for `isActive`, «إرسال رسالة تجريبية» / "Send a test message", «تعديل» / "Edit", «حذف» / "Delete", and «آخر الرسائل» / "Recent messages" (deliveries).
+- **Add channel** «أضف قناة» / "Add channel": pick Telegram / Slack / Discord, then name, language («لغة الرسائل» / "Message language": العربية / English), the alert types as checkboxes (labels as in the notification settings matrix; «أتمتة» / "Automation" for `automation`), and:
+  - Telegram: «توكن البوت» / "Bot token" (password field), «رقم الجروب» / "Group id". Help: «١) كلّم ‎@BotFather واعمل ‎/newbot وانسخ التوكن. ٢) ضيف البوت للجروب. ٣) هات رقم الجروب من ‎@RawDataBot.» / "1) Message @BotFather, send /newbot and copy the token. 2) Add the bot to your group. 3) Get the group id from @RawDataBot."
+  - Slack: «لينك الـ Webhook» / "Webhook URL". Help: «من api.slack.com/apps اعمل App وفعّل Incoming Webhooks واختار القناة وانسخ اللينك.» / "At api.slack.com/apps, create an app, turn on Incoming Webhooks, pick the channel and copy the URL."
+  - Discord: «لينك الـ Webhook» / "Webhook URL". Help: «إعدادات القناة ← Integrations ← Webhooks ← New Webhook ← Copy URL.» / "Channel settings → Integrations → Webhooks → New Webhook → Copy URL."
+  - In edit mode the secret fields are empty with the hint as placeholder: «سيبه فاضي لو مش هتغيّره» / "Leave empty to keep it".
+- A channel that failed 10 times in a row is paused by the server and the store's managers get an `integration.failed` alert («تعذّر الاتصال بـ Telegram: {name}» / "Couldn't reach Telegram: {name}", link `/settings/notifications`).
+
+### Automations
+- New step type **`notify_channel`** (listed in `stepTypes` of GET `/automations`): `{ "type": "notify_channel", "teamChannelId": "<id>", "message": "طلب {{order_number}} محتاج مكالمة" }` (message up to 500, same tokens as `notify_team`). Step picker label «رسالة لقناة الفريق» / "Message a team channel", with a channel dropdown from GET `/team-channels`. The run log shows `notify_channel telegram`, or failed with "team channel "…" is paused" / "the team channel no longer exists".

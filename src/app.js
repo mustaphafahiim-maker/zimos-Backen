@@ -366,6 +366,8 @@ v1.use('/workspaces/:workspaceId/email-marketing', require('./modules/emailMarke
 v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
 v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
+// Alerts to a Telegram group, Slack or Discord channel (item 378).
+v1.use('/workspaces/:workspaceId/team-channels', require('./modules/notifications/teamChannels/teamChannelRoutes'));
 // The store as an app for shoppers: its home-screen name, icon and colour (website.publish).
 v1.use('/workspaces/:workspaceId/store-app', require('./modules/storefront/storeApp').router);
 v1.use('/workspaces/:workspaceId/tracking-pixels', appGate.requireAppForChanges('tracking_pixels'), trackingPixelRoutes);
