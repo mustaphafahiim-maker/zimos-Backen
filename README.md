@@ -162,9 +162,10 @@ front of the domain and handles the padlock. Merchant steps:
 1. **Add the domain in your dashboard** — `POST /api/v1/workspaces/:workspaceId/domains`
    with `{ "hostname": "ahmedstore.com" }`. You get back a TXT record to add.
 2. **Create a free Cloudflare account** and add your domain there.
-3. **Add the TXT record** we gave you (`zimos-verify=<token>` at the
-   domain root) in Cloudflare's DNS, plus an A/CNAME record pointing the domain
-   at this server.
+3. **Add the TXT record** we gave you (`zimos-verify=<token>` on the name
+   `_zimos-verify.<your domain>`; a domain added before that name was used may keep it
+   on the domain itself) in Cloudflare's DNS, plus an A/CNAME record pointing the
+   domain at this server.
 4. **Point your domain's nameservers to Cloudflare** (Cloudflare shows you the
    two nameservers; set them at your registrar).
 5. **Verify** — `POST /api/v1/workspaces/:workspaceId/domains/:domainId/verify`.

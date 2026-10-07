@@ -43,8 +43,15 @@ const hostResolver = asyncHandler(async (req, res, next) => {
       }
     }
   } else {
-    const domain = await db.Domain.findOne({ where: { hostname: host }, attributes: ['workspaceId', 'status'] });
-    if (domain) {
+    // Several stores may have an unverified row for one host (migration 211):
+    // the verified one wins. A domain suspended for its plan is not served; one
+    // suspended with its store still reaches the store's "unavailable" page
+    // (item 341, Ziad's 045801f; domains/domainJobs.js).
+    const attributes = ['workspaceId', 'status', 'suspendedAt', 'suspendedReason'];
+    const domain =
+      (await db.Domain.findOne({ where: { hostname: host, status: ['verified', 'active'] }, attributes })) ||
+      (await db.Domain.findOne({ where: { hostname: host }, attributes }));
+    if (domain && !(domain.suspendedAt && domain.suspendedReason === 'plan')) {
       if (domain.status === 'verified' || domain.status === 'active') {
         workspaceId = domain.workspaceId;
       } else {

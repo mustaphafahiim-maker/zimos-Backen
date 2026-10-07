@@ -152,6 +152,17 @@ function positiveInt(name, fallback) {
   return Number(value);
 }
 
+// The same for a limit that may be left unset (item 341): unset or blank = none (null).
+function optionalPositiveInt(name) {
+  const raw = process.env[name];
+  if (process.env.NODE_ENV === 'test' || isBlank(raw)) return null;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new Error(`${name} must be a whole number of 1 or more, or unset for none`);
+  }
+  return Number(value);
+}
+
 // A public endpoint's switch (item 331). Ziad's rule: only the exact value
 // "true" opens it. Where our frontend uses the endpoint today the default
 // (unset or blank) stays open, and any value but "true" closes it. Under
@@ -653,6 +664,51 @@ const env = {
   siteAnalytics: {
     enabled: publicSwitch('SITE_ANALYTICS_ENABLED', false),
     origins: csvList(process.env.SITE_ANALYTICS_ORIGINS, ''),
+  },
+
+  // Merchant custom domains (modules/domains; item 341, Ziad's 08d23b2,
+  // d051b79, b600e71, 045801f). Each knob keeps our behaviour by default and
+  // gives his deployment its own:
+  //  - enabled (CUSTOM_DOMAINS_ENABLED): unset = open, as before; any value
+  //    but "true" closes every dashboard route under /workspaces/:id/domains
+  //    (404 like an unknown path) and the domains jobs but the provider
+  //    deletion retry. Verified domains keep resolving either way.
+  //  - subdomainsOnly (CUSTOM_DOMAINS_SUBDOMAINS_ONLY): only exactly "true"
+  //    refuses a root domain (400 APEX_NOT_SUPPORTED) for connecting and
+  //    buying, and sends no www / root counterpart.
+  //  - cnameTarget (CUSTOM_DOMAIN_CNAME_TARGET): set, the one host every
+  //    domain points at (the Cloudflare for SaaS entry); unset, each store's
+  //    own <slug>.<PLATFORM_ROOT_DOMAIN>, as before.
+  //  - maxPerStore (CUSTOM_DOMAINS_MAX_PER_STORE): set, the most domains one
+  //    store may hold, verified or not; unset, only the plan's limit.
+  //  - pendingTtlDays (CUSTOM_DOMAINS_PENDING_TTL_DAYS): set, an unverified
+  //    domain expires after that many days (verify refuses, the job removes
+  //    it); unset, it waits for its TXT however long it takes, as before.
+  //  - resolvers (DOMAIN_VERIFY_RESOLVERS): the public DNS servers that
+  //    verification and the DNS check ask; unset = 1.1.1.1,8.8.8.8, set but
+  //    empty = this server's own resolver.
+  // Under NODE_ENV=test each takes its default; a test sets them here.
+  customDomains: {
+    enabled: publicSwitch('CUSTOM_DOMAINS_ENABLED', true),
+    subdomainsOnly: process.env.NODE_ENV !== 'test' && process.env.CUSTOM_DOMAINS_SUBDOMAINS_ONLY === 'true',
+    cnameTarget:
+      process.env.NODE_ENV === 'test'
+        ? ''
+        : String(process.env.CUSTOM_DOMAIN_CNAME_TARGET || '')
+            .trim()
+            .toLowerCase()
+            .replace(/\.$/, ''),
+    maxPerStore: optionalPositiveInt('CUSTOM_DOMAINS_MAX_PER_STORE'),
+    pendingTtlDays: optionalPositiveInt('CUSTOM_DOMAINS_PENDING_TTL_DAYS'),
+    resolvers: csvList(process.env.DOMAIN_VERIFY_RESOLVERS, '1.1.1.1,8.8.8.8'),
+    // Cloudflare for SaaS custom hostnames (domains/certificates/cloudflare.js,
+    // CERTIFICATE_PROVIDER=cloudflare). The token needs Zone > SSL and
+    // Certificates: Edit on that zone only. Empty under NODE_ENV=test, so a
+    // dev .env never reaches the suite; a test sets them here.
+    cloudflare: {
+      apiToken: process.env.NODE_ENV === 'test' ? '' : (process.env.CLOUDFLARE_API_TOKEN || '').trim(),
+      zoneId: process.env.NODE_ENV === 'test' ? '' : (process.env.CLOUDFLARE_ZONE_ID || '').trim(),
+    },
   },
 };
 

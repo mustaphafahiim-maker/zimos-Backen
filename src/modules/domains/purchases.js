@@ -13,6 +13,7 @@ const { AppError, ConflictError, NotFoundError } = require('../../core/errors/Ap
 const { recordAudit } = require('../audit/auditService');
 const { registrar } = require('./registrar');
 const { sellPrice } = require('./registrar/pricing');
+const rules = require('./domainRules');
 
 /*
  * Buy a domain in the dashboard (Lightfunnels' domain purchase; contract in
@@ -55,9 +56,22 @@ function candidates(query) {
   return [...new Set([exact, ...TLDS.map((t) => `${label}.${t}`)].filter(Boolean))];
 }
 
+/**
+ * Every name sold here is a root domain: with CUSTOM_DOMAINS_SUBDOMAINS_ONLY on
+ * (item 341) none could be connected, so buying is refused before anything else.
+ */
+function assertRootsAllowed() {
+  if (rules.subdomainsOnly()) {
+    throw new AppError('APEX_NOT_SUPPORTED', 'Buying a domain is not available: connect a subdomain of a domain you own, like www.yourstore.com', 400);
+  }
+}
+
 async function search(workspaceId, q) {
+  assertRootsAllowed();
   const names = candidates(q);
-  const owned = new Set((await db.Domain.findAll({ where: { hostname: names }, attributes: ['hostname'] })).map((d) => d.hostname));
+  // Another store's unverified claim does not make a name taken (item 341): only a verified one, or this store's own.
+  const { holding } = require('./domainsService');
+  const owned = new Set((await db.Domain.findAll({ where: { hostname: names, ...holding(workspaceId) }, attributes: ['hostname'] })).map((d) => d.hostname));
   const results = await registrar().search(names);
   // The merchant sees the selling price; the registrar's cost stays with the platform.
   return {
@@ -113,10 +127,12 @@ async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice, co
   const host = String(domain).trim().toLowerCase();
   const hostParts = host.split('.');
   if (hostParts.length !== 2 || !TLDS.includes(hostParts[1]) || !candidates(host).includes(host)) throw new AppError('VALIDATION_ERROR', `Enter a domain like mystore.com (${TLDS.map((t) => `.${t}`).join(', ')})`, 422, [{ field: 'domain', message: 'Enter a domain like mystore.com' }]);
+  assertRootsAllowed();
+  const domainsService = require('./domainsService');
   const r = registrar();
   if (typeof r.assertReady === 'function') r.assertReady();
   const [quote] = await r.search([host]);
-  if (!quote || !quote.available || (await db.Domain.count({ where: { hostname: host } }))) throw new ConflictError('This domain is not available', 'DOMAIN_UNAVAILABLE');
+  if (!quote || !quote.available || (await db.Domain.count({ where: { hostname: host, ...domainsService.holding(workspaceId) } }))) throw new ConflictError('This domain is not available', 'DOMAIN_UNAVAILABLE');
   const price = await sellPrice(quote.price);
   // A real registrar never sells without a price (no quote, or no exchange rate for the selling currency yet).
   if (!price && r.name !== 'sandbox') throw new AppError('DOMAIN_PRICE_UNAVAILABLE', 'The price of this domain is not available right now — try again later', 503);
@@ -132,9 +148,11 @@ async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice, co
   if (!(await db.Website.count({ where: { workspaceId } }))) throw new ConflictError('Set up your store (add a product) before buying a domain', 'STORE_NOT_SET_UP');
   const rootDomains = require('./rootDomains');
   const counterpartHost = rootDomains.counterpartOf(host);
-  if (counterpartHost && (await db.Domain.count({ where: { hostname: counterpartHost, workspaceId: { [Op.ne]: workspaceId } } }))) {
+  if (counterpartHost && (await db.Domain.count({ where: { hostname: counterpartHost, workspaceId: { [Op.ne]: workspaceId }, status: ['verified', 'active'] } }))) {
     throw new ConflictError(`${counterpartHost} is connected to another store`, 'DOMAIN_UNAVAILABLE');
   }
+  // The store's own limit (CUSTOM_DOMAINS_MAX_PER_STORE), before anything is bought.
+  await domainsService.assertCanAdd(workspaceId, host);
 
   // A real registrar needs the owner of record; the last one given is used again.
   const owner = contact || (await savedRegistrant(workspaceId));
@@ -158,15 +176,17 @@ async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice, co
     await row.update({ providerRef: reg.providerRef, expiresAt: reg.expiresAt });
 
     // Connect it to the store, then point its DNS here: we hold the zone, so it is verified at once.
-    const domainsService = require('./domainsService');
+    // The TXT goes on _zimos-verify.<domain> (item 341); each registrar maps that name to its own host field.
     const { domain: added, record } = await domainsService.addDomain(workspaceId, { hostname: host }, req);
-    const target = `${workspace.slug}.${env.platformRootDomain}`;
+    const target = rules.cnameTarget(workspace);
     const routing = rootDomains.routingFor(host, target);
     // www (or the root) is sent to the domain: its record is ours to create too, so the merchant has none to add.
     const counterpart = added.counterpart && added.counterpart.redirect && counterpartHost ? rootDomains.routingFor(counterpartHost, target, 'redirect').records : [];
     await r.setRecords({ domain: host, providerRef: reg.providerRef, records: [...routing.records, ...counterpart, record] });
-    await added.update({ status: 'verified', verifiedAt: new Date(), ...(counterpart.length ? { counterpart: { ...added.counterpart, dnsManaged: true } } : {}) });
+    // Verified as by the TXT, other stores' unverified claims go (item 341); then the certificate is asked for.
+    await domainsService.markVerified(added, counterpart.length ? { counterpart: { ...added.counterpart, dnsManaged: true } } : {});
     await row.update({ status: 'active', domainId: added.id, lastError: null });
+    await require('./domainSettings').requestAfterVerify(added);
   } catch (err) {
     await row.update({ status: 'failed', lastError: String(err.message).slice(0, 500) });
     logger.error('[domains] purchase failed', { workspaceId, domain: host, message: err.message });

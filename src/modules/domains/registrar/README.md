@@ -76,7 +76,7 @@ Registrar**'s API is beta and cannot renew yet. **Namecheap** works, but its API
 
 **Before going live**, run this against the sandbox. The adapter was written from the API3 documentation and tested against a stand-in, because Dynadot's site could not be reached from where it was built.
 1. Search a free name and a taken one. Prices must come back as "10.88 in USD"-style text.
-2. Buy a name with a registrant. The registrant must show on the domain, and the zone must hold the A, www and TXT records.
+2. Buy a name with a registrant. The registrant must show on the domain, and the zone must hold the A, www and TXT records (the TXT on `_zimos-verify.<domain>`, item 341).
 3. Renew it. The new expiry must come back.
 4. Read `tld_price`: the renew price per TLD must be found. If the answer is nested differently, adjust `tldPrices()`.
 

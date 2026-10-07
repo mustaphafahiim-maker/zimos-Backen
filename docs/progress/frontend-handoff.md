@@ -3981,3 +3981,67 @@ A second kind of manual payment, beside the existing "manual transfer with a rec
 - **Order page and the confirmation queue**: while `manualPayment.status` isn't `approved`, the confirm button shows «لازم تقبل الدفع الأول» / "Approve the payment first" (disabled, or show `MANUAL_PAYMENT_NOT_APPROVED` with that text); the queue row gets a badge «إنستا باي / محفظة — {status}» / "InstaPay / wallet — {status}" and the screenshot thumbnail.
 - **Storefront checkout**: each `store_method` entry is a payment option «{name}» with «ادفع على {accountNumber}» / "Pay to {accountNumber}" and a copy button «نسخ» / "Copy", the instructions, and «افتح لينك الدفع» / "Open the payment link" when `paymentLink` is set; its `adjustment` as for other methods. Placing the order sends `paymentMethod: "bank_transfer"` and `manualPaymentMethodId`, then goes to the proof page.
 - **Storefront proof page** (the thank-you step for this order, and the /pay link of such an order: when GET `/payment` shows `paymentMethod: "bank_transfer"`, try GET `/manual-payment` with the same token and show this page on 200): «حوّل {totalAmount} على {label}» / "Send {totalAmount} via {label}", the number with «نسخ» / "Copy", the link, the instructions; then «الرقم أو حساب إنستا باي اللي حوّلت منه» / "The number or InstaPay account you paid from", «صورة التحويل (سكرين شوت)» / "Transfer screenshot", «ابعت إثبات الدفع» / "Send payment proof". Submitted: «وصلنا إثبات الدفع — المتجر هيراجعه ويأكد طلبك» / "We received your payment proof — the store will check it and confirm your order". Approved: «الدفع اتأكد» / "Payment confirmed". Rejected: «المتجر رفض إثبات الدفع: {rejectionReason}» / "The store rejected the payment proof: {rejectionReason}" and the form again. Cancelled (`canSubmit` false, not approved): «الطلب ده اتلغى» / "This order is cancelled". Errors: payerNumber «اكتب الرقم أو حساب إنستا باي اللي حوّلت منه» / "Enter the number or InstaPay account you paid from"; `NO_FILE` «ارفع صورة التحويل» / "Attach the transfer screenshot"; `UNSUPPORTED_MEDIA_TYPE` / `IMAGE_UNREADABLE` «الصورة لازم تكون JPEG أو PNG أو WebP» / "The screenshot must be JPEG, PNG or WebP"; `FILE_TOO_LARGE` / `IMAGE_TOO_LARGE` «الصورة كبيرة — جرّب صورة أصغر» / "The screenshot is too large — try a smaller one"; `PROOF_ALREADY_SUBMITTED` «إثبات الدفع اتبعت خلاص» / "The payment proof was already sent" (reload the status); `RATE_LIMITED` «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute"; 404 «اللينك ده مش صالح» / "This link isn't valid".
+
+## 341. Custom domains: the verification TXT on `_zimos-verify`, deployment rules, certificate states and suspension — UI: pending
+
+The domains screen (Dashboard → Settings → Domains, `domain.manage`) keeps everything it has (root domains with A / ALIAS records and their www, the primary domain, redirects, buying a domain). What changes: the verification TXT record now goes on its own name, `_zimos-verify.<domain>`, so it never sits beside the CNAME; another store's unverified claim to a domain no longer blocks its owner; the certificate is asked for right after verification and followed by the server (no need to press "Check" any more, though the button stays); a certificate can be `moved`; a domain can be suspended. Each deployment rule is a server setting (names only in `.env.example`), and the overview says which apply so the screen can adapt: `CUSTOM_DOMAINS_ENABLED` (unset = on; anything but `true` closes the whole section), `CUSTOM_DOMAINS_SUBDOMAINS_ONLY` (`true` = no root domains, no buying), `CUSTOM_DOMAIN_CNAME_TARGET` (one host every domain points at; unset = the store's own `<slug>.<platform domain>`), `CUSTOM_DOMAINS_MAX_PER_STORE`, `CUSTOM_DOMAINS_PENDING_TTL_DAYS`, `DOMAIN_VERIFY_RESOLVERS`, `CERTIFICATE_PROVIDER` (`sandbox` | `cloudflare`), `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`. Today (all unset) the screen behaves as before, with the TXT on its new name.
+
+Domains added before this change: the dashboard now shows them the TXT on `_zimos-verify.<domain>`, but a TXT already added on the domain itself (the old place) still verifies them — the merchant need not move it.
+
+### Endpoints (dashboard, all `domain.manage`, under `/workspaces/:workspaceId/domains`)
+- **Closed** (`CUSTOM_DOMAINS_ENABLED` set to anything but `true`): every path below answers 404 `ROUTE_NOT_FOUND` with a token (401 without one), exactly like a path that does not exist. Hide Settings → Domains and the setup-guide step when GET `/domains/overview` answers 404. Domains already verified keep working on the storefront.
+- **GET `/overview`** → 200, new fields marked:
+  ```json
+  {
+    "domains": [{
+      "id": "73deb867-…", "hostname": "ahmedstore.com", "status": "pending_verification", "verifiedAt": null, "isPrimary": false,
+      "sslStatus": "none", "sslProvider": null, "sslCheckedAt": null,
+      "sslDetail": null,
+      "suspended": false, "suspendedReason": null,
+      "verifyBy": null,
+      "homeFunnel": null, "redirectToPrimary": true, "isRoot": true,
+      "records": [
+        { "type": "TXT", "name": "_zimos-verify.ahmedstore.com", "value": "zimos-verify=9e7a0e0e…", "ttl": 300, "purpose": "verification" },
+        { "type": "ALIAS", "name": "ahmedstore.com", "value": "demo-store.zimos.co", "ttl": 300, "purpose": "routing" },
+        { "type": "CNAME", "name": "www.ahmedstore.com", "value": "demo-store.zimos.co", "ttl": 300, "purpose": "redirect" }
+      ],
+      "alternatives": [],
+      "counterpart": { "hostname": "www.ahmedstore.com", "redirect": true, "sslStatus": "none", "dnsManaged": false, "records": […], "alternatives": [] }
+    }],
+    "cnameTarget": "demo-store.zimos.co",
+    "subdomainsOnly": false,
+    "maxPerStore": null,
+    "pendingTtlDays": null,
+    "certificateProvider": "sandbox"
+  }
+  ```
+  - `records[0].name` is now `_zimos-verify.<hostname>` (was the hostname). Show the name column as is; many DNS panels want only `_zimos-verify` (or `_zimos-verify.www`) in the "Name/Host" field — show that short form beside it ("Host: `_zimos-verify`").
+  - `cnameTarget`: with `CUSTOM_DOMAIN_CNAME_TARGET` set it is that one host (e.g. `customers.zimos.co`) for every store and every routing record uses it.
+  - `sslStatus`: `none` | `pending` | `issued` | `failed` | **`moved`** (the certificate was issued but the domain no longer points at the store). `sslDetail`: the provider's reason as a sentence (show as is under the status), or null.
+  - `suspended` / `suspendedReason`: `store_suspended` (the store is suspended by the platform) or `plan` (the plan no longer includes custom domains while plan features are enforced). Set and cleared by the server within 10 minutes.
+  - `verifyBy`: for a `pending_verification` domain when `pendingTtlDays` is set, the time after which it can no longer be verified (and is removed); null otherwise.
+  - `subdomainsOnly: true`: no root domains (adding one answers `APEX_NOT_SUPPORTED`), no buying (search / purchase answer `APEX_NOT_SUPPORTED`), `counterpart` is null. `maxPerStore`: the most domains one store may hold (verified or not), null = only the plan's limit. `pendingTtlDays`: null = an unverified domain waits for ever.
+- **GET `/`** (the short list): each item adds `"cname": { "type": "CNAME", "name": "<hostname>", "value": "<cnameTarget>" }`; `record.name` is `_zimos-verify.<hostname>`.
+- **POST `/`** `{ "hostname": "www.ahmedstore.com" }` → 201 `{ "domain": {…}, "record": { "type": "TXT", "name": "_zimos-verify.www.ahmedstore.com", "value": "zimos-verify=…" }, "next": "…" }`. The hostname is stored lower-case; an Arabic name in its `xn--` form (show `hostname` as the browser would, or as is). Errors:
+  - 422 `VALIDATION_ERROR` field `hostname`: "Enter a valid domain like www.ahmedstore.com", or "That is a zimos.co subdomain — it already works, no setup needed".
+  - 400 `DOMAIN_NOT_ALLOWED`: an IP address, or a name that can never be a store's (the platform's hosting zones, `.local`, `.internal`, `.test`, `.example`, `.localhost` …).
+  - 400 `APEX_NOT_SUPPORTED` (subdomains-only): `details.suggestion` = `"www.ahmedstore.com"`.
+  - 409 `DOMAIN_ALREADY_ADDED` (already on this store), `DOMAIN_TAKEN` (verified by another store — an unverified claim elsewhere no longer counts), `DOMAIN_LIMIT_REACHED` (`maxPerStore`), `STORE_NOT_SET_UP`; 403 `PLAN_FEATURE_REQUIRED` / plan limit as before; 429 `RATE_LIMITED` (10 a minute per IP).
+- **POST `/:domainId/verify`** → 200 as before. The TXT is looked for on `_zimos-verify.<hostname>`, then on the hostname itself (older domains). On success the certificate is requested at once: reload the overview (`sslStatus` usually `pending`). Errors: 400 `DOMAIN_NOT_VERIFIED` (message names `_zimos-verify.<hostname>`); 409 `DOMAIN_TAKEN` (another store verified it first); 409 `DOMAIN_VERIFICATION_EXPIRED` (past `verifyBy`: remove it and add it again); 429 `RATE_LIMITED` (20 a minute per IP).
+- **GET `/:domainId/dns-check`** → `dns.txt` adds `"name": "_zimos-verify.<hostname>"` and `"foundOnHost": true|false` (`found` is true when either place has it); 429 `RATE_LIMITED` (30 a minute per IP).
+- **POST `/:domainId/ssl/check`**: the answer's `domain` carries `sslDetail`; `sslStatus` may be `moved`.
+- **PATCH `/:domainId`** `{ "redirectCounterpart": true }` → 400 `APEX_NOT_SUPPORTED` in subdomains-only mode.
+- **GET `/search`**, **POST `/purchases`** → 400 `APEX_NOT_SUPPORTED` in subdomains-only mode. A purchase now checks `DOMAIN_LIMIT_REACHED` / `DOMAIN_ALREADY_ADDED` / `DOMAIN_TAKEN` before anything is bought, and a name another store only claimed (unverified) shows as available.
+
+### Storefront proxy and console
+- **GET `/store/resolve-host?host=…`**: a domain suspended for its `plan` answers 404 (treat it as an unknown host, as for any unknown domain). A domain of a suspended store answers as before, so the storefront shows the store's "unavailable" page there. A suspended or `moved` domain is never the `primaryHost`.
+- **POST `/admin/workspaces/:workspaceId/support-view`** (console, `support.view`): each `domains[]` row adds `sslDetail` and `suspendedReason`.
+
+### Screens (dashboard → Settings → Domains)
+- **Add a domain**: the field hint follows `subdomainsOnly`: false «اكتب الدومين، مثلًا ahmedstore.com أو shop.ahmedstore.com» / "Type the domain, e.g. ahmedstore.com or shop.ahmedstore.com"; true «اكتب دومين فرعي، مثلًا www.ahmedstore.com أو shop.ahmedstore.com» / "Type a subdomain, e.g. www.ahmedstore.com or shop.ahmedstore.com". When `maxPerStore` is reached, disable the button with «وصلت لأقصى عدد دومينات ({maxPerStore}) — امسح واحد الأول» / "You've reached the most domains ({maxPerStore}) — remove one first".
+- **DNS records card**: for the TXT row label it «إثبات الملكية» / "Ownership proof" and show «الاسم: _zimos-verify» / "Name: _zimos-verify" (or `_zimos-verify.www` for www) with a copy button «نسخ» / "Copy", and the full name in small text. Note under it: «لو كنت ضفت سجل TXT على الدومين نفسه قبل كده، هيشتغل برضه» / "If you already added the TXT on the domain itself before, it still works". With `verifyBy`: «لازم تأكد الدومين قبل {verifyBy} وإلا هيتمسح» / "Verify the domain before {verifyBy} or it will be removed".
+- **Certificate badge** (`sslStatus`): «مفيش شهادة لسه» / "No certificate yet" (`none`) · «الشهادة بتتجهز» / "Certificate in progress" (`pending`, with «بنتابعها تلقائي — مش لازم تعمل حاجة» / "We follow it automatically — nothing to do") · «الشهادة شغالة» / "Certificate active" (`issued`) · «الشهادة فشلت» / "Certificate failed" (`failed`) · «الدومين مبقاش متوجه للمتجر» / "The domain no longer points at the store" (`moved`, with «راجع سجلات الـ DNS وبعدين اضغط افحص تاني» / "Check the DNS records, then press Check again"). Under `failed` / `moved` show `sslDetail` as is.
+- **Suspended**: a warning on the row — `store_suspended` «الدومين متوقف لأن المتجر موقوف» / "This domain is paused because the store is suspended"; `plan` «الدومين متوقف — باقتك مش فيها دومين خاص» / "This domain is paused — your plan doesn't include a custom domain" with «رقّي الباقة» / "Upgrade plan" (→ Subscription). It comes back by itself once the reason is gone.
+- **Errors**: `DOMAIN_NOT_ALLOWED` «الدومين ده مينفعش يتوصل بمتجر» / "This domain can't be connected to a store"; `APEX_NOT_SUPPORTED` «وصّل دومين فرعي زي {suggestion}، وحوّل الدومين الأساسي له من عند شركة الدومين» / "Connect a subdomain such as {suggestion}, and forward the main domain to it at your domain registrar" (button «استخدم {suggestion}» / "Use {suggestion}" fills the field); `DOMAIN_ALREADY_ADDED` «الدومين ده متضاف للمتجر خلاص» / "This domain is already on your store"; `DOMAIN_TAKEN` «الدومين ده متوصل بمتجر تاني» / "This domain is connected to another store"; `DOMAIN_LIMIT_REACHED` as above; `DOMAIN_VERIFICATION_EXPIRED` «عدّت المدة ومتأكدش — امسحه وضيفه تاني» / "It wasn't verified in time — remove it and add it again"; `RATE_LIMITED` «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute".
+- **Buy a domain** tab: hidden when `subdomainsOnly` is true (the API answers `APEX_NOT_SUPPORTED`).
+- **Console → a store → support view → Domains**: show `suspendedReason` («موقوف: المتجر موقوف» / "Paused: store suspended", «موقوف: الباقة» / "Paused: plan") and `sslDetail` beside the certificate state.

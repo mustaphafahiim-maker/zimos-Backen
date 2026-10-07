@@ -51,8 +51,14 @@ async function start() {
   logger.info(
     `Public switches: shopper review form ${env.reviews.publicSubmissionEnabled ? 'open' : 'closed'}, password reset by SMS ${
       env.passwordReset.smsEnabled ? 'on' : 'off'
-    }, phone change by SMS ${env.account.phoneChangeEnabled ? 'on' : 'off'}, marketing-site traffic ${env.siteAnalytics.enabled ? 'on' : 'off'}`
+    }, phone change by SMS ${env.account.phoneChangeEnabled ? 'on' : 'off'}, marketing-site traffic ${env.siteAnalytics.enabled ? 'on' : 'off'}, custom domains ${
+      env.customDomains.enabled ? `on${env.customDomains.subdomainsOnly ? ' (subdomains only)' : ''}` : 'off'
+    }`
   );
+  // Item 341: Cloudflare for SaaS named without its token or zone answers every certificate request with 502.
+  if (String(process.env.CERTIFICATE_PROVIDER || '').trim().toLowerCase() === 'cloudflare' && !(env.customDomains.cloudflare.apiToken && env.customDomains.cloudflare.zoneId)) {
+    logger.error('CERTIFICATE_PROVIDER=cloudflare needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID: no certificate can be requested until both are set');
+  }
   // Item 339: on with no origin listed refuses every beacon (403).
   if (env.siteAnalytics.enabled && env.siteAnalytics.origins.length === 0) {
     logger.warn('SITE_ANALYTICS_ENABLED is on but SITE_ANALYTICS_ORIGINS is empty: every site event is refused (403 ORIGIN_NOT_ALLOWED)');
