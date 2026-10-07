@@ -15,6 +15,18 @@ const { STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('../orders/orderStage');
 // the minor-unit difference (KWD has 3 digits) that the per-unit rate doesn't (item 291).
 const { factorSql } = require('../currencies/baseAmounts');
 
+// An order line as the pieces it holds (as orders/orderUnits.js does in JS; item 292): an offer line
+// counts offers, so its pieces are its quantity × the offer's line quantities. A one-line offer keeps
+// the line's variant (the shopper's pick); a bundle names each of its variants. Needs the alias `oi`.
+const PIECES_JOIN = `LEFT JOIN LATERAL (
+    SELECT ov.variant_id, ov.quantity, count(*) OVER () AS n, sum(ov.quantity) OVER () AS total
+      FROM offer_variants ov WHERE ov.offer_id = oi.offer_id) x ON true`;
+const PIECE_VARIANT = 'CASE WHEN x.n IS NULL OR x.n = 1 THEN oi.variant_id ELSE x.variant_id END';
+const PIECES = 'oi.quantity * COALESCE(x.quantity, 1)';
+// The piece row's part of the line total (by pieces); the whole line for a plain one.
+const PIECE_SHARE = 'COALESCE(x.quantity::numeric / NULLIF(x.total, 0), 1)';
+const PIECE_OWN = '(x.n IS NULL OR x.n = 1 OR x.variant_id = oi.variant_id)';
+
 /*
  * Reports for accounts and stock decisions (spec-gaps items 238–242), beside
  * analytics/reportsService.js. All read existing tables. Each answers JSON,
@@ -160,9 +172,13 @@ router.get(
     const rows = await run(
       `SELECT v.id AS "variantId", p.id AS "productId", p.name AS "productName", v.sku, v.option_values AS options,
               (v.stock_on_hand - v.reserved_stock) AS free, v.cost_amount AS "unitCost", v.created_at AS "createdAt",
-              (SELECT MAX(o.created_at) FROM order_items oi JOIN orders o ON o.id = oi.order_id
-                WHERE oi.variant_id = v.id AND o.cancelled_at IS NULL AND o.is_test = false) AS "lastSoldAt"
+              sold.last AS "lastSoldAt"
          FROM product_variants v JOIN products p ON p.id = v.product_id
+         -- One pass over this store's orders (item 292), by the pieces sold; a rejected order is no sale.
+         LEFT JOIN (SELECT ${PIECE_VARIANT} AS variant_id, MAX(o.created_at) AS last
+                      FROM orders o JOIN order_items oi ON oi.order_id = o.id ${PIECES_JOIN}
+                     WHERE o.workspace_id = :ws AND o.cancelled_at IS NULL AND o.is_test = false AND o.confirmation_state <> 'rejected'
+                     GROUP BY 1) sold ON sold.variant_id = v.id
         WHERE v.workspace_id = :ws AND p.track_inventory = true AND p.status <> 'archived' AND v.status = 'active'
           AND v.stock_on_hand - v.reserved_stock > 0
           ${req.query.includeNew ? '' : "AND v.created_at < now() - (:days * INTERVAL '1 day')"}`,
@@ -205,7 +221,7 @@ router.get('/discounts', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate
               o.total_amount AS total, o.amount_refunded AS refunded, dr.amount_allocated AS given,
               (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live, o.stage,
               NOT EXISTS (SELECT 1 FROM orders p WHERE p.customer_id = o.customer_id AND p.workspace_id = o.workspace_id
-                           AND p.cancelled_at IS NULL AND p.is_test = false AND p.created_at < o.created_at) AS first_order
+                           AND p.cancelled_at IS NULL AND p.confirmation_state <> 'rejected' AND p.is_test = false AND p.created_at < o.created_at) AS first_order
          FROM discount_redemptions dr
          JOIN discounts d ON d.id = dr.discount_id
          JOIN (SELECT o.*, ${STAGE_SQL} AS stage FROM ${ORDERS_WITH_STAGE_FROM} WHERE o.workspace_id = :ws AND o.created_at >= :from AND o.created_at < :to) o ON o.id = dr.order_id
@@ -275,8 +291,9 @@ router.get('/order-heatmap', requirePermission(PERMISSIONS.ANALYTICS_VIEW), vali
 router.get('/sales-by-collection', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({ params: Joi.object(ws), query: Joi.object(range) }), asyncHandler(async (req, res) => {
   const c = await contextOf(req);
   const lines = `
-    SELECT oi.product_id, oi.order_id, oi.quantity, ROUND((oi.line_total_amount) * ${factorSql()}) AS amount, o.stage
+    SELECT oi.product_id, oi.order_id, ${PIECES} AS quantity, ROUND(oi.line_total_amount * ${PIECE_SHARE} * ${factorSql()}) AS amount, o.stage
       FROM order_items oi
+      ${PIECES_JOIN}
       JOIN (SELECT o.*, ${STAGE_SQL} AS stage FROM ${ORDERS_WITH_STAGE_FROM}
              WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'
                AND o.created_at >= :from AND o.created_at < :to) o ON o.id = oi.order_id`;
@@ -316,11 +333,15 @@ router.get('/sales-by-option', requirePermission(PERMISSIONS.ANALYTICS_VIEW), va
   const c = await contextOf(req);
   const rows = await run(
     `SELECT MIN(trim(kv.key)) AS option, MIN(trim(kv.value)) AS value, lower(trim(kv.key)) AS ok, lower(trim(kv.value)) AS ov,
-            SUM(oi.quantity)::int AS units, COUNT(DISTINCT oi.order_id)::int AS orders, COUNT(DISTINCT oi.product_id)::int AS products,
-            COALESCE(ROUND(SUM(oi.line_total_amount * ${factorSql()})), 0)::bigint AS revenue
+            SUM(${PIECES})::int AS units, COUNT(DISTINCT oi.order_id)::int AS orders, COUNT(DISTINCT oi.product_id)::int AS products,
+            COALESCE(ROUND(SUM(oi.line_total_amount * ${PIECE_SHARE} * ${factorSql()})), 0)::bigint AS revenue
        FROM order_items oi
        JOIN orders o ON o.id = oi.order_id
-       CROSS JOIN LATERAL jsonb_each_text(CASE WHEN jsonb_typeof(oi.variant_options_snapshot) = 'object' THEN oi.variant_options_snapshot ELSE '{}'::jsonb END) kv
+       ${PIECES_JOIN}
+       -- A bundle's other variants carry their own options (item 292); the line's own piece keeps what was sold.
+       LEFT JOIN product_variants pv ON pv.id = x.variant_id AND NOT ${PIECE_OWN}
+       CROSS JOIN LATERAL jsonb_each_text(CASE WHEN NOT ${PIECE_OWN} AND jsonb_typeof(pv.option_values) = 'object' THEN pv.option_values
+                                               WHEN ${PIECE_OWN} AND jsonb_typeof(oi.variant_options_snapshot) = 'object' THEN oi.variant_options_snapshot ELSE '{}'::jsonb END) kv
       WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'
         AND o.created_at >= :from AND o.created_at < :to
         ${req.query.option ? 'AND lower(trim(kv.key)) = lower(:option)' : ''}
