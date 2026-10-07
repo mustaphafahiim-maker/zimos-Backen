@@ -99,9 +99,10 @@ async function listReturns(workspaceId, { status } = {}) {
  * an approved exchange gets its replacement order, and return.approved /
  * return.rejected go to the outbox — the shopper's email, push and the
  * store's automations and webhooks. notifyCustomer false keeps it from the
- * shopper (email, push, automations) as for a cancellation.
+ * shopper (email, push, automations) as for a cancellation; left out, the
+ * store's return_approved / return_rejected email switch decides.
  */
-async function moderateReturn(workspaceId, returnId, { action, note = null, notifyCustomer = true, exchangeShippingAmount = 0 }, req) {
+async function moderateReturn(workspaceId, returnId, { action, note = null, notifyCustomer, exchangeShippingAmount = 0 }, req) {
   return db.sequelize.transaction(async (transaction) => {
     const ret = await db.ReturnRequest.findOne({ where: { id: returnId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!ret) throw new NotFoundError('ReturnRequest');
@@ -127,7 +128,7 @@ async function moderateReturn(workspaceId, returnId, { action, note = null, noti
       entityId: ret.id,
       before,
       after: { status, resolution: ret.resolution, exchangeOrderId: ret.exchangeOrderId, note: ret.decisionNote },
-      metadata: { notifyCustomer: notifyCustomer !== false },
+      metadata: typeof notifyCustomer === 'boolean' ? { notifyCustomer } : null,
       req,
       transaction,
     });
@@ -137,7 +138,7 @@ async function moderateReturn(workspaceId, returnId, { action, note = null, noti
       orderId: ret.orderId,
       resolution: ret.resolution,
       exchangeOrderId: ret.exchangeOrderId || null,
-      notifyCustomer: notifyCustomer !== false,
+      ...(typeof notifyCustomer === 'boolean' ? { notifyCustomer } : {}),
     });
     return ret;
   });

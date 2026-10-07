@@ -30,7 +30,12 @@ const inStock = (v) => Boolean(v.allowOverselling) || v.availableStock() > 0;
 async function exchangeOptions(workspaceId, orderItems) {
   const productIds = [...new Set(orderItems.map((i) => i.productId).filter(Boolean))];
   if (!productIds.length) return new Map();
-  const variants = await db.ProductVariant.findAll({ where: { workspaceId, productId: productIds, status: 'active' }, order: [['createdAt', 'ASC']] });
+  // A draft or archived product is not for sale even when its variant row is active (orderService.priceLine).
+  const variants = await db.ProductVariant.findAll({
+    where: { workspaceId, productId: productIds, status: 'active' },
+    include: [{ model: db.Product, as: 'product', attributes: ['id'], where: { status: 'active' } }],
+    order: [['createdAt', 'ASC']],
+  });
   const out = new Map();
   for (const item of orderItems) {
     out.set(
@@ -57,7 +62,9 @@ async function lineProblems(workspaceId, resolution, items, orderItemsById, pref
     return problems;
   }
   const ids = [...new Set(items.map((l) => l.exchangeVariantId).filter(Boolean))];
-  const variants = ids.length ? await db.ProductVariant.findAll({ where: { id: ids, workspaceId } }) : [];
+  const variants = ids.length
+    ? await db.ProductVariant.findAll({ where: { id: ids, workspaceId }, include: [{ model: db.Product, as: 'product', attributes: ['id', 'status'], required: false }] })
+    : [];
   const byId = new Map(variants.map((v) => [v.id, v]));
   items.forEach((line, i) => {
     const oi = orderItemsById.get(line.orderItemId);
@@ -66,7 +73,7 @@ async function lineProblems(workspaceId, resolution, items, orderItemsById, pref
     if (!line.exchangeVariantId) problems.push({ field: `${prefix}.${i}.exchangeVariantId`, message: 'Pick the size or colour you want instead' });
     else if (!v || v.productId !== oi.productId) problems.push({ field: `${prefix}.${i}.exchangeVariantId`, message: 'Pick another variant of the same product' });
     else if (v.id === oi.variantId) problems.push({ field: `${prefix}.${i}.exchangeVariantId`, message: 'Pick a different variant from the one you got' });
-    else if (v.status !== 'active') problems.push({ field: `${prefix}.${i}.exchangeVariantId`, message: 'This variant is no longer sold' });
+    else if (v.status !== 'active' || !v.product || v.product.status !== 'active') problems.push({ field: `${prefix}.${i}.exchangeVariantId`, message: 'This variant is no longer sold' });
   });
   return problems;
 }

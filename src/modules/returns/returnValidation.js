@@ -35,9 +35,11 @@ module.exports = {
     params: Joi.object({ workspaceId: uuid.required(), returnId: uuid.required() }),
     body: Joi.object({
       action: Joi.string().valid('approve', 'reject').required(),
-      // Item 372: told to the shopper with the decision; false keeps the decision from them.
+      // Item 372: told to the shopper with the decision.
       note: Joi.string().trim().max(500).allow('', null),
-      notifyCustomer: Joi.boolean().default(true),
+      // false keeps the decision from the shopper, true sends the email even while its template is off;
+      // left out, the store's return_approved / return_rejected switch decides.
+      notifyCustomer: Joi.boolean().optional(),
       // What the replacement order of an exchange charges for shipping (minor units; none by default).
       exchangeShippingAmount: Joi.number().integer().min(0).max(100000000).default(0),
     }),
