@@ -172,6 +172,8 @@ const checkout = asyncHandler(async (req, res) => {
   }
   // A signed-in tax-exempt business customer pays no added tax (businessCustomers/, item 228).
   await require('../businessCustomers').markCheckout(workspaceId, req.headers['x-shopper-token'], orderBody);
+  // Cart offers: an offered line at the price the cart showed (cartOffers/, item 253). Funnels keep their own offers.
+  if (!orderBody.funnelId) ({ items } = await require('../cartOffers').applyAtCheckout(workspace, items));
   // Free gifts the order earns, added by the server at no charge (freeGifts/, item 208). Funnels keep their own offers.
   if (!orderBody.funnelId) ({ items } = await require('../freeGifts').addGifts(workspace, items));
   // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (giftOptions, item 214).

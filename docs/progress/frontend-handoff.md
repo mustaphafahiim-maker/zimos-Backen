@@ -3065,3 +3065,31 @@ These pixels carry `events`: our event → the platform's name, `null` = don't s
 
 ### Screen
 - Settings → Team (owner only) → «نقل ملكية المتجر» / "Transfer ownership" (danger zone): pick a team member, choose «أفضل في المتجر كمدير» / "Stay as store manager" · «أفضل مالك معاه» / "Stay as an owner too" · «أخرج من المتجر» / "Leave the store", type the password, and confirm with «المتجر هيبقى ملك {name} — الخطة والفريق والإعدادات معاه. مينفعش ترجّعه غير لو هو رجّعهولك» / "The store will belong to {name} — plan, team and settings. Only they can hand it back". Success toast «المتجر بقى ملك {name}» / "{name} now owns the store".
+
+## 253. Cart offers — UI: pending
+
+### Staff: `/api/v1/workspaces/:ws/cart-offers`
+- `GET /` (`products.view`) → `{ rules: [...] }`; `PUT /` (`discounts.manage`) `{ rules: [...] }` replaces the list (20 at most) → `{ rules }`.
+```json
+{ "rules": [{ "name": "Matching socks 20% off", "variantId": "…", "discountPercent": 20, "maxQuantity": 1,
+              "productIds": ["…"], "minSubtotal": null, "startsAt": null, "endsAt": null, "active": true }] }
+```
+- `discountPercent` (1–100) **or** `offerPriceAmount` (minor units), exactly one; `maxQuantity` 1–10 (default 1); at least one of `productIds` (the cart has one of them) / `minSubtotal` (minor units; the rest of the cart reaches it) — both set = both needed. 422 when a variant/product isn't in the store, when the only trigger is the offered product itself, or when it ends before it starts.
+
+### Storefront: the cart (`GET/POST/PATCH /store/:ws/cart…`) gains `cartOffers`
+```json
+"cartOffers": {
+  "offers": [{ "ruleId": "…", "name": "Matching socks 20% off",
+               "variant": { "variantId": "…", "productId": "…", "productName": "ZZ CO Offer", "slug": "zz-co-offer", "optionValues": {}, "imageUrl": null },
+               "regularPrice": "5000", "offerPrice": "4000", "discountPercent": 20, "maxQuantity": 1,
+               "inCart": false, "applied": false, "overMaxQuantity": false }],
+  "locked": [{ "ruleId": "…", "name": "Big cart deal", "variant": { "variantId": "…", "productName": "…", "slug": "…" },
+               "regularPrice": "10000", "offerPrice": "1000", "missingAmount": "50000", "needsProduct": false }] }
+```
+- `offers`: rules that hold now. Add it with the normal `POST /cart/items { variantId, quantity: 1 }` — the line is then priced at `offerPrice` (`applied: true`) and the cart totals include it. Above `maxQuantity` the line is back at the normal price (`overMaxQuantity: true`).
+- `locked`: rules not reached yet («ضيف بـ {missingAmount} كمان وخد … بـ {offerPrice}» / "Add {missingAmount} more to get … for {offerPrice}"); `needsProduct` = it needs a certain product.
+- The checkout charges the same price (lines within `maxQuantity`, never higher than the price already shown). Not in funnel checkouts. Buying the offered product alone gets no offer price.
+
+### Screens
+- Marketing → «عروض السلة» / "Cart offers": the list of rules (name, product, «خصم ٢٠٪» or «بـ ٤٠ ج.م», condition, dates, on/off), and an editor: product + variant picker, «نوع الخصم» / "Discount" (percent / fixed price), «أقصى كمية بالسعر ده» / "Max quantity at this price", «يظهر لما» / "Show when": «السلة فيها منتج من دول» / "the cart has one of these products" and/or «السلة توصل لـ» / "the cart reaches", start/end.
+- Storefront cart drawer / cart page: a card per offer — image, name, «بدل {regularPrice}» struck through, «{offerPrice}», «ضيف للسلة» / "Add to cart" (or «في السلة ✓» / "In your cart" when `inCart`); a note when `overMaxQuantity`: «السعر المخفض لأول {maxQuantity} بس» / "The offer price is for up to {maxQuantity}"; locked offers as a progress hint.

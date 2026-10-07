@@ -296,6 +296,8 @@ v1.use('/workspaces/:workspaceId/stock-lots', require('./modules/stockLots').rou
 v1.use('/workspaces/:workspaceId/purchasing', require('./modules/purchasing').router);
 // Free gift with purchase (spec-gaps item 208).
 v1.use('/workspaces/:workspaceId/free-gifts', require('./modules/freeGifts').router);
+// Cart offers (spec-gaps item 253).
+v1.use('/workspaces/:workspaceId/cart-offers', require('./modules/cartOffers').router);
 // Notes and follow-ups on customers (spec-gaps item 209).
 v1.use('/workspaces/:workspaceId/customer-notes', require('./modules/customerNotes').router);
 // Size charts (spec-gaps item 210).

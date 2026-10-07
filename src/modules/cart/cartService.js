@@ -49,10 +49,14 @@ async function getCart(workspaceId, cartId, { shopperToken = null } = {}) {
   let testPrices = await productTests.visitorPrices(workspaceId, (cart.items || []).filter((i) => !i.offerId).map((i) => i.variantId), cart.visitorId);
   // A signed-in wholesale customer's price lists (priceLists/, item 205), as the checkout will pin them.
   if (shopperToken) testPrices = await require('../priceLists').cartPrices(workspaceId, cart, shopperToken, testPrices);
+  // Cart offers ("add X for 20% off", cartOffers/, item 253): the offered line's price, and what to offer.
+  const cartOffers = await require('../cartOffers').forCart(workspaceId, cart, testPrices).catch(() => ({ prices: testPrices, offers: [], locked: [] }));
+  testPrices = cartOffers.prices;
   // Quantity bundles lower the lines they cover, as they will on the order.
   const view = await require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart, testPrices));
   // Free gifts the cart earns, or how far it is from them (freeGifts/, item 208); added by the checkout.
   view.freeGifts = await require('../freeGifts').forCart(workspaceId, view).catch(() => []);
+  view.cartOffers = { offers: cartOffers.offers, locked: cartOffers.locked || [] };
   return view;
 }
 
