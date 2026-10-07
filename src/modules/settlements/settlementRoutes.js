@@ -14,6 +14,8 @@ const uuid = Joi.string().uuid();
 const ws = { workspaceId: uuid.required() };
 const line = Joi.object({
   orderId: uuid.required(),
+  // An order sent as several parcels (item 375) is settled per delivered parcel: which one.
+  shipmentId: uuid.optional(),
   collectedAmount: Joi.number().integer().min(0),
   feeAmount: Joi.number().integer().min(0).default(0),
 });

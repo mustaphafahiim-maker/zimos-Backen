@@ -7,7 +7,6 @@ const db = require('../../db/models');
 const { AppError } = require('../../core/errors/AppError');
 const { registerFonts, drawText, hasArabic } = require('../../core/pdf/bidiText');
 const { computeWaybillModel } = require('../waybill/waybillService');
-const { codAmountFor } = require('../shipping/carrierShipmentService');
 
 /**
  * Printed paper for many orders at once (SPEC §12.4):
@@ -155,9 +154,10 @@ async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
     order: [['carrierCode', 'ASC'], ['createdAt', 'ASC']],
     limit: 1000,
   });
-  // One row per order: its newest live shipment.
+  // One row per order: its newest live shipment. An order sent as several
+  // parcels (item 375) has a row per parcel, each with its own COD amount.
   const byOrder = new Map();
-  for (const s of shipments) byOrder.set(s.orderId, s);
+  for (const s of shipments) byOrder.set(Array.isArray(s.items) ? s.id : s.orderId, s);
   const rows = [...byOrder.values()];
   if (rows.length === 0) throw new AppError('NO_SHIPMENTS', 'There are no shipments to hand over for this selection', 422);
 
@@ -208,7 +208,7 @@ async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
     }
     const o = s.order;
     const contact = o.contactSnapshot || {};
-    const collectAmount = codAmountFor(o);
+    const collectAmount = require('../shipping/partialShipments').codAmountForShipment(o, s);
     total += collectAmount;
     const cells = [
       String(index + 1),

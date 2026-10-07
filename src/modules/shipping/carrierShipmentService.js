@@ -13,6 +13,7 @@ const accounts = require('./carrierAccountService');
 const { resolveDropOff } = require('./carrierRegionMap');
 const { CarrierAuthError, CarrierPermissionError } = require('./carriers/carrierErrors');
 const { loadTiers } = require('./shippingPricing');
+const partial = require('./partialShipments');
 
 /**
  * Shipments booked through a merchant's connected courier account.
@@ -377,7 +378,8 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       });
       if (!order) throw new NotFoundError('Order');
       assertReadyToShip(order);
-      await assertNoActiveShipment(order.id, transaction);
+      // The whole order, or the units in data.items when it goes as several parcels (item 375).
+      const plan = await partial.planShipment(order, data, transaction);
       // A returned parcel that was restocked: its units are taken again before the courier is called (item 354).
       await require('../orders/returnedStock').retakeForReship(workspaceId, order.id, req && req.user ? req.user.id : null, transaction);
 
@@ -387,14 +389,18 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       const tier = await bookingTier(workspaceId, order, data.tierId, transaction);
       const pkg = adapter.resolvePackage ? adapter.resolvePackage(account.settings || {}, tier) : null;
 
-      const items = await db.OrderItem.findAll({ where: { orderId: order.id }, transaction });
+      const items = plan.items
+        ? plan.lines.map(({ item, quantity }) => ({ quantity, productNameSnapshot: item.productNameSnapshot }))
+        : await db.OrderItem.findAll({ where: { orderId: order.id }, transaction });
       const snapshot = order.shippingAddressSnapshot;
       booked = await accounts.withAuthHandling(account, () =>
         adapter.createShipment(credentials, {
           order,
           address: { ...address, firstLine: snapshot.addressLine, secondLine: snapshot.notes || null },
-          cod: codAmountFor(order),
-          goodsValue: Math.max(0, Number(order.subtotalAmount) - Number(order.discountAmount)),
+          cod: plan.items ? plan.codAmount : codAmountFor(order),
+          goodsValue: plan.items
+            ? Math.round(plan.lines.reduce((sum, { item, quantity }) => sum + partial.goodsValue(item, quantity), 0))
+            : Math.max(0, Number(order.subtotalAmount) - Number(order.discountAmount)),
           itemsCount: items.reduce((sum, item) => sum + item.quantity, 0),
           description: items.map((item) => `${item.quantity}x ${item.productNameSnapshot}`).join(', '),
           // The account's standing notes for the courier when the booking brings none.
@@ -423,6 +429,8 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
             package: pkg ? { ...pkg, tierOverridden: Boolean(data.tierId) } : null,
           },
           status: 'created',
+          items: plan.items,
+          codAmount: plan.codAmount,
         },
         transaction
       );

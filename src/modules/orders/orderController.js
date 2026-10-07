@@ -162,6 +162,10 @@ const listShipments = asyncHandler(async (req, res) => {
   res.json({ shipments: await service.listShipments(req.tenant.workspaceId, req.params.orderId) });
 });
 
+const shipmentPlan = asyncHandler(async (req, res) => {
+  res.json({ plan: await require('../shipping/partialShipments').shipmentPlan(req.tenant.workspaceId, req.params.orderId) });
+});
+
 const createShipment = asyncHandler(async (req, res) => {
   const shipment = await service.createShipment(req.tenant.workspaceId, req.params.orderId, req.body, req);
   res.status(201).json({ shipment });
@@ -208,6 +212,7 @@ module.exports = {
   deleteNote,
   update,
   listShipments,
+  shipmentPlan,
   createShipment,
   updateShipment,
 };

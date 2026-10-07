@@ -6,7 +6,7 @@ const db = require('../../db/models');
 const { NotFoundError } = require('../../core/errors/AppError');
 const logger = require('../../core/utils/logger');
 const { registerFonts, drawText, hasArabic } = require('../../core/pdf/bidiText');
-const { isCarrierBooked, FINISHED_STATUSES, codAmountFor } = require('../shipping/carrierShipmentService');
+const { isCarrierBooked, FINISHED_STATUSES } = require('../shipping/carrierShipmentService');
 const { getAdapter, MANUAL } = require('../shipping/carriers');
 
 const money = (minor, currency) => `${(Number(minor) / 100).toFixed(2)} ${currency || ''}`.trim();
@@ -134,7 +134,8 @@ async function computeWaybillModel(workspaceId, orderId) {
     storeName: (workspace && workspace.name) || 'Store',
     // The same figure a courier booking sends as its COD amount: what is
     // still unpaid, not the order total.
-    amountToCollect: isCod ? String(codAmountFor(order)) : null,
+    // A parcel that carries part of the order collects its own amount (item 375).
+    amountToCollect: isCod ? String(require('../shipping/partialShipments').codAmountForShipment(order, shipment)) : null,
     shipTo: order.contactSnapshot || {},
     address: order.shippingAddressSnapshot || {},
     // The shopper's custom-field answers (waybill/customData.js). Emoji are dropped: the PDF fonts have no glyphs for them.

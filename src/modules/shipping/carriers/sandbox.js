@@ -78,7 +78,8 @@ async function createShipment(creds, input) {
     carrierShipmentId: null,
     trackingUrl: null,
     labelUrl: null,
-    raw: { sandbox: true, sandboxStatus: 'created', city: path[0] ? path[0].id : null, district: path[1] ? path[1].id : null, reference: order.orderNumber },
+    // What a real courier is told to collect and carry (item 375: a split parcel's own COD and units).
+    raw: { sandbox: true, sandboxStatus: 'created', city: path[0] ? path[0].id : null, district: path[1] ? path[1].id : null, reference: order.orderNumber, cod: input.cod, itemsCount: input.itemsCount },
   };
 }
 

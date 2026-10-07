@@ -49,7 +49,7 @@ A capability claimed without the function behind it throws at require time.
 ## Functions
 
 Every function gets the **decrypted** credentials first. Never log them.
-Amounts (`cod`, `goodsValue`) are in **our** minor units; the adapter converts.
+Amounts (`cod`, `goodsValue`) are in **our** minor units; the adapter converts. For a parcel that carries part of the order (item 375, `shipping/partialShipments.js`), `cod`, `goodsValue`, `itemsCount` and `description` describe that parcel only; read them from the input, never from `order`.
 
 | Function | Returns |
 | --- | --- |

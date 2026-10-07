@@ -1440,7 +1440,8 @@ async function createShipment(workspaceId, orderId, data, req) {
     });
     if (!order) throw new NotFoundError('Order');
     carrierShipmentService.assertConfirmedOrPaid(order);
-    await carrierShipmentService.assertNoActiveShipment(order.id, transaction);
+    // The whole order (one active shipment), or the units in data.items when it goes as several parcels (item 375).
+    const plan = await require('../shipping/partialShipments').planShipment(order, data, transaction);
     // A returned parcel that was restocked: its units are taken again (item 354).
     await require('./returnedStock').retakeForReship(workspaceId, order.id, req.user ? req.user.id : null, transaction);
 
@@ -1452,6 +1453,8 @@ async function createShipment(workspaceId, orderId, data, req) {
         waybillNumber: data.waybillNumber || null,
         trackingUrl: data.trackingUrl || null,
         status: 'created',
+        items: plan.items,
+        codAmount: plan.codAmount,
       },
       transaction
     );

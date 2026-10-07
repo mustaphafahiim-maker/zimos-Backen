@@ -207,6 +207,14 @@ router.get(
   requirePermission(PERMISSIONS.ORDERS_VIEW),
   controller.listShipments
 );
+// Partial fulfilment (item 375): each line's units in parcels, delivered and
+// still to send, and the suggested next parcel with its COD amount.
+router.get(
+  '/:orderId/shipments/plan',
+  validate(schemas.listShipments),
+  requirePermission(PERMISSIONS.ORDERS_VIEW),
+  controller.shipmentPlan
+);
 router.post(
   '/:orderId/shipments',
   validate(schemas.createShipment),

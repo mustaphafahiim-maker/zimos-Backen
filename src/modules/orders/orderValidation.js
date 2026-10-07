@@ -334,6 +334,17 @@ module.exports = {
       // Connected couriers only: book as this weight tier instead of the one
       // stored on the order at checkout.
       tierId: uuid.optional(),
+      // Partial fulfilment (item 375, shipping/partialShipments.js): the units
+      // this parcel carries. Left out: the whole order, or what is still to
+      // send once the order has split parcels.
+      items: Joi.array()
+        .items(Joi.object({ orderItemId: uuid.required(), quantity: Joi.number().integer().min(1).max(100000).required() }))
+        .min(1)
+        .max(200)
+        .optional(),
+      // Cash on delivery, split parcels only: what the courier collects for
+      // this one (minor units). Defaults to its share of what is still owed.
+      codAmount: Joi.number().integer().min(0).optional(),
     }),
   },
   updateShipment: {
