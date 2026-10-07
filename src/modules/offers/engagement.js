@@ -60,6 +60,8 @@ const schemas = {
     email: Joi.string().trim().email().max(255).allow('', null),
     // A honeypot: people never see it, bots fill it in.
     website: Joi.string().max(500).allow('', null),
+    // The checkout bot guard's time token (GET /store/:ws/checkout/guard), item 363.
+    botToken: Joi.string().max(500).allow('', null),
   }),
 };
 
@@ -217,8 +219,12 @@ async function subscribe(workspace, body) {
   const config = read(workspace.settings, NEWSLETTER_KEY, schemas.newsletter);
   if (!config.enabled) throw new AppError('NEWSLETTER_OFF', 'This store has no sign-up form', 404);
   const couponCode = await usableCoupon(workspace.id, config.discountId);
-  // A bot's submission is answered like a real one and stored nowhere.
+  // A bot's submission is answered like a real one and stored nowhere: the honeypot, and with the
+  // store's bot guard on, the checkout's time token (item 363, as funnels/funnelOptIn.js does).
   if (body.website) return { subscribed: true, couponCode: null };
+  if (require('../risk/botProtection').settingsOf(workspace).enabled && require('../checkoutSessions/autosaveGuard').failedCheck(body, workspace.id)) {
+    return { subscribed: true, couponCode: null };
+  }
 
   const phoneNormalized = normalizePhone(body.phone);
   if (!phoneNormalized) throw new ValidationError([{ field: 'phone', message: 'Enter a valid mobile number' }]);

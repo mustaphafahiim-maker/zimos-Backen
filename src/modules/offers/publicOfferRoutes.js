@@ -110,6 +110,8 @@ router.get(
 );
 router.post(
   '/newsletter/subscribe',
+  // A contact with marketing consent per call: a few a minute per IP (item 363).
+  require('../../core/middleware/rateLimiters').newsletterSignupLimiter,
   validate({ params: Joi.object({ workspaceId }), body: engagement.schemas.subscribe }),
   asyncHandler(async (req, res) => res.status(201).json(await engagement.subscribe(req.publicWorkspace, req.body)))
 );

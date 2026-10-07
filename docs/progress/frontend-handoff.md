@@ -4259,3 +4259,24 @@ The storefront asks POST `/deposit-quote` whether a cash-on-delivery order needs
 - When the checkout answers 422 `DEPOSIT_REQUIRED`: open the transfer box (the existing `TransferDetails` with the deposit notice, using the methods from GET `/payment-methods`) with «الطلب ده محتاج عربون بالتحويل قبل الدفع عند الاستلام» / "This order needs a deposit by transfer before cash on delivery", keep the form filled and let the shopper place the order again with the transfer.
 - `RATE_LIMITED` on the quote: ignore it quietly and let the checkout decide (no message).
 - No settings change in the dashboard.
+
+## 363. Newsletter sign-up and spin to win carry the bot guard's token and have a per-IP limit — UI: pending
+
+Both storefront sign-ups make a contact with marketing consent, so a script could fill the store's contacts (and the plan's leads limit) with random numbers. Now each has a limit of 6 a minute per IP, and when the store's bot guard is on (Settings → fraud rules → bot protection, on by default in production) each must carry the same time token the checkout and the funnel opt-in already send. A sign-up without a valid token is answered as if it worked but nothing is kept and no coupon is given, so the storefront must send the token or real sign-ups are lost.
+
+### Endpoints (public, no auth)
+- **GET `/api/v1/store/:workspaceId/checkout/guard`** (unchanged): `{ "enabled": true, "token": "…", "minSeconds": 3, "honeypotField": "website", "captcha": null }`. Get it when the popup or the footer form is shown (or reuse the page's checkout token, valid 12 hours), and send it at least `minSeconds` after it was issued (lib/botGuard.ts already waits this out for the checkout autosave). With `enabled: false` send nothing.
+- **POST `/api/v1/store/:workspaceId/newsletter/subscribe`** `{ "phone": "+201001234567", "fullName": "Sara", "email": null, "website": "", "botToken": "…" }`
+  - 201 `{ "subscribed": true, "couponCode": "WELCOME10" }` (unchanged).
+  - Guard on and the token missing, forged or under 3 seconds old: 201 `{ "subscribed": true, "couponCode": null }` and nothing stored.
+  - 429 `RATE_LIMITED`: over 6 sign-ups a minute from one IP.
+- **POST `/api/v1/store/:workspaceId/spin-wheel/spin`** `{ "phone": "+201001234567", "fullName": "Sara", "marketingConsent": true, "website": "", "botToken": "…" }`
+  - 201 `{ "sliceId": "…", "label": "10%", "prize": true, "couponCode": "SPIN10" }` (unchanged); 409 `ALREADY_SPUN` unchanged.
+  - Guard on and the token missing, forged or under 3 seconds old: 201 `{ "sliceId": null, "label": null, "prize": false, "couponCode": null }` and nothing stored.
+  - 429 `RATE_LIMITED`: over 6 spins a minute from one IP.
+
+### Screens (storefront)
+- Newsletter form (footer and popup) and the spin-to-win popup: add the `botToken` field from the guard, and keep the hidden `website` field empty. No visible change for a real shopper.
+- On 429 `RATE_LIMITED`: «محاولات كتير، جرّب تاني بعد دقيقة» / "Too many tries, please try again in a minute", keeping what was typed.
+- A spin answered with `sliceId: null` shows the wheel's "better luck next time" result: «حظ أوفر المرة الجاية» / "Better luck next time".
+- No settings change in the dashboard.

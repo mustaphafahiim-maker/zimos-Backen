@@ -458,6 +458,10 @@ const domainDnsCheckLimiter = createIpMinuteLimiter('domain-dns-check', 30, { sk
 const STORE_GATE_UNLOCKS_PER_MINUTE = 10;
 const storeGateUnlockLimiter = createIpMinuteLimiter('store-gate-unlock', STORE_GATE_UNLOCKS_PER_MINUTE, { skip });
 const storeGateSignupLimiter = createIpMinuteLimiter('store-gate-signup', 10, { skip });
+// The newsletter sign-up and spin to win (item 363): each makes a contact with marketing consent, per IP a minute.
+const STORE_SIGNUPS_PER_MINUTE = 6;
+const newsletterSignupLimiter = createIpMinuteLimiter('store-signup', STORE_SIGNUPS_PER_MINUTE, { skip });
+const spinWheelLimiter = createIpMinuteLimiter('spin-wheel', STORE_SIGNUPS_PER_MINUTE, { skip });
 
 /*
  * Password reset requests, per IP per hour, keyed on the IP alone (unlike
@@ -616,6 +620,8 @@ module.exports = {
   STORE_GATE_UNLOCKS_PER_MINUTE,
   storeGateUnlockLimiter,
   storeGateSignupLimiter,
+  newsletterSignupLimiter,
+  spinWheelLimiter,
   usernameCheckLimiter,
   createUsernameCheckLimiter,
   publicPlansLimiter,

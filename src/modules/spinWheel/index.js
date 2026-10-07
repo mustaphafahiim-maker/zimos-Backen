@@ -80,7 +80,11 @@ async function publicView(workspace) {
 async function spin(workspace, body) {
   const config = configOf(workspace);
   if (!config || !config.enabled) throw new AppError('SPIN_WHEEL_OFF', 'This store has no wheel', 404);
-  if (body.website) return { sliceId: null, label: null, prize: false, couponCode: null };
+  // A bot is answered like a losing spin and nothing is kept: the honeypot, and with the store's
+  // bot guard on, the checkout's time token (item 363, as funnels/funnelOptIn.js does).
+  const noPrize = { sliceId: null, label: null, prize: false, couponCode: null };
+  if (body.website) return noPrize;
+  if (require('../risk/botProtection').settingsOf(workspace).enabled && require('../checkoutSessions/autosaveGuard').failedCheck(body, workspace.id)) return noPrize;
   const phoneNormalized = normalizePhone(body.phone);
   if (!phoneNormalized) throw new ValidationError([{ field: 'phone', message: 'Enter a valid mobile number' }]);
   const { inDraw, total, coupons } = await drawable(workspace.id, config);
@@ -149,13 +153,16 @@ store.get('/', resolvePublicWorkspace, asyncHandler(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({ wheel: await publicView(req.publicWorkspace) });
 }));
-store.post('/spin', resolvePublicWorkspace, validate({
+// Each spin can make a contact with marketing consent: a few a minute per IP (item 363).
+store.post('/spin', require('../../core/middleware/rateLimiters').spinWheelLimiter, resolvePublicWorkspace, validate({
   body: Joi.object({
     phone: Joi.string().trim().min(6).max(32).required(),
     fullName: text(200),
     // The shopper ticks "send me offers": the wheel is a sign-up, said so on its face.
     marketingConsent: Joi.boolean().valid(true).required(),
     website: Joi.string().max(500).allow('', null),
+    // The checkout bot guard's time token (GET /store/:ws/checkout/guard).
+    botToken: Joi.string().max(500).allow('', null),
   }),
 }), asyncHandler(async (req, res) => {
   res.status(201).json(await spin(req.publicWorkspace, req.body));
