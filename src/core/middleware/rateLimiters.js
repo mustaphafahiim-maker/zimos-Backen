@@ -451,6 +451,10 @@ const checkoutOtpLimiter = createIpMinuteLimiter('checkout-otp', CHECKOUT_OTP_PE
 const domainAddLimiter = createIpMinuteLimiter('domain-add', 10, { skip });
 const domainVerifyLimiter = createIpMinuteLimiter('domain-verify', 20, { skip });
 const domainDnsCheckLimiter = createIpMinuteLimiter('domain-dns-check', 30, { skip });
+// A locked store's password and coming-soon sign-up (modules/storeGate, item 349): per IP a minute.
+const STORE_GATE_UNLOCKS_PER_MINUTE = 10;
+const storeGateUnlockLimiter = createIpMinuteLimiter('store-gate-unlock', STORE_GATE_UNLOCKS_PER_MINUTE, { skip });
+const storeGateSignupLimiter = createIpMinuteLimiter('store-gate-signup', 10, { skip });
 
 /*
  * Password reset requests, per IP per hour, keyed on the IP alone (unlike
@@ -604,6 +608,9 @@ module.exports = {
   domainAddLimiter,
   domainVerifyLimiter,
   domainDnsCheckLimiter,
+  STORE_GATE_UNLOCKS_PER_MINUTE,
+  storeGateUnlockLimiter,
+  storeGateSignupLimiter,
   usernameCheckLimiter,
   createUsernameCheckLimiter,
   publicPlansLimiter,

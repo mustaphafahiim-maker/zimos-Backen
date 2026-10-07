@@ -14,7 +14,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { storeGateUnlockLimiter, storeGateSignupLimiter } = require('../../core/middleware/rateLimiters');
 const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
@@ -54,15 +54,18 @@ function settingsOf(workspace) {
   };
 }
 
-const hashPassword = (password) => {
+// scrypt runs on the libuv thread pool (item 349): a guess never blocks the event loop.
+const scrypt = require('util').promisify(crypto.scrypt);
+const hashPassword = async (password) => {
   const salt = crypto.randomBytes(16);
-  return `${salt.toString('hex')}:${crypto.scryptSync(String(password), salt, 32).toString('hex')}`;
+  return `${salt.toString('hex')}:${(await scrypt(String(password), salt, 32)).toString('hex')}`;
 };
-const passwordOk = (password, stored) => {
+const passwordOk = async (password, stored) => {
   const [salt, hash] = String(stored || '').split(':');
   if (!salt || !hash) return false;
-  const got = crypto.scryptSync(String(password), Buffer.from(salt, 'hex'), 32);
-  return crypto.timingSafeEqual(got, Buffer.from(hash, 'hex'));
+  const want = Buffer.from(hash, 'hex');
+  const got = await scrypt(String(password), Buffer.from(salt, 'hex'), 32);
+  return want.length === got.length && crypto.timingSafeEqual(got, want);
 };
 const key = () => crypto.createHmac('sha256', env.jwt.accessSecret).update('zimos:store-gate').digest();
 const sign = (body) => crypto.createHmac('sha256', key()).update(body).digest('hex');
@@ -118,18 +121,18 @@ const sp = Joi.object({ workspaceId: Joi.string().required() });
 store.get('/', resolvePublicWorkspace, validate({ params: sp }), (req, res) => res.json({ gate: publicView(req.publicWorkspace) }));
 store.post(
   '/unlock',
-  trackingLimiter,
+  storeGateUnlockLimiter,
   resolvePublicWorkspace,
   validate({ params: sp, body: Joi.object({ password: Joi.string().min(1).max(200).required() }) }),
   asyncHandler(async (req, res) => {
     const s = settingsOf(req.publicWorkspace);
-    if (s.mode !== 'password' || !passwordOk(req.body.password, s.passwordHash)) throw new AppError('WRONG_PASSWORD', 'That password is not right', 422, [{ field: 'password', message: 'That password is not right' }]);
+    if (s.mode !== 'password' || !(await passwordOk(req.body.password, s.passwordHash))) throw new AppError('WRONG_PASSWORD', 'That password is not right', 422, [{ field: 'password', message: 'That password is not right' }]);
     res.json({ token: issueToken(req.publicWorkspace.id, s.passwordVersion), expiresInSeconds: TOKEN_TTL_MS / 1000 });
   })
 );
 store.post(
   '/signup',
-  trackingLimiter,
+  storeGateSignupLimiter,
   resolvePublicWorkspace,
   validate({ params: sp, body: Joi.object({ email: Joi.string().trim().email().max(255).required(), locale: Joi.string().valid('ar', 'en', 'fr') }) }),
   asyncHandler(async (req, res) => {
@@ -173,7 +176,7 @@ staff.put(
     const next = {
       ...cur,
       mode: req.body.mode,
-      ...(req.body.password ? { passwordHash: hashPassword(req.body.password), passwordVersion: (cur.passwordVersion || 0) + 1 } : {}),
+      ...(req.body.password ? { passwordHash: await hashPassword(req.body.password), passwordVersion: (cur.passwordVersion || 0) + 1 } : {}),
       ...(req.body.message !== undefined ? { message: req.body.message || null } : {}),
       ...(req.body.opensAt !== undefined ? { opensAt: req.body.opensAt ? new Date(req.body.opensAt).toISOString() : null } : {}),
       ...(req.body.lockFunnels !== undefined ? { lockFunnels: req.body.lockFunnels } : {}),
