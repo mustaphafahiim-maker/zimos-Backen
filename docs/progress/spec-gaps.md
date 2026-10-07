@@ -1949,5 +1949,8 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
 - [x] 287. A shopper's address change kept the old area, place and notes when the new address left them out. (backend fix; UI note in frontend-handoff.md)
   - The change replaces every delivery field (province, city, area, address line, place, postal code, notes): one left out is removed, not kept from the old address. The country stays unless sent; other keys on the snapshot are kept. The form may now also send `postalCode` and `notes`.
   - Checked: an order with area, postal code and notes moved to another governorate with only province, city and street → the old area, postal code and notes are gone.
-- [ ] 288. Smaller: a stock count whose location was deleted applied to the whole store; one malformed line in a URL-redirect import (or lookup) answered 500 half-way.
+- [x] 288. Smaller: a stock count whose location was deleted applied to the whole store; one malformed line in a URL-redirect import (or lookup) answered 500 half-way. (backend fix; no UI change)
+  - Deleting a location cancels its open stock counts (the database sets their location to none, which read as the whole store). Applying one then answers 409 COUNT_CLOSED; the store's numbers don't move.
+  - Redirects: an address that doesn't parse is no path — the import lists that line in `errors` and carries on, a lookup answers 404. A full https target that doesn't parse is refused instead of stored.
+  - Checked: import of 4 lines with 2 malformed → 200, created 2, errors for lines 3 and 4; lookup of a malformed address → 404; a count at a branch, branch deleted → count cancelled, apply 409, stock unchanged.
 - [ ] 289. Offer and bundle lines counted as one piece in the pick list and in lot consumption (an offer of "3 pieces" picked and taken from lots as 1, a bundle's other variants not at all) — the same expansion scan to pack got in item 271.

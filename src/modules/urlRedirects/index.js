@@ -42,14 +42,29 @@ function normalize(p) {
     /* keep as typed */
   }
   if (/^https?:\/\//i.test(s)) {
-    const u = new URL(s);
+    // A malformed address is no path (item 288): the import reports that line, a lookup finds nothing.
+    let u;
+    try {
+      u = new URL(s);
+    } catch {
+      return '';
+    }
     s = `${u.pathname}${u.search}`;
   }
   const [path, query] = s.split('?');
   const clean = path.length > 1 ? path.replace(/\/+$/, '') : path;
   return query ? `${clean}?${query}` : clean;
 }
-const isFullUrl = (s) => /^https:\/\/[^\s]+$/i.test(String(s || ''));
+const isFullUrl = (s) => {
+  if (!/^https:\/\/[^\s]+$/i.test(String(s || ''))) return false;
+  // One that doesn't parse is refused like any bad line, not stored (item 288).
+  try {
+    new URL(s); // eslint-disable-line no-new
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 async function assertNoLoop(workspaceId, from, to, ignoreId = null) {
   if (isFullUrl(to)) return;

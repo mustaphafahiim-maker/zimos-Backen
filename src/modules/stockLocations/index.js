@@ -176,6 +176,9 @@ async function remove(workspaceId, id, req) {
     throw new AppError('LOCATION_HAS_STOCK', 'Transfer this location’s stock elsewhere first', 409);
   }
   await db.Order.update({ stockLocationId: null }, { where: { workspaceId, stockLocationId: l.id }, hooks: false });
+  // Its open stock counts close with it (item 288): the database clears their location, and an
+  // applied count without one would set the whole store's numbers from one place's shelf.
+  await db.StockCount.update({ status: 'cancelled' }, { where: { workspaceId, locationId: l.id, status: 'open' } });
   await l.destroy();
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'stock_location.delete', entityType: 'StockLocation', entityId: l.id, before: { name: l.name }, req });
 }
