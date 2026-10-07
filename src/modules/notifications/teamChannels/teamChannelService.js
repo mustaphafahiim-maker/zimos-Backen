@@ -162,6 +162,8 @@ async function update(workspaceId, id, body, req) {
     if (body.isActive && !channel.isActive) patch.failureCount = 0;
   }
   if (['botToken', 'chatId', 'webhookUrl'].some((k) => body[k] !== undefined)) {
+    // A new destination needs the permissions of the types it will receive, as subscribing to them does.
+    if (body.types === undefined) checkTypes(channel.types, req);
     const { credentials, hint } = buildCredentials(channel.provider, body, openCredentials(channel) || {});
     patch.credentials = seal(credentials);
     patch.hint = hint;
@@ -220,9 +222,16 @@ async function sendTo(channel, text, { type, dedupeKey = null, rethrow = false }
   }
   await delivery.update({ status: error ? 'failed' : 'sent', error });
   if (error) {
-    const failureCount = channel.failureCount + 1;
-    const pause = channel.isActive && failureCount >= PAUSE_AFTER_FAILURES;
-    await channel.update({ lastStatus: 'failed', lastError: error, failureCount, ...(pause ? { isActive: false } : {}) });
+    // Counted in the database: deliveries to one channel run side by side, so a loaded copy is stale.
+    const [[row]] = await db.sequelize.query(
+      'UPDATE team_channels SET failure_count = failure_count + 1, last_status = :status, last_error = :error, updated_at = NOW() WHERE id = :id RETURNING failure_count',
+      { replacements: { id: channel.id, status: 'failed', error } }
+    );
+    const failureCount = row ? row.failure_count : channel.failureCount + 1;
+    // Only the send that switches it off raises the alert.
+    const [paused] = failureCount >= PAUSE_AFTER_FAILURES ? await db.TeamChannel.update({ isActive: false }, { where: { id: channel.id, isActive: true } }) : [0];
+    const pause = paused > 0;
+    Object.assign(channel.dataValues, { lastStatus: 'failed', lastError: error, failureCount, ...(pause ? { isActive: false } : {}) });
     logger.warn(`[team-channel] ${channel.provider} ${channel.id} failed: ${error}`);
     if (pause) {
       // eslint-disable-next-line global-require
@@ -235,7 +244,10 @@ async function sendTo(channel, text, { type, dedupeKey = null, rethrow = false }
     if (rethrow) throw new AppError('TEAM_CHANNEL_SEND_FAILED', error, 502);
     return { status: 'failed', error };
   }
-  await channel.update({ lastStatus: 'sent', lastError: null, lastSentAt: new Date(), failureCount: 0 });
+  // Written by id, not through the loaded copy, whose stale failureCount 0 would not be saved.
+  const sent = { lastStatus: 'sent', lastError: null, lastSentAt: new Date(), failureCount: 0 };
+  await db.TeamChannel.update(sent, { where: { id: channel.id } });
+  Object.assign(channel.dataValues, sent);
   return { status: 'sent' };
 }
 
