@@ -4272,17 +4272,17 @@ The storefront asks POST `/deposit-quote` whether a cash-on-delivery order needs
 
 ## 363. Newsletter sign-up and spin to win carry the bot guard's token and have a per-IP limit — UI: pending
 
-Both storefront sign-ups make a contact with marketing consent, so a script could fill the store's contacts (and the plan's leads limit) with random numbers. Now each has a limit of 6 a minute per IP, and when the store's bot guard is on (Settings → fraud rules → bot protection, on by default in production) each must carry the same time token the checkout and the funnel opt-in already send. A sign-up without a valid token is answered as if it worked but nothing is kept and no coupon is given, so the storefront must send the token or real sign-ups are lost.
+Both storefront sign-ups make a contact with marketing consent, so a script could fill the store's contacts (and the plan's leads limit) with random numbers. Now each has a limit of 6 a minute per IP, and when the store's bot guard is on (Settings → fraud rules → bot protection, on by default in production) each must carry the same time token the checkout and the funnel opt-in already send. A sign-up with a forged, stale or too-fresh token is answered as if it worked but nothing is kept and no coupon is given. A sign-up with no token at all is still accepted while the guard is on only by its production default (so forms that do not send it yet keep working), and refused only on stores that switched bot protection on themselves, so send the token.
 
 ### Endpoints (public, no auth)
 - **GET `/api/v1/store/:workspaceId/checkout/guard`** (unchanged): `{ "enabled": true, "token": "…", "minSeconds": 3, "honeypotField": "website", "captcha": null }`. Get it when the popup or the footer form is shown (or reuse the page's checkout token, valid 12 hours), and send it at least `minSeconds` after it was issued (lib/botGuard.ts already waits this out for the checkout autosave). With `enabled: false` send nothing.
 - **POST `/api/v1/store/:workspaceId/newsletter/subscribe`** `{ "phone": "+201001234567", "fullName": "Sara", "email": null, "website": "", "botToken": "…" }`
   - 201 `{ "subscribed": true, "couponCode": "WELCOME10" }` (unchanged).
-  - Guard on and the token missing, forged or under 3 seconds old: 201 `{ "subscribed": true, "couponCode": null }` and nothing stored.
+  - Guard on and the token forged, stale or under 3 seconds old (or missing, when the store set bot protection on itself): 201 `{ "subscribed": true, "couponCode": null }` and nothing stored.
   - 429 `RATE_LIMITED`: over 6 sign-ups a minute from one IP.
 - **POST `/api/v1/store/:workspaceId/spin-wheel/spin`** `{ "phone": "+201001234567", "fullName": "Sara", "marketingConsent": true, "website": "", "botToken": "…" }`
   - 201 `{ "sliceId": "…", "label": "10%", "prize": true, "couponCode": "SPIN10" }` (unchanged); 409 `ALREADY_SPUN` unchanged.
-  - Guard on and the token missing, forged or under 3 seconds old: 201 `{ "sliceId": null, "label": null, "prize": false, "couponCode": null }` and nothing stored.
+  - Guard on and the token forged, stale or under 3 seconds old (or missing, when the store set bot protection on itself): 201 `{ "sliceId": null, "label": null, "prize": false, "couponCode": null }` and nothing stored.
   - 429 `RATE_LIMITED`: over 6 spins a minute from one IP.
 
 ### Screens (storefront)

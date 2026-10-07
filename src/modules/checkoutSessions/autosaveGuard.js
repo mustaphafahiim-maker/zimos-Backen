@@ -30,6 +30,24 @@ function failedCheck(body, workspaceId) {
   return null;
 }
 
+/**
+ * Storefront sign-ups (newsletter, spin to win; item 363): true when the
+ * guard refuses the sign-up. Same checks as the autosave, except that a
+ * sign-up carrying no token at all passes unless the store itself set
+ * fraud_rules.bot_protection to true: the storefront forms do not send the
+ * token yet, and the guard's production default would otherwise drop every
+ * real sign-up. A refusal is logged, as the autosave's is.
+ */
+function signupRefused(workspace, body, source) {
+  if (!botProtection.settingsOf(workspace).enabled) return false;
+  const rules = (workspace.settings && workspace.settings.fraud_rules) || {};
+  const noToken = body.botToken === undefined || body.botToken === null || body.botToken === '';
+  const check = noToken && rules.bot_protection !== true ? null : failedCheck(body, workspace.id);
+  if (!check) return false;
+  logger.info(`[${source}] sign-up refused by the bot guard (${check})`, { workspaceId: workspace.id });
+  return true;
+}
+
 const guardAutosave = asyncHandler(async (req, res, next) => {
   const body = req.body || {};
   const workspace = req.publicWorkspace;
@@ -41,4 +59,4 @@ const guardAutosave = asyncHandler(async (req, res, next) => {
   return res.json({ session: { id: crypto.randomUUID() } });
 });
 
-module.exports = { guardAutosave, failedCheck };
+module.exports = { guardAutosave, failedCheck, signupRefused };

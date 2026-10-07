@@ -84,7 +84,7 @@ async function spin(workspace, body) {
   // bot guard on, the checkout's time token (item 363, as funnels/funnelOptIn.js does).
   const noPrize = { sliceId: null, label: null, prize: false, couponCode: null };
   if (body.website) return noPrize;
-  if (require('../risk/botProtection').settingsOf(workspace).enabled && require('../checkoutSessions/autosaveGuard').failedCheck(body, workspace.id)) return noPrize;
+  if (require('../checkoutSessions/autosaveGuard').signupRefused(workspace, body, 'spin-wheel')) return noPrize;
   const phoneNormalized = normalizePhone(body.phone);
   if (!phoneNormalized) throw new ValidationError([{ field: 'phone', message: 'Enter a valid mobile number' }]);
   const { inDraw, total, coupons } = await drawable(workspace.id, config);

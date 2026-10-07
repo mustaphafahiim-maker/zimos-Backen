@@ -222,7 +222,7 @@ async function subscribe(workspace, body) {
   // A bot's submission is answered like a real one and stored nowhere: the honeypot, and with the
   // store's bot guard on, the checkout's time token (item 363, as funnels/funnelOptIn.js does).
   if (body.website) return { subscribed: true, couponCode: null };
-  if (require('../risk/botProtection').settingsOf(workspace).enabled && require('../checkoutSessions/autosaveGuard').failedCheck(body, workspace.id)) {
+  if (require('../checkoutSessions/autosaveGuard').signupRefused(workspace, body, 'newsletter')) {
     return { subscribed: true, couponCode: null };
   }
 
