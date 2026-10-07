@@ -3314,3 +3314,8 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 ## 304. Webhook custom header values — UI: pending (small)
 
 - `customHeaders[].value` on create / update now refuses non-Latin text and control characters (422 on `customHeaders.N.value`). Hint under the value field: «إنجليزي وأرقام ورموز بس — زي مفتاح API» / "Latin letters, digits and symbols only — like an API key".
+
+## 305. Buy a domain — availability — UI: pending (small)
+
+- Search and buy can answer 503 `DOMAIN_PURCHASE_UNAVAILABLE` (no registrar connected on this server): hide or disable «اشتري دومين» / "Buy a domain" and show «شراء الدومين مش متاح دلوقتي — اربط دومين عندك» / "Buying a domain isn't available yet — connect one you own" with a link to Connect domain.
+- Buying needs a name like mystore.com on .com .net .store .shop .online .co; anything else → 422 on `domain`.
