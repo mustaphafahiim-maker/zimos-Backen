@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const storePickup = require('../shipping/storePickup');
+const deliveryZones = require('../shipping/deliveryZones');
+const { DESTINATION_INDEPENDENT } = require('../shipping/shippingRules');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
@@ -459,6 +461,11 @@ async function createOrder(
     if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
     // The governorates the store delivers to, when it limits them (shipping/deliveryAreas.js).
     if (!req.user && !shippingOverride && !pickup) await require('../shipping/deliveryAreas').assertAreaServed(workspaceId, shippingAddress, transaction);
+    // Delivery zones inside a city (shipping/deliveryZones.js): the shopper's area prices the delivery
+    // and its minimum binds too. Read from the database only; null while the store does not use zones.
+    const zone =
+      !req.user && !shippingOverride && !pickup ? await deliveryZones.resolveForCheckout(workspaceId, payload.deliveryZoneId, transaction) : null;
+    deliveryZones.assertZoneMinimum(zone, subtotal);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
@@ -476,8 +483,11 @@ async function createOrder(
       transaction,
     });
     // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
-    const chosenShipping = pickup ? null : await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
-    const shippingAmount = pickup ? 0 : chosenShipping ? chosenShipping.amount : shipping.amount;
+    const chosenShipping =
+      pickup || zone ? null : await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
+    // A zone's fee replaces the destination price; a store-wide rule that makes shipping free (or an offer's own price) still wins.
+    const zoneAmount = zone ? (DESTINATION_INDEPENDENT.includes(shipping.rule) ? shipping.amount : zone.feeAmount) : null;
+    const shippingAmount = pickup ? 0 : zone ? zoneAmount : chosenShipping ? chosenShipping.amount : shipping.amount;
 
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
@@ -528,7 +538,11 @@ async function createOrder(
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
         // With the option the shopper picked, when not the standard one.
-        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}) },
+        shippingSnapshot: {
+          ...shippingSnapshot(shipping),
+          ...(chosenShipping ? { option: chosenShipping.snapshot } : {}),
+          ...(zone ? { zone: { id: zone.id, name: zone.name, feeAmount: zone.feeAmount, etaMinutes: zone.etaMinutes } } : {}),
+        },
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,

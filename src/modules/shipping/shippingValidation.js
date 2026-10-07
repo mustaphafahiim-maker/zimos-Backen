@@ -102,6 +102,8 @@ const settingsBody = Joi.object({
     phone: Joi.string().trim().max(32).allow(''),
     note: Joi.string().trim().max(300).allow(''),
   }).allow(null),
+  // Checkout prices by the store's delivery zones (deliveryZones.js); false/null = by governorate.
+  deliveryZonesEnabled: Joi.boolean().allow(null),
 }).min(1);
 
 const pricingModeBody = Joi.object({

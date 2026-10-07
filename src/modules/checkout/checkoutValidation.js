@@ -50,6 +50,8 @@ module.exports = {
       shippingOption: Joi.string().max(40).optional(),
       // 'pickup': collected from the store (shipping/storePickup.js) — no address, no shipping fee.
       deliveryMethod: Joi.string().valid('delivery', 'pickup').optional(),
+      // The store's delivery area (shipping/deliveryZones.js) while it prices by zones.
+      deliveryZoneId: uuid.optional(),
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
       notes: Joi.string().max(2000).allow('').optional(),

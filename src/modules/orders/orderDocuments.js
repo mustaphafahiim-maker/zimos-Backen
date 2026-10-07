@@ -182,6 +182,8 @@ async function manifestRows(workspaceId, { orderIds, date, carrier, courierId } 
       city: address.city || '',
       addressLine: address.addressLine || '',
       addressNotes: address.notes || '',
+      // The delivery zone the customer picked (shipping/deliveryZones.js), when the store uses zones.
+      zone: (o.shippingSnapshot && o.shippingSnapshot.zone && o.shippingSnapshot.zone.name) || '',
       // The store's courier by name (a renamed courier shows the new name), else the text typed.
       courier: (s.courier && s.courier.name) || s.carrierCode || '',
       courierId: s.courierId || null,
@@ -252,7 +254,7 @@ async function manifestPdf(workspaceId, selection = {}) {
       y = header();
     }
     total += r.collectAmount;
-    const place = r.pickup ? 'PICKUP — collected at the store' : [r.governorate, r.city].filter(Boolean).join(' - ');
+    const place = r.pickup ? 'PICKUP — collected at the store' : [r.zone, r.governorate, r.city].filter(Boolean).join(' - ');
     const cells = [
       String(index + 1),
       [r.orderNumber, r.waybill].filter(Boolean).join('\n'),

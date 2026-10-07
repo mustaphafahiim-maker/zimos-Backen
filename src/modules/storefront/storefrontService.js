@@ -115,6 +115,8 @@ async function getStorefront(workspaceId) {
       servedGovernorates: require('../shipping/deliveryAreas').servedGovernorates(w.settings),
       // Pickup from the store: its address, phone and note, or null while off (shipping/storePickup.js).
       pickup: require('../shipping/storePickup').publicPickup(w.settings),
+      // Delivery zones inside a city: the active ones while the store prices by them, else null.
+      zones: await require('../shipping/deliveryZones').publicZones(w),
     },
     // What the thank-you page shows after an order (settings.thank_you_page).
     thankYou: resolveThankYouPage(w.settings),

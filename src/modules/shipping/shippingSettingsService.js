@@ -22,6 +22,8 @@ const { GOVERNORATES } = require('./governorates');
  *                                   absent or empty = everywhere
  *   store_pickup                    { enabled, address, phone, note } —
  *                                   pickup from the store (storePickup.js)
+ *   delivery_zones_enabled          true = checkout prices by the store's
+ *                                   delivery zones (deliveryZones.js)
  *
  * The first two were already writable through PATCH /workspaces/:id and
  * still are (same keys, same meaning). A key the store never set is absent,
@@ -35,6 +37,7 @@ const KEYS = Object.freeze({
   defaultCarrierCode: 'default_carrier_code',
   servedGovernorates: 'served_governorates',
   storePickup: 'store_pickup',
+  deliveryZonesEnabled: 'delivery_zones_enabled',
 });
 
 const MANUAL = carriers.MANUAL;
@@ -51,6 +54,7 @@ function view(settings) {
     defaultCarrierCode: s[KEYS.defaultCarrierCode] || null,
     servedGovernorates: Array.isArray(s[KEYS.servedGovernorates]) ? [...s[KEYS.servedGovernorates]] : [],
     storePickup: require('./storePickup').pickupSettings(s),
+    deliveryZonesEnabled: s[KEYS.deliveryZonesEnabled] === true,
   };
 }
 
@@ -102,7 +106,8 @@ async function updateSettings(workspaceId, body, req) {
       const empty =
         value === null ||
         (field === 'governorateRates' && Object.keys(value).length === 0) ||
-        (field === 'servedGovernorates' && value.length === 0);
+        (field === 'servedGovernorates' && value.length === 0) ||
+        (field === 'deliveryZonesEnabled' && value === false);
       if (empty) delete next[key];
       else next[key] = value;
     }

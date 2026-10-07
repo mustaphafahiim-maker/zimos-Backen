@@ -283,6 +283,8 @@ describe('GET/PATCH /shipping/settings', () => {
       servedGovernorates: [],
       // Store pickup (storePickup.js): off.
       storePickup: { enabled: false, address: '', phone: '', note: '' },
+      // Delivery zones inside a city (deliveryZones.js): off.
+      deliveryZonesEnabled: false,
     });
     expect(empty.body.governorates).toHaveLength(27);
 
