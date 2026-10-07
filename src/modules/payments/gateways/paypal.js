@@ -349,10 +349,14 @@ async function parseWebhook({ body }, creds) {
       transaction = await refetchTransaction(creds, payload);
     } catch {
       // PayPal could not be asked now: stored unconfirmed, the sweep asks again (never acted on as sent).
-      return { valid: true, eventKey: `paypal:${what}:${id}:unconfirmed`, transaction: null, payload };
+      // Keyed by the delivery (PayPal's event id), so a later change also reported while PayPal is down is kept too.
+      return { valid: true, eventKey: `paypal:${what}:${id}:unconfirmed:${payload.id || ''}`, transaction: null, payload };
     }
     if (!transaction) return null; // PayPal does not show this merchant such a refund or dispute
-    return { valid: true, eventKey: `paypal:${what}:${id}:${transaction.status}`, transaction, payload };
+    // A dispute can come back to a status it had (needs_response → under_review → needs_response with a new
+    // deadline): keyed per PayPal event, not per status; disputeService handles repeats and late events itself.
+    const change = what === 'dispute' && payload.id ? `:${payload.id}` : '';
+    return { valid: true, eventKey: `paypal:${what}:${id}:${transaction.status}${change}`, transaction, payload };
   } catch {
     return null;
   }

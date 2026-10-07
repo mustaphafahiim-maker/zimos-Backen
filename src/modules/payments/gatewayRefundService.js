@@ -35,6 +35,16 @@ async function findRefundedPayment(account, tx) {
   return null;
 }
 
+/** A lost dispute's chargeback of this amount not yet matched to a gateway refund (it still carries the dispute id). */
+async function lostDisputeRefund(paymentId, amount, transaction) {
+  const disputes = await db.PaymentDispute.findAll({ where: { paymentId, status: 'lost', refundId: { [Op.ne]: null } }, transaction });
+  for (const d of disputes) {
+    const row = await db.Refund.findOne({ where: { id: d.refundId, source: 'chargeback', status: 'processed', providerRefundReference: d.providerDisputeId }, transaction });
+    if (row && Number(row.amount) === Number(amount)) return row;
+  }
+  return null;
+}
+
 async function recordRefundTransaction(account, tx) {
   const payment = await findRefundedPayment(account, tx);
   if (!payment) return { outcome: 'unmatched_refund' };
@@ -87,6 +97,13 @@ async function recordRefundTransaction(account, tx) {
       transaction,
     });
     if (existing) return null;
+    // PayPal also reports a lost dispute's money as a refund (item 377): the refund of the same amount is that
+    // chargeback, which takes its reference instead of a second row (a later refund of that amount is its own).
+    const chargeback = await lostDisputeRefund(payment.id, amount, transaction);
+    if (chargeback) {
+      await chargeback.update({ providerRefundReference: tx.transactionId }, { transaction });
+      return false;
+    }
     // Never more than is left of the payment: a lost chargeback (item 377) may already count this money,
     // when the gateway also reports it as a refund.
     const refunded = Number((await db.Refund.sum('amount', { where: { paymentId: payment.id, status: 'processed' }, transaction })) || 0);

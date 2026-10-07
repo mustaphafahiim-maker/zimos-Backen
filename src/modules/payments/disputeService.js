@@ -69,10 +69,11 @@ function serialize(d) {
   };
 }
 
-function flagsAfter(flags, status) {
-  const rest = (flags || []).filter((f) => f !== FLAGS.DISPUTED);
-  if (OPEN.includes(status)) return [...rest, FLAGS.DISPUTED];
-  if (status === 'lost' && !rest.includes(FLAGS.CHARGEBACK_LOST)) return [...rest, FLAGS.CHARGEBACK_LOST];
+function flagsAfter(flags, status, otherOpen = 0) {
+  let rest = (flags || []).filter((f) => f !== FLAGS.DISPUTED);
+  if (status === 'lost' && !rest.includes(FLAGS.CHARGEBACK_LOST)) rest = [...rest, FLAGS.CHARGEBACK_LOST];
+  // Another dispute on the order still open keeps the flag it set (unless the merchant already cleared it).
+  if (OPEN.includes(status) || (otherOpen > 0 && (flags || []).includes(FLAGS.DISPUTED))) return [...rest, FLAGS.DISPUTED];
   return rest;
 }
 
@@ -83,6 +84,19 @@ async function chargebackRefund(account, payment, dispute, transaction) {
   const refunded = Number((await db.Refund.sum('amount', { where: { paymentId: payment.id, status: 'processed' }, transaction })) || 0);
   const left = Math.max(0, Number(payment.amount) - refunded);
   const contested = dispute.currency && payment.currency && dispute.currency === payment.currency && Number(dispute.amount) > 0 ? Number(dispute.amount) : left;
+  // PayPal may report the money as a refund first (item 377): a gateway refund of the contested amount
+  // made since the dispute opened, and not already another dispute's, is this chargeback.
+  const linked = (await db.PaymentDispute.findAll({ where: { paymentId: payment.id, refundId: { [Op.ne]: null } }, attributes: ['refundId'], transaction })).map((d) => d.refundId);
+  const reported = await db.Refund.findOne({
+    where: {
+      paymentId: payment.id, source: 'gateway', status: 'processed', amount: contested,
+      createdAt: { [Op.gte]: dispute.openedAt || dispute.createdAt },
+      ...(linked.length ? { id: { [Op.notIn]: linked } } : {}),
+    },
+    order: [['createdAt', 'ASC']],
+    transaction,
+  });
+  if (reported) return reported;
   const amount = Math.min(left, contested);
   if (amount <= 0) return null;
   const row = await db.Refund.create(
@@ -147,7 +161,10 @@ async function recordDisputeTransaction(account, tx) {
     }
     if (order) {
       const fresh = await db.Order.findOne({ where: { id: order.id }, transaction });
-      const flags = flagsAfter(fresh.riskFlags, tx.status);
+      const otherOpen = OPEN.includes(tx.status)
+        ? 0
+        : await db.PaymentDispute.count({ where: { orderId: order.id, status: OPEN, id: { [Op.ne]: dispute.id } }, transaction });
+      const flags = flagsAfter(fresh.riskFlags, tx.status, otherOpen);
       if (JSON.stringify(flags) !== JSON.stringify(fresh.riskFlags || [])) await fresh.update({ riskFlags: flags }, { transaction });
       await recordAudit({
         workspaceId: account.workspaceId,
@@ -185,7 +202,8 @@ async function notifyTeam(workspaceId, dispute, order) {
     localized: { ar: { title: text.ar, body: body.ar }, en: { title: text.en, body: body.en } },
     link: order ? `/orders/${order.id}` : null,
     data: { orderId: dispute.orderId, orderNumber: number || null, disputeId: dispute.id, status: dispute.status, amount: Number(dispute.amount), currency: dispute.currency, providerCode: dispute.providerCode, evidenceDueBy: dispute.evidenceDueBy },
-    dedupeKey: `dispute:${dispute.id}:${dispute.status}`,
+    // A dispute back to needing a response with a new deadline is said again.
+    dedupeKey: `dispute:${dispute.id}:${dispute.status}${due ? `:${due}` : ''}`,
   });
 }
 
