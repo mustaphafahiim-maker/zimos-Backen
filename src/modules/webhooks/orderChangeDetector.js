@@ -20,7 +20,13 @@ const { subscribes } = require('./webhookEvents');
  *      returns straight away.
  *   2. Lists the orders whose row, or any of whose shipments, has an
  *      updated_at inside (cursor − OVERLAP, now] — only in workspaces with an
- *      active endpoint, so a store without webhooks costs nothing.
+ *      active endpoint, so a store without webhooks costs nothing. The list
+ *      is read in pages of BATCH_SIZE, keyset on (changed_at, order_id), until
+ *      a page comes back short; only then does the cursor move to now. (It
+ *      used to stop at a full batch and move the cursor to that batch's last
+ *      time — but 500 orders changed inside one minute, by a bulk action or a
+ *      settlement, put that time inside the next pass's overlap, so every
+ *      pass re-read the same 500 and the cursor never moved again.)
  *   3. Derives each one's state the way the orders screen does
  *      (orders/orderStage.js) — stage, the three state machines and the
  *      latest shipment's status — and compares it with the snapshot from the
@@ -79,7 +85,11 @@ async function takeCursor(now, transaction) {
   });
 }
 
-async function changedOrders({ since, until, limit }, transaction) {
+// One page of the window, after the (changed_at, order_id) the previous page
+// ended on. changed_at_key is the time as Postgres text, microseconds and all:
+// a JS Date keeps only milliseconds, and a key rounded down would let the
+// rows sharing that millisecond come back on the next page forever.
+async function changedOrders({ since, until, limit, after = null }, transaction) {
   return db.sequelize.query(
     `WITH active AS (
        SELECT DISTINCT workspace_id FROM webhook_endpoints WHERE is_active
@@ -92,12 +102,16 @@ async function changedOrders({ since, until, limit }, transaction) {
          FROM shipments s JOIN active a ON a.workspace_id = s.workspace_id
         WHERE s.updated_at > :since AND s.updated_at <= :until
      )
-     SELECT order_id, MAX(changed_at) AS changed_at
-       FROM changed
-      GROUP BY order_id
-      ORDER BY MAX(changed_at), order_id
+     SELECT g.order_id, g.changed_at, g.changed_at::text AS changed_at_key
+       FROM (SELECT order_id, MAX(changed_at) AS changed_at FROM changed GROUP BY order_id) g
+      ${after ? 'WHERE (g.changed_at, g.order_id) > (CAST(:afterAt AS timestamptz), CAST(:afterId AS uuid))' : ''}
+      ORDER BY g.changed_at, g.order_id
       LIMIT :limit`,
-    { replacements: { since, until, limit }, type: QueryTypes.SELECT, transaction }
+    {
+      replacements: { since, until, limit, afterAt: after ? after.at : null, afterId: after ? after.orderId : null },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
   );
 }
 
@@ -128,121 +142,132 @@ async function scanOnce({ now = new Date(), limit = BATCH_SIZE } = {}) {
     if (!cursor) return { skipped: true, scanned: 0, events: 0 };
 
     const since = new Date(cursor.scannedUntil.getTime() - OVERLAP_MS);
-    const candidates = await changedOrders({ since, until: now, limit }, transaction);
-    // A full batch means there may be more in the window: move the cursor
-    // only as far as this batch reached, and the next pass continues there.
-    const reachedUntil = candidates.length === limit ? new Date(candidates[candidates.length - 1].changed_at) : now;
-
-    if (candidates.length === 0) {
-      await cursor.update({ scannedUntil: reachedUntil }, { transaction });
-      return { skipped: false, scanned: 0, events: 0 };
+    let scanned = 0;
+    let events = 0;
+    let pages = 0;
+    let after = null;
+    for (;;) {
+      const candidates = await changedOrders({ since, until: now, limit, after }, transaction);
+      pages += 1;
+      if (candidates.length > 0) {
+        const page = await processPage(candidates, now, transaction);
+        scanned += page.scanned;
+        events += page.events;
+        const last = candidates[candidates.length - 1];
+        after = { at: last.changed_at_key, orderId: last.order_id };
+      }
+      if (candidates.length < limit) break;
     }
+    // The whole window is read: the next pass starts from now (less the overlap).
+    await cursor.update({ scannedUntil: now }, { transaction });
+    return { skipped: false, scanned, events, pages };
+  });
+}
 
-    const changedAt = new Map(candidates.map((c) => [c.order_id, new Date(c.changed_at)]));
-    const ids = [...changedAt.keys()];
-    const [rows, snapshots] = await Promise.all([
-      currentStates(ids, transaction),
-      db.WebhookOrderState.findAll({ where: { orderId: ids }, transaction }),
-    ]);
-    const snapshotById = new Map(snapshots.map((s) => [s.orderId, s]));
+/** Events and snapshots for one page of changed orders. */
+async function processPage(candidates, now, transaction) {
+  const changedAt = new Map(candidates.map((c) => [c.order_id, new Date(c.changed_at)]));
+  const ids = [...changedAt.keys()];
+  const [rows, snapshots] = await Promise.all([
+    currentStates(ids, transaction),
+    db.WebhookOrderState.findAll({ where: { orderId: ids }, transaction }),
+  ]);
+  const snapshotById = new Map(snapshots.map((s) => [s.orderId, s]));
 
-    const workspaceIds = [...new Set(rows.map((r) => r.workspace_id))];
-    const endpoints = await db.WebhookEndpoint.findAll({
-      where: { workspaceId: workspaceIds, isActive: true },
+  const workspaceIds = [...new Set(rows.map((r) => r.workspace_id))];
+  const endpoints = await db.WebhookEndpoint.findAll({
+    where: { workspaceId: workspaceIds, isActive: true },
+    transaction,
+  });
+  const endpointsByWorkspace = new Map();
+  for (const endpoint of endpoints) {
+    if (!endpointsByWorkspace.has(endpoint.workspaceId)) endpointsByWorkspace.set(endpoint.workspaceId, []);
+    endpointsByWorkspace.get(endpoint.workspaceId).push(endpoint);
+  }
+
+  const pending = []; // { endpoint, type, row, previous, current }
+  const newSnapshots = [];
+  for (const row of rows) {
+    const current = stateOf(row);
+    const signature = signatureOf(current);
+    const snapshot = snapshotById.get(row.id);
+    if (snapshot && snapshot.signature === signature) continue;
+
+    for (const endpoint of endpointsByWorkspace.get(row.workspace_id) || []) {
+      let type = 'order.status_changed';
+      if (!snapshot && new Date(row.created_at) >= endpoint.createdAt) type = 'order.created';
+      if (!subscribes(endpoint, type)) continue;
+      pending.push({ endpoint, type, row, previous: snapshot ? snapshot.state : null, current, signature });
+    }
+    newSnapshots.push({ orderId: row.id, workspaceId: row.workspace_id, signature, state: current });
+  }
+
+  // An endpoint with a filter only hears about its funnels / products.
+  if (pending.some((p) => p.endpoint.filter)) {
+    const { orderSubject } = require('./webhookFanout');
+    const { matchesFilter } = require('./webhookFilter');
+    const subjects = new Map();
+    const kept = [];
+    for (const p of pending) {
+      if (p.endpoint.filter) {
+        if (!subjects.has(p.row.id)) subjects.set(p.row.id, await orderSubject(p.row.workspace_id, p.row.id));
+        if (!matchesFilter(p.endpoint, subjects.get(p.row.id) || {})) continue;
+      }
+      kept.push(p);
+    }
+    pending.length = 0;
+    pending.push(...kept);
+  }
+
+  // The order as the public API shows it, once per order however many
+  // endpoints hear about it.
+  const orderIds = [...new Set(pending.map((p) => p.row.id))];
+  const orders = new Map();
+  for (const orderId of orderIds) {
+    const row = rows.find((r) => r.id === orderId);
+    orders.set(orderId, serializeOrder(await orderService.getOrder(row.workspace_id, orderId)));
+  }
+
+  const deliveries = pending.map(({ endpoint, type, row, previous, current, signature }) => {
+    const eventId =
+      type === 'order.created'
+        ? `order.created:${row.id}`
+        : `order.status_changed:${row.id}:${changedAt.get(row.id).getTime()}:${shortHash(signature)}`;
+    const data = type === 'order.created'
+      ? { order: orders.get(row.id), current }
+      : {
+          order: orders.get(row.id),
+          // SPEC §16.1: the order's status (its stage, as the orders screen shows it) before and after.
+          // old_status is null for an order placed before the endpoint existed.
+          old_status: previous ? previous.stage : null,
+          new_status: current.stage,
+          previous,
+          current,
+          changed: changedKeys(previous, current),
+        };
+    return {
+      workspaceId: row.workspace_id,
+      endpointId: endpoint.id,
+      eventId,
+      eventType: type,
+      payload: { id: eventId, type, createdAt: now.toISOString(), workspaceId: row.workspace_id, data },
+      status: 'pending',
+      attemptCount: 0,
+      nextAttemptAt: now,
+    };
+  });
+
+  if (deliveries.length > 0) {
+    // (endpoint_id, event_id) is unique: a window read twice enqueues nothing twice.
+    await db.WebhookDelivery.bulkCreate(deliveries, { ignoreDuplicates: true, transaction });
+  }
+  if (newSnapshots.length > 0) {
+    await db.WebhookOrderState.bulkCreate(newSnapshots, {
+      updateOnDuplicate: ['signature', 'state', 'updatedAt'],
       transaction,
     });
-    const endpointsByWorkspace = new Map();
-    for (const endpoint of endpoints) {
-      if (!endpointsByWorkspace.has(endpoint.workspaceId)) endpointsByWorkspace.set(endpoint.workspaceId, []);
-      endpointsByWorkspace.get(endpoint.workspaceId).push(endpoint);
-    }
-
-    const pending = []; // { endpoint, type, row, previous, current }
-    const newSnapshots = [];
-    for (const row of rows) {
-      const current = stateOf(row);
-      const signature = signatureOf(current);
-      const snapshot = snapshotById.get(row.id);
-      if (snapshot && snapshot.signature === signature) continue;
-
-      for (const endpoint of endpointsByWorkspace.get(row.workspace_id) || []) {
-        let type = 'order.status_changed';
-        if (!snapshot && new Date(row.created_at) >= endpoint.createdAt) type = 'order.created';
-        if (!subscribes(endpoint, type)) continue;
-        pending.push({ endpoint, type, row, previous: snapshot ? snapshot.state : null, current, signature });
-      }
-      newSnapshots.push({ orderId: row.id, workspaceId: row.workspace_id, signature, state: current });
-    }
-
-    // An endpoint with a filter only hears about its funnels / products.
-    if (pending.some((p) => p.endpoint.filter)) {
-      const { orderSubject } = require('./webhookFanout');
-      const { matchesFilter } = require('./webhookFilter');
-      const subjects = new Map();
-      const kept = [];
-      for (const p of pending) {
-        if (p.endpoint.filter) {
-          if (!subjects.has(p.row.id)) subjects.set(p.row.id, await orderSubject(p.row.workspace_id, p.row.id));
-          if (!matchesFilter(p.endpoint, subjects.get(p.row.id) || {})) continue;
-        }
-        kept.push(p);
-      }
-      pending.length = 0;
-      pending.push(...kept);
-    }
-
-    // The order as the public API shows it, once per order however many
-    // endpoints hear about it.
-    const orderIds = [...new Set(pending.map((p) => p.row.id))];
-    const orders = new Map();
-    for (const orderId of orderIds) {
-      const row = rows.find((r) => r.id === orderId);
-      orders.set(orderId, serializeOrder(await orderService.getOrder(row.workspace_id, orderId)));
-    }
-
-    const deliveries = pending.map(({ endpoint, type, row, previous, current, signature }) => {
-      const eventId =
-        type === 'order.created'
-          ? `order.created:${row.id}`
-          : `order.status_changed:${row.id}:${changedAt.get(row.id).getTime()}:${shortHash(signature)}`;
-      const data = type === 'order.created'
-        ? { order: orders.get(row.id), current }
-        : {
-            order: orders.get(row.id),
-            // SPEC §16.1: the order's status (its stage, as the orders screen shows it) before and after.
-            // old_status is null for an order placed before the endpoint existed.
-            old_status: previous ? previous.stage : null,
-            new_status: current.stage,
-            previous,
-            current,
-            changed: changedKeys(previous, current),
-          };
-      return {
-        workspaceId: row.workspace_id,
-        endpointId: endpoint.id,
-        eventId,
-        eventType: type,
-        payload: { id: eventId, type, createdAt: now.toISOString(), workspaceId: row.workspace_id, data },
-        status: 'pending',
-        attemptCount: 0,
-        nextAttemptAt: now,
-      };
-    });
-
-    if (deliveries.length > 0) {
-      // (endpoint_id, event_id) is unique: a window read twice enqueues nothing twice.
-      await db.WebhookDelivery.bulkCreate(deliveries, { ignoreDuplicates: true, transaction });
-    }
-    if (newSnapshots.length > 0) {
-      await db.WebhookOrderState.bulkCreate(newSnapshots, {
-        updateOnDuplicate: ['signature', 'state', 'updatedAt'],
-        transaction,
-      });
-    }
-    await cursor.update({ scannedUntil: reachedUntil }, { transaction });
-
-    return { skipped: false, scanned: rows.length, events: deliveries.length };
-  });
+  }
+  return { scanned: rows.length, events: deliveries.length };
 }
 
 module.exports = { scanOnce, OVERLAP_MS, BATCH_SIZE };

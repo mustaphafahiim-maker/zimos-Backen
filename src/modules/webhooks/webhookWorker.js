@@ -2,7 +2,7 @@
 
 const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
-const { scanOnce, BATCH_SIZE } = require('./orderChangeDetector');
+const { scanOnce } = require('./orderChangeDetector');
 const { deliverDue } = require('./webhookDispatcher');
 
 /**
@@ -12,16 +12,12 @@ const { deliverDue } = require('./webhookDispatcher');
  * each step locks what it works on.
  */
 
-/** One full pass. Keeps scanning while the detector's batches come back full. */
+/**
+ * One full pass. The detector reads its whole window page by page in one
+ * scan, so a single call covers every change up to now.
+ */
 async function runOnce({ now } = {}) {
-  let scanned = 0;
-  let events = 0;
-  for (let i = 0; i < 20; i += 1) {
-    const pass = await scanOnce({ now: now || new Date() });
-    scanned += pass.scanned;
-    events += pass.events;
-    if (pass.skipped || pass.scanned < BATCH_SIZE) break;
-  }
+  const { scanned, events } = await scanOnce({ now: now || new Date() });
   const sent = await deliverDue({ now });
   return { scanned, events, ...sent };
 }
