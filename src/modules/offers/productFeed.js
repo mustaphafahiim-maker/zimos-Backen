@@ -24,7 +24,14 @@ const { resolveStoreInfo, publicLegalIndex } = require('../storefront/storeInfo'
  * CACHE_MS, so a price change shows within minutes without a rebuild job.
  *
  * settings.product_feed: { enabled, collection_ids, exclude_out_of_stock,
- * brand, google_product_category }.
+ * brand, google_product_category, channels }.
+ *
+ * Per channel (item 264, SPEC §7.8 "choose a channel, then filter"):
+ * channels.<meta|google|tiktok|snapchat> = { enabled, collection_ids,
+ * exclude_out_of_stock, require_checklist (google) } — a channel's own
+ * collections / stock rule, or null to follow the store-wide ones; a channel
+ * can be switched off on its own; the Google feed can be held back until the
+ * Merchant checklist passes.
  *
  * The Google Merchant checklist reads what approval needs — contact details
  * and the shipping, return and cash-on-delivery policies (store info, SPEC
@@ -37,17 +44,37 @@ const FORMATS = ['xml', 'csv'];
 const CACHE_MS = 10 * 60 * 1000;
 const MAX_ITEMS = 20000;
 
+const channelSchema = Joi.object({
+  enabled: Joi.boolean().default(true),
+  // null: the store-wide choice.
+  collectionIds: Joi.array().items(Joi.string().uuid()).max(100).unique().allow(null).default(null),
+  excludeOutOfStock: Joi.boolean().allow(null).default(null),
+  requireChecklist: Joi.boolean().default(false),
+});
+
 const feedSchema = Joi.object({
   enabled: Joi.boolean().required(),
+  channels: Joi.object(Object.fromEntries(CHANNELS.map((c) => [c, channelSchema]))).default({}),
   collectionIds: Joi.array().items(Joi.string().uuid()).max(100).unique().default([]),
   excludeOutOfStock: Joi.boolean().default(true),
   brand: Joi.string().trim().max(100).allow('', null),
   googleProductCategory: Joi.string().trim().max(250).allow('', null),
 });
 
+function readChannel(raw, channel) {
+  const c = (raw && typeof raw === 'object' && raw[channel]) || {};
+  return {
+    enabled: c.enabled !== false,
+    collectionIds: Array.isArray(c.collection_ids) ? c.collection_ids : null,
+    excludeOutOfStock: typeof c.exclude_out_of_stock === 'boolean' ? c.exclude_out_of_stock : null,
+    requireChecklist: channel === 'google' && c.require_checklist === true,
+  };
+}
+
 function readFeedSettings(settings) {
   const s = (settings && settings[SETTINGS_KEY]) || {};
   return {
+    channels: Object.fromEntries(CHANNELS.map((c) => [c, readChannel(s.channels, c)])),
     enabled: s.enabled === true,
     collectionIds: Array.isArray(s.collection_ids) ? s.collection_ids : [],
     excludeOutOfStock: s.exclude_out_of_stock !== false,
@@ -75,9 +102,22 @@ const plain = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-/** The feed's items for a store: one per active variant of each listed product. */
-async function buildItems(workspace) {
-  const config = readFeedSettings(workspace.settings);
+/** The settings one channel's feed is built with: its own choices, else the store-wide ones. */
+function configFor(settings, channel) {
+  const store = readFeedSettings(settings);
+  const own = channel ? store.channels[channel] : null;
+  return {
+    ...store,
+    enabled: store.enabled && (!own || own.enabled),
+    collectionIds: own && own.collectionIds !== null ? own.collectionIds : store.collectionIds,
+    excludeOutOfStock: own && own.excludeOutOfStock !== null ? own.excludeOutOfStock : store.excludeOutOfStock,
+    requireChecklist: Boolean(own && own.requireChecklist),
+  };
+}
+
+/** The feed's items for a store (for one channel): one per active variant of each listed product. */
+async function buildItems(workspace, channel = null) {
+  const config = configFor(workspace.settings, channel);
   const include = [{ model: db.ProductVariant, as: 'variants', where: { status: 'active' }, required: true }];
   if (config.collectionIds.length > 0) {
     include.push({ model: db.Collection, as: 'collections', where: { id: config.collectionIds }, attributes: [], required: true });
@@ -167,19 +207,19 @@ function toCsv(items) {
   return `﻿${[CSV_COLUMNS.join(','), ...items.map((item) => CSV_COLUMNS.map((column) => cell(item[column])).join(','))].join('\r\n')}\r\n`;
 }
 
-const cache = new Map(); // "workspaceId:format" → { at, body, count }
+const cache = new Map(); // "workspaceId:channel:format" → { at, body, count }
 
-async function renderFeed(workspace, format) {
-  const key = `${workspace.id}:${format}`;
+async function renderFeed(workspace, format, channel) {
+  const key = `${workspace.id}:${channel}:${format}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit;
-  const items = await buildItems(workspace);
+  const items = await buildItems(workspace, channel);
   const entry = { at: Date.now(), count: items.length, body: format === 'csv' ? toCsv(items) : toXml(workspace, items, await storeBase(workspace)) };
   cache.set(key, entry);
   return entry;
 }
 
-const dropCache = (workspaceId) => FORMATS.forEach((format) => cache.delete(`${workspaceId}:${format}`));
+const dropCache = (workspaceId) => CHANNELS.forEach((channel) => FORMATS.forEach((format) => cache.delete(`${workspaceId}:${channel}:${format}`)));
 
 // ------------------------------------------------------------------ staff --
 
@@ -187,10 +227,21 @@ async function getFeed(workspaceId) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name', 'slug', 'settings'] });
   dropCache(workspaceId);
   const items = await buildItems(workspace);
+  const feed = readFeedSettings(workspace.settings);
+  // Each channel: whether it answers, and what it holds (item 264).
+  const checklist = feed.channels.google.requireChecklist ? await merchantChecklist(workspaceId) : null;
+  const channels = {};
+  for (const channel of CHANNELS) {
+    const config = configFor(workspace.settings, channel);
+    const own = await buildItems(workspace, channel);
+    const heldBack = channel === 'google' && config.requireChecklist && checklist && !checklist.ready;
+    channels[channel] = { live: config.enabled && !heldBack, heldBackByChecklist: Boolean(heldBack), itemCount: own.length, productCount: new Set(own.map((i) => i.item_group_id)).size };
+  }
   return {
-    feed: readFeedSettings(workspace.settings),
+    feed,
     itemCount: items.length,
     productCount: new Set(items.map((item) => item.item_group_id)).size,
+    channels,
     links: Object.fromEntries(
       CHANNELS.map((channel) => [channel, { xml: `/feeds/${workspace.slug}/${channel}.xml`, csv: `/feeds/${workspace.slug}/${channel}.csv` }])
     ),
@@ -209,6 +260,12 @@ async function saveFeed(workspaceId, data, req) {
         exclude_out_of_stock: data.excludeOutOfStock,
         brand: data.brand || '',
         google_product_category: data.googleProductCategory || '',
+        channels: Object.fromEntries(
+          CHANNELS.map((c) => {
+            const ch = (data.channels && data.channels[c]) || {};
+            return [c, { enabled: ch.enabled !== false, collection_ids: ch.collectionIds ?? null, exclude_out_of_stock: ch.excludeOutOfStock ?? null, require_checklist: c === 'google' && ch.requireChecklist === true }];
+          })
+        ),
       },
     };
     workspace.changed('settings', true);
@@ -234,8 +291,8 @@ async function merchantChecklist(workspaceId) {
   const info = resolveStoreInfo(workspace.settings);
   const legal = publicLegalIndex(workspace.settings);
   const cardReady = (card) => card.enabled && (Boolean(card.title) || card.points.length > 0);
-  const items = await buildItems(workspace);
-  const feed = readFeedSettings(workspace.settings);
+  const items = await buildItems(workspace, 'google');
+  const feed = configFor(workspace.settings, 'google');
   const checks = [
     { key: 'store_info_enabled', ok: info.enabled, fixAt: 'store_info' },
     { key: 'email', ok: Boolean(info.email), fixAt: 'store_info' },
@@ -298,10 +355,13 @@ publicRouter.get(
       where: { slug: String(req.params.workspaceSlug).toLowerCase() },
       attributes: ['id', 'name', 'slug', 'settings'],
     });
-    if (!workspace || !readFeedSettings(workspace.settings).enabled) throw new NotFoundError('Feed');
+    // The store's feed and this channel's own switch (item 264).
+    if (!workspace || !configFor(workspace.settings, match[1]).enabled) throw new NotFoundError('Feed');
     // The Google feed is the Google Merchant app (apps/appCatalogue.js): taken off, Google gets nothing.
     if (match[1] === 'google' && !(await require('../apps/appGate').isEnabled(workspace.id, 'google_merchant'))) throw new NotFoundError('Feed');
-    const feed = await renderFeed(workspace, match[2]);
+    // Google held back until the Merchant checklist passes, when the merchant asked for it (item 264).
+    if (match[1] === 'google' && configFor(workspace.settings, 'google').requireChecklist && !(await merchantChecklist(workspace.id)).ready) throw new NotFoundError('Feed');
+    const feed = await renderFeed(workspace, match[2], match[1]);
     res.set('Content-Type', match[2] === 'csv' ? 'text/csv; charset=utf-8' : 'application/xml; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=600');
     res.send(feed.body);

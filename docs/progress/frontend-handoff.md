@@ -3194,3 +3194,20 @@ Public, rate-limited like the other sign-in routes.
 
 ### Screen
 - Apps → the supplier's card → settings: two switches «استخدم أسعار شحن المورّد» / "Use the supplier's shipping rates" and «ارفض الطلب لو أقل من الحد الأدنى للمورّد» / "Refuse orders below the supplier's minimum" (disabled with a hint when the supplier doesn't support it).
+
+## 264. Product feeds per channel — UI: pending
+
+Same endpoints: `GET / PUT /api/v1/workspaces/:ws/offers/feed`. The PUT body (whole, as before) gains `channels`:
+```json
+{ "enabled": true, "collectionIds": [], "excludeOutOfStock": true, "brand": "", "googleProductCategory": "",
+  "channels": {
+    "google":   { "enabled": true, "collectionIds": ["…"], "excludeOutOfStock": null, "requireChecklist": true },
+    "meta":     { "enabled": true, "collectionIds": null, "excludeOutOfStock": false },
+    "tiktok":   { "enabled": false },
+    "snapchat": {} } }
+```
+- Per channel: `enabled` (default true), `collectionIds` / `excludeOutOfStock` — `null` = follow the store-wide choice; `requireChecklist` (Google only) = no Google feed until the Merchant checklist passes. A channel left out of `channels` goes back to defaults.
+- The GET (and PUT answer) gains `channels: { meta|google|tiktok|snapchat: { live, heldBackByChecklist, itemCount, productCount } }`; `links` as before. A channel that isn't live answers 404 at its link.
+
+### Screen
+- Marketing → «فيد المنتجات» / "Product feeds": keep the store-wide settings on top; below, one card per channel (logo, «شغال / مقفول» / "Live / Off" switch, its link with copy, items count), «استخدم إعدادات المتجر» / "Use the store settings" ticked by default, else its own collections picker and «استبعد المنتجات الخلصانة» / "Leave out sold-out items". Google card: «متنشرش غير لما قايمة جوجل تكمل» / "Don't publish until the Google checklist is complete", and when `heldBackByChecklist` a link to the checklist.
