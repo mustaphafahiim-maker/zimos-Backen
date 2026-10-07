@@ -2794,3 +2794,9 @@ Body for create / edit / preview:
 - Settings → Orders → «استبيان بعد الشراء» / "Post-purchase survey": on/off, up to 3 questions (type: «اختيار» / "Choice", «تقييم 0–10» / "Score 0–10", «نص» / "Text"), options, «ومكان لـ "حاجة تانية"» / "Allow other", required.
 - Thank-you page: the questions under the order summary, «ابعت» / "Send", then «شكرًا على رأيك!» / "Thanks for your feedback!"; skippable.
 - Order page: the answers. Analytics → «نتائج الاستبيان» / "Survey results": bar per option, average and NPS for the score, latest texts.
+
+## Frontend requests (2026-10-07, third batch, docs/ux/backend-requests.md) — done
+
+- **Waybill PDF and emoji (214):** the waybill's customer-details lines (gift message, custom-field answers, pickup and delivery-slot lines) drop emoji, flags, skin tones and joiners before drawing — the PDF fonts have no glyphs for them. «Happy birthday ❤️🎉 يا حبيبتي» prints as «Happy birthday يا حبيبتي». The order itself keeps the message as typed.
+- **Cart: the product a free gift needs (208):** each `freeGifts[]` entry of the cart now has `neededProducts: [{ id, name, slug }]` (filled when `needsProduct` is true, active products only). Nudge: «ضيف Box cap وخد هدية» / "Add Box cap to get a free gift", linking to `/products/<slug>`.
+- **Mix-and-match box prices (215):** new `POST /api/v1/store/:ws/bundles/:bundleId/quote` `{ picks: [{ variantId, quantity }] }` → `{ units, currency, full, discount, total, freeShipping, tiers: [{ tierId, title, sku, quantity, packs }], nextTier: { id, title, quantity, missingUnits } | null, ignored: [variantIds not in this box] }` — the same tier pricing the cart and checkout use. Show «الإجمالي 400 ج بدل 450» / "Total EGP 400 instead of 450" and «ضيف قطعة كمان وتوصل للعرض» / "Add 1 more to unlock the offer" from `nextTier.missingUnits`.
