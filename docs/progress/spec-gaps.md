@@ -2153,3 +2153,33 @@ the registrar sites were blocked from here, so numbers are to be confirmed at si
     - purchase: 755 EGP to buy and 1260 EGP to renew (Namecheap's retail renewal, the reason it is the fallback); a premium name not sold; a buy → 201 active with the four contacts in `+20.1001234567` form; setHosts got @ ALIAS, www CNAME and @ TXT; the renew expiry was read from `ExpiredDate`;
     - errors: a wrong client IP → 502 `REGISTRAR_REFUSED` "Invalid request IP"; missing config → 503;
     - the key never reached the log.
+
+## Twenty-sixth pass (2026-10-07) — porting Ziad's work (ziadabbas19/zimos, PRs #5–#24)
+
+The owner asked to take everything Ziad added in his repo (github.com/ziadabbas19/zimos) that ours lacks. Our branch forked
+from his at `0dd31ce` (his PR #4, Fawaterak billing, 2026-10-02). Since then his PRs #5–#24 added auth, billing, console and
+domain work; his PR #18 is an import of our own Oct 4–5 work (renumbered), so that part is not ported back. Rules:
+- Port by reading his commits and adapting them to our code, which moved on. Never remove one of our features. Where his
+  behaviour conflicts with ours, ours stays the default and his goes behind a setting. Each decision is written under its item.
+- His migrations keep **his file names** (130–132, 204–213, beside ours with the same numbers but other names), together with
+  his `src/db/migrationGuards.js`, so a database that already ran them in his repo does not run them twice. This deliberately
+  departs from the 500–549 range in LANES for these files only.
+- Billing is Ziad's: his billing code is taken as he wrote it, adapted only where our code differs.
+- His tests are not ported (CLAUDE.md: no tests); every item is verified by running it.
+
+- [ ] 328. No fallback secrets: `JWT_ACCESS_SECRET` and `DB_PASSWORD` must be set; `.env.example` lists names only (his d7ee605, 50a4657, 0b5e1ab).
+- [ ] 329. Client IP from one source: `clientIp` middleware; Cloudflare's CF-Connecting-IP trusted only with the edge secret header (his 973fc8e, beff29e).
+- [ ] 330. Sign-up and sign-in: signed in at once and confirm the email with a code; sign in by email or username; an unconfirmed account can't start a trial, publish, be invited or get a console role; Google takes over an unconfirmed password account and never lifts a suspension; sign-up requires a phone (his 00ef17f, 842cd87, f730020, 05d9875, 4b7afe8).
+- [ ] 331. Password reset that says nothing about the address, per-IP auth limits from the environment, `PASSWORD_RESET_SMS_ENABLED`, `REVIEWS_PUBLIC_SUBMISSION_ENABLED` (his 5a33487, be428aa, b0ae907, c9a87db, a77791e).
+- [ ] 332. Verification codes with a purpose, and changing your name, email and phone from the account settings (`PHONE_CHANGE_ENABLED`) (his 8efcb9d, 7c061ba).
+- [ ] 333. The merchant's plans: code preview, charges, plan change, one free trial per account; one feature catalogue and `PLAN_FEATURE_ENFORCEMENT` (his f757e0d, 1d70df5, b005b3f).
+- [ ] 334. Billing gateway adapter; platform payment methods and transfer proofs a platform admin approves; the charge written when the proof is sent; an optional payment link on a method (his 413ecc1, d716e81, 7b5ce74, 31f4e58).
+- [ ] 335. Prepaid wallet: per-order fees from a balance behind `WALLET_ENABLED`, top-ups by transfer proof, balance endpoints, pay per order, the ledger check script (his 6c2e7cc, ead64d1).
+- [ ] 336. Manual subscription pricing: paid, free or discounted (his 3b89de9).
+- [ ] 337. Console: suspend, unsuspend and soft-delete an account (deleted accounts can't sign in); the user list leaves deleted accounts out unless asked (his 26df946, f47e1de, e4f7cf7).
+- [ ] 338. Console notifications for platform admins, with read state and settings (his 32a28d0).
+- [ ] 339. Marketing-site traffic for the console, linked to the account at sign-up (his 3864272).
+- [ ] 340. Store manual payments by InstaPay or wallet with a screenshot proof (his f74f4c1).
+- [ ] 341. Custom domains: `CUSTOM_DOMAINS_ENABLED`, TXT on `_zimos-verify`, one CNAME target, no squatting, the Cloudflare for SaaS certificate adapter, provider deletions, the jobs and domain suspension; "subdomains only" as a setting, our root domains and purchases kept (his 08d23b2, d051b79, b600e71, 045801f).
+- [ ] 342. Ziad's fixes to the imported code, where they apply to ours: status guards, reports, the COD switch schema, orders without an address, the storefront cache default, the console notify provider (his 7ffc0a9, 78075b8).
+- [ ] 343. The launch-reset script with our table list (his e4e26d6 and later table-list updates).
