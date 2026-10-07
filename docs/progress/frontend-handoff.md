@@ -2958,3 +2958,24 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screens
 - Customer page → «عملاء ممكن يكونوا نفس الشخص» / "Possible duplicates" (from `/candidates`, with the reason chips «نفس الإيميل» / «نفس الرقم» / «نفس الاسم»), and «دمج» / "Merge": a side-by-side of both customers, a choice of which to keep, a confirmation «هننقل كل طلبات وبيانات العميل التاني للعميل ده ونمسحه — مينفعش يترجع» / "All of the other customer's orders and data move here and it is deleted — this can't be undone", then the result (what moved).
+
+## 249. Scan to pack — UI: pending
+
+### `/api/v1/workspaces/:ws/orders/:orderId/pack` (`orders.manage`)
+Nothing is stored between calls: the page keeps the list of scans and sends all of them each time (a reload or a second device just sends the list again).
+- `POST /check` `{ "scans": ["6221234567890", "ZZ-PACK-1"] }` →
+```json
+{ "order": { "id": "…", "orderNumber": "ORD-…", "packed": false },
+  "lines": [{ "variantId": "…", "name": "ZZ Pack Test", "options": {}, "sku": "ZZ-PACK-1", "barcode": "6221234567890",
+              "expected": 2, "scanned": 1, "done": false, "missing": 1, "over": 0 }],
+  "manual": [], "unknown": ["NOPE"], "over": [{ "variantId": "…", "name": "…", "over": 1 }],
+  "complete": false, "progress": { "scanned": 1, "expected": 2 } }
+```
+  - A scan matches a variant's barcode or SKU (trimmed, upper/lower case ignored). `unknown` = codes that aren't in this order (wrong item). `over` = scanned more than ordered. `manual` = lines with no variant (can't be scanned; tick by hand). `complete` = every line scanned exactly and no unknown codes.
+  - Up to 2000 scans, each ≤ 120 chars. 404 order; 409 `ORDER_CANCELLED`.
+- `POST /confirm` `{ "scans": [...], "force": false, "note": "" }` → `{ "packed": true, "complete": true }`. Adds the tag `packed` to the order and an audit/timeline entry (`order.packed`, with the progress and any unknown codes).
+  - Not complete → 409 `PACK_NOT_COMPLETE` (`details.lines`, `details.unknown`), unless `force: true` with a `note` (422 on `note` without one) — e.g. an item without a barcode.
+
+### Screen
+- Order page and the pick list → «تغليف بالسكانر» / "Scan to pack": a big input that keeps focus (a USB/Bluetooth scanner types and presses Enter; the phone camera can also fill it), the lines with «اتسكن ١ من ٢» / "1 of 2 scanned" and a tick when done, a progress bar, a beep/red flash for «المنتج ده مش في الطلب» / "This item isn't in the order" and «زيادة عن المطلوب» / "More than ordered", an «تراجع» / "Undo last scan" button.
+- When complete: «كله تمام — تأكيد التغليف» / "All scanned — confirm packed". Otherwise «تأكيد رغم النقص» / "Confirm anyway" opens a required note «ليه؟» / "Why?". After confirm show the `packed` chip «اتغلّف» / "Packed" on the order and in the orders list (filter by tag `packed`).

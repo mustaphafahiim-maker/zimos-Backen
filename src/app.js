@@ -194,6 +194,8 @@ v1.use('/workspaces/:workspaceId/subscriptions', customerSubscriptionRoutes.staf
 v1.use('/workspaces/:workspaceId/shoppable-images', shoppableImageRoutes.staff);
 v1.use('/workspaces/:workspaceId/courses', courseRoutes.staff);
 v1.use('/workspaces/:workspaceId', dashboardRoutes);
+// Scan to pack (orders/scanToPack.js, item 249).
+v1.use('/workspaces/:workspaceId/orders/:orderId/pack', require('./modules/orders/scanToPack').router);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/exports', require('./modules/orders/exportFileRoutes'));
 v1.use('/workspaces/:workspaceId/account-settings', require('./modules/workspaces/accountSettings').router);
