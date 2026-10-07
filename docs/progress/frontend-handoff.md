@@ -3294,3 +3294,9 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 - `POST /workspaces/:ws/catalog/bulk-update/apply`: send an `Idempotency-Key: <uuid>` header (one new key per upload; reuse it on a retry). A second click with the same key gets the first answer, or 409 `IDEMPOTENCY_KEY_IN_PROGRESS` while it still runs: «لسه بيتنفذ — استنى ثواني» / "Still applying — wait a few seconds".
 - Preview: a change can carry `warnings: [{ code: "BELOW_RESERVED", reserved }]` → a yellow note on the row: «الكمية أقل من المحجوز لطلبات مفتوحة ({reserved})» / "Below what open orders hold ({reserved})". With stock locations, a row that would take the main location below zero is in `errors` with its message.
 - `stock_change` is applied as a change on the stock at that moment, so the preview's "to" can differ from the result when orders come in meanwhile.
+
+## 297. Bulk update sheets — amounts and columns — UI: pending (small)
+
+- `POST …/catalog/bulk-update/preview` (and apply) now answer `ignoredColumns: ["name", …]` (+ `summary.ignoredColumns`): show «الأعمدة دي مش هتتغير: {list}» / "These columns are not updated: {list}".
+- Amounts may be typed "249.50" or "249,50"; the row error for an unclear amount reads "price must be an amount like 249.50 (at most 2 decimals)" — show it as is, or «اكتب السعر زي 249.50» / "Type the price like 249.50".
+- A damaged .xlsx answers 422 `VALIDATION_ERROR` on `file`: «الملف بايظ — احفظه تاني أو ابعته CSV» / "The file is damaged — save it again or send a CSV".

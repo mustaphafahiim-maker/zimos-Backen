@@ -1990,5 +1990,9 @@ The review of the bulk update, packing slips and customer merge (items 243, 244,
   - Tax exemption (and its note) and the blacklist (and its date) carry over if either had them; pay-on-account terms are the kept customer's when it has them, else the duplicate's.
   - Marketing consent: yes only if either had it and no opt-out (STOP reply or unsubscribe) exists for any of the two phones or emails — the email-marketing sync reads only the consent flag.
   - Checked: kept (3 years old, no consent, STOP on its number) + duplicate (800 fresh points, consent, tax-exempt, on account 5000.00 / 30 days) → consent false, 800 points with a recent activity date, tax-exempt with the note, on-account terms kept.
-- [ ] 297. Bulk update sheets: comma decimals ("249,50" from a semicolon CSV) read 100× too high; the product export's `compare_at_price` column was silently ignored (unknown columns not reported); a malformed .xlsx answered 500.
+- [x] 297. Bulk update sheets: comma decimals ("249,50" from a semicolon CSV) read 100× too high; the product export's `compare_at_price` column was silently ignored (unknown columns not reported); a malformed .xlsx answered 500. (backend fix; UI note in frontend-handoff.md)
+  - Amounts: "249.50" and "249,50" are the same; with both marks the last one is the decimal ("1,299.00", "1.299,00"); "1,299" is thousands. In the variant currency's digits (KWD 3, JPY 0, from fxService.minorDigits — it was always × 100); more decimals than the currency has is refused, not rounded ("1.299" on an EGP store: more likely 1299 typed the European way than 1.30).
+  - `compare_at_price` (the product export's column) is read as `compare_at`; columns the update doesn't read come back in `ignoredColumns`.
+  - A damaged .xlsx (bad offsets, broken compression, an out-of-range character) answers 422 with "This .xlsx file is damaged or not a spreadsheet".
+  - Checked: a semicolon CSV with price "249,50" and compare_at_price "1.299,00" → 24950 / 129900, `name` listed as ignored; "1.299" refused; a junk .xlsx → 422.
 

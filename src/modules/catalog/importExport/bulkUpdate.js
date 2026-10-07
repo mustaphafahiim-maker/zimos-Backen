@@ -37,10 +37,31 @@ function acceptFile(req, res, next) {
   return upload.single('file')(req, res, (err) => (err ? next(new AppError('UPLOAD_ERROR', err.message, 422)) : next()));
 }
 
-const minor = (s) => {
-  const n = Number(String(s).replace(/,/g, ''));
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
+/**
+ * A typed amount in major units → minor units, or null (item 297). Both "249.50" and "249,50" (a
+ * semicolon CSV from a comma-decimal locale) are 24950; "1,299.00" and "1.299,00" are 129900 (the
+ * last mark is the decimal one); "1,299" is a thousand-two-hundred-ninety-nine. In the variant's
+ * currency's digits (KWD has 3); more decimals than it has is refused, not rounded — "1.299" on an EGP
+ * store is more likely 1299 typed the European way than 1.30. Anything else is refused.
+ */
+const minor = (s, digits = 2) => {
+  let t = String(s).trim().replace(/[\s\u00a0]/g, '');
+  const dot = t.lastIndexOf('.');
+  const comma = t.lastIndexOf(',');
+  if (dot >= 0 && comma >= 0) t = dot > comma ? t.replace(/,/g, '') : t.replace(/\./g, '').replace(',', '.');
+  else if (comma >= 0) {
+    if (/^\d+,\d{1,2}$/.test(t)) t = t.replace(',', '.');
+    else if (/^\d{1,3}(,\d{3})+$/.test(t)) t = t.replace(/,/g, '');
+    else return null;
+  } else if (/^\d{1,3}(\.\d{3}){2,}$/.test(t)) t = t.replace(/\./g, '');
+  if (!/^\d+(\.\d+)?$/.test(t)) return null;
+  if ((t.split('.')[1] || '').length > digits) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 10 ** digits) : null;
 };
+
+// The columns this update reads; `compare_at_price` is what the product export writes (item 297).
+const KNOWN = ['sku', 'stock', 'stock_change', 'price', 'compare_at', 'compare_at_price', 'cost'];
 
 async function plan(workspaceId, req) {
   let sheet;
@@ -53,6 +74,9 @@ async function plan(workspaceId, req) {
     throw err;
   }
   if (!sheet.header.includes('sku')) throw new ValidationError([{ field: 'file', message: 'The sheet needs a `sku` column' }]);
+  // Said, not silently skipped (item 297): a column this update doesn't read (e.g. a product export's name).
+  const ignoredColumns = sheet.header.filter((h) => h && !KNOWN.includes(h));
+  for (const r of sheet.rows) if (r.compare_at_price !== undefined && !r.compare_at) r.compare_at = r.compare_at_price;
   if (sheet.rows.length > MAX_ROWS) throw new ValidationError([{ field: 'file', message: `At most ${MAX_ROWS} rows` }]);
 
   const skus = [...new Set(sheet.rows.map((r) => (r.sku || '').toLowerCase()).filter(Boolean))];
@@ -98,8 +122,9 @@ async function plan(workspaceId, req) {
     let failed = false;
     for (const [col, key, clearable] of [['price', 'priceAmount', false], ['compare_at', 'compareAtAmount', true], ['cost', 'costAmount', false]]) {
       if (!r[col]) continue;
-      const m = minor(r[col]);
-      if (m === null) { bad(`${col} must be a number`); failed = true; break; }
+      const digits = require('../../currencies/fxService').minorDigits(v.currency || 'EGP');
+      const m = minor(r[col], digits);
+      if (m === null) { bad(`${col} must be an amount like 249.50 (at most ${digits} decimals)`); failed = true; break; }
       if (key === 'priceAmount' && m === 0) { bad('price cannot be 0'); failed = true; break; }
       const to = clearable && m === 0 ? null : m;
       const from = v[key] == null ? null : Number(v[key]);
@@ -124,7 +149,7 @@ async function plan(workspaceId, req) {
       }
     }
   }
-  return { rows: sheet.rows.length, changes, unknown, errors };
+  return { rows: sheet.rows.length, changes, unknown, errors, ignoredColumns };
 }
 
 // Mounted at /api/v1/workspaces/:workspaceId/catalog/bulk-update.
@@ -134,7 +159,7 @@ const params = Joi.object({ workspaceId: Joi.string().uuid().required() });
 
 router.post('/preview', acceptFile, validate({ params }), asyncHandler(async (req, res) => {
   const p = await plan(req.tenant.workspaceId, req);
-  res.json({ ...p, summary: { rows: p.rows, changes: p.changes.length, unknown: p.unknown.length, errors: p.errors.length } });
+  res.json({ ...p, summary: { rows: p.rows, changes: p.changes.length, unknown: p.unknown.length, errors: p.errors.length, ignoredColumns: p.ignoredColumns.length } });
 }));
 
 async function apply(req, res) {

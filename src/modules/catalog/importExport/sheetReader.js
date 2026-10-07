@@ -176,7 +176,17 @@ function parseXlsx(buffer) {
  */
 function readSheet(buffer, filename = '') {
   const isZip = buffer.length > 3 && buffer[0] === 0x50 && buffer[1] === 0x4b;
-  const rows = isZip || /\.xlsx$/i.test(filename) ? parseXlsx(buffer) : parseCsv(buffer);
+  let rows;
+  if (isZip || /\.xlsx$/i.test(filename)) {
+    // A damaged file is the sender's problem, said as such (item 297): a bad offset, broken
+    // compression or a character code out of range would otherwise answer 500.
+    try {
+      rows = parseXlsx(buffer);
+    } catch (err) {
+      if (err instanceof SheetError) throw err;
+      throw new SheetError('This .xlsx file is damaged or not a spreadsheet; save it again or send a CSV');
+    }
+  } else rows = parseCsv(buffer);
   if (rows.length === 0) throw new SheetError('The file is empty');
   const header = rows[0].map((h) => String(h).trim().toLowerCase().replace(/\s+/g, '_'));
   const out = [];
