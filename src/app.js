@@ -173,6 +173,8 @@ v1.use('/templates', templateRoutes);
 // reaches this router's `authenticateFlexible`.
 v1.use('/workspaces/:workspaceId/quickstart', quickstartRoutes);
 v1.use('/workspaces', workspaceRoutes);
+// Bulk stock and price update from a sheet (catalog/importExport/bulkUpdate.js, item 243).
+v1.use('/workspaces/:workspaceId/catalog/bulk-update', require('./modules/catalog/importExport/bulkUpdate').router);
 v1.use('/workspaces/:workspaceId/catalog', catalogRoutes);
 v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);

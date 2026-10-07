@@ -2887,3 +2887,14 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screen
 - Reports → «أوقات الطلبات» / "When orders come in": a 7×24 heatmap (rows Sat…Fri for Egypt: «السبت» … «الجمعة»; columns 12am…11pm), toggle «عدد الطلبات» / "Orders" vs «المبيعات» / "Revenue", tooltip with the confirmation rate; a line «أكتر وقت: الخميس 9 م» / "Busiest: Thursday 9 PM"; bars by weekday and by hour under it; «تنزيل CSV».
+
+## 243. Bulk stock and price update from a sheet — UI: pending
+
+### `/api/v1/workspaces/:ws/catalog/bulk-update` (`products.manage`)
+- `POST /preview` and `POST /apply` — the same input: a multipart `file` (CSV or xlsx, ≤ 10 MB), or JSON `{ csv: "…" }`. Header row; `sku` required (case-insensitive match); optional columns, blank = unchanged: `stock` (new count), `stock_change` (±units; not with `stock` on the same row), `price`, `compare_at` (`0` clears), `cost` — money in major units as typed ("129.50"). ≤ 5000 rows.
+- Preview → `{ rows, summary: { rows, changes, unknown, errors }, changes: [{ row, sku, variantId, productName, options, fields: { stock: { from, to }, priceAmount: { from, to }, compareAtAmount, costAmount } }], unknown: [{ row, sku }], errors: [{ row, sku?, message }] }` — nothing changes.
+- Apply → `{ applied, failed: [{ row, sku, message }], unknown, errors }`. Stock is set to the sheet's target against the stock at that moment (an inventory movement "Bulk update from a sheet"); prices go through the variant (price history, item 234). One audit entry.
+- Row errors: «SKU مكرر في الشيت» / "This SKU is on an earlier row too", «فيه أكتر من صنف بنفس الـ SKU» / "Several variants share this SKU", «استخدم stock أو stock_change مش الاتنين» / "Use stock or stock_change, not both", «المخزون هيبقى أقل من صفر» / "Stock would go below 0", «السعر لازم رقم» / "Price must be a number". No `sku` column → 422.
+
+### Screen
+- Products → «تحديث جماعي من شيت» / "Bulk update from a sheet": a template download (sku, stock, stock_change, price, compare_at, cost), upload, the preview table (old → new per field, unknown SKUs and errors in their own tabs), «طبّق N تغيير» / "Apply N changes", then the result.
