@@ -1480,6 +1480,17 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
   return db.sequelize.transaction(async (transaction) => {
     const shipment = await db.Shipment.findOne({ where: { id: shipmentId, workspaceId, orderId }, transaction });
     if (!shipment) throw new NotFoundError('Shipment');
+    // A courier booking's waybill is the courier's own reference: its
+    // webhooks and polls find the shipment by it, so another number typed
+    // here (PATCH, "Shipped" by hand, the tracking import, the public API)
+    // would cut it off from every status update.
+    if (
+      data.waybillNumber !== undefined &&
+      data.waybillNumber !== shipment.waybillNumber &&
+      carrierShipmentService.isCarrierBooked(shipment)
+    ) {
+      throw new AppError('CARRIER_WAYBILL_LOCKED', 'The courier assigned this waybill; it cannot be changed', 422);
+    }
     // Cancelling a booking whose courier has no cancel API needs the
     // merchant's acknowledgeManualCancel; a final status stops polling.
     const extra = carrierShipmentService.manualCancelUpdates(shipment, data, req);

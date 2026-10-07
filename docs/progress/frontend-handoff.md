@@ -4294,3 +4294,19 @@ Confirming a courier settlement used to add every line's collected cash to its o
 - Confirmed settlement, lines table: add a column «اتسجل على الطلب» / "Added to order" showing `appliedAmount`.
 - When `appliedAmount` is less than `collectedAmount`, show a muted note on the line: «الطلب كان مدفوع أو ملغي قبل التأكيد، فاتسجل الباقي بس» / "The order was already paid or cancelled before confirming, so only what it still owed was added".
 - Draft settlement: no change (hide the column while `appliedAmount` is null).
+
+## 370. A courier-booked shipment's waybill can no longer be changed — UI: pending
+
+A shipment booked through a connected courier (Bosta, J&T, Mylerz, sandbox) is found by its waybill when the courier sends a status update. Typing another number on it cut it off from every update, so the backend now refuses a different waybill on such a shipment. The same number, or only a tracking link, is still accepted. Manual shipments are unchanged.
+
+### Endpoints (dashboard, `orders.manage` or `shipping.manage`; fulfill needs `orders.manage`)
+- **PATCH `/api/v1/workspaces/:workspaceId/orders/:orderId/shipments/:shipmentId`** `{ "waybillNumber": "Y123" }` on a courier booking: 422 `{ "error": { "code": "CARRIER_WAYBILL_LOCKED", "message": "The courier assigned this waybill; it cannot be changed" } }`. `{ "trackingUrl": "https://…" }` or the unchanged waybill: 200 as before.
+- **POST `/api/v1/workspaces/:workspaceId/orders/:orderId/fulfill`** `{ "trackingNumber": "Y123" }` when the order's waiting shipment is a courier booking with another waybill: the same 422 `CARRIER_WAYBILL_LOCKED`. Without a tracking number, or with the booking's own, it ships as before.
+- **POST `/api/v1/workspaces/:workspaceId/orders/import-tracking`**: such a row comes back `{ "ok": false, "code": "CARRIER_WAYBILL_LOCKED", "message": "…" }`; the other rows still apply.
+- Public API `PATCH /orders/:orderId/shipments/:shipmentId`: the same 422.
+
+### Screens (dashboard → Orders → an order → shipping card)
+- Shipment edit form: for a courier-booked shipment (the one that shows "Sync status" and "Print label"), show the waybill read-only, keep the tracking link editable, and add a hint «رقم البوليصة من شركة الشحن ومينفعش يتغير» / "The courier assigned this waybill number; it can't be changed".
+- On 422 `CARRIER_WAYBILL_LOCKED` (edit form or "Shipped" by hand): «الشحنة دي محجوزة مع شركة الشحن برقم بوليصة تاني. الغي الحجز الأول لو هتشحن بطريقة تانية» / "This shipment is booked with the courier under another waybill. Cancel the booking first if you're shipping another way."
+- Tracking import results: show the row's message as for other row errors.
+- No settings change.
