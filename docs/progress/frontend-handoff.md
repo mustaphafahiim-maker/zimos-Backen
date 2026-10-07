@@ -3277,3 +3277,8 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 - `POST /store/:ws/quotes/:id/accept` answered twice (double click, a retry) now makes one order: the second answers 409 `QUOTE_NOT_OPEN`. Storefront: on that code, reload the quote (`GET /store/:ws/quotes/:id?token=…`) and, when it shows `accepted` with an `orderId`, show the success state instead of an error: «تم قبول العرض وطلبك اتسجل» / "Quote accepted — your order is placed".
 - The order's total is now exactly the quote's `totalAmount` plus shipping: the store's automatic discount and quantity-bundle tiers no longer apply on top. Any "you save" line next to the quote total can go.
 - Decline / cancel / answer on a quote that was just accepted answer 409 (`QUOTE_NOT_OPEN` for the shopper, `QUOTE_CLOSED` for the team): reload the quote and show its state.
+
+## 287. Order self-service address change — UI: pending (small)
+
+- `POST /store/:ws/orders/:orderId/self-service/address` `{ token?, address: { country?, province, city, area?, addressLine, placeId?, postalCode?, notes? } }`: the new address replaces the old one field by field — anything left out is cleared. Prefill the form with the current address (`order.shippingAddress`) so a shopper who changes only the street keeps their area and notes; send every field.
+- New optional fields: `postalCode` (≤ 20) «الرمز البريدي» / "Postal code", `notes` (≤ 500) «ملاحظات للمندوب» / "Notes for the courier".

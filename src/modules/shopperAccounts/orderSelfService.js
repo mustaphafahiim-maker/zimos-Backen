@@ -83,13 +83,19 @@ async function cancel(workspace, order, reason, req) {
   return { cancelled: true };
 }
 
+// The fields the delivery address is made of (checkout's address): a change replaces all of them (item 287).
+const ADDRESS_FIELDS = ['province', 'city', 'area', 'addressLine', 'placeId', 'postalCode', 'notes'];
+
 async function changeAddress(workspace, order, address, req) {
   const a = allowed(workspace, order);
   if (!a.canChangeAddress) throw new AppError('ADDRESS_CHANGE_NOT_ALLOWED', 'The address can no longer be changed here — contact the store', 409);
   await require('../shipping/shippingPlaces').assertDeliverable(workspace, address);
   await require('../places/placePricing').assertDeliverable(workspace.id, address);
   const before = order.shippingAddressSnapshot;
-  const next = { ...(before || {}), ...address };
+  // A field the new address leaves out is gone, not kept from the old one (item 287): an old area,
+  // place or note doesn't ride along with a new city. The country stays unless given.
+  const next = Object.fromEntries(Object.entries(before || {}).filter(([k]) => !ADDRESS_FIELDS.includes(k)));
+  for (const k of ['country', ...ADDRESS_FIELDS]) if (address[k] !== undefined && address[k] !== null && address[k] !== '') next[k] = address[k];
   await order.update({ shippingAddressSnapshot: next });
   await recordAudit({ workspaceId: workspace.id, actorUserId: null, action: 'order.address_changed_by_customer', entityType: 'Order', entityId: order.id, before: { address: before }, after: { address: next }, req });
   await require('../notifications/merchantNotificationService').create(workspace.id, {
@@ -115,7 +121,7 @@ store.post('/cancel', trackingLimiter, resolvePublicWorkspace, validate({ params
 }));
 store.post('/address', trackingLimiter, resolvePublicWorkspace, validate({
   params,
-  body: Joi.object({ token: Joi.string().max(500), address: Joi.object({ country: Joi.string().length(2), province: Joi.string().max(120).required(), city: Joi.string().max(120).required(), area: Joi.string().max(120).allow('', null), addressLine: Joi.string().max(500).required(), placeId: Joi.string().uuid().allow(null) }).required() }),
+  body: Joi.object({ token: Joi.string().max(500), address: Joi.object({ country: Joi.string().length(2), province: Joi.string().max(120).required(), city: Joi.string().max(120).required(), area: Joi.string().max(120).allow('', null), addressLine: Joi.string().max(500).required(), placeId: Joi.string().uuid().allow(null), postalCode: Joi.string().max(20).allow('', null), notes: Joi.string().max(500).allow('', null) }).required() }),
 }), asyncHandler(async (req, res) => {
   const order = await orderFor(req.publicWorkspace, req.params.orderId, auth(req));
   res.json(await changeAddress(req.publicWorkspace, order, req.body.address, req));
@@ -135,4 +141,4 @@ staff.put('/', validate({ params: ws, body: Joi.object({ cancel: rule.required()
   res.json(settingsOf(w));
 }));
 
-module.exports = { store, staff, allowed, settingsOf, orderFor };
+module.exports = { store, staff, allowed, settingsOf, orderFor, changeAddress };
