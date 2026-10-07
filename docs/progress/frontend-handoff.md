@@ -3174,3 +3174,13 @@ All under `/api/v1/workspaces/:ws/profit/ads` — reads `financial_reports.view`
 ### Screens
 - Profit → «حسابات الإعلانات» / "Ad accounts": connect (pick the platform/adapter, its key fields), then a checklist of the accounts found «اختار الحسابات اللي تتابعها» / "Pick the accounts to follow", «فصل» / "Disconnect", last sync / error.
 - Campaigns screen: per campaign row (with its `campaignId` and account) a «إيقاف / تشغيل» / "Pause / Resume" toggle and «الميزانية اليومية» / "Daily budget" edit with confirm «هيتغيّر على المنصة نفسها» / "This changes it on the ad platform". Show the last state from `connections[].campaigns`.
+
+## 262. Merchant sign-in with a WhatsApp code — UI: pending
+
+Public, rate-limited like the other sign-in routes.
+- `POST /api/v1/auth/login/whatsapp/request` `{ phone, locale: "ar" | "en" | "fr" }` → `{ challengeToken, channel: "whatsapp" | "sms", sentTo: "2010*****621" }`. The same answer for a phone with no account (no code is sent then) — don't say "no account". 429 `TOO_MANY_CODES`; 503 `CODE_NOT_DELIVERED` «مقدرناش نبعت الكود — ادخل بالإيميل والباسورد» / "We couldn't send the code — sign in with email and password".
+- `POST /api/v1/auth/login/whatsapp/verify` `{ challengeToken, code: "123456", locale }` → the same answer as `POST /auth/login`: `{ user, accessToken, refreshToken, … }` (refresh cookie as usual), or, for an account with an authenticator app / email codes, `{ twoFactorRequired, challengeToken, channel }` → finish with the existing `POST /auth/two-factor/verify`. 401 `INVALID_LOGIN_CODE` «الكود غلط أو انتهى» / "Wrong or expired code"; 429 `TOO_MANY_ATTEMPTS` after 5 wrong codes.
+- Works only for a phone verified on the account (Settings → Security → verify phone).
+
+### Screen
+- Sign-in page: a third option «ادخل بكود واتساب» / "Sign in with a WhatsApp code" → phone field → «ابعت الكود» / "Send code" → «بعتنا كود لـ {sentTo}» / "We sent a code to {sentTo}" + 6-digit input, «ابعت تاني» / "Resend" after 60 s; then the usual second-step screen when asked. Hint under the phone: «لازم يكون الرقم متأكد في حسابك» / "The number must be verified on your account".
