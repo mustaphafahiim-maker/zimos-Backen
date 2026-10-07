@@ -7,7 +7,8 @@
  * what the store or ZIMOS knows about that phone or this visitor: risk score,
  * level, reasons and flags (blacklisted_customer, network reasons), data
  * quality, IP / device, ad match and attribution, tags, the customer id, the
- * courier draft, the seen marks, the base-currency figures and the merchant's
+ * courier draft, the seen marks, the consent record (whether the contact unsubscribed
+ * earlier), the base-currency figures and the merchant's
  * unit cost on each line. Everything else (totals, states, contact and
  * address the shopper typed, snapshots) stays as before, so the storefront
  * reads the same keys.
@@ -18,6 +19,8 @@ const HIDDEN_ORDER_FIELDS = [
   'adMatch', 'attribution', 'sessionStats', 'purchaseEventSentAt',
   'customerId', 'tags', 'shipmentDraft', 'isSeen', 'seenAt',
   'fxRateToBase', 'totalAmountBase', 'stockLocationId', 'archivedAt',
+  // The consent record says whether this contact unsubscribed earlier (item 374).
+  'consents',
 ];
 const HIDDEN_ITEM_FIELDS = ['unitCostAmount'];
 

@@ -4407,6 +4407,7 @@ The checkout can now show two boxes, each switched on by the merchant: "Email me
 - **POST `/api/v1/store/:workspaceId/checkout`**: new booleans `acceptsMarketing` and `acceptsTerms` (send the boxes' state when shown).
   - Terms required and not `true`: 422 `{ "error": { "code": "VALIDATION_ERROR", "message": "Invalid body", "details": [ { "field": "acceptsTerms", "message": "\"acceptsTerms\" must be [true]" } ] } }` (with any other form problems). Show under the box: «لازم توافق على الشروط علشان تكمل الطلب» / "Please accept the terms to place your order". The storefront should also keep the order button disabled until it is ticked.
   - A box the store doesn't show is ignored if sent.
+  - The 201 answer's `order` does not include `consents` (it would tell whoever typed the phone or email whether that contact unsubscribed earlier); the storefront already knows what it sent. The record is on the dashboard order only.
 
 ### Dashboard order page (`orders.view`)
 - **GET `/api/v1/workspaces/:workspaceId/orders/:orderId`** → `order.consents` (null when the store showed neither box):
