@@ -53,15 +53,16 @@ const settingsOf = (row) => ({
 });
 
 /** The suppliers this store can use now: connected, and their app installed where the app store lists one. */
-async function connectedRows(workspaceId) {
+async function connectedRows(workspaceId, transaction) {
   const codes = providers.list().available.map((p) => p.code);
-  const rows = await db.WorkspaceIntegration.findAll({ where: { workspaceId, provider: codes.map(integrationKey), status: 'connected' } });
+  // On the caller's transaction when it has one (item 281): order creation asks this while holding its connection.
+  const rows = await db.WorkspaceIntegration.findAll({ where: { workspaceId, provider: codes.map(integrationKey), status: 'connected' }, transaction });
   const { BY_KEY } = require('../apps/appCatalogue');
   const gate = require('../apps/appGate');
   const usable = [];
   for (const row of rows) {
     const key = `dropship_${row.provider.split(':')[1]}`;
-    if (!BY_KEY.has(key) || (await gate.isEnabled(workspaceId, key))) usable.push(row);
+    if (!BY_KEY.has(key) || (await gate.isEnabled(workspaceId, key, { transaction }))) usable.push(row);
   }
   return usable;
 }

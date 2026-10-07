@@ -1915,11 +1915,16 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
   - Checked (sandbox tokens carry the nonce as a 4th part): no nonce 401, this store's 200, another store's 401, old/forged 401.
 - [x] 280. Receiving a purchase order twice at once (double click) added the stock twice and lost one update of the received count. (backend fix; no UI change)
   - After the purchase order's lock, its lines are read again with a lock in a new statement, so a receive that waited sees what the one before it received. Checked: two parallel "receive 8" on a line of 10 → one 200, one 422 PO_OVER_RECEIVED; stock +8, received 8.
-- [ ] 281. Delivery-slot hold queried outside its own transaction: ten checkouts at once could exhaust the database connection pool.
+- [x] 281. Delivery-slot hold queried outside its own transaction: ten checkouts at once could exhaust the database connection pool. (backend fix; no UI change)
+  - The slot calendar is read before the hold opens its transaction; inside it, the advisory lock, the recount and the booking all run on the one connection.
+  - Found while checking it: the supplier rules of item 263 asked for the connected suppliers outside the order's transaction (`dropshipOrders.connectedRows` and the app-gate check now take the caller's transaction). That alone emptied the pool: 12 checkouts at once gave three 500s after 30 s.
+  - Checked: 12 checkouts at once on one slot → twelve 201 in 1.5 s (before: three 500 "Operation timeout" in 31 s).
 - [ ] 282. A pickup at the default location was moved to another warehouse by the order-assignment job.
 - [ ] 283. Two click-and-collect orders at once could both take a location's last unit.
 - [ ] 284. Stock lots ignored the location: FEFO picked and consumed lots of other locations; a write-off could take a location's count below zero.
-- [ ] 285. A failed checkout left its delivery-slot hold, blocking the shopper's own retry for 10 minutes.
+- [x] 285. A failed checkout left its delivery-slot hold, blocking the shopper's own retry for 10 minutes. (backend fix; no UI change)
+  - When the checkout answers 400 or more, a hold not yet attached to an order is deleted (on the response's finish, so every failure path is covered). An attached one stays: it belongs to the order.
+  - Checked: a slot with room for 1, a checkout refused for stock (409 INSUFFICIENT_STOCK) → 0 holds left; the retry → 201.
 - [ ] 286. Erasing a customer left the billing address on orders and the phone/email in sign-in codes.
 - [ ] 287. A shopper's address change kept the old area, place and notes when the new address left them out.
 - [ ] 288. Smaller: a stock count whose location was deleted applied to the whole store; one malformed line in a URL-redirect import (or lookup) answered 500 half-way.

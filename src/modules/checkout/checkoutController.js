@@ -181,6 +181,13 @@ const checkout = asyncHandler(async (req, res) => {
   if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
   // The delivery day and time slot: a place is held now and given to the order once it exists (deliverySlots/, item 221).
   const slotBooking = await require('../deliverySlots').hold(workspace, deliverySlot);
+  // A checkout that fails after this gives the place back at once (item 285): the shopper's retry isn't
+  // blocked by their own hold. A hold that became the order's (order_id set) stays.
+  if (slotBooking) {
+    res.on('finish', () => {
+      if (res.statusCode >= 400) require('../../db/models').DeliverySlotBooking.destroy({ where: { id: slotBooking.id, orderId: null } }).catch(() => {});
+    });
+  }
   await require('../clickAndCollect').assertStock(workspace, pickupLocation, items);
 
   // The gateway takes the order's currency, or the order is not created (payments/methodCurrency.js).

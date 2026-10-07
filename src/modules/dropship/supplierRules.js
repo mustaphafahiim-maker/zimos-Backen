@@ -47,7 +47,7 @@ async function cached(key, fn) {
 /** Connected suppliers with a switch on, as { code, provider, row, settings, credentials }. */
 async function activeSuppliers(workspaceId, flag, method, transaction) {
   // Connected, and the supplier's app on where the app store lists one (as forwarding uses).
-  const rows = await require('./dropshipOrders').connectedRows(workspaceId);
+  const rows = await require('./dropshipOrders').connectedRows(workspaceId, transaction);
   return rows
     .filter((row) => row.config && row.config[flag] === true)
     .map((row) => ({ code: row.provider.split(':')[1], row }))

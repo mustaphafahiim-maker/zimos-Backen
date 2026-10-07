@@ -129,13 +129,15 @@ async function hold(workspace, choice) {
     if (s.required) throw new ValidationError([{ field: 'deliverySlot', message: 'Choose a delivery day and time' }], 'Invalid body');
     return null;
   }
+  // Which slots are offered, read before the transaction (item 281): inside it, this would take a second
+  // pool connection while the first waits on the lock — ten checkouts at once would drain the pool.
+  const { days } = await calendar(workspace);
+  const day = days.find((d) => d.date === choice.date);
+  const slot = day && day.slots.find((x) => x.id === choice.slotId);
+  if (!slot) throw new AppError('DELIVERY_SLOT_UNAVAILABLE', 'This delivery time is not offered; choose another', 409);
   return db.sequelize.transaction(async (transaction) => {
     // One checkout at a time per store counts and takes a place.
     await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `delivery-slots:${workspace.id}` }, transaction });
-    const { days } = await calendar(workspace);
-    const day = days.find((d) => d.date === choice.date);
-    const slot = day && day.slots.find((x) => x.id === choice.slotId);
-    if (!slot) throw new AppError('DELIVERY_SLOT_UNAVAILABLE', 'This delivery time is not offered; choose another', 409);
     // calendar() ran outside the transaction; count again inside the lock.
     const booked = (await bookedCounts(workspace.id, choice.date, choice.date, transaction)).get(`${choice.date}|${slot.id}`) || 0;
     if (slot.capacity != null && booked >= slot.capacity) throw new AppError('DELIVERY_SLOT_FULL', 'This delivery time is fully booked; choose another', 409);
