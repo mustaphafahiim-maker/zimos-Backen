@@ -43,6 +43,7 @@ the rounded price asks the merchant to confirm again.
 |---|---|
 | `sandbox` (default) | Availability from a real NS lookup (a name with name servers is taken; "taken" in the name is taken). Prices from `DOMAIN_SANDBOX_PRICES` (JSON per TLD), else null. Register / DNS / renew only log. |
 | `dynadot` (item 326, the owner's pick) | Dynadot API3, JSON. See below. |
+| `namecheap` (item 327, the fallback) | Namecheap XML API. See below. |
 
 Not used, and why (research 2026-10-07): **Hostinger** forbids reselling in its terms. **Cloudflare
 Registrar**'s API is beta and cannot renew yet. **Namecheap** works, but its API prices are retail, so a
@@ -78,6 +79,27 @@ Registrar**'s API is beta and cannot renew yet. **Namecheap** works, but its API
 2. Buy a name with a registrant. The registrant must show on the domain, and the zone must hold the A, www and TXT records.
 3. Renew it. The new expiry must come back.
 4. Read `tld_price`: the renew price per TLD must be found. If the answer is nested differently, adjust `tldPrices()`.
+
+## Namecheap (`DOMAIN_REGISTRAR=namecheap`)
+
+| Env | |
+|---|---|
+| `NAMECHEAP_API_USER` / `NAMECHEAP_API_KEY` | Profile → Tools → Business & Dev Tools → Namecheap API Access. The key is never logged. |
+| `NAMECHEAP_USERNAME` | The account the domains go to. Default: the API user. |
+| `NAMECHEAP_CLIENT_IP` | **Required:** the server's fixed IPv4, whitelisted in the API settings. Namecheap only answers calls from it, and the IP declared must be the real source. |
+| `NAMECHEAP_SANDBOX` | `true` uses `api.sandbox.namecheap.com`, a separate free account at sandbox.namecheap.com. `NAMECHEAP_API_URL` overrides the address. |
+| `NAMECHEAP_ADMIN_CONTACT` | Optional JSON (same fields as the registrant) for the admin, tech and billing contacts. Without it the merchant is all four. |
+
+**How each step works:**
+- **Calls:** `domains.check`; `users.getPricing` per TLD and action (the account's own price plus the ICANN fee, cached for an hour as Namecheap asks); `domains.create` with free WHOIS privacy; `domains.dns.setDefault` then `domains.dns.setHosts`; and `domains.renew`.
+- **DNS:** setHosts **replaces the whole host list**, so every write sends every record. ALIAS is supported, so `PLATFORM_APEX_IPS` is optional here.
+- **Premium names** are never sold.
+
+**API access needs** one of: 20+ domains in the account, a $50 balance, or $50 spent in two years.
+
+**Prices:** API prices are retail, and a .com renewal costs about $18.5. With the same margin the renewal price is much higher than the purchase price; this is why Namecheap is only the fallback.
+
+**Before going live**, run the same sandbox checklist as for Dynadot. The XML answers were mocked from Namecheap's API documentation.
 
 ## The domain's owner (registrant)
 

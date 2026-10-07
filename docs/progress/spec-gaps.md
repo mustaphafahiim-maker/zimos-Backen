@@ -2146,4 +2146,10 @@ the registrar sites were blocked from here, so numbers are to be confirmed at si
     - renew quote and renew worked;
     - three parallel searches → at most 1 call in flight;
     - the key never reached the server log; a wrong key → 502 `REGISTRAR_REFUSED`; no key / no apex IPs → 503.
-- [ ] 327. Namecheap registrar adapter (`DOMAIN_REGISTRAR=namecheap`) as the fallback: same contract over its XML API (whitelisted IPv4, full host list on every DNS write).
+- [x] 327. Namecheap registrar adapter (`DOMAIN_REGISTRAR=namecheap`) as the fallback: same contract over its XML API (whitelisted IPv4, full host list on every DNS write). (backend done; no UI change beyond 325/326)
+  - `registrar/namecheapRegistrar.js`: check, getPricing (own price + ICANN fee, per TLD and action, cached an hour), create (merchant as registrant; admin/tech/billing from `NAMECHEAP_ADMIN_CONTACT` or the merchant; free WHOIS privacy), setDefault + setHosts (all records, ALIAS at the root), renew (expiry read back). A small attribute reader instead of an XML library (no new dependency).
+  - Refuses to start without the API user, key and a valid `NAMECHEAP_CLIENT_IP` (503 before anything is bought).
+  - Verified against a stand-in built from the API docs:
+    - purchase: 755 EGP to buy and 1260 EGP to renew (Namecheap's retail renewal, the reason it is the fallback); a premium name not sold; a buy → 201 active with the four contacts in `+20.1001234567` form; setHosts got @ ALIAS, www CNAME and @ TXT; the renew expiry was read from `ExpiredDate`;
+    - errors: a wrong client IP → 502 `REGISTRAR_REFUSED` "Invalid request IP"; missing config → 503;
+    - the key never reached the log.

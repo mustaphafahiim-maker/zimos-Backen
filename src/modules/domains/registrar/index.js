@@ -20,6 +20,7 @@ const ADAPTERS = {
   sandbox: () => require('./sandboxRegistrar'),
   // The owner's pick (item 326); Namecheap is the fallback (item 327).
   dynadot: () => require('./dynadotRegistrar'),
+  namecheap: () => require('./namecheapRegistrar'),
 };
 
 function registrar() {
