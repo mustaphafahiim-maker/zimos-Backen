@@ -78,6 +78,8 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
     // For the "similar products" section: products sharing a collection.
     collectionIds: (await db.ProductCollection.findAll({ where: { productId: product.id }, attributes: ['collectionId'] })).map((r) => r.collectionId),
     bundle: bundle ? bundlePricing.presentBundle(bundle, publicProduct.variants) : null,
+    // Menu options: the product's active option groups and choices ([] when it has none, catalog/menuOptions.js).
+    optionGroups: await require('../catalog/menuOptions').publicGroups(workspaceId, product.id),
     // A running A/B test: the page asks for this visitor's prices and pictures (catalog/productTests.js).
     abTest: await require('../catalog/productTests').hasRunningTest(workspaceId, product.id),
     rating,

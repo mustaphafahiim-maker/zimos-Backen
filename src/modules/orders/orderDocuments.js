@@ -158,7 +158,7 @@ async function manifestRows(workspaceId, { orderIds, date, carrier, courierId } 
   const shipments = await db.Shipment.findAll({
     where,
     include: [
-      { model: db.Order, as: 'order' },
+      { model: db.Order, as: 'order', include: [{ model: db.OrderItem, as: 'items', attributes: ['productNameSnapshot', 'quantity', 'optionsSnapshot'] }] },
       { model: db.Courier, as: 'courier', attributes: ['id', 'name', 'phone'] },
     ],
     order: [['carrierCode', 'ASC'], ['createdAt', 'ASC']],
@@ -189,6 +189,13 @@ async function manifestRows(workspaceId, { orderIds, date, carrier, courierId } 
       courierId: s.courierId || null,
       // Collected from the store: on the sheet, but not for a courier.
       pickup: o.deliveryMethod === 'pickup',
+      // What is in the bag, menu options included (catalog/menuOptions.js): "2× برجر (الحجم: كبير)".
+      items: (o.items || [])
+        .map((i) => {
+          const options = require('../catalog/menuOptions').optionsLabel(i.optionsSnapshot);
+          return `${i.quantity}× ${i.productNameSnapshot}${options ? ` (${options})` : ''}`;
+        })
+        .join(' | '),
       paymentMethod: o.paymentMethod,
       collectAmount: o.paymentMethod === 'cod' ? codAmountFor(o) : 0,
       currency: o.currency,
@@ -260,7 +267,7 @@ async function manifestPdf(workspaceId, selection = {}) {
       [r.orderNumber, r.waybill].filter(Boolean).join('\n'),
       r.customerName || '—',
       [r.phone, r.alternatePhone].filter(Boolean).join('\n'),
-      [place, r.addressLine, r.addressNotes].filter(Boolean).join('\n'),
+      [place, r.addressLine, r.addressNotes, r.items].filter(Boolean).join('\n'),
       r.pickup ? 'PICKUP' : r.courier,
       r.paymentMethod === 'cod' ? money(r.collectAmount, '') : 'prepaid',
     ];

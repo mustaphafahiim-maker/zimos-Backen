@@ -22,14 +22,17 @@ const clip = (s) => {
 /** "<product> — <field>: <answer>" for every answered field of the order, at most MAX_LINES (+ "…and N more"). */
 async function customDataLines(orderId) {
   const items = await db.OrderItem.findAll({
-    where: { orderId, customizations: { [Op.ne]: null } },
-    attributes: ['productNameSnapshot', 'quantity', 'customizations'],
+    where: { orderId, [Op.or]: [{ customizations: { [Op.ne]: null } }, { optionsSnapshot: { [Op.ne]: null } }] },
+    attributes: ['productNameSnapshot', 'quantity', 'customizations', 'optionsSnapshot'],
     order: [['createdAt', 'ASC'], ['id', 'ASC']],
   });
   const lines = [];
   for (const item of items) {
-    if (!Array.isArray(item.customizations)) continue;
     const product = item.quantity > 1 ? `${item.productNameSnapshot} ×${item.quantity}` : item.productNameSnapshot;
+    // Menu options the line was sold with (catalog/menuOptions.js).
+    const options = require('../catalog/menuOptions').optionsLabel(item.optionsSnapshot);
+    if (options) lines.push(clip(`${product} — ${options}`));
+    if (!Array.isArray(item.customizations)) continue;
     for (const entry of item.customizations) {
       const label = (entry.label && (entry.label.ar || entry.label.en)) || entry.fieldId;
       const answer = entry.type === 'image' ? 'photo on the order page' : entry.value;

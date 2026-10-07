@@ -17,6 +17,8 @@ module.exports = (sequelize, DataTypes) => {
       // The shopper's answers to the product's custom fields, snapshotted with
       // their labels (catalog/customFields.js). Null: none.
       customizations: { type: DataTypes.JSONB, allowNull: true },
+      // Menu options picked on this line, [{ groupId, choiceIds }] (migration 218, catalog/menuOptions.js).
+      selectedOptions: { type: DataTypes.JSONB, allowNull: true, field: 'selected_options' },
     },
     { tableName: 'cart_items', indexes: [{ fields: ['cart_id'] }] }
   );

@@ -65,7 +65,17 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
   });
   if (!variant) throw new NotFoundError('ProductVariant');
   // Priced custom fields the shopper filled in add to the unit price (catalog/customFieldPricing.js).
-  const fieldsDelta = require('../catalog/customFieldPricing').customFieldsDelta(variant.product.customFields, customizations);
+  const customDelta = require('../catalog/customFieldPricing').customFieldsDelta(variant.product.customFields, customizations);
+  // Menu options (catalog/menuOptions.js): checked against the product's menu and priced from the
+  // database only. Required groups bind the shopper's own orders (enforceRequiredOptions). A line an
+  // order already holds (forSale false) keeps the prices it recorded, so its menu is not read again.
+  const options = forSale
+    ? await require('../catalog/menuOptions').resolveSelection(workspaceId, variant.productId, line.options, {
+        enforceRequired: Boolean(line.enforceRequiredOptions),
+        transaction,
+      })
+    : { snapshot: null, deltaPerUnit: 0 };
+  const fieldsDelta = customDelta + options.deltaPerUnit;
 
   if (offerId) {
     const offer = await db.Offer.findOne({
@@ -111,6 +121,7 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
       lineTotalAmount: lineTotal,
       consumedInventory: consumedLines,
       customFields: variant.product.customFields || [],
+      optionsSnapshot: options.snapshot,
       currency: offer.currency,
       shippingOverride: offer.shippingOverride,
       // One bundle weighs what its offer lines weigh — not the anchor variant.
@@ -141,6 +152,7 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
     lineTotalAmount: lineTotal,
     consumedInventory: [{ variantId: variant.id, quantity }],
     customFields: variant.product.customFields || [],
+    optionsSnapshot: options.snapshot,
     currency: variant.currency,
     shippingOverride: null,
     weightUnits: [weightUnit(variant, 1)],
@@ -380,7 +392,8 @@ async function createOrder(
       const isOrderBump = item.isOrderBump === true;
       const bumpFailure = (err) =>
         isOrderBump && (err instanceof NotFoundError || (err && err.code === 'INSUFFICIENT_STOCK')) ? orderBumpUnavailable() : err;
-      const line = await priceLine(workspaceId, item, transaction).catch((err) => {
+      // The shopper's own checkout must answer the product's required menu groups (catalog/menuOptions.js).
+      const line = await priceLine(workspaceId, { ...item, enforceRequiredOptions: Boolean(customFields.enforceRequired) }, transaction).catch((err) => {
         throw bumpFailure(err);
       });
       line.isOrderBump = isOrderBump;
@@ -590,6 +603,7 @@ async function createOrder(
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,
+            optionsSnapshot: line.optionsSnapshot || null,
             isOrderBump: line.isOrderBump,
           },
           { transaction }

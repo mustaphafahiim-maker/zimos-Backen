@@ -4,6 +4,7 @@ const joiEmail = require('../../core/utils/joiEmail');
 const { workspaceRef } = require('../../core/utils/workspaceSlug');
 const { customizationsInputSchema } = require('../catalog/customFields');
 const { formFieldsBodySchema } = require('./checkoutForm');
+const { optionsInputSchema } = require('../catalog/menuOptions');
 
 const contact = Joi.object({
   fullName: Joi.string().max(200).required(),
@@ -69,6 +70,8 @@ module.exports = {
         quantity: Joi.number().integer().min(1).default(1),
         // Answers to the product's custom fields (see cartValidation.addItem).
         customizations: customizationsInputSchema.optional(),
+        // Menu options picked (catalog/menuOptions.js); priced by the server only.
+        options: optionsInputSchema.optional(),
       }).optional(),
       // More "Buy Now" lines beside `item`: a quantity bundle with a variant
       // chosen per unit (one red, one blue). Priced by the server like `item`.
@@ -79,6 +82,7 @@ module.exports = {
             offerId: uuid.optional(),
             quantity: Joi.number().integer().min(1).default(1),
             customizations: customizationsInputSchema.optional(),
+            options: optionsInputSchema.optional(),
           })
         )
         .max(20)

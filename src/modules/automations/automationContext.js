@@ -80,7 +80,17 @@ async function loadOrderSubject(workspaceId, orderId) {
       store_name: workspace ? workspace.name : '',
       tracking_url: shipment && shipment.trackingUrl ? shipment.trackingUrl : '',
       city: address.city || '',
-      product_names: [...new Set(items.map((i) => i.productNameSnapshot).filter(Boolean))].join('، '),
+      // A line sold with menu options names them: "برجر (الحجم: كبير · إضافات: جبنة)" (catalog/menuOptions.js).
+      product_names: [
+        ...new Set(
+          items
+            .map((i) => {
+              const options = require('../catalog/menuOptions').optionsLabel(i.optionsSnapshot);
+              return i.productNameSnapshot && options ? `${i.productNameSnapshot} (${options})` : i.productNameSnapshot;
+            })
+            .filter(Boolean)
+        ),
+      ].join('، '),
       product_name: (items.find((i) => i.productNameSnapshot) || {}).productNameSnapshot || '',
       items_count: items.reduce((sum, i) => sum + (i.quantity || 0), 0),
       shipping_amount: formatAmount(order.shippingAmount, order.currency),

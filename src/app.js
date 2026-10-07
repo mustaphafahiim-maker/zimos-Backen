@@ -222,6 +222,8 @@ v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/workspaces/:workspaceId/couriers', require('./modules/couriers/couriersRoutes'));
 // Delivery zones inside a city (self delivery).
 v1.use('/workspaces/:workspaceId/delivery-zones', require('./modules/shipping/deliveryZoneRoutes'));
+// A product's menu options (option groups and choices).
+v1.use('/workspaces/:workspaceId/product-options/:productId', require('./modules/catalog/menuOptionsRoutes'));
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);

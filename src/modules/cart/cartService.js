@@ -9,6 +9,7 @@ const { toPublicVariant } = require('../storefront/storefrontService');
 const { resolveCustomizations, sameCustomizations, snapshotToInput, bindUploadsToCart } = require('../catalog/customFields');
 const { customFieldsDelta } = require('../catalog/customFieldPricing');
 const productTests = require('../catalog/productTests');
+const menuOptions = require('../catalog/menuOptions');
 
 function generateGuestToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -48,7 +49,8 @@ async function getCart(workspaceId, cartId) {
   // A product A/B test prices plain lines for whoever filled the cart (catalog/productTests.js).
   const testPrices = await productTests.visitorPrices(workspaceId, (cart.items || []).filter((i) => !i.offerId).map((i) => i.variantId), cart.visitorId);
   // Quantity bundles lower the lines they cover, as they will on the order.
-  return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart, testPrices));
+  const optionIndex = await menuOptions.choiceIndex(workspaceId, (cart.items || []).map((i) => i.selectedOptions));
+  return require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart, testPrices, optionIndex));
 }
 
 /**
@@ -58,7 +60,7 @@ async function getCart(workspaceId, cartId) {
  * The authoritative price is always resolved again at checkout time inside
  * orderService, exactly like every other entry point into order creation.
  */
-function withComputedTotals(cart, testPrices = new Map()) {
+function withComputedTotals(cart, testPrices = new Map(), optionIndex = new Map()) {
   const items = (cart.items || []).map((item) => {
     const listUnit = item.offer
       ? item.offer.priceAmount
@@ -67,7 +69,10 @@ function withComputedTotals(cart, testPrices = new Map()) {
         : effectiveVariantPrice(item.variant, item.variant.product).priceAmount;
     // Priced custom fields (catalog/customFieldPricing.js), as the order will charge them.
     const fieldsDelta = customFieldsDelta(item.variant && item.variant.product && item.variant.product.customFields, item.customizations);
-    const currentUnitPrice = fieldsDelta ? Number(listUnit) + fieldsDelta : listUnit;
+    // Menu options, at their current prices (catalog/menuOptions.js).
+    const options = menuOptions.priceFromIndex(item.selectedOptions, optionIndex);
+    const extras = fieldsDelta + options.delta;
+    const currentUnitPrice = extras ? Number(listUnit) + extras : listUnit;
     return {
       id: item.id,
       variantId: item.variantId,
@@ -81,6 +86,9 @@ function withComputedTotals(cart, testPrices = new Map()) {
       isOrderBump: item.isOrderBump,
       // The shopper's answers, labels included; photos by upload id only.
       customizations: item.customizations || null,
+      // The menu options picked, with current names and prices; null when none.
+      options: options.snapshot,
+      selectedOptions: item.selectedOptions || null,
     };
   });
   const subtotal = items.reduce((sum, i) => sum + i.lineTotal, 0);
@@ -94,7 +102,7 @@ function withComputedTotals(cart, testPrices = new Map()) {
   };
 }
 
-async function addItem(workspaceId, cartId, { variantId, offerId, quantity, customizations, visitorId }) {
+async function addItem(workspaceId, cartId, { variantId, offerId, quantity, customizations, options, visitorId }) {
   // A draft or archived product isn't for sale, even if its variant row is active.
   const variant = await db.ProductVariant.findOne({
     where: { id: variantId, workspaceId, status: 'active' },
@@ -111,6 +119,9 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
     enforceRequired: true,
   });
 
+  // Menu options: checked against the product's menu now (required groups included), and again at checkout.
+  const picked = await menuOptions.resolveSelection(workspaceId, variant.productId, options, { enforceRequired: true });
+
   // The cart is priced for whoever last added to it (catalog/productTests.js).
   if (visitorId) await db.Cart.update({ visitorId }, { where: { id: cartId, workspaceId } });
   const testPrice = offerId ? undefined : (await productTests.visitorPrices(workspaceId, [variantId], visitorId)).get(variantId);
@@ -122,11 +133,14 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
   }
   const fieldsDelta = customFieldsDelta(variant.product.customFields, snapshot);
   if (fieldsDelta) unitPrice = Number(unitPrice) + fieldsDelta;
+  if (picked.deltaPerUnit) unitPrice = Number(unitPrice) + picked.deltaPerUnit;
 
   // The same product with different answers ("Ahmed" / "Sara" engraved) is a
   // line of its own; only identical ones add up.
   const candidates = await db.CartItem.findAll({ where: { cartId, variantId, offerId: offerId || null } });
-  const existing = candidates.find((line) => sameCustomizations(line.customizations, snapshot));
+  const existing = candidates.find(
+    (line) => sameCustomizations(line.customizations, snapshot) && menuOptions.sameSelection(line.selectedOptions, picked.input)
+  );
   if (existing) {
     await existing.update({ quantity: existing.quantity + quantity, unitPriceSnapshot: unitPrice });
   } else {
@@ -137,6 +151,7 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
       quantity,
       unitPriceSnapshot: unitPrice,
       customizations: snapshot,
+      selectedOptions: picked.input,
     });
   }
   await bindUploadsToCart(snapshot, cartId);
@@ -177,6 +192,8 @@ async function toOrderItems(workspaceId, cartId) {
       quantity: i.quantity,
       // Re-checked against the product when the order is made.
       customizations: snapshotToInput(i.customizations),
+      // Checked and priced again from the menu when the order is made.
+      options: i.selectedOptions || undefined,
     })),
   };
 }

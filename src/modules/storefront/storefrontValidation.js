@@ -73,6 +73,8 @@ module.exports = {
             quantity: Joi.number().integer().min(1).max(1000).default(1),
             // The product form's custom-field answers: a priced field changes the subtotal.
             customizations: require('../catalog/customFields').customizationsInputSchema.optional(),
+            // Menu options picked: their prices count in the quoted subtotal.
+            options: require('../catalog/menuOptions').optionsInputSchema.optional(),
           })
         )
         .min(1)

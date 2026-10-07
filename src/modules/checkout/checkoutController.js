@@ -91,6 +91,7 @@ const checkout = asyncHandler(async (req, res) => {
       offerId: line.offerId,
       quantity: line.quantity || 1,
       customizations: line.customizations,
+      options: line.options,
     }));
   } else {
     throw new AppError(

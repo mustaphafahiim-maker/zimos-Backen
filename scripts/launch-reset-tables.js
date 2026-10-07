@@ -143,6 +143,8 @@ const TABLES = {
   cod_settlements: wipe(STORE),
   couriers: wipe("a store's own couriers (migration 216)"),
   delivery_zones: wipe("a store's delivery areas inside a city (migration 217)"),
+  product_option_choices: wipe("menu options' choices (migration 218)"),
+  product_option_groups: wipe("a product's menu option groups (migration 218)"),
   course_modules: wipe('store courses (each module)'),
   courses: wipe(STORE),
   cross_sell_rules: wipe(STORE),
