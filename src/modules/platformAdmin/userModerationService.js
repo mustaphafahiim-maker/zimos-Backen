@@ -2,9 +2,9 @@
 
 const { Op } = require('sequelize');
 const db = require('../../db/models');
-const { AppError, ConflictError, NotFoundError } = require('../../core/errors/AppError');
+const { AppError, AuthorizationError, ConflictError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { PLATFORM_ROLES } = require('../../core/security/platformPermissions');
+const { PLATFORM_ROLES, PLATFORM_PERMISSIONS, hasPlatformPermission } = require('../../core/security/platformPermissions');
 const { isVerified } = require('../auth/signupPolicy');
 
 /**
@@ -36,9 +36,9 @@ const { isVerified } = require('../auth/signupPolicy');
  *     suspended in the same transaction. Its memberships of other stores stay
  *     (the team page shows "Deleted user"; an owner removes it as any member).
  *
- * Nobody acts on themselves; a creator's account needs a creator; the last
- * creator is never suspended or deleted. Every write is audited as a
- * platform-level entry.
+ * Nobody acts on themselves; a creator's account needs a creator, another
+ * console account needs admins.manage; the last creator is never suspended
+ * or deleted. Every write is audited as a platform-level entry.
  */
 
 function view(user) {
@@ -51,21 +51,40 @@ function view(user) {
   };
 }
 
-async function lockTarget(userId, req, transaction) {
+/**
+ * Locks every creator plus the target and the acting admin, in id order (the
+ * same rows and order as adminUsersService's lockForRoleChange), and checks
+ * the actor under that lock: two admins acting on each other at the same
+ * moment are serialized, and the second finds itself suspended and stops.
+ * A console account (any platform role) also needs admins.manage, as changing
+ * or revoking its access does.
+ */
+async function lockTarget(rawUserId, req, transaction) {
+  // Postgres matches a uuid in any case; compare the canonical form.
+  const userId = String(rawUserId).toLowerCase();
   if (userId === req.user.id) {
     throw new ConflictError('You cannot do this to your own account.', 'CANNOT_ACT_ON_SELF');
   }
-  const target = await db.User.findByPk(userId, { transaction, lock: transaction.LOCK.UPDATE });
+  const rows = await db.User.findAll({
+    where: { [Op.or]: [{ platformRole: PLATFORM_ROLES.CREATOR }, { id: [userId, req.user.id] }] },
+    order: [['id', 'ASC']],
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  const actor = rows.find((u) => u.id === req.user.id);
+  if (!actor || actor.status !== 'active' || actor.deletedAt || !hasPlatformPermission(actor, PLATFORM_PERMISSIONS.WORKSPACES_MANAGE)) {
+    throw new AuthorizationError();
+  }
+  const target = rows.find((u) => u.id === userId);
   if (!target) throw new NotFoundError('User');
   if (target.platformRole === PLATFORM_ROLES.CREATOR) {
-    if (req.user.platformRole !== PLATFORM_ROLES.CREATOR) {
+    if (actor.platformRole !== PLATFORM_ROLES.CREATOR) {
       throw new AppError('CREATOR_REQUIRED', "Only a creator can act on a creator's account.", 403);
     }
-    const creators = await db.User.count({
-      where: { platformRole: PLATFORM_ROLES.CREATOR, status: 'active', id: { [Op.ne]: target.id } },
-      transaction,
-    });
-    if (creators < 1) throw new ConflictError('This is the last creator.', 'LAST_CREATOR');
+    const others = rows.filter((u) => u.platformRole === PLATFORM_ROLES.CREATOR && u.status === 'active' && u.id !== target.id);
+    if (others.length < 1) throw new ConflictError('This is the last creator.', 'LAST_CREATOR');
+  } else if (target.platformRole && !hasPlatformPermission(actor, PLATFORM_PERMISSIONS.ADMINS_MANAGE)) {
+    throw new AppError('ADMINS_MANAGE_REQUIRED', "Only an admin who manages platform users can act on a console account.", 403);
   }
   return target;
 }

@@ -137,19 +137,22 @@ async function storesFor(userIds, matchedWorkspaces) {
   });
   const now = new Date();
   const byUser = new Map(userIds.map((id) => [id, []]));
-  const row = (w, role) => ({
+  const row = (w, role, owner) => ({
     id: w.id,
     name: w.name,
     slug: w.slug,
     status: w.status,
     role,
+    // The owner of record (workspaces.owner_user_id), whose stores deleting the
+    // account suspends; a member kept on the Owner role has role 'owner' but not this.
+    owner,
     matched: matchedWorkspaces.has(w.id),
     subscription: subscriptionSummary(w.subscription, now),
   });
-  for (const w of owned) byUser.get(w.ownerUserId).push(row(w, 'owner'));
+  for (const w of owned) byUser.get(w.ownerUserId).push(row(w, 'owner', true));
   for (const m of memberships) {
     if (!m.workspace || m.workspace.ownerUserId === m.userId) continue;
-    byUser.get(m.userId).push(row(m.workspace, m.role ? m.role.key : 'member'));
+    byUser.get(m.userId).push(row(m.workspace, m.role ? m.role.key : 'member', false));
   }
   return byUser;
 }
