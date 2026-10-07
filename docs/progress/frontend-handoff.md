@@ -4082,3 +4082,19 @@ Google sign-in still starts with a full-page visit to `GET /api/v1/auth/google` 
 | `GOOGLE_LOGIN_FAILED` | Google refused the sign-in code (used twice, expired) | «الدخول بجوجل منجحش. جرّب تاني» | "Google sign-in didn't work. Please try again" |
 
 Each error screen shows a «جرّب تاني» / "Try again" button that opens `/api/v1/auth/google` again, and a link back to the sign-in page. `ACCOUNT_SUSPENDED` / `ACCOUNT_DELETED` are unchanged.
+
+## 348. Checkout code: Resend only after the checkout asked for a code, and a per-IP limit — UI: pending
+
+The storefront's code-entry step (shown after the checkout answers 428 `OTP_REQUIRED`) keeps the same two calls. Resend now only sends again to a phone this store's checkout challenged in the last 30 minutes, and both calls share a limit of 10 a minute per IP. Nothing new to call.
+
+### Endpoints (public, no auth, unchanged bodies)
+- **POST `/api/v1/store/:workspaceId/checkout/otp/resend`** `{ "phone": "+201001234567" }` → 200 `{ "sent": true, "resendAfterSeconds": 60 }`.
+  - 409 `OTP_NOT_REQUESTED` `{ "error": { "code": "OTP_NOT_REQUESTED", "message": "Place the order again to get a code" } }`: this store sent no code to that phone in the last 30 minutes (the shopper changed the phone, or came back much later). Nothing is sent.
+  - 429 `OTP_RESEND_TOO_SOON` / `OTP_RATE_LIMITED` (unchanged), 422 `INVALID_PHONE` (unchanged).
+  - 429 `RATE_LIMITED`: over 10 verify + resend calls a minute from one IP.
+- **POST `/api/v1/store/:workspaceId/checkout/otp/verify`** `{ "phone", "code" }` → 200 `{ "verified": true, "otpToken": "…" }` (unchanged); can now answer 429 `RATE_LIMITED` as above.
+
+### Screens (storefront → checkout → code step)
+- Always send the Resend call with the same phone the checkout was submitted with; if the shopper edits the phone, submit the order again instead of calling Resend.
+- `OTP_NOT_REQUESTED`: close the code step, keep the form filled and show «اضغط "اطلب" تاني عشان نبعتلك كود جديد» / "Press "Place order" again and we'll send you a new code".
+- `RATE_LIMITED`: «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute"; keep the code field and the Resend countdown as they are.

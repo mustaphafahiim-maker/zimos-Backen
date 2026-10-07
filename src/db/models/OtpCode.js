@@ -14,6 +14,8 @@ module.exports = (sequelize, DataTypes) => {
       expiresAt: { type: DataTypes.DATE, allowNull: false, field: 'expires_at' },
       attempts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       consumedAt: { type: DataTypes.DATE, allowNull: true, field: 'consumed_at' },
+      // The store a checkout code was sent for (item 348); null for the other purposes.
+      workspaceId: { type: DataTypes.UUID, allowNull: true, field: 'workspace_id' },
     },
     {
       tableName: 'otp_codes',

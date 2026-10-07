@@ -38,6 +38,8 @@ const blockedEntries = require('../fraud/blockedEntries');
 const PURPOSE = 'checkout';
 const RESEND_AFTER_SECONDS = 60;
 const PROOF_TTL_MS = 30 * 60 * 1000;
+// Resend only reaches a phone this store challenged at checkout this recently (item 348).
+const RESEND_WINDOW_MS = 30 * 60 * 1000;
 const CHANNELS = ['whatsapp', 'sms'];
 const APPLY_TO = ['all', 'cod_only', 'risky_only'];
 
@@ -109,7 +111,7 @@ async function sendCode(workspace, rawPhone, { strict = false } = {}) {
   }
 
   const code = String(crypto.randomInt(0, 10 ** settings.codeLength)).padStart(settings.codeLength, '0');
-  await db.OtpCode.create({ phone, purpose: PURPOSE, codeHash: hashCode(code), expiresAt: new Date(Date.now() + otpService.CODE_TTL_MS) });
+  await db.OtpCode.create({ phone, purpose: PURPOSE, workspaceId: workspace.id, codeHash: hashCode(code), expiresAt: new Date(Date.now() + otpService.CODE_TTL_MS) });
   const message = {
     recipient: phone,
     template: 'otp_checkout',
@@ -194,10 +196,27 @@ const verify = asyncHandler(async (req, res) => {
   res.json({ verified: true, otpToken: issueProof(req.publicWorkspace.id, result.phone) });
 });
 
-/** POST /store/:workspaceId/checkout/otp/resend */
+/**
+ * POST /store/:workspaceId/checkout/otp/resend
+ *
+ * Only a second code: the first one goes out when this store's checkout
+ * answers 428 OTP_REQUIRED (or the COD switch asks for one). A phone this
+ * store has not challenged in the last 30 minutes gets 409
+ * OTP_NOT_REQUESTED and nothing is sent (item 348), so the button cannot
+ * send codes to any number through any store.
+ */
 const resend = asyncHandler(async (req, res) => {
-  const { phone } = parse(phoneBody, req.body);
-  await sendCode(req.publicWorkspace, phone, { strict: true });
+  const { phone: rawPhone } = parse(phoneBody, req.body);
+  const phone = normalizePhone(rawPhone);
+  if (!phone) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
+  const challenged = await db.OtpCode.count({
+    where: { phone, purpose: PURPOSE, workspaceId: req.publicWorkspace.id, createdAt: { [Op.gt]: new Date(Date.now() - RESEND_WINDOW_MS) } },
+  });
+  // A phone blocked from codes was never sent one; it keeps getting the same quiet answer.
+  if (!challenged && !(await blockedEntries.findMatch(req.publicWorkspace.id, 'otp', { phoneNormalized: phone }))) {
+    throw new AppError('OTP_NOT_REQUESTED', 'Place the order again to get a code', 409);
+  }
+  await sendCode(req.publicWorkspace, rawPhone, { strict: true });
   res.json({ sent: true, resendAfterSeconds: RESEND_AFTER_SECONDS });
 });
 
