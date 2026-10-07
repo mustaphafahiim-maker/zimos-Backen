@@ -82,6 +82,15 @@ async function merge(workspaceId, keepId, duplicateId, req) {
     const credit = Number(dup.storeCreditAmount) || 0;
     const tags = [...new Set([...(keep.tags || []), ...(dup.tags || [])])].slice(0, 50);
     const addresses = [...(keep.savedAddresses || []), ...(dup.savedAddresses || [])].slice(0, 20);
+    // What the two records were granted or chose carries over (item 296).
+    const later = (a, b) => (!a ? b || null : !b ? a : new Date(a) > new Date(b) ? a : b);
+    // Points expire from the last loyalty activity: the later of the two, so the duplicate's fresh points don't expire at once.
+    const loyaltyActivityAt = later(keep.loyaltyActivityAt || (Number(keep.loyaltyPoints) ? keep.createdAt : null), dup.loyaltyActivityAt || (points ? dup.createdAt : null));
+    // An unsubscribe of either (an opt-out on any of their numbers or emails) wins over the other's consent.
+    const contacts = { phones: [keep.phoneNormalized, dup.phoneNormalized].filter(Boolean), emails: [keep.email, dup.email].filter(Boolean).map((e) => String(e).toLowerCase()) };
+    const optedOut = await db.MarketingOptOut.count({ where: { workspaceId, [db.Sequelize.Op.or]: [...(contacts.phones.length ? [{ phoneNormalized: contacts.phones }] : []), ...(contacts.emails.length ? [{ email: contacts.emails }] : [])] }, transaction }) > 0;
+    // Pay-on-account terms: the kept customer's when it has them, else the duplicate's.
+    const terms = keep.onAccountEnabled || !dup.onAccountEnabled ? keep : dup;
     await keep.update({
       fullName: keep.fullName || dup.fullName,
       email: keep.email || dup.email,
@@ -92,9 +101,16 @@ async function merge(workspaceId, keepId, duplicateId, req) {
       taxId: keep.taxId || dup.taxId,
       tags,
       savedAddresses: addresses,
-      marketingConsent: keep.marketingConsent || dup.marketingConsent,
+      marketingConsent: (keep.marketingConsent || dup.marketingConsent) && !optedOut,
       isBlacklisted: keep.isBlacklisted || dup.isBlacklisted,
       blacklistReason: keep.blacklistReason || dup.blacklistReason,
+      blacklistedAt: keep.isBlacklisted ? keep.blacklistedAt : dup.isBlacklisted ? dup.blacklistedAt : null,
+      taxExempt: keep.taxExempt || dup.taxExempt,
+      taxExemptNote: keep.taxExempt ? keep.taxExemptNote : dup.taxExempt ? dup.taxExemptNote : keep.taxExemptNote,
+      onAccountEnabled: terms.onAccountEnabled,
+      creditLimit: terms.creditLimit,
+      paymentTermsDays: terms.paymentTermsDays,
+      loyaltyActivityAt,
       totalOrders: (keep.totalOrders || 0) + (dup.totalOrders || 0),
       totalRejectedOrders: (keep.totalRejectedOrders || 0) + (dup.totalRejectedOrders || 0),
       loyaltyPoints: Number(keep.loyaltyPoints) + points,
