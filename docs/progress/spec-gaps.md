@@ -2058,5 +2058,7 @@ Three reviews of the features built in passes four to six (integrations, storefr
   - A "yes" for a person with an opt-out (a STOP reply or an unsubscribe) on the row's phone, the row's email or the contact's current email leaves consent as it is, and the row is listed: "This person unsubscribed earlier — marketing consent was left off". New contacts likewise.
   - An email the import changes is unverified (emailVerifiedAt cleared), as a profile change does: email-code and Google sign-in need it verified again.
   - Checked: a verified contact with a STOP reply, a sheet giving it another email and "yes" → the email changed and unverified, consent still off, row reported; a new contact whose email unsubscribed → created without consent; another new one → with consent.
-- [ ] 316. Two shopper return requests at once could ask to return the same items twice (and restock them twice when both were approved).
+- [x] 316. Two shopper return requests at once could ask to return the same items twice (and restock them twice when both were approved). (backend fix; no UI change — the existing 422 on items.N.quantity)
+  - The request locks the order row in its transaction and counts again what the order's other returns (not rejected) already ask for; a line beyond what is left answers 422 "A return was already asked for this" / "At most N can be returned".
+  - Checked: a delivered order of 2, three requests for both pieces at once → one return created, two 422.
 

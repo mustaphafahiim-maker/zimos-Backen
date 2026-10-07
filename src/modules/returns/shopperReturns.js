@@ -125,6 +125,19 @@ async function requestReturn(workspace, order, { reasonCode, reasonDetail, items
 
   const reason = reasonDetail ? `${reasonCode}: ${reasonDetail}`.slice(0, 300) : reasonCode;
   const ret = await db.sequelize.transaction(async (transaction) => {
+    // Counted again under the order's lock (item 316): two requests at once queue here, and the second
+    // sees what the first asked for — the same pieces can't be asked back twice.
+    await db.Order.findOne({ where: { id: order.id, workspaceId: workspace.id }, attributes: ['id'], lock: transaction.LOCK.UPDATE, transaction });
+    const earlier = await db.ReturnRequest.findAll({ where: { orderId: order.id, workspaceId: workspace.id, status: { [Op.ne]: 'rejected' } }, attributes: ['items'], transaction });
+    const asked = new Map();
+    for (const r of earlier) for (const l of r.items || []) asked.set(l.orderItemId, (asked.get(l.orderItemId) || 0) + Number(l.quantity));
+    const late = [];
+    items.forEach((line, i) => {
+      const l = byId.get(line.orderItemId);
+      const left = Math.max(0, l.quantity - (asked.get(line.orderItemId) || 0));
+      if (line.quantity > left) late.push({ field: `items.${i}.quantity`, message: left ? `At most ${left} can be returned` : 'A return was already asked for this' });
+    });
+    if (late.length) throw new ValidationError(late);
     const row = await db.ReturnRequest.create({ workspaceId: workspace.id, orderId: order.id, reason, status: 'requested', items, source: 'shopper', photoUploadIds: ids }, { transaction });
     if (ids.length) await db.CustomerUpload.update({ status: 'attached', expiresAt: null }, { where: { id: ids, workspaceId: workspace.id }, transaction });
     await recordAudit({ workspaceId: workspace.id, actorUserId: null, action: 'return.request_by_shopper', entityType: 'ReturnRequest', entityId: row.id, after: { orderId: order.id, reasonCode, items, photos: ids.length }, transaction });
@@ -201,4 +214,4 @@ staff.put(
   })
 );
 
-module.exports = { store, staff, eligibility, settingsOf, withPhotos };
+module.exports = { store, staff, eligibility, settingsOf, withPhotos, requestReturn };
