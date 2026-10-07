@@ -1862,3 +1862,14 @@ An audit of every SPEC section against the code (more than 250 named capabilitie
 - [x] 267. Tell a partner app when a store uninstalls it: an optional "uninstall address" on the app, called (signed with its client secret) when the install ends — by the store, the platform, or a re-approval — so the app stops working for that store and can clean up. (backend done, UI in frontend-handoff.md)
   - Migration 502 (partner_apps.uninstall_url). A consumer of the existing app.uninstalled outbox event (partnerApps/jobs.js) on the webhooks queue, so it retries on that schedule (up to a day) until a 2xx. Signed with the client secret like the app's page address.
   - Every way an install ends sends it (store, platform suspend, developer delete, the app's revoke), except a re-approval: the app just got a new token, so nothing ended for it. The address follows the webhooks' URL rules (no private networks in production).
+
+## Nineteenth pass (2026-10-07) — review of today's own work
+
+A review of everything built today (items 249–267) found defects in it; each was checked against the code before being queued.
+
+- [x] 268. Cart offers: the offer price could be taken more than `maxQuantity` times by sending the offered variant as several lines (Buy Now extra items, or cart lines that differ only in customizations) — count the variant across lines. (backend fix; no UI change)
+  - Checkout and cart now add up the offered variant over all its plain lines; above maxQuantity no line gets the offer price (the rule the cart already stated). Checked: a Buy Now with the trigger and the offered variant as three lines of 1 (max 1) is charged the normal price on all three; one unit still gets the offer.
+- [ ] 269. WhatsApp sign-in hardening: the new-device email code and the new-sign-in alert must apply as for a password sign-in; the 5-try limit must hold under parallel requests (atomic); answers must not tell whether a phone has an account (429 / 503 / sms channel only for real accounts).
+- [ ] 270. Webhooks tied to a key: only keys an installed app holds (a merchant's own integration key keeps its old behaviour when revoked); re-approving a partner app moves its webhooks to the new token instead of switching them off.
+- [ ] 271. Scan to pack: offer and bundle lines expected the wrong units (offers count, not pieces; bundles of several variants) — expect the physical units the order reserved per variant.
+- [ ] 272. Two public paths that can be made expensive: the dropship supplier answer cache grows without bound from shopper-typed cities; the Google feed with "require checklist" rebuilt the catalogue on every request — bound and cache both.

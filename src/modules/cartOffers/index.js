@@ -99,10 +99,14 @@ async function applyAtCheckout(workspace, items) {
   });
   const held = evaluate(rules, lines, (r) => (variants.get(r.variantId) ? variants.get(r.variantId).productId : null)).filter((e) => e.holds);
   const best = bestByVariant(held, variants);
+  // maxQuantity counts the variant across every plain line (several lines of it — Buy Now extras,
+  // cart lines differing only in customizations — never add up past it). Above it: no offer price at all.
+  const totals = new Map();
+  for (const i of items) if (!i.offerId && i.variantId) totals.set(i.variantId, (totals.get(i.variantId) || 0) + (Number(i.quantity) || 1));
   const applied = [];
   const out = items.map((i, idx) => {
     const b = !i.offerId && best.get(i.variantId);
-    if (!b || (Number(i.quantity) || 1) > (b.rule.maxQuantity || 1)) return i;
+    if (!b || totals.get(i.variantId) > (b.rule.maxQuantity || 1)) return i;
     if (b.price >= lines[idx].unitPrice) return i;
     applied.push({ ruleId: b.rule.id, variantId: i.variantId, price: b.price });
     return { ...i, [PINNED]: b.price, [Symbol.for('zimos.lineLabel')]: String(b.rule.name).slice(0, 120) };
@@ -132,8 +136,10 @@ async function forCart(workspaceId, cart, basePrices) {
   for (const [variantId, b] of best) {
     const line = plain.find((i) => i.variantId === variantId);
     const max = b.rule.maxQuantity || 1;
+    // Every cart line of the variant together (as the checkout counts it).
+    const inCartQty = plain.filter((i) => i.variantId === variantId).reduce((n, i) => n + i.quantity, 0);
     const current = line ? (basePrices.has(variantId) ? Number(basePrices.get(variantId)) : b.regular) : b.regular;
-    const applies = Boolean(line) && line.quantity <= max && b.price < current;
+    const applies = Boolean(line) && inCartQty <= max && b.price < current;
     if (applies) prices.set(variantId, b.price);
     offers.push({
       ruleId: b.rule.id,
@@ -145,7 +151,7 @@ async function forCart(workspaceId, cart, basePrices) {
       maxQuantity: max,
       inCart: Boolean(line),
       applied: applies,
-      overMaxQuantity: Boolean(line) && line.quantity > max,
+      overMaxQuantity: Boolean(line) && inCartQty > max,
     });
   }
   // Rules that don't hold yet but could ("add EGP 50 more to unlock …").
