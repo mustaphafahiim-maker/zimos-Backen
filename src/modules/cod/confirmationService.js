@@ -127,6 +127,12 @@ async function loadTasks(workspaceId, ids, transaction) {
   const tasks = ids.map((id) => byId.get(id)).filter(Boolean).map(serializeTask);
   // The agent confirms the customer's photos and texts on the call too.
   for (const task of tasks) if (task.order) await presentOrderItems(workspaceId, task.order.items);
+  // Paid by one of the store's InstaPay / wallet methods: the payer's number and screenshot, and whether it waits for review (manualPayments, item 340).
+  for (const task of tasks) {
+    if (task.order && task.order.paymentMethod === 'bank_transfer') {
+      task.order.manualPayment = await require('../manualPayments/manualPaymentService').presentForStaff(workspaceId, task.order.id, transaction);
+    }
+  }
   return tasks;
 }
 
@@ -455,7 +461,8 @@ async function confirmFromOrder(workspaceId, orderId, { notes, channel }, req) {
     const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!order) throw new NotFoundError('Order');
     assertOrderOpen(order);
-    if (order.paymentMethod !== 'cod') {
+    // A store-manual order (manualPayments, item 340) waits in the queue too; it is confirmed once its proof is approved.
+    if (order.paymentMethod !== 'cod' && !(await require('../manualPayments/manualPaymentService').hasManualPayment(order, transaction))) {
       throw new AppError('ORDER_NOT_COD', 'Only cash-on-delivery orders are confirmed by phone', 409);
     }
     if (order.confirmationState === 'confirmed') {

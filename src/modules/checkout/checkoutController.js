@@ -46,7 +46,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, pickupLocationId, trackingConsent, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, manualPaymentMethodId, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, pickupLocationId, trackingConsent, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -66,7 +66,10 @@ const checkout = asyncHandler(async (req, res) => {
 
   // A manual transfer (the whole order, or a COD order's deposit) is checked
   // here, before any cart work; it is not an online (gateway) payment.
-  const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
+  // Or one of the store's InstaPay / wallet methods (manualPayments, item 340): placed unpaid, the screenshot
+  // sent afterwards with the payment token this answer carries.
+  const storeManual = await require('../manualPayments/manualPaymentService').prepareCheckout(workspace, { paymentMethod: orderBody.paymentMethod, manualPaymentMethodId, funnelId: orderBody.funnelId });
+  const manualTransfer = storeManual ? null : await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
   const isOnline = !['cod', 'bank_transfer', 'on_account'].includes(orderBody.paymentMethod);
   // Pay later on account (accountCredit/, item 229): the signed-in shopper is who the store approved.
   if (orderBody.paymentMethod === 'on_account') await require('../accountCredit').markCheckout(workspaceId, req.headers['x-shopper-token'], orderBody);
@@ -218,6 +221,7 @@ const checkout = asyncHandler(async (req, res) => {
       // funnel_upsell_merge on): nobody confirms the order until the shopper
       // is past them, so an accepted offer can still join it.
       confirmationAvailableAt: await offerWindowEnd(workspace, orderBody.funnelId),
+      manualPayment: storeManual ? { method: storeManual.method, tokenHash: storeManual.token.hash } : null,
     });
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets
@@ -240,7 +244,9 @@ const checkout = asyncHandler(async (req, res) => {
     const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
     const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
     if ((giftCard && giftCard.applied) || (points && points.applied) || (credit && credit.applied)) await order.reload();
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}), trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order) });
+    // The InstaPay / wallet details to pay to, and the token the proof is sent with (shown once, as an online payment's).
+    const storeManualPayment = storeManual ? { manualPayment: await require('../manualPayments/manualPaymentService').getForShopper(workspaceId, order.id, storeManual.token.token), paymentToken: storeManual.token.token } : {};
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...storeManualPayment, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}), trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(

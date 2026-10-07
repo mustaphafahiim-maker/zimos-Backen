@@ -51,6 +51,9 @@ module.exports = {
         receiptUploadId: uuid.allow(null).optional(),
         senderReference: Joi.string().max(100).allow('', null).optional(),
       }).optional(),
+      // Or one of the store's InstaPay / wallet methods (manualPayments, item 340): 'bank_transfer'
+      // only, never with `transfer`; the screenshot is sent after the order is placed.
+      manualPaymentMethodId: Joi.when('paymentMethod', { is: 'bank_transfer', then: uuid.optional(), otherwise: Joi.forbidden() }),
       // Which gateway, when more than one offers the method. Optional.
       paymentProvider: Joi.string().max(50).optional(),
       // Where the gateway sends the shopper back to (online methods only).
@@ -136,6 +139,6 @@ module.exports = {
       // Answers to the purchase-form fields with no column of their own
       // (sa_national_address, custom_1…5) — checkout/checkoutForm.js.
       formFields: formFieldsBodySchema,
-    }),
+    }).oxor('transfer', 'manualPaymentMethodId'),
   },
 };

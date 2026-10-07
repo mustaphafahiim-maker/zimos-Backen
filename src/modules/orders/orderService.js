@@ -259,6 +259,9 @@ async function createOrder(
     shippingOverride = null,
     source = null,
     chargeFee = true,
+    // { method, tokenHash }: a storefront order paid with one of the store's InstaPay / wallet
+    // methods (manualPayments, item 340) — unpaid, confirmed only once its proof is approved.
+    manualPayment = null,
   } = {}
 ) {
   // A picked place names the address it prices (places/placePricing.alignAddress, item 314).
@@ -589,6 +592,8 @@ async function createOrder(
               },
             }
           : {}),
+        // The shopper's browser sends the transfer screenshot with this token (manualPayments).
+        ...(manualPayment ? { paymentTokenHash: manualPayment.tokenHash } : {}),
       },
       { transaction }
     );
@@ -627,7 +632,9 @@ async function createOrder(
       await attachUploads(line.customizations, orderItems[orderItems.length - 1].id, transaction);
     }
 
-    if (paymentMethod === 'cod') {
+    if (manualPayment) await require('../manualPayments/manualPaymentService').recordForOrder(order, manualPayment.method, transaction);
+    // A store-manual order waits in the queue too, flagged until its proof is approved (manualPayments).
+    if (paymentMethod === 'cod' || manualPayment) {
       // `confirmationAvailableAt`: a funnel order waits for the funnel's offer
       // window before anyone may confirm it (funnels/funnelOfferMerge.js).
       await db.ConfirmationTask.create(
@@ -928,6 +935,8 @@ async function getOrder(workspaceId, orderId) {
   json.checkoutFields = require('../checkout/checkoutExtras').presentCheckoutFields(json.checkoutFields);
   // Each line's product picture and the funnel's name (orderListDecor.js).
   await require('./orderListDecor').decorateOne(workspaceId, json);
+  // Paid by one of the store's InstaPay / wallet methods: the payer's number, the screenshot's signed link and the review (manualPayments).
+  if (order.paymentMethod === 'bank_transfer') json.manualPayment = await require('../manualPayments/manualPaymentService').presentForStaff(workspaceId, order.id);
   // A funnel offer the shopper took after this order had left its offer
   // window is an order of its own: both ends name the other.
   const linkedOrders = await db.Order.findAll({

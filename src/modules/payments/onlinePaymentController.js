@@ -37,8 +37,10 @@ const storefrontMethods = asyncHandler(async (req, res) => {
   const currency = await require('./methodCurrency').shopperCurrency(req.publicWorkspace, req.query);
   const offered = await methods.storefrontMethods(req.publicWorkspace, { preview, currency });
   const manual = require('./manualTransferService');
+  // Then the store's InstaPay / wallet methods, proven with a screenshot after the order (manualPayments, item 340).
+  const storeMethods = await require('../manualPayments/manualPaymentService').checkoutEntries(req.publicWorkspace.id);
   // Narrowed to the funnel's own list, each with its fee or discount (paymentRulesService).
-  const all = [...offered, ...manual.storefrontMethods(req.publicWorkspace)];
+  const all = [...offered, ...manual.storefrontMethods(req.publicWorkspace), ...storeMethods];
   res.json({ methods: require('./paymentRulesService').forStorefront(req.publicWorkspace, all, req.query.funnelId, currency), preview, currency });
 });
 

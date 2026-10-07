@@ -126,6 +126,10 @@ function tokenMatches(order, token) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// An order paid with one of the store's InstaPay / wallet methods (manualPayments, item 340): of the
+// bank-transfer orders, only those carry a payment token (ours with a receipt never do).
+const isStoreManualOrder = (order) => order.paymentMethod === 'bank_transfer' && Boolean(order.paymentTokenHash);
+
 function assertOnlineEnabled() {
   if (!env.payments.onlineEnabled) {
     throw new AppError('PAYMENTS_ONLINE_DISABLED', 'Online payments are not available', 404);
@@ -654,7 +658,8 @@ async function describeForShopper(order, workspace, preview) {
   const status = shopperStatusOf(order);
   const offered = await methodsService.storefrontMethods(workspace, { preview, currency: order.currency });
   const online = offered.filter((m) => m.id !== methodsService.COD);
-  const awaiting = status === 'awaiting_payment';
+  // A store-manual order is paid by its screenshot, so this page offers it no retry and no switch.
+  const awaiting = status === 'awaiting_payment' && !isStoreManualOrder(order);
   const retriesLeft = Math.max(0, env.payments.maxAttemptsPerOrder - attempts.length);
   const canSwitchToCod = awaiting && offered.some((m) => m.id === methodsService.COD) && require('./codSwitchChecks').funnelAllowsCod(workspace, order);
 
@@ -808,6 +813,9 @@ function assertAwaiting(order) {
   if (status === 'expired') throw new AppError('ORDER_PAYMENT_EXPIRED', 'The time to pay for this order has run out', 409);
   if (status === 'cancelled') throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
   if (status === 'cod') throw new AppError('ORDER_IS_COD', 'This order is already cash on delivery', 409);
+  // Paid by hand with one of the store's InstaPay / wallet methods: proven with a screenshot, never retried
+  // online nor switched (manualPayments, item 340).
+  if (isStoreManualOrder(order)) throw new AppError('ORDER_IS_MANUAL', 'This order is paid by transfer', 409);
   if (order.paymentExpiresAt && new Date(order.paymentExpiresAt) < new Date()) {
     throw new AppError('ORDER_PAYMENT_EXPIRED', 'The time to pay for this order has run out', 409);
   }
@@ -930,4 +938,6 @@ module.exports = {
   switchToCod,
   shopperStatusOf,
   hashToken,
+  newPaymentToken,
+  tokenMatches,
 };
