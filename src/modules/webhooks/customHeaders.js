@@ -25,7 +25,9 @@ const schema = Joi.array()
   .items(
     Joi.object({
       name: Joi.string().trim().pattern(NAME).required(),
-      value: Joi.string().max(1000).pattern(/^[^\r\n]*$/).when('keep', { is: true, then: Joi.forbidden(), otherwise: Joi.required() }),
+      // Only what an HTTP header can carry (item 304): tab, printable ASCII and Latin-1 — no control
+      // characters, no Arabic or emoji (Node refuses them when sending).
+      value: Joi.string().max(1000).pattern(/^[\t\x20-\x7e\x80-\xff]*$/).messages({ 'string.pattern.base': 'A header value can only hold Latin letters, digits and symbols' }).when('keep', { is: true, then: Joi.forbidden(), otherwise: Joi.required() }),
       keep: Joi.boolean(),
     })
   )

@@ -3310,3 +3310,7 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - `POST /workspaces/:ws/order-emails/:key/test` `{ to? }`: `to` must be your own email or a team member's; otherwise 422 on `to`: «الإيميل التجريبي بيروح لك أو لحد من فريق المتجر بس» / "Test emails go to you or a member of your team". Prefill `to` with the signed-in user's email (or a team picker).
 - 429 `TOO_MANY_TEST_EMAILS` after 50 a day: «وصلت لحد الإيميلات التجريبية النهارده» / "You've reached today's test email limit".
+
+## 304. Webhook custom header values — UI: pending (small)
+
+- `customHeaders[].value` on create / update now refuses non-Latin text and control characters (422 on `customHeaders.N.value`). Hint under the value field: «إنجليزي وأرقام ورموز بس — زي مفتاح API» / "Latin letters, digits and symbols only — like an API key".
