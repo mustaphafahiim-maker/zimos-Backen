@@ -1696,7 +1696,10 @@ customer CSV import (contacts/contactImport), weight-based shipping, gift card b
 channel reports, 2FA, age notice (storeGate ageCheck), dynamic segments. Not listed because of SPEC §21: survey or
 review requests sent to many customers at once. Migrations 495–499 are the last of this pass's range.
 
-- [ ] 232. URL redirects: the merchant's old-path → new-path list (301/302), a public lookup the storefront calls on a not-found page, and a redirect added by itself when a product or collection slug changes; CSV import for a platform move.
+- [x] 232. URL redirects: the merchant's old-path → new-path list (301/302), a public lookup the storefront calls on a not-found page, and a redirect added by itself when a product or collection slug changes; CSV import for a platform move. (backend done, UI in frontend-handoff.md)
+  - urlRedirects/index.js; migration 495 url_redirects (unique per store and from path; hits). Paths normalised (decoded, trailing slash dropped, query kept); lookup tries path+query, then path. Targets: a store path or an https URL only.
+  - Product/Collection afterUpdate hooks (installed when the module loads) add the slug redirect, re-point older redirects (no chains) and drop a redirect away from the new address. Loop check follows up to 10 hops.
+  - Verified: create/lookup (trailing slash, query), duplicate, self, loop, https target, http refused, CSV import with a bad line, slug change and change back, legacy redirect re-pointed, hits.
 - [ ] 233. Store locator: the store's branches (from stock locations) with address, phone, opening hours, map coordinates and a "get directions" link, as a public list and a nearest-branch answer for given coordinates.
 - [ ] 234. Price history: every variant price change recorded, the lowest price of the last 30 days shown honestly next to a sale price, and the history in the dashboard.
 - [ ] 235. Customer privacy requests: a signed-in shopper downloads their data or asks to delete their account; the team sees the requests and completes an erase that removes personal details but keeps order and accounting records.

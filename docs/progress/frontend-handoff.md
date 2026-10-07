@@ -2716,3 +2716,18 @@ Body for create / edit / preview:
 - Product page: a «المواصفات» / "Specifications" table (value + unit), and «قارن» / "Compare" (adds to a compare tray kept in the browser, max 4).
 - Collection / search pages: filter panel from `/filters` (checkbox values with counts), results from `/products?f=…`.
 - Compare page: products as columns, keys as rows, «اعرض الاختلافات بس» / "Show differences only" (uses `differs`), add to cart per column.
+
+## 232. URL redirects — UI: pending
+
+### Dashboard — `/api/v1/workspaces/:ws/redirects` (`website.edit`)
+- `GET ?q=&source=manual|auto|import&limit=&offset=` → `{ redirects: [{ id, fromPath, toPath, statusCode, source, hits, lastHitAt, createdAt }], total }`.
+- `POST /` `{ fromPath: "/old-page", toPath: "/new-page" | "https://…", statusCode: 301 | 302 (301) }` → 201 `{ redirect }`. Paths start with `/` (a trailing slash is dropped; a query is kept). 422: `fromPath` «المسار ده عليه تحويل بالفعل» / "This path already redirects"; `toPath` «مينفعش يحوّل لنفسه» / "A redirect cannot point at itself", «ده هيعمل لفة مقفولة» / "This would send shoppers round in a loop"; an `http://` target is refused (https only).
+- `PUT /:id` same body; `DELETE /:id` → 204.
+- `POST /import` `{ csv: "from,to[,301|302]\n/old,/new" }` (≤ 5000 lines, header optional) → `{ created, updated, errors: [{ line, message }] }`.
+- Automatic (source `auto`): when a product slug changes, `/products/<old>` → `/products/<new>`; a collection slug change, `/products?collection=<old>` → `…=<new>`. Older redirects to the old address are pointed at the new one; a redirect away from the new address is removed.
+
+### Storefront
+- `GET /api/v1/store/:ws/redirects/lookup?path=/old-page` → `{ to, statusCode }` or 404. Call it on the not-found page (and for a product/collection slug that returns 404), then redirect (Next.js `permanentRedirect` for 301, `redirect` for 302). Hits are counted.
+
+### Screens
+- Settings → Website → «تحويل الروابط» / "URL redirects": table (from → to, type «دائم 301» / "Permanent", «مؤقت 302» / "Temporary", source chip «تلقائي» / "Automatic", hits «عدد الزيارات»), search, add / edit / delete, «استيراد CSV» / "Import CSV" with the error lines shown.
