@@ -3332,3 +3332,7 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 ## 303. GTM container — the store's own Google tags — UI: pending (small)
 
 - `GET /workspaces/:ws/tracking-pixels/gtm/container` no longer includes the store's own Google pixels (they already run on the storefront; a copy in GTM counts twice). Ask for a GA4 / Google Ads id only when it is not set up as a Zimos pixel. The response header `X-Zimos-Skipped-Ids` lists ids left out ("none" otherwise): show «{ids} شغالين من زيموس مباشرة — مش هنحطهم في الملف عشان ميتحسبوش مرتين» / "{ids} already run from Zimos — left out of the file so nothing counts twice".
+
+## 318. Send to supplier — in progress — UI: pending (small)
+
+- `POST …/dropship/…/orders/:orderId/push` can answer 409 `DROPSHIP_PUSH_IN_PROGRESS` while the same order is already being sent: «الطلب بيتبعت للمورد دلوقتي — حدّث الصفحة بعد شوية» / "This order is being sent to the supplier — refresh in a moment". The order's Supplier card may show a reference `externalOrderId: "pending"` for a few seconds: show «جاري الإرسال…» / "Sending…".

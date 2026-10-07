@@ -53,7 +53,11 @@ function send(method, url, { headers, body, timeoutMs }) {
   const local = /^(127\.0\.0\.1|localhost)$/i.test(target.hostname) && !env.isProduction;
   const client = target.protocol === 'https:' ? require('https') : require('http');
   const payload = body ? JSON.stringify(body) : null;
-  return new Promise((resolve, reject) => {
+  return new Promise((resolveOuter, rejectOuter) => {
+    // One deadline for the whole exchange (item 318), beside the socket's idle timeout.
+    let deadline = null;
+    const resolve = (v) => { clearTimeout(deadline); resolveOuter(v); };
+    const reject = (e) => { clearTimeout(deadline); rejectOuter(e); };
     // An IP written in the address is not looked up, so the lookup guard can't see it: checked here.
     const host = target.hostname.replace(/^\[|\]$/g, '');
     const guard = require('../../webhooks/webhookUrlGuard');
@@ -80,7 +84,10 @@ function send(method, url, { headers, body, timeoutMs }) {
       res.on('end', () => {
         let json = null;
         try {
-          json = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          // A UTF-8 BOM some WordPress plugins put first is dropped, as fetch's res.json() did (item 318).
+          let text = Buffer.concat(chunks).toString('utf8');
+          if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+          json = JSON.parse(text);
         } catch {
           json = null;
         }
@@ -88,6 +95,7 @@ function send(method, url, { headers, body, timeoutMs }) {
       });
       res.on('error', reject);
     });
+    deadline = setTimeout(() => req.destroy(Object.assign(new Error('timeout'), { name: 'TimeoutError' })), timeoutMs);
     req.on('timeout', () => req.destroy(Object.assign(new Error('timeout'), { name: 'TimeoutError' })));
     req.on('error', reject);
     req.end(payload || undefined);
