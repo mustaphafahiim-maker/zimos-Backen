@@ -390,4 +390,27 @@ router.get('/returns', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({
   });
 }));
 
+// Cart offers and free gifts (spec-gaps item 256): what each rule brought, from the order
+// lines the checkout labelled with the rule's name (plain lines with a label, no offer).
+router.get('/cart-offers', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({ params: Joi.object(ws), query: Joi.object(range) }), asyncHandler(async (req, res) => {
+  const c = await contextOf(req);
+  const p = { ws: c.ws, from: c.from, to: c.to };
+  const rows = await run(
+    `WITH o AS (SELECT o.id, o.total_amount FROM orders o
+                WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL AND o.created_at >= :from AND o.created_at < :to),
+          l AS (SELECT oi.order_id, oi.offer_name_snapshot AS name, oi.quantity, oi.line_total_amount, oi.unit_price_amount
+                  FROM order_items oi JOIN o ON o.id = oi.order_id
+                 WHERE oi.offer_id IS NULL AND oi.offer_name_snapshot IS NOT NULL)
+     SELECT l.name, CASE WHEN bool_and(l.unit_price_amount = 0) THEN 'free_gift' ELSE 'cart_offer' END AS kind,
+            COUNT(DISTINCT l.order_id)::int AS orders, SUM(l.quantity)::int AS units,
+            COALESCE(SUM(l.line_total_amount), 0)::bigint AS "lineRevenue",
+            COALESCE((SELECT SUM(o.total_amount) FROM o WHERE o.id IN (SELECT order_id FROM l l2 WHERE l2.name = l.name)), 0)::bigint AS "ordersRevenue"
+       FROM l GROUP BY l.name ORDER BY orders DESC, units DESC LIMIT 200`, p);
+  const [all] = await run(`SELECT COUNT(*)::int AS orders, COALESCE(SUM(total_amount), 0)::bigint AS revenue FROM orders
+                             WHERE workspace_id = :ws AND is_test = false AND cancelled_at IS NULL AND created_at >= :from AND created_at < :to`, p);
+  const out = rows.map((r) => ({ ...r, lineRevenue: String(r.lineRevenue), ordersRevenue: String(r.ordersRevenue), averageOrder: r.orders ? String(Math.round(Number(r.ordersRevenue) / r.orders)) : '0' }));
+  if (req.query.format === 'csv') return sendCsv(res, 'cart-offers', ['name', 'kind', 'orders', 'units', 'lineRevenue', 'ordersRevenue', 'averageOrder'], out);
+  return res.json({ from: c.from, to: c.to, currency: c.currency, store: { orders: all.orders, averageOrder: all.orders ? String(Math.round(Number(all.revenue) / all.orders)) : '0' }, rules: out });
+}));
+
 module.exports = { router, contextOf, sendCsv, run, ws, range };

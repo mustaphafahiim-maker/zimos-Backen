@@ -105,7 +105,7 @@ async function applyAtCheckout(workspace, items) {
     if (!b || (Number(i.quantity) || 1) > (b.rule.maxQuantity || 1)) return i;
     if (b.price >= lines[idx].unitPrice) return i;
     applied.push({ ruleId: b.rule.id, variantId: i.variantId, price: b.price });
-    return { ...i, [PINNED]: b.price };
+    return { ...i, [PINNED]: b.price, [Symbol.for('zimos.lineLabel')]: String(b.rule.name).slice(0, 120) };
   });
   return { items: out, applied };
 }

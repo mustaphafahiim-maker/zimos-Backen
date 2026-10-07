@@ -1813,3 +1813,9 @@ The owner, 2026-10-07: "شوف لايت فانل شغال ازاي واعمل ز
   - X signs with OAuth 1.0a, so its sealed token is the four keys joined by colons (checked on save); its conversions are the pixel's X event ids (config.eventIds) and need an identifier, so anonymous storefront events go only with a twclid. Its test event answers skipped (X has no page-view conversion).
   - Reddit uses the pixel id as the ad account id and the test event code as test_mode; Microsoft sends pageLoad for page views. Click ids (rdt_cid, twclid, msclkid) come from the order's touch or the visit (item 254).
   - A relayed event a platform does not take is now reported as skipped and not logged as sent (also true for Pinterest's missing events).
+
+## Sixteenth pass (2026-10-07) — measuring the cart offers
+
+- [x] 256. Cart offers and free gifts report: each rule's orders, units and revenue, and how big those orders are against the store's average; order lines show the rule they came from. (backend done, UI in frontend-handoff.md)
+  - A plain line the checkout priced from a cart offer, or added as a free gift, keeps the rule's name in order_items.offer_name_snapshot (a line label symbol the order service reads, like the pinned price); invoices and the order page already print that column. No migration.
+  - GET /store-reports/cart-offers groups those lines by rule name (gift = every line at 0). Orders before this change have no label and are not counted. Cancelled and test orders are left out.

@@ -133,7 +133,8 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
     variantOptions: variant.optionValues,
     sku: variant.sku,
     offerId: null,
-    offerName: null,
+    // The rule a server-added or offer-priced plain line came from (cart offer, free gift; item 256).
+    offerName: line[Symbol.for('zimos.lineLabel')] || null,
     quantity,
     unitPriceAmount,
     unitCostAmount: variant.costAmount,

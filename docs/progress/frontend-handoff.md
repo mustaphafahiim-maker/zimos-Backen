@@ -3110,3 +3110,18 @@ Same endpoints as before (`/workspaces/:ws/tracking-pixels`). `reddit`, `x` and 
 - **X**: token = four keys joined by colons: `consumerKey:consumerSecret:accessToken:accessTokenSecret` (422 on `capiToken` otherwise: «لـ X اكتب المفاتيح الأربعة مفصولة بـ :» / "For X, paste the four keys separated by colons"). Show four inputs and join them. Conversions go only for events that have an X event id (`config.eventIds`, item 251).
 - `POST /tracking-pixels/:id/test` → `{ ok, skipped, error, eventId, usedTestCode }`. `skipped: true` (X): «X مفيهوش حدث تجريبي — هيتأكد من المفاتيح مع أول طلب» / "X has no test event — the keys are checked with the first order".
 - Orders go to them like the other platforms (Purchase, or Lead for stores/funnels that report leads), with the same event id as the browser tag, the click ids from item 254, hashed email/phone. Until the owner turns each on live (`*_CAPI_MODE=live`), the server builds the events and logs them without sending (sandbox) — say «تجريبي» / "Sandbox" next to these switches until then if the API reports it (not exposed yet).
+
+## 256. Cart offers and free gifts report — UI: pending
+
+### `GET /api/v1/workspaces/:ws/store-reports/cart-offers?from=&to=&format=json|csv` (`analytics.view`)
+```json
+{ "currency": "EGP", "store": { "orders": 120, "averageOrder": "14000" },
+  "rules": [{ "name": "Matching socks 20% off", "kind": "cart_offer", "orders": 14, "units": 15,
+              "lineRevenue": "56000", "ordersRevenue": "196000", "averageOrder": "14000" },
+            { "name": "Free tote over 100", "kind": "free_gift", "orders": 30, "units": 30, "lineRevenue": "0", "ordersRevenue": "510000", "averageOrder": "17000" }] }
+```
+- `lineRevenue` = what the offered lines sold for; `ordersRevenue` / `averageOrder` = the whole orders that had them, to set against `store.averageOrder`. Minor units. Not cancelled, not test. Counts orders from now on (older orders weren't labelled).
+- Order lines: an offer-priced or gift line now has `offerNameSnapshot` = the rule's name — show it under the product name on the order page («من عرض: …» / "From offer: …").
+
+### Screen
+- Reports → «عروض السلة والهدايا» / "Cart offers & gifts": a row per rule with a kind chip («عرض سلة» / "Cart offer", «هدية» / "Free gift"), orders, units, «مبيعات العرض» / "Offer sales", «متوسط الطلب» / "Average order" next to the store's average (green when higher), CSV download. Link from the Cart offers and Free gifts screens («شوف النتايج» / "See results").

@@ -76,7 +76,8 @@ async function addGifts(workspace, items) {
     if (gifts.some((g) => g.variantId === rule.giftVariantId)) continue;
     const v = gv.get(rule.giftVariantId);
     if (!inStock(v, rule.quantity || 1)) continue;
-    out.push({ variantId: rule.giftVariantId, quantity: rule.quantity || 1, [PINNED]: 0 });
+    // Labelled with the rule's name, so the order line and the cart offers report (item 256) say where it came from.
+    out.push({ variantId: rule.giftVariantId, quantity: rule.quantity || 1, [PINNED]: 0, [Symbol.for('zimos.lineLabel')]: String(rule.name).slice(0, 120) });
     gifts.push({ ruleId: rule.id, name: rule.name, variantId: rule.giftVariantId, quantity: rule.quantity || 1 });
   }
   return { items: out, gifts };
