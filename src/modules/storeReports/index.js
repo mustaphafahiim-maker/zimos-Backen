@@ -260,4 +260,44 @@ router.get('/order-heatmap', requirePermission(PERMISSIONS.ANALYTICS_VIEW), vali
   return res.json({ from: c.from, to: c.to, timezone: c.tz, currency: c.currency, cells, byWeekday: sumBy('weekday', 7), byHour: sumBy('hour', 24), busiest: busiest && busiest.orders ? { weekday: busiest.weekday, hour: busiest.hour, orders: busiest.orders } : null });
 }));
 
+// ---------------------------------------------- 245. sales by collection --
+
+/*
+ * Per collection, for live orders (not cancelled/rejected, not test) placed
+ * in the window: units, orders, revenue (line totals after line discounts,
+ * fx-converted) and delivered revenue. A product in several collections
+ * counts in each, so the rows do not add up to the store total; lines whose
+ * product is in no collection are summed in `uncollected`.
+ */
+router.get('/sales-by-collection', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({ params: Joi.object(ws), query: Joi.object(range) }), asyncHandler(async (req, res) => {
+  const c = await contextOf(req);
+  const lines = `
+    SELECT oi.product_id, oi.order_id, oi.quantity, ROUND((oi.line_total_amount) * coalesce(o.fx_rate_to_base, 1)) AS amount, o.stage
+      FROM order_items oi
+      JOIN (SELECT o.*, ${STAGE_SQL} AS stage FROM ${ORDERS_WITH_STAGE_FROM}
+             WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'
+               AND o.created_at >= :from AND o.created_at < :to) o ON o.id = oi.order_id`;
+  const rows = await run(
+    `WITH l AS (${lines})
+     SELECT c.id AS "collectionId", c.name, COALESCE(SUM(l.quantity), 0)::int AS units, COUNT(DISTINCT l.order_id)::int AS orders,
+            COALESCE(SUM(l.amount), 0)::bigint AS revenue, COALESCE(SUM(l.amount) FILTER (WHERE l.stage = 'delivered'), 0)::bigint AS "deliveredRevenue",
+            COUNT(DISTINCT l.product_id)::int AS products
+       FROM collections c
+       JOIN product_collections pc ON pc.collection_id = c.id
+       JOIN l ON l.product_id = pc.product_id
+      WHERE c.workspace_id = :ws
+      GROUP BY c.id, c.name ORDER BY revenue DESC`,
+    { ws: c.ws, from: c.from, to: c.to }
+  );
+  const [u] = await run(
+    `WITH l AS (${lines})
+     SELECT COALESCE(SUM(quantity), 0)::int AS units, COALESCE(SUM(amount), 0)::bigint AS revenue FROM l
+      WHERE NOT EXISTS (SELECT 1 FROM product_collections pc WHERE pc.product_id = l.product_id)`,
+    { ws: c.ws, from: c.from, to: c.to }
+  );
+  const out = rows.map((r) => ({ ...r, revenue: String(r.revenue), deliveredRevenue: String(r.deliveredRevenue) }));
+  if (req.query.format === 'csv') return sendCsv(res, 'sales-by-collection', ['name', 'units', 'orders', 'products', 'revenue', 'deliveredRevenue'], out);
+  return res.json({ from: c.from, to: c.to, currency: c.currency, collections: out, uncollected: { units: u.units, revenue: String(u.revenue) } });
+}));
+
 module.exports = { router, contextOf, sendCsv, run, ws, range };

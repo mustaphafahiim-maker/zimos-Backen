@@ -2907,3 +2907,16 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 ### Screens
 - Orders list → bulk actions: «ورقة التجهيز للطلب» / "Packing slips" next to waybills, invoices and pick list; a dialog with the size (A5/A4) and an optional note «رسالة في آخر الورقة» / "Note at the bottom" (remember the last note in the browser).
 - Order page → «اطبع ورقة التجهيز» / "Print packing slip".
+
+## 245. Sales by collection — UI: pending
+
+### `GET /api/v1/workspaces/:ws/store-reports/sales-by-collection?from=&to=&format=json|csv` (`analytics.view`)
+```json
+{ "currency": "EGP",
+  "collections": [{ "collectionId": "…", "name": "ZZ Shirts", "units": 3, "orders": 2, "products": 1, "revenue": "30000", "deliveredRevenue": "20000" }],
+  "uncollected": { "units": 3, "revenue": "30000" } }
+```
+- Live orders placed in the window (not cancelled/rejected, not test); revenue = line totals after line discounts (store currency). A product in several collections counts in each — rows don't add up to the store total (say so under the table). `uncollected` = products in no collection.
+
+### Screen
+- Reports → «المبيعات حسب التشكيلة» / "Sales by collection": table + bar chart by revenue, «اتسلّم فعلًا» / "Delivered" column, a note «المنتج اللي في أكتر من تشكيلة بيتحسب في كل واحدة» / "A product in several collections counts in each", the «منتجات من غير تشكيلة» / "Not in any collection" row, «تنزيل CSV».

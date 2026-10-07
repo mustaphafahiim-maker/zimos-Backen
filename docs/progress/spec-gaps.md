@@ -1756,6 +1756,8 @@ breakdowns. No migration needed for any item below.
 - [x] 244. Packing slips: one A4/A5 slip per selected order — lines and quantities, gift message, prices hidden for gift orders that asked for it — as one PDF beside the other order documents. (backend done, UI in frontend-handoff.md)
   - orders/packingSlips.js, POST /orders/documents/packing-slips beside the other documents; A5/A4; prices hidden when giftOptions.hidePrices; pickup orders show the place; Arabic through bidiText; emoji stripped.
   - Verified: gift order (Arabic name/address/message with an emoji, prices hidden) and a normal order (prices and total) rendered and checked as images; empty selection 422.
-- [ ] 245. Sales by collection: units, orders and revenue per collection in a date range (a product in several collections counts in each), with CSV.
+- [x] 245. Sales by collection: units, orders and revenue per collection in a date range (a product in several collections counts in each), with CSV. (backend done, UI in frontend-handoff.md)
+  - storeReports /sales-by-collection: order lines of live orders (stage via STAGE_SQL subquery) × product_collections; units, distinct orders and products, revenue, delivered revenue; uncollected total.
+  - Verified: product in 2 collections counted in both (3 units, 2 orders, 300, delivered 200), cancelled order out, lone product in uncollected, CSV.
 - [ ] 246. Sales by variant option: units and revenue per option value (e.g. size M, colour black) across products, for buying decisions; CSV.
 - [ ] 247. Returns by reason: return requests per reason and per product, the return rate per product (returned units / delivered units), and refunds given; CSV.
