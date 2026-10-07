@@ -21,8 +21,12 @@ const { eventsFor } = require('./browserPixelEvents');
  *   gtm        Tag Manager container      —
  *   clarity    Microsoft Clarity project  —
  *   pinterest  Pinterest Tag              Conversions API (per ad account: config.adAccountId)
- *   x, taboola, outbrain, kwai, reddit, microsoft (UET)   browser tag only (item 251;
- *              event names in browserPixelEvents.js, X event ids in config.eventIds)
+ *   x          X pixel                    Conversions API (item 255; OAuth 1.0a: the token is
+ *                                        "consumerKey:consumerSecret:accessToken:accessTokenSecret";
+ *                                        a conversion per X event id in config.eventIds)
+ *   reddit     Reddit Pixel               Conversions API (item 255)
+ *   microsoft  UET tag                    UET Conversions API (item 255)
+ *   taboola, outbrain, kwai   browser tag only (item 251; event names in browserPixelEvents.js)
  *
  * The public half (platform, pixelId, scope) is served to the storefront by
  * publicPixels(); the token never leaves the server.
@@ -40,12 +44,13 @@ const PLATFORMS = Object.freeze({
   pinterest: { idPattern: /^\d{10,16}$/, capi: true, testEventCode: true },
   // Browser-only (item 251): X pixel id, Taboola account id, Outbrain marketer id,
   // Kwai pixel id, Reddit pixel (t2_/a2_), Microsoft Ads UET tag id.
-  x: { idPattern: /^[a-z0-9]{4,12}$/i, capi: false, testEventCode: false },
+  x: { idPattern: /^[a-z0-9]{4,12}$/i, capi: true, testEventCode: false },
   taboola: { idPattern: /^\d{4,10}$/, capi: false, testEventCode: false },
   outbrain: { idPattern: /^[a-f0-9]{20,40}$/i, capi: false, testEventCode: false },
   kwai: { idPattern: /^\d{10,25}$/, capi: false, testEventCode: false },
-  reddit: { idPattern: /^(t2|a2)_[a-z0-9]{4,20}$/i, capi: false, testEventCode: false },
-  microsoft: { idPattern: /^\d{5,12}$/, capi: false, testEventCode: false },
+  // Reddit's test switch is the pixel's test event code being set (sent as test_mode).
+  reddit: { idPattern: /^(t2|a2)_[a-z0-9]{4,20}$/i, capi: true, testEventCode: true },
+  microsoft: { idPattern: /^\d{5,12}$/, capi: true, testEventCode: false },
 });
 const PLATFORM_NAMES = Object.keys(PLATFORMS);
 const SCOPE_TYPES = ['all', 'funnels', 'products'];
@@ -83,6 +88,13 @@ const fieldError = (field, message) => new ValidationError([{ field, message }],
 function assertAdAccount(platform, capiEnabled, config) {
   if (platform === 'pinterest' && capiEnabled && !(config && config.adAccountId)) {
     throw fieldError('config.adAccountId', 'The Pinterest ad account id is needed to turn the Conversions API on');
+  }
+}
+
+/** X signs with OAuth 1.0a: its token is the four keys (pixelProviders/xCapi.js). */
+function assertTokenShape(platform, token) {
+  if (platform === 'x' && token && !require('./pixelProviders/xCapi').parseToken(token)) {
+    throw fieldError('capiToken', 'For X, paste the four keys as consumerKey:consumerSecret:accessToken:accessTokenSecret');
   }
 }
 
@@ -124,6 +136,7 @@ async function create(workspaceId, body, req) {
     const capable = supportsCapi(body.platform, body.pixelId);
     const scope = await cleanScope(workspaceId, body.scope, transaction);
     if (body.capiEnabled && capable && !body.capiToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
+    assertTokenShape(body.platform, body.capiToken);
     assertAdAccount(body.platform, body.capiEnabled, body.config);
     assertAdsLabels(body.platform, body.pixelId, body.config);
     const pixel = await db.TrackingPixel.create(
@@ -174,6 +187,7 @@ async function update(workspaceId, pixelId, body, req) {
     if (body.scope !== undefined) Object.assign(patch, await cleanScope(workspaceId, body.scope, transaction));
     if (body.testEventCode !== undefined && PLATFORMS[pixel.platform].testEventCode) patch.testEventCode = body.testEventCode || null;
     // capiToken: undefined keeps the stored one, '' removes it.
+    if (body.capiToken) assertTokenShape(pixel.platform, body.capiToken);
     if (body.capiToken !== undefined) patch.capiTokenSealed = body.capiToken ? secretBox.seal(body.capiToken) : null;
 
     const capable = supportsCapi(pixel.platform, patch.pixelId || pixel.pixelId);

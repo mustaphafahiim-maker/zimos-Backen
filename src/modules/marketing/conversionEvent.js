@@ -25,6 +25,9 @@ const EVENT_NAMES = Object.freeze({
   snapchat: { purchase: 'PURCHASE', lead: 'SIGN_UP' },
   google: { purchase: 'purchase', lead: 'generate_lead' },
   pinterest: { purchase: 'checkout', lead: 'lead' },
+  // Item 255 (X uses the pixel's own event ids instead: config.eventIds).
+  reddit: { purchase: 'Purchase', lead: 'Lead' },
+  microsoft: { purchase: 'purchase', lead: 'submit_lead_form' },
 });
 
 const storeKindOf = (settings) => (settings && KINDS.includes(settings.conversion_event) ? settings.conversion_event : DEFAULT_KIND);

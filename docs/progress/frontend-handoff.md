@@ -3101,3 +3101,12 @@ No new endpoints; new values in existing ones.
 - Attribution / campaigns reports: orders from these platforms now come back under those platform keys — give each a logo/colour in the source lists and charts.
 - Storefront (`lib/touches.ts` and the events batch): also keep the click ids `twclid`, `rdt_cid`, `msclkid`, `tblci` from the landing URL — in `touches.first/last`, in `attribution.clickIds`, and in the checkout-session `touch`, like `fbclid`/`ttclid`/`gclid`. The server reads them from the event URL too.
 - Ad link builder (if shown): suggest `utm_source=taboola|outbrain|kwai|reddit|x|bing` for those platforms; Outbrain and Kwai links need `utm_source` (they add no click id).
+
+## 255. Server-side conversions for Reddit, X and Microsoft Ads — UI: pending
+
+Same endpoints as before (`/workspaces/:ws/tracking-pixels`). `reddit`, `x` and `microsoft` now have `capiSupported: true`, so the pixel form shows the «Conversions API» switch and the token field for them (the token is sealed; only `capiTokenMask` comes back).
+- **Reddit**: token = Conversions access token (Reddit Ads → Events Manager). `testEventCode` (any text) = test mode («وضع الاختبار» / "Test mode").
+- **Microsoft Ads**: token = the UET tag's CAPI token (Microsoft Advertising → UET tag → Conversions API).
+- **X**: token = four keys joined by colons: `consumerKey:consumerSecret:accessToken:accessTokenSecret` (422 on `capiToken` otherwise: «لـ X اكتب المفاتيح الأربعة مفصولة بـ :» / "For X, paste the four keys separated by colons"). Show four inputs and join them. Conversions go only for events that have an X event id (`config.eventIds`, item 251).
+- `POST /tracking-pixels/:id/test` → `{ ok, skipped, error, eventId, usedTestCode }`. `skipped: true` (X): «X مفيهوش حدث تجريبي — هيتأكد من المفاتيح مع أول طلب» / "X has no test event — the keys are checked with the first order".
+- Orders go to them like the other platforms (Purchase, or Lead for stores/funnels that report leads), with the same event id as the browser tag, the click ids from item 254, hashed email/phone. Until the owner turns each on live (`*_CAPI_MODE=live`), the server builds the events and logs them without sending (sandbox) — say «تجريبي» / "Sandbox" next to these switches until then if the API reports it (not exposed yet).

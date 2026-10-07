@@ -103,6 +103,8 @@ async function run(workspaceId, trigger, orderId) {
   const funnel = order.funnelId ? await db.Funnel.findOne({ where: { id: order.funnelId, workspaceId }, attributes: ['id', 'settings'] }) : null;
   const kind = conversion.kindFor(workspace && workspace.settings, funnel && funnel.settings);
   const nameFor = (platform) => conversion.eventNameFor(platform, kind);
+  const touches = order.attribution || {};
+  const clickOf = (key) => (touches.last && touches.last[key]) || (touches.first && touches.first[key]) || undefined;
 
   // The providers keep their original signature (a `secrets` blob with one
   // named key per platform); each pixel's own token is handed to them in that
@@ -117,6 +119,13 @@ async function run(workspaceId, trigger, orderId) {
     // Per ad account (pixel.config.adAccountId); sandbox until PINTEREST_CAPI_MODE=live (pinterestCapi.js).
     pinterest: ({ pixel, token }) =>
       require('./pixelProviders/pinterestCapi').sendPurchase({ adAccountId: (pixel.config || {}).adAccountId, secrets: { pinterestAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: nameFor('pinterest'), test: Boolean(pixel.testEventCode) }),
+    // Item 255: sandbox until REDDIT_ / MICROSOFT_ / X_CAPI_MODE=live. Their click ids come from the order's touch (item 254).
+    reddit: ({ pixel, token }) =>
+      require('./pixelProviders/redditCapi').sendPurchase({ accountId: pixel.pixelId, token, order, eventId, ...seen, clickId: clickOf('rdt_cid'), eventName: nameFor('reddit'), test: Boolean(pixel.testEventCode) }),
+    microsoft: ({ pixel, token }) =>
+      require('./pixelProviders/microsoftCapi').sendPurchase({ tagId: pixel.pixelId, token, order, eventId, eventSourceUrl, ...seen, msclkid: clickOf('msclkid'), eventName: nameFor('microsoft') }),
+    x: ({ pixel, token }) =>
+      require('./pixelProviders/xCapi').sendPurchase({ pixelId: pixel.pixelId, token, xEventId: ((pixel.config || {}).eventIds || {})[kind] || null, order, eventId, matching, twclid: clickOf('twclid') }),
   };
 
   const results = [];
