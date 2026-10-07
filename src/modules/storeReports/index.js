@@ -138,4 +138,52 @@ router.get('/inventory-value', requirePermission(PERMISSIONS.FINANCIAL_REPORTS_V
   });
 }));
 
+// ------------------------------------------------ 240. slow / dead stock --
+
+/*
+ * Variants with free stock (on hand − reserved > 0) and no sale in the last
+ * `days` (30, 60, 90 or 180): the units and the value tied up at cost, the
+ * last sale date (null = never sold) and the days since. A sale = a line of
+ * an order that is not cancelled and not a test. Variants created inside the
+ * window are left out (too new to judge) unless includeNew.
+ */
+router.get(
+  '/slow-stock',
+  requirePermission(PERMISSIONS.ANALYTICS_VIEW),
+  validate({ params: Joi.object(ws), query: Joi.object({ days: Joi.number().valid(30, 60, 90, 180).default(60), includeNew: Joi.boolean().default(false), format: range.format, limit: Joi.number().integer().min(1).max(2000).default(500) }) }),
+  asyncHandler(async (req, res) => {
+    const c = await contextOf(req);
+    const days = req.query.days;
+    const rows = await run(
+      `SELECT v.id AS "variantId", p.id AS "productId", p.name AS "productName", v.sku, v.option_values AS options,
+              (v.stock_on_hand - v.reserved_stock) AS free, v.cost_amount AS "unitCost", v.created_at AS "createdAt",
+              (SELECT MAX(o.created_at) FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                WHERE oi.variant_id = v.id AND o.cancelled_at IS NULL AND o.is_test = false) AS "lastSoldAt"
+         FROM product_variants v JOIN products p ON p.id = v.product_id
+        WHERE v.workspace_id = :ws AND p.track_inventory = true AND p.status <> 'archived' AND v.status = 'active'
+          AND v.stock_on_hand - v.reserved_stock > 0
+          ${req.query.includeNew ? '' : "AND v.created_at < now() - (:days * INTERVAL '1 day')"}`,
+      { ws: c.ws, days }
+    );
+    const since = Date.now() - days * 86400000;
+    const list = rows
+      .filter((r) => !r.lastSoldAt || new Date(r.lastSoldAt).getTime() < since)
+      .map((r) => ({
+        variantId: r.variantId, productId: r.productId, productName: r.productName, sku: r.sku, options: r.options,
+        freeUnits: r.free, unitCost: r.unitCost == null ? null : String(r.unitCost),
+        valueTiedUp: r.unitCost == null ? null : String(r.free * Number(r.unitCost)),
+        lastSoldAt: r.lastSoldAt ? new Date(r.lastSoldAt).toISOString() : null, daysSinceSale: r.lastSoldAt ? Math.floor((Date.now() - new Date(r.lastSoldAt).getTime()) / 86400000) : null,
+        neverSold: !r.lastSoldAt,
+      }))
+      .sort((a, b) => Number(b.valueTiedUp || 0) - Number(a.valueTiedUp || 0) || b.freeUnits - a.freeUnits)
+      .slice(0, req.query.limit);
+    if (req.query.format === 'csv') return sendCsv(res, `slow-stock-${days}d`, ['productName', 'sku', 'freeUnits', 'unitCost', 'valueTiedUp', 'lastSoldAt', 'daysSinceSale'], list.map((r) => ({ ...r, productName: [r.productName, Object.values(r.options || {}).join(' / ')].filter(Boolean).join(' — ') })));
+    return res.json({
+      days, currency: c.currency,
+      totals: { variants: list.length, units: list.reduce((n, r) => n + r.freeUnits, 0), valueTiedUp: String(list.reduce((n, r) => n + Number(r.valueTiedUp || 0), 0)), neverSold: list.filter((r) => r.neverSold).length, withoutCost: list.filter((r) => r.unitCost == null).length },
+      variants: list,
+    });
+  })
+);
+
 module.exports = { router, contextOf, sendCsv, run, ws, range };

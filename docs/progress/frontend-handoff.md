@@ -2846,3 +2846,16 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screen
 - Reports → «قيمة المخزون» / "Inventory value": cards «قيمة المخزون بالتكلفة» / "Stock value at cost", «منها محجوز لطلبات» / "Of which reserved", «قطع» / "Units"; per-location table when there are locations; variants table; a warning box «N منتج من غير سعر تكلفة — مش داخلين في الحساب» / "N products have no cost — not counted" linking to the products; «تنزيل CSV».
+
+## 240. Slow-moving and dead stock — UI: pending
+
+### `GET /api/v1/workspaces/:ws/store-reports/slow-stock?days=30|60|90|180&includeNew=false&limit=&format=json|csv` (`analytics.view`)
+```json
+{ "days": 60, "currency": "EGP",
+  "totals": { "variants": 2, "units": 19, "valueTiedUp": "75000", "neverSold": 1, "withoutCost": 0 },
+  "variants": [{ "variantId": "…", "productName": "ZZ Old sale", "sku": "ZZ-OLD", "options": {}, "freeUnits": 9, "unitCost": "5000", "valueTiedUp": "45000", "lastSoldAt": "2026-07-24T…", "daysSinceSale": 75, "neverSold": false }] }
+```
+- Variants with free stock (on hand − reserved) and no sale (order line, not cancelled, not test) in the last `days`; most money tied up first. Variants created inside the window are left out (too new) unless `includeNew=true`. `days` other than 30/60/90/180 → 422.
+
+### Screen
+- Reports → «البضاعة الراكدة» / "Slow-moving stock": chips «30 يوم» «60 يوم» «90 يوم» «180 يوم», cards «فلوس محبوسة في المخزون» / "Money tied up", «عمرها ما اتباعت» / "Never sold"; table (product, free units, value, «آخر بيع» / "Last sold", «من كام يوم» / "Days ago"); row actions as links: «اعمل تخفيض مجدول» / "Schedule a sale" (item 227) and «اعرض المنتج» / "Open product"; «تنزيل CSV».

@@ -1732,6 +1732,8 @@ owner's call and is noted in LANES when given).
 - [x] 239. Inventory valuation: on-hand units × unit cost per variant and per stock location, the total, and the variants without a cost; CSV. (backend done, UI in frontend-handoff.md)
   - storeReports /inventory-value. On hand × cost (on hand is still on the shelf: a sale leaves it when committed); reserved and free shown; per location through stockLocations.stockMatrix; variants without cost listed apart and out of the totals.
   - Verified: 10 units at 40 = 400 (free 320), no-cost variants listed, transfer 4 to a second location → 240/160 split, location filter, CSV.
-- [ ] 240. Slow-moving and dead stock: variants with stock but no sale in 30/60/90 days, units and value tied up, last sale date; CSV.
+- [x] 240. Slow-moving and dead stock: variants with stock but no sale in 30/60/90 days, units and value tied up, last sale date; CSV. (backend done, UI in frontend-handoff.md)
+  - storeReports /slow-stock. Free units (on hand − reserved) with no live order line in the window; value at cost; never-sold flagged; variants younger than the window skipped unless includeNew. Window limited to 30/60/90/180.
+  - Verified: never-sold and sold-75-days-ago show at 60 days, only never-sold at 90, recently sold left out, bad window 422, CSV with ISO dates.
 - [ ] 241. Discount code performance: per code — uses, orders, revenue, discount given, average order, new vs returning customers, and cancellations; for a date range.
 - [ ] 242. Orders by weekday and hour: a 7×24 heatmap of orders and revenue in the store's time zone, for planning confirmation calls and stock.
