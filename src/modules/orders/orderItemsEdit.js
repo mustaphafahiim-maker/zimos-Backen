@@ -156,14 +156,18 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     funnelId: order.funnelId || null,
     transaction,
   });
-  const { taxAmount } = await calculateTax(workspaceId, {
+  let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
     shippingAmount: shipping.amount,
     transaction,
   });
-  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
+  // Priced as an upsell joining the order is (item 317): a tax-exempt business order stays exempt, and the
+  // payment method's own fee or discount is worked out again on the new amount instead of dropped.
+  if (order.contactSnapshot && order.contactSnapshot.taxExempt === true) taxAmount = 0;
+  const paymentAdjustment = await require('../payments/paymentRulesService').adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction, order.currency);
+  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;
 
   // ---- write the lines
   const keptIds = new Set(lines.filter((l) => l.kept).map((l) => l.kept.id));
@@ -212,6 +216,10 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       shippingAmount: shipping.amount,
       taxAmount,
       totalAmount,
+      paymentAdjustmentAmount: paymentAdjustment.amount,
+      paymentAdjustmentLabel: paymentAdjustment.label,
+      // The total in the store's currency moves with the total (item 317): the reports convert with base / total.
+      ...(await require('../currencies/fxService').baseFieldsFor(workspaceId, { currency: order.currency, totalAmount }, transaction)),
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,

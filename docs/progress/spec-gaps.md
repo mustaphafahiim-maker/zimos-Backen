@@ -2081,3 +2081,19 @@ Three reviews of the features built in passes four to six (integrations, storefr
   - The request locks the order row in its transaction and counts again what the order's other returns (not rejected) already ask for; a line beyond what is left answers 422 "A return was already asked for this" / "At most N can be returned".
   - Checked: a delivered order of 2, three requests for both pieces at once → one return created, two 422.
 
+## Twenty-fourth pass (2026-10-07) — review of this pass's own fixes (items 290–316)
+
+A multi-agent review of the 27 commits of items 290–316, each finding checked by a second agent trying to refute it, found these (10 introduced by those fixes, 1 older). Most severe first.
+
+- [x] 317. Reports scale an edited order by a stale base/total ratio: editing an order's items changes its total but not its base total, and the reports (item 291) now convert with base/total. (backend fix; no UI change)
+  - Editing an order's items (`orderItemsEdit`) writes the base total with the new total (fxService.baseFieldsFor, as the upsell join and the payment-method switch do), and, found beside it, re-prices like the upsell join: a tax-exempt order stays at tax 0, and the payment method's fee or discount is worked out again instead of being dropped from the total.
+  - Orders edited before this keep their old base total (pre-launch data; no backfill).
+  - Checked (14% VAT): 1 → 3 units: total 3420, base 3420 (before: base stayed 1140); a tax-exempt order edited → tax 0, base = total.
+- [ ] 318. Forwarding to a supplier (item 307) held a database connection and an open transaction for the whole remote call, and the new HTTP helper (item 309) had no whole-exchange deadline; it also no longer stripped a UTF-8 BOM before reading JSON (some WooCommerce stores send one).
+- [ ] 319. Payments: the afterCommit hook that closes cancelled attempts at the gateway (item 300) returned its promise, so commit waited on Stripe; cancelling open attempts dropped the status guard on its update (could overwrite an attempt that just failed).
+- [ ] 320. Gateway refunds keyed by our refund row (item 299) lost the per-minute double-submit protection: a refund form sent twice makes two refunds. Accept an Idempotency-Key on the refund request.
+- [ ] 321. Purchase limits (item 313): an upsell joining an order was checked against every product of the order (a free gift or an unrelated line could refuse it); a funnel add-on order placed as its own follow-on order failed the per-order minimum on its own.
+- [ ] 322. Checkout sessions (item 302) kept a funnel / website from an earlier save after the visitor moved to another checkout.
+- [ ] 323. Bulk update (item 297): a number cell of an .xlsx computed by a formula (249.4999999…) is refused for having too many decimals; number cells should be rounded, typed text still checked.
+- [ ] 324. Customer merge (older): when the merge changes consent, email or the blacklist, Mailchimp / Klaviyo are not told (no contact.updated).
+
