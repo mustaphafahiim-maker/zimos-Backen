@@ -87,12 +87,17 @@ async function recordRefundTransaction(account, tx) {
       transaction,
     });
     if (existing) return null;
+    // Never more than is left of the payment: a lost chargeback (item 377) may already count this money,
+    // when the gateway also reports it as a refund.
+    const refunded = Number((await db.Refund.sum('amount', { where: { paymentId: payment.id, status: 'processed' }, transaction })) || 0);
+    const counted = Math.min(Number(amount), Math.max(0, Number(payment.amount) - refunded));
+    if (counted <= 0) return false;
     const row = await db.Refund.create(
       {
         workspaceId: account.workspaceId,
         orderId: payment.orderId,
         paymentId: payment.id,
-        amount,
+        amount: counted,
         reason: 'Refunded in the gateway dashboard',
         status: 'pending',
         source: 'gateway',
@@ -103,7 +108,7 @@ async function recordRefundTransaction(account, tx) {
     await paymentService.applyProcessedRefund(account.workspaceId, row, null, transaction);
     return row;
   });
-  return { outcome: created ? 'gateway_refund_recorded' : 'duplicate', ...ids };
+  return { outcome: created ? 'gateway_refund_recorded' : created === false ? 'gateway_refund_already_counted' : 'duplicate', ...ids };
 }
 
 /**

@@ -54,7 +54,7 @@ module.exports = {
   async inquireTransaction(creds, { transactionId, payment }) -> transaction | null,
   async refund(creds, { payment, amount, settings })
       -> { status: 'processed'|'pending'|'failed', providerRefundReference, failureReason, failureCode? },
-  parseWebhook({ query, body, headers }, creds) -> null | { valid, eventKey, transaction, payload },
+  parseWebhook({ query, body, headers, rawBody }, creds) -> null | { valid, eventKey, transaction, payload },  // may be async
   parseRedirect(query, creds)                   -> null | { valid, eventKey, transaction, payload },
 };
 ```
@@ -63,7 +63,7 @@ module.exports = {
 
 ```js
 {
-  kind: 'payment' | 'refund' | 'void',
+  kind: 'payment' | 'refund' | 'void' | 'dispute',
   status,                 // payment: 'paid' | 'failed' | 'pending'; refund/void: 'processed' | 'failed' | 'pending'
   transactionId,          // the gateway's id for this transaction
   parentTransactionId,    // the payment a refund/void belongs to, or null
@@ -130,7 +130,7 @@ back asks the gateway (`inquire`) and the payments sweep settles anything left.
 | Currencies | USD EUR GBP EGP SAR AED MAD QAR CAD AUD TRY | USD EUR GBP CAD AUD |
 | Payment | Checkout Session, Idempotency-Key = attempt | Orders v2 CAPTURE, PayPal-Request-Id = attempt |
 | Paid when | session `payment_status = paid` | `inquire` captures an APPROVED order (once) |
-| Webhook | `checkout.session.*`, Stripe-Signature over the raw body (5 min tolerance); ignored without a signing secret | not used (verifying needs a call back to PayPal) |
+| Webhook | `checkout.session.*`, refunds (`charge.refunded`, `charge.refund.updated`, `refund.*`) and `charge.dispute.*`; Stripe-Signature over the raw body (5 min tolerance); ignored without a signing secret | `PAYMENT.CAPTURE.REFUNDED` and `CUSTOMER.DISPUTE.*` only; the refund or dispute is fetched from PayPal by its id with the merchant's keys (the body is never believed) |
 | Refund | `/v1/refunds` on the payment intent | `/v2/payments/captures/:id/refund` |
 
 `expressFor(method, settings)` (optional): `{ wallets: [...] }` marks a method
@@ -159,3 +159,22 @@ duplicate-request key, so two refunds of the same amount stay two.
   gateway again and gets the normalized transaction (same shape as `parseWebhook`'s `transaction`).
   Used when the adapter has no `normalizeTransaction`.
 
+
+### Refunds made in the gateway and disputes (item 377)
+
+- **Refunds**: a refund webhook returns the normalized `transaction` with `kind: 'refund'` and
+  `parentTransactionId` = the id stored as `Payment.providerTransactionId` (Stripe: the payment intent; PayPal:
+  the capture). `gatewayRefundService.recordRefundTransaction` settles our own refund or records one made in the
+  gateway's dashboard (source `gateway`), never more than what is left of the payment.
+- **Disputes**: `kind: 'dispute'`, with `transactionId` = the gateway's dispute id, `parentTransactionId` as
+  above, `status` one of `inquiry | needs_response | under_review | won | lost | closed`, `providerStatus`,
+  `amount`, `currency`, `reason`, `evidenceDueBy`, `openedAt`. `../disputeService.js` keeps one
+  `payment_disputes` row per dispute (migration 511), flags the order (`payment_disputed`, then
+  `chargeback_lost` when lost — a courier is not booked while either is set), writes a `chargeback` refund for a
+  lost one, an audit row on the order and a `payment.disputed` notification. `eventKey` includes the status, so
+  each move is processed once.
+- An adapter that confirms a webhook by asking the gateway (PayPal) may make `parseWebhook` async. When the
+  gateway cannot be asked, it returns `{ valid: true, transaction: null, payload }`: the event is stored
+  unprocessed and the sweep calls `refetchTransaction(creds, payload)` for it.
+- Sandbox: the `sandbox` gateway does not report disputes; try them with Stripe test keys
+  (card 4000 0000 0000 0259) and a webhook endpoint, or PayPal's sandbox dispute simulator.

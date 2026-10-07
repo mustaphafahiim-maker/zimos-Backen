@@ -253,6 +253,8 @@ function assertConfirmedOrPaid(order) {
   if ((order.riskFlags || []).includes('test_payment')) {
     throw new AppError('ORDER_TEST_PAYMENT', 'This order was paid in test mode and cannot be shipped', 409);
   }
+  // A disputed or charged-back card payment (item 377): reviewed before it ships.
+  require('../payments/disputeService').assertNotDisputed(order);
 }
 
 function assertReadyToShip(order) {

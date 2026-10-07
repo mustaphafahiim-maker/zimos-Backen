@@ -25,7 +25,7 @@ const notify = require('./notify');
 
 const CHANNELS = ['inApp', 'email', 'push', 'whatsapp'];
 // Push (notifications/push) is on by default for what needs a quick look; off for the rest.
-const PUSH_ON = new Set(['order.new', 'order.suspicious', 'integration.failed', 'export.ready', 'shipping.batch_done', 'automation', 'plan.limit_reached']);
+const PUSH_ON = new Set(['order.new', 'order.suspicious', 'integration.failed', 'export.ready', 'shipping.batch_done', 'automation', 'plan.limit_reached', 'payment.disputed']);
 
 /**
  * type → the permission needed to receive it (null = every teammate) and
@@ -53,6 +53,8 @@ const TYPES = Object.freeze({
   'product.question': { permission: PERMISSIONS.PRODUCTS_MANAGE, defaults: { inApp: true, email: false } },
   // Stock lots about to expire (stockLots/, item 230).
   'stock.lot_expiring': { permission: PERMISSIONS.INVENTORY_VIEW, defaults: { inApp: true, email: true } },
+  // A card payment was disputed, or its dispute moved (payments/disputeService.js, item 377).
+  'payment.disputed': { permission: PERMISSIONS.REFUNDS_MANAGE, defaults: { inApp: true, email: true } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 

@@ -13,9 +13,13 @@ const { GatewayAuthError, GatewayRejectedError, GatewayError, sanitizeGatewayMes
  *
  * - Credentials: a REST app's client id + secret. Sandbox or live is found by
  *   trying both and kept with the credentials (`environment`).
- * - The redirect carries nothing signed, and PayPal webhooks are verified
- *   only by calling PayPal back, which parseWebhook (synchronous) cannot do:
- *   both are left to `inquire`.
+ * - The redirect carries nothing signed: the payment is left to `inquire`.
+ * - Webhooks (item 377) carry refunds made in PayPal (PAYMENT.CAPTURE.REFUNDED)
+ *   and disputes (CUSTOMER.DISPUTE.*). Only the id is taken from the body:
+ *   parseWebhook asks PayPal for that refund or dispute with the merchant's
+ *   own keys, so a forged call can name only something PayPal shows this
+ *   merchant. When PayPal cannot be reached the event is stored unconfirmed
+ *   and the payments sweep asks again (refetchTransaction).
  *
  * PAYPAL_API_BASE overrides the PayPal host (a mock, outside production).
  */
@@ -47,15 +51,19 @@ const setupSteps = {
     'In developer.paypal.com open Apps & Credentials, pick Sandbox (to try) or Live (to sell), and create an app.',
     'Copy its Client ID and Secret here. We detect whether they are sandbox or live keys.',
     'PayPal shows as an express button at checkout for orders in USD, EUR, GBP, CAD or AUD.',
+    'Recommended: in the same app, under Webhooks, add the webhook URL below for Payment capture refunded and the Customer dispute events, so refunds made in PayPal and disputes reach ZIMOS.',
   ],
   ar: [
     'من developer.paypal.com افتح Apps & Credentials، اختار Sandbox (للتجربة) أو Live (للبيع)، واعمل App.',
     'انسخ الـ Client ID والـ Secret هنا. إحنا بنعرف لوحدنا إذا كانوا مفاتيح تجربة ولا حقيقية.',
     'PayPal بيظهر كزرار دفع سريع في الطلبات بالدولار أو اليورو أو الجنيه الإسترليني أو الدولار الكندي أو الأسترالي.',
+    'مهم: في نفس الـ App، من Webhooks، ضيف رابط الـ Webhook اللي تحت لأحداث Payment capture refunded وأحداث Customer dispute، عشان الاسترجاعات اللي بتتعمل من PayPal والنزاعات توصل لـ ZIMOS.',
   ],
 };
 const helpLinks = [{ label: bi('PayPal apps & credentials', 'تطبيقات ومفاتيح PayPal'), url: 'https://developer.paypal.com/dashboard/applications' }];
-const webhookSetup = { field: 'Webhook URL', perIntegration: false, automatic: true };
+const WEBHOOK_EVENTS = ['PAYMENT.CAPTURE.REFUNDED', 'CUSTOMER.DISPUTE.CREATED', 'CUSTOMER.DISPUTE.UPDATED', 'CUSTOMER.DISPUTE.RESOLVED'];
+// Payments need no webhook (inquire captures them); refunds made in PayPal and disputes do (item 377).
+const webhookSetup = { field: 'Webhook URL', perIntegration: false, automatic: false, events: WEBHOOK_EVENTS };
 
 const modeFromCredentials = (creds) => (creds && creds.environment === 'live' ? 'live' : 'test');
 const availableMethods = () => METHODS;
@@ -267,8 +275,88 @@ async function refund(creds, { payment, amount, refundId = null }) {
   return { status, providerRefundReference: r.id || null, failureReason: status === 'failed' ? 'PayPal refused the refund' : null };
 }
 
-// See the header: settled by inquire, never on an unchecked callback.
-const parseWebhook = () => null;
+/** A PayPal refund → the normalized refund transaction; its parent is the capture (our providerTransactionId). */
+function fromRefund(r) {
+  const up = (r.links || []).find((l) => l.rel === 'up' && /\/captures\//.test(String(l.href || '')));
+  const status = r.status === 'COMPLETED' ? 'processed' : ['FAILED', 'CANCELLED'].includes(r.status) ? 'failed' : 'pending';
+  return {
+    kind: 'refund', status, transactionId: String(r.id),
+    parentTransactionId: up ? decodeURIComponent(String(up.href).split('/captures/')[1].split(/[/?#]/)[0]) : null,
+    providerOrderId: null,
+    amount: minor(r.amount && r.amount.value), currency: r.amount ? String(r.amount.currency_code || '') : null,
+    maskedDisplay: 'PayPal', failureReason: status === 'failed' ? 'PayPal refused the refund' : null,
+  };
+}
+
+// The outcome of a resolved PayPal dispute → ours (disputeService.STATUSES).
+const SELLER_WON = ['RESOLVED_SELLER_FAVOUR', 'DENIED'];
+const BUYER_WON = ['RESOLVED_BUYER_FAVOUR', 'RESOLVED_WITH_PAYOUT', 'ACCEPTED', 'REFUNDED'];
+
+/** A PayPal dispute → the normalized dispute transaction; its parent is the disputed capture. */
+function fromDispute(d) {
+  let status;
+  if (d.status === 'RESOLVED') {
+    const outcome = d.dispute_outcome && d.dispute_outcome.outcome_code;
+    status = SELLER_WON.includes(outcome) ? 'won' : BUYER_WON.includes(outcome) ? 'lost' : 'closed';
+  } else if (d.dispute_life_cycle_stage === 'INQUIRY' && d.status !== 'UNDER_REVIEW') status = 'inquiry';
+  else if (['UNDER_REVIEW', 'WAITING_FOR_BUYER_RESPONSE'].includes(d.status)) status = 'under_review';
+  else status = 'needs_response';
+  const disputed = (d.disputed_transactions || [])[0] || {};
+  const amount = d.dispute_amount || {};
+  return {
+    kind: 'dispute', status,
+    providerStatus: [d.dispute_life_cycle_stage, d.status, d.dispute_outcome && d.dispute_outcome.outcome_code].filter(Boolean).join(' ').slice(0, 60) || null,
+    transactionId: String(d.dispute_id),
+    parentTransactionId: disputed.seller_transaction_id ? String(disputed.seller_transaction_id) : null,
+    providerOrderId: null,
+    amount: minor(amount.value), currency: amount.currency_code ? String(amount.currency_code) : null,
+    reason: d.reason || null,
+    evidenceDueBy: d.seller_response_due_date ? new Date(d.seller_response_due_date) : null,
+    openedAt: d.create_time ? new Date(d.create_time) : null,
+    maskedDisplay: 'PayPal', failureReason: null,
+  };
+}
+
+/** PayPal's own answer about a refund or dispute named by a webhook; null when PayPal does not know it. */
+async function refetchTransaction(creds, payload) {
+  const ask = async (path, what, normalize) => {
+    const res = await call(creds, 'GET', path, { what }).catch((err) => {
+      if (err.notFound) return null;
+      throw err;
+    });
+    return res ? normalize(res) : null;
+  };
+  if (payload && payload.refund) return ask(`/v2/payments/refunds/${encodeURIComponent(payload.refund)}`, 'the refund', fromRefund);
+  if (payload && payload.dispute) return ask(`/v1/customer/disputes/${encodeURIComponent(payload.dispute)}`, 'the dispute', fromDispute);
+  return null;
+}
+
+/**
+ * Refund and dispute webhooks (item 377). Nothing in the body is believed but the id: PayPal is asked.
+ * Async — the webhook route awaits it. Never throws.
+ */
+async function parseWebhook({ body }, creds) {
+  try {
+    if (!body || typeof body !== 'object' || !WEBHOOK_EVENTS.includes(body.event_type)) return null;
+    const resource = body.resource || {};
+    const ask = body.event_type === 'PAYMENT.CAPTURE.REFUNDED' ? { refund: resource.id } : { dispute: resource.dispute_id };
+    const id = String(ask.refund || ask.dispute || '');
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) return null;
+    const what = ask.refund ? 'refund' : 'dispute';
+    const payload = { id: body.id ? String(body.id).slice(0, 100) : null, type: body.event_type, [what]: id };
+    let transaction;
+    try {
+      transaction = await refetchTransaction(creds, payload);
+    } catch {
+      // PayPal could not be asked now: stored unconfirmed, the sweep asks again (never acted on as sent).
+      return { valid: true, eventKey: `paypal:${what}:${id}:unconfirmed`, transaction: null, payload };
+    }
+    if (!transaction) return null; // PayPal does not show this merchant such a refund or dispute
+    return { valid: true, eventKey: `paypal:${what}:${id}:${transaction.status}`, transaction, payload };
+  } catch {
+    return null;
+  }
+}
 const parseRedirect = () => null;
 
 module.exports = {
@@ -292,6 +380,7 @@ module.exports = {
   inquireTransaction,
   inquireRefund,
   refund,
+  refetchTransaction,
   parseWebhook,
   parseRedirect,
 };

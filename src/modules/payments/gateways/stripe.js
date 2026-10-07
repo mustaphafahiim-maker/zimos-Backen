@@ -15,8 +15,9 @@ const { GatewayAuthError, GatewayRejectedError, GatewayError, sanitizeGatewayMes
  * - createPayment: a Checkout Session for the attempt's amount (idempotent on
  *   the attempt id). providerOrderId = the session id.
  * - The redirect back is not signed, so parseRedirect is null and the return
- *   asks Stripe (inquire). Webhooks (checkout.session.*) are checked with the
- *   endpoint's signing secret when the merchant adds one.
+ *   asks Stripe (inquire). Webhooks (checkout.session.*, refunds and
+ *   charge.dispute.*, item 377) are checked with the endpoint's signing
+ *   secret when the merchant adds one.
  * - Test or live is in the key itself (sk_test_ / sk_live_).
  *
  * STRIPE_API_BASE overrides https://api.stripe.com (a mock, outside production).
@@ -48,17 +49,23 @@ const settingFields = [{ key: 'expressWallets', method: 'card', type: 'boolean',
 const setupSteps = {
   en: [
     'In your Stripe dashboard open Developers → API keys and copy the secret key (sk_test_… to try, sk_live_… to sell).',
-    'Optional: in Developers → Webhooks add the webhook URL below for the checkout.session events, and paste its signing secret.',
+    'Recommended: in Developers → Webhooks add the webhook URL below for the checkout.session, refund and charge.dispute events listed, and paste its signing secret. Without it, refunds made in Stripe and card disputes do not reach ZIMOS.',
     'Apple Pay and Google Pay appear on Stripe\'s page by themselves on devices that have them.',
   ],
   ar: [
     'من لوحة Stripe افتح Developers ← API keys وانسخ المفتاح السري (sk_test_… للتجربة، sk_live_… للبيع).',
-    'اختياري: من Developers ← Webhooks ضيف رابط الـ Webhook اللي تحت لأحداث checkout.session، والصق مفتاح التوقيع.',
+    'مهم: من Developers ← Webhooks ضيف رابط الـ Webhook اللي تحت لأحداث checkout.session والـ refund والـ charge.dispute اللي تحت، والصق مفتاح التوقيع. من غيره، الاسترجاعات اللي بتتعمل من Stripe والنزاعات على الدفع مش هتوصل لـ ZIMOS.',
     'Apple Pay وGoogle Pay بيظهروا لوحدهم في صفحة Stripe على الأجهزة اللي فيها.',
   ],
 };
 const helpLinks = [{ label: bi('Stripe API keys', 'مفاتيح Stripe'), url: 'https://dashboard.stripe.com/apikeys' }];
-const webhookSetup = { field: 'Webhook endpoint URL', perIntegration: false, automatic: false };
+const webhookSetup = {
+  field: 'Webhook endpoint URL',
+  perIntegration: false,
+  automatic: false,
+  // What to tick in Stripe → Developers → Webhooks (item 377 added refunds and disputes).
+  events: ['checkout.session.completed', 'checkout.session.async_payment_succeeded', 'checkout.session.async_payment_failed', 'checkout.session.expired', 'charge.refunded', 'charge.refund.updated', 'refund.created', 'refund.updated', 'refund.failed', 'charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed'],
+};
 
 const auth = (creds) => ({ authorization: `Bearer ${creds.secretKey}` });
 const modeFromCredentials = (creds) => (/^(sk|rk)_live_/.test(String(creds && creds.secretKey)) ? 'live' : 'test');
@@ -206,14 +213,87 @@ function signatureValid(raw, header, secret) {
 }
 
 const SESSION_EVENTS = ['checkout.session.completed', 'checkout.session.async_payment_succeeded', 'checkout.session.async_payment_failed', 'checkout.session.expired'];
+// Refunds made in the Stripe dashboard, and the outcome of ours (item 377).
+const REFUND_EVENTS = ['charge.refunded', 'charge.refund.updated', 'refund.created', 'refund.updated', 'refund.failed'];
+// Card disputes and chargebacks (item 377; payments/disputeService.js).
+const DISPUTE_EVENTS = ['charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed', 'charge.dispute.funds_withdrawn', 'charge.dispute.funds_reinstated'];
+const WEBHOOK_EVENTS = [...SESSION_EVENTS, ...REFUND_EVENTS, ...DISPUTE_EVENTS];
+
+const idOf = (v) => (v && typeof v === 'object' ? v.id : v) || null;
+
+/** A Stripe refund (re_…) → the normalized refund transaction; its parent is the payment intent we keep. */
+function fromRefund(r) {
+  const status = r.status === 'succeeded' ? 'processed' : r.status === 'failed' || r.status === 'canceled' ? 'failed' : 'pending';
+  return {
+    kind: 'refund',
+    status,
+    transactionId: String(r.id),
+    parentTransactionId: idOf(r.payment_intent),
+    providerOrderId: null,
+    amount: Number(r.amount),
+    currency: String(r.currency || '').toUpperCase(),
+    maskedDisplay: null,
+    failureReason: status === 'failed' ? r.failure_reason || 'Refund failed' : null,
+  };
+}
+
+// Stripe's dispute statuses → ours (disputeService.STATUSES). warning_* are inquiries: no money moved yet.
+const DISPUTE_STATUS = {
+  warning_needs_response: 'inquiry',
+  warning_under_review: 'inquiry',
+  warning_closed: 'closed',
+  needs_response: 'needs_response',
+  under_review: 'under_review',
+  won: 'won',
+  lost: 'lost',
+  prevented: 'closed',
+};
+
+/** A Stripe dispute (dp_…) → the normalized dispute transaction. */
+function fromDispute(d) {
+  const due = d.evidence_details && d.evidence_details.due_by;
+  return {
+    kind: 'dispute',
+    status: DISPUTE_STATUS[d.status] || 'needs_response',
+    providerStatus: d.status || null,
+    transactionId: String(d.id),
+    parentTransactionId: idOf(d.payment_intent),
+    providerOrderId: null,
+    amount: Number(d.amount),
+    currency: String(d.currency || '').toUpperCase(),
+    reason: d.reason || null,
+    evidenceDueBy: due ? new Date(Number(due) * 1000) : null,
+    openedAt: d.created ? new Date(Number(d.created) * 1000) : null,
+    maskedDisplay: null,
+    failureReason: null,
+  };
+}
+
+/** The refund a charge.refunded event is about: the newest in its list (Stripe leaves the list out on newer API versions; refund.created covers those). */
+function refundOfCharge(charge) {
+  const list = (charge.refunds && Array.isArray(charge.refunds.data) ? charge.refunds.data : []).slice().sort((a, b) => Number(b.created || 0) - Number(a.created || 0));
+  if (!list[0]) return null;
+  return { ...list[0], payment_intent: list[0].payment_intent || charge.payment_intent };
+}
 
 function parseWebhook({ body, headers, rawBody }, creds) {
   try {
-    if (!body || typeof body !== 'object' || !SESSION_EVENTS.includes(body.type)) return null;
+    if (!body || typeof body !== 'object' || !WEBHOOK_EVENTS.includes(body.type)) return null;
     // No signing secret saved: Stripe's word cannot be checked, so the return and the sweep ask Stripe instead.
     if (!creds.webhookSecret) return null;
     const raw = Buffer.isBuffer(rawBody) ? rawBody.toString('utf8') : typeof rawBody === 'string' ? rawBody : '';
     const valid = Boolean(raw) && signatureValid(raw, headers && headers['stripe-signature'], creds.webhookSecret);
+    const object = (body.data && body.data.object) || {};
+    if (DISPUTE_EVENTS.includes(body.type)) {
+      const transaction = fromDispute(object);
+      return { valid, eventKey: `stripe:dispute:${object.id}:${transaction.status}`, transaction, payload: { id: body.id, type: body.type, dispute: object.id } };
+    }
+    if (REFUND_EVENTS.includes(body.type)) {
+      const r = body.type === 'charge.refunded' ? refundOfCharge(object) : object;
+      if (!r || !r.id) return null;
+      const transaction = fromRefund(r);
+      return { valid, eventKey: `stripe:refund:${r.id}:${transaction.status}`, transaction, payload: { id: body.id, type: body.type, refund: r.id } };
+    }
     const session = (body.data && body.data.object) || {};
     if (body.type === 'checkout.session.async_payment_failed') session.async_failed = true;
     const transaction = fromSession(session);
@@ -233,6 +313,8 @@ async function cancelPayment(creds, { payment }) {
 
 /** The sweep's retry of a stored event (item 300): Stripe's own answer about the session, asked again. */
 async function refetchTransaction(creds, payload) {
+  if (payload && payload.refund) return fromRefund(await call(creds, 'GET', `/v1/refunds/${encodeURIComponent(payload.refund)}`, { what: 'the refund' }));
+  if (payload && payload.dispute) return fromDispute(await call(creds, 'GET', `/v1/disputes/${encodeURIComponent(payload.dispute)}`, { what: 'the dispute' }));
   if (!payload || !payload.session) return null;
   const session = await call(creds, 'GET', `/v1/checkout/sessions/${encodeURIComponent(payload.session)}?expand[]=payment_intent.latest_charge`, { what: 'the payment' });
   return fromSession(session);

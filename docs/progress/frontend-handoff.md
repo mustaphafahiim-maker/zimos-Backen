@@ -4457,3 +4457,35 @@ A path (edge) between funnel steps can now also check the order the visitor plac
   - A priority control (up / down) on the paths leaving a step, since the first matching path wins.
 - Issues panel: the condition messages above, pointing at the path.
 - No settings.
+
+## 377. Card disputes, chargebacks and refunds made in Stripe or PayPal — UI: pending
+
+When a shopper who paid by card (Stripe, Apple Pay / Google Pay through Stripe, or PayPal) opens a dispute with their bank or PayPal, ZIMOS now records it on the order, flags the order so it is not shipped by mistake, and tells the team. A dispute lost writes the money back as a refund (source `chargeback`). Refunds the merchant makes in the Stripe or PayPal dashboard now show on the order like refunds made here. The merchant still answers the dispute (uploads evidence) in Stripe or PayPal; ZIMOS links there.
+
+### Settings → Payments → Stripe / PayPal (`workspace.manage`)
+- **GET `/api/v1/workspaces/:workspaceId/payments/gateways`**: `webhookSetup` now carries `events`, the list to tick in the gateway, and PayPal's `automatic` is now `false` (its webhook URL must be added by hand):
+  `{ "code": "stripe", "webhookSetup": { "field": "Webhook endpoint URL", "perIntegration": false, "automatic": false, "events": ["checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "checkout.session.expired", "charge.refunded", "charge.refund.updated", "refund.created", "refund.updated", "refund.failed", "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed"] }, "connection": { "webhookUrl": "https://…/api/v1/webhooks/payments/stripe/<token>", … } }`
+  `{ "code": "paypal", "webhookSetup": { "field": "Webhook URL", "perIntegration": false, "automatic": false, "events": ["PAYMENT.CAPTURE.REFUNDED", "CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.UPDATED", "CUSTOMER.DISPUTE.RESOLVED"] } }`
+- Show the webhook URL with a copy button and the events as a checklist under it: «فعّل الأحداث دي في الـ Webhook» / "Turn on these events for the webhook". `setupSteps` (already rendered) say why. For Stripe, without the signing secret nothing arrives: next to an empty `webhookSecret` show «من غير مفتاح التوقيع، الاسترجاعات والنزاعات اللي بتحصل في Stripe مش هتوصل» / "Without the signing secret, refunds and disputes from Stripe won't reach ZIMOS".
+
+### Disputes list (`orders.view`)
+- **GET `/api/v1/workspaces/:workspaceId/payment-disputes?status=open&orderId=&limit=50&cursor=`** — `status` is `open` (inquiry + needs_response + under_review) or one status; newest first:
+  `{ "disputes": [ { "id": "…", "orderId": "…", "orderNumber": "1042", "paymentId": "…", "providerCode": "stripe", "providerDisputeId": "dp_1Q…", "status": "needs_response", "providerStatus": "needs_response", "amount": 100000, "currency": "EGP", "reason": "fraudulent", "evidenceDueBy": "2026-10-14T13:55:22.000Z", "openedAt": "2026-10-07T13:55:22.000Z", "closedAt": null, "refundId": null, "createdAt": "…", "updatedAt": "…" } ], "openCount": 1, "nextCursor": null }`
+- Statuses: `inquiry` «استفسار» / "Inquiry" (no money taken yet), `needs_response` «محتاج ردك» / "Needs your response", `under_review` «تحت المراجعة» / "Under review", `won` «كسبته» / "Won", `lost` «خسرته» / "Lost", `closed` «اتقفل» / "Closed". Amounts in minor units. `reason` is the gateway's code (Stripe: `fraudulent`, `product_not_received`, `duplicate`, `subscription_canceled`, `general`…; PayPal: `UNAUTHORISED`, `MERCHANDISE_OR_SERVICE_NOT_RECEIVED`…): show it humanised, e.g. `fraudulent` «العميل بيقول إنه ما عملش الدفعة» / "Customer says they didn't make this payment", `product_not_received` «العميل بيقول إن الطلب ما وصلوش» / "Customer says the order never arrived", anything else «سبب تاني ({reason})» / "Other reason ({reason})".
+- Errors: 422 `VALIDATION_ERROR` on a bad `status` / `orderId`.
+
+### Order page (`orders.view`)
+- **GET `/orders/:orderId/payment-timeline`** has a new `disputes` array (same shape as above, oldest first), and `alerts` can now hold `payment_disputed` and `chargeback_lost` next to the existing payment alerts.
+- Payment card banner, per dispute:
+  - open: «فيه نزاع على الدفعة دي ({amount}) — آخر ميعاد للرد {evidenceDueBy}» / "This payment is disputed ({amount}) — respond by {evidenceDueBy}", button «رد من لوحة {Stripe|PayPal}» / "Respond in {Stripe|PayPal}" linking to `https://dashboard.stripe.com/disputes/{providerDisputeId}` (test keys: `https://dashboard.stripe.com/test/disputes/{providerDisputeId}`) or `https://www.paypal.com/resolutioncenter`.
+  - won: «النزاع اتقفل لصالحك» / "Dispute closed in your favour"; closed (inquiry): «الاستفسار اتقفل من غير خصم» / "Inquiry closed, nothing was taken".
+  - lost: «خسرت النزاع — البنك رجّع {amount} للعميل» / "Dispute lost — the bank returned {amount} to the customer". The refund list shows that refund with `source: "chargeback"`: label «رد بنكي (Chargeback)» / "Chargeback"; a refund with `source: "gateway"`: «اترجع من لوحة {gateway}» / "Refunded in {gateway}".
+- Order timeline (GET `/orders/:orderId/timeline`): an `audit` event with `data.action: "order.payment_dispute"`, `actor.type: "system"`, `data.before: { "status": "needs_response" } | null`, `data.after: { "status": "lost", "amount": 100000, "providerCode": "stripe" }`: «نزاع على الدفعة: {status}» / "Payment dispute: {status}".
+- Shipping: booking a courier or adding a shipment on a flagged order answers 409 `ORDER_PAYMENT_DISPUTED`: «الدفع بالبطاقة عليه نزاع أو اترجع من البنك — راجع الطلب قبل ما تشحنه» / "This card payment is disputed or was charged back — review the order before shipping it". The existing "approve flagged order" action (fraud review) clears the flag if the merchant still wants to ship; show it in that error with «اشحن برضه» / "Ship anyway".
+- Orders list: the flags show with the other risk flags: `payment_disputed` «عليه نزاع» / "Disputed", `chargeback_lost` «اترجع من البنك» / "Charged back".
+
+### Notifications
+- New type **`payment.disputed`** (to teammates with `refunds.manage`; in-app, email and push on by default) in the bell and in the notification settings matrix: «نزاعات على الدفع» / "Payment disputes". `data`: `{ "orderId", "orderNumber", "disputeId", "status", "amount", "currency", "providerCode", "evidenceDueBy" }`; `link`: `/orders/:orderId`. Titles come localised (e.g. «نزاع على دفعة بالبطاقة — محتاج ردك» / "Card payment disputed — your response is needed").
+
+### Dashboard home (optional)
+- A card when `openCount > 0` from `GET /payment-disputes?status=open&limit=5`: «{openCount} نزاع مفتوح على الدفع» / "{openCount} open payment disputes", each row with the order number, amount and deadline.

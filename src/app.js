@@ -264,6 +264,8 @@ v1.use('/workspaces/:workspaceId/manual-transfers', require('./modules/payments/
 // The store's InstaPay / wallet methods and the shoppers' screenshot proofs (manualPayments, item 340).
 v1.use('/workspaces/:workspaceId/manual-payments', require('./modules/manualPayments/manualPaymentRoutes'));
 v1.use('/workspaces/:workspaceId/payment-rules', require('./modules/payments/paymentRulesRoutes'));
+// Card disputes and chargebacks reported by Stripe and PayPal (item 377).
+v1.use('/workspaces/:workspaceId/payment-disputes', require('./modules/payments/disputeRoutes'));
 v1.use('/workspaces/:workspaceId/currencies', require('./modules/currencies/currencyRoutes'));
 v1.use('/workspaces/:workspaceId/saved-payment-methods', require('./modules/payments/savedMethods/savedMethodRoutes'));
 v1.use('/workspaces/:workspaceId/server-pixels', appGate.requireAppForChanges('tracking_pixels'), serverPixelsRoutes.staff);

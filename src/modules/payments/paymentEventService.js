@@ -60,7 +60,11 @@ async function insertEvent(account, parsed, source) {
 /** Routes one stored event to the code that acts on it. */
 async function dispatch(account, transaction) {
   const online = require('./onlinePaymentService');
+  // A webhook the gateway could not be asked about yet (PayPal, item 377): the sweep asks again.
+  if (!transaction) throw new Error('The gateway has not confirmed this event yet');
   if (transaction.kind === 'payment') return online.recordPaymentTransaction(account, transaction);
+  // Card disputes and chargebacks (item 377).
+  if (transaction.kind === 'dispute') return require('./disputeService').recordDisputeTransaction(account, transaction);
   return require('./gatewayRefundService').recordRefundTransaction(account, transaction);
 }
 
@@ -171,7 +175,8 @@ async function acceptWebhook(code, token, req) {
   const account = await accounts.findByWebhookToken(code, token);
   if (!account) throw new NotFoundError('Webhook');
 
-  const parsed = adapter.parseWebhook({ query: req.query || {}, body: req.body, headers: req.headers || {}, rawBody: req.rawBody }, account.credentials);
+  // Awaited: an adapter may confirm the event with the gateway first (PayPal, item 377).
+  const parsed = await adapter.parseWebhook({ query: req.query || {}, body: req.body, headers: req.headers || {}, rawBody: req.rawBody }, account.credentials);
   if (!parsed) return { statusCode: 200, body: { received: true, ignored: true } };
   if (!parsed.valid) {
     // Never log the received or expected signature.

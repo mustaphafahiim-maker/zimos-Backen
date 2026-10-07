@@ -118,7 +118,8 @@ async function sweep({ limit = 50, maxPasses = 20 } = {}) {
 
 // ------------------------------------------------------------ merchant side
 
-const PAYMENT_FLAGS = Object.values(online.FLAGS);
+// With the card-dispute flags (item 377, disputeService.js).
+const PAYMENT_FLAGS = [...Object.values(online.FLAGS), ...Object.values(require('./disputeService').FLAGS)];
 
 /**
  * Everything about an order's money, for the order page: every attempt, every
@@ -129,7 +130,7 @@ async function timeline(workspaceId, orderId) {
   const order = await db.Order.findOne({ where: { id: orderId, workspaceId } });
   if (!order) throw new NotFoundError('Order');
 
-  const [attempts, eventRows, refundRows] = await Promise.all([
+  const [attempts, eventRows, refundRows, disputes] = await Promise.all([
     db.Payment.findAll({ where: { orderId: order.id, workspaceId }, order: [['createdAt', 'ASC']] }),
     db.PaymentEvent.findAll({
       where: { orderId: order.id, workspaceId },
@@ -148,6 +149,7 @@ async function timeline(workspaceId, orderId) {
       order: [['createdAt', 'ASC']],
     }),
     db.Refund.findAll({ where: { orderId: order.id, workspaceId }, order: [['createdAt', 'ASC']] }),
+    require('./disputeService').forOrder(workspaceId, order.id),
   ]);
 
   const used = new Map();
@@ -179,6 +181,7 @@ async function timeline(workspaceId, orderId) {
     attempts,
     events: eventRows,
     refunds: refundRows,
+    disputes,
   };
 }
 
