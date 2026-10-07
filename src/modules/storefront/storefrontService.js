@@ -111,7 +111,11 @@ async function getStorefront(workspaceId) {
     // what the checkout already enforced before this existed.
     checkout: resolveCheckoutSettings(w),
     // Self delivery: the governorates the store delivers to (null = everywhere, shipping/deliveryAreas.js).
-    delivery: { servedGovernorates: require('../shipping/deliveryAreas').servedGovernorates(w.settings) },
+    delivery: {
+      servedGovernorates: require('../shipping/deliveryAreas').servedGovernorates(w.settings),
+      // Pickup from the store: its address, phone and note, or null while off (shipping/storePickup.js).
+      pickup: require('../shipping/storePickup').publicPickup(w.settings),
+    },
     // What the thank-you page shows after an order (settings.thank_you_page).
     thankYou: resolveThankYouPage(w.settings),
     // Contact details and trust cards (null while switched off), which legal

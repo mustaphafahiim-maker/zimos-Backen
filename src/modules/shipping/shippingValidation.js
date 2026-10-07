@@ -95,6 +95,13 @@ const settingsBody = Joi.object({
     .unique()
     .max(GOVERNORATE_CODES.length)
     .allow(null),
+  // Pickup from the store (storePickup.js); null clears it (= off).
+  storePickup: Joi.object({
+    enabled: Joi.boolean().required(),
+    address: Joi.string().trim().max(300).allow(''),
+    phone: Joi.string().trim().max(32).allow(''),
+    note: Joi.string().trim().max(300).allow(''),
+  }).allow(null),
 }).min(1);
 
 const pricingModeBody = Joi.object({

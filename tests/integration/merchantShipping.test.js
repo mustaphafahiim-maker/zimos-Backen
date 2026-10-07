@@ -281,6 +281,8 @@ describe('GET/PATCH /shipping/settings', () => {
       defaultCarrierCode: null,
       // Self delivery's served governorates (deliveryAreas.js): none = everywhere.
       servedGovernorates: [],
+      // Store pickup (storePickup.js): off.
+      storePickup: { enabled: false, address: '', phone: '', note: '' },
     });
     expect(empty.body.governorates).toHaveLength(27);
 

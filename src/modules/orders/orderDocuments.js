@@ -179,6 +179,8 @@ async function manifestRows(workspaceId, { orderIds, date, carrier } = {}) {
       addressLine: address.addressLine || '',
       addressNotes: address.notes || '',
       courier: s.carrierCode || '',
+      // Collected from the store: on the sheet, but not for a courier.
+      pickup: o.deliveryMethod === 'pickup',
       paymentMethod: o.paymentMethod,
       collectAmount: o.paymentMethod === 'cod' ? codAmountFor(o) : 0,
       currency: o.currency,
@@ -239,14 +241,14 @@ async function manifestPdf(workspaceId, selection = {}) {
       y = header();
     }
     total += r.collectAmount;
-    const place = [r.governorate, r.city].filter(Boolean).join(' - ');
+    const place = r.pickup ? 'PICKUP — collected at the store' : [r.governorate, r.city].filter(Boolean).join(' - ');
     const cells = [
       String(index + 1),
       [r.orderNumber, r.waybill].filter(Boolean).join('\n'),
       r.customerName || '—',
       [r.phone, r.alternatePhone].filter(Boolean).join('\n'),
       [place, r.addressLine, r.addressNotes].filter(Boolean).join('\n'),
-      r.courier,
+      r.pickup ? 'PICKUP' : r.courier,
       r.paymentMethod === 'cod' ? money(r.collectAmount, '') : 'prepaid',
     ];
     let x = left;

@@ -20,6 +20,8 @@ const { GOVERNORATES } = require('./governorates');
  *   served_governorates             [<governorate code>] — the only ones the
  *                                   store delivers to (deliveryAreas.js);
  *                                   absent or empty = everywhere
+ *   store_pickup                    { enabled, address, phone, note } —
+ *                                   pickup from the store (storePickup.js)
  *
  * The first two were already writable through PATCH /workspaces/:id and
  * still are (same keys, same meaning). A key the store never set is absent,
@@ -32,6 +34,7 @@ const KEYS = Object.freeze({
   governorateRates: 'shipping_governorate_rates',
   defaultCarrierCode: 'default_carrier_code',
   servedGovernorates: 'served_governorates',
+  storePickup: 'store_pickup',
 });
 
 const MANUAL = carriers.MANUAL;
@@ -47,6 +50,7 @@ function view(settings) {
     governorateRates: Object.fromEntries(Object.entries(rates).map(([code, value]) => [code, Number(value)])),
     defaultCarrierCode: s[KEYS.defaultCarrierCode] || null,
     servedGovernorates: Array.isArray(s[KEYS.servedGovernorates]) ? [...s[KEYS.servedGovernorates]] : [],
+    storePickup: require('./storePickup').pickupSettings(s),
   };
 }
 

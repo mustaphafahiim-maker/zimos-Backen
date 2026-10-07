@@ -50,7 +50,8 @@ const checkout = asyncHandler(async (req, res) => {
 
   // Per-store required fields (settings.checkout_settings). Checked before any
   // cart work so a rejected checkout costs nothing.
-  assertRequiredCheckoutFields(workspace, req.body);
+  // A pickup order has no address, so the form's address rules do not apply to it.
+  assertRequiredCheckoutFields(workspace, req.body.deliveryMethod === 'pickup' ? { ...req.body, shippingAddress: undefined } : req.body);
 
   // One of the store's manual methods: placed like cash on delivery, unpaid,
   // with a token the shopper's browser uses to send the transfer proof.

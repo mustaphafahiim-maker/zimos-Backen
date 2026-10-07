@@ -9,6 +9,7 @@ const carrierShipmentService = require('../shipping/carrierShipmentService');
 const orderService = require('./orderService');
 const statusHistory = require('./orderStatusHistory');
 const { insertShipment } = require('./shipmentLifecycle');
+const storePickup = require('../shipping/storePickup');
 const {
   setConfirmationState,
   setFulfillmentState,
@@ -159,7 +160,7 @@ async function moveShipment(workspaceId, orderId, from, to, { carrierCode, waybi
         {
           workspaceId,
           orderId: order.id,
-          carrierCode: carrierCode || 'manual',
+          carrierCode: storePickup.isPickup(order) ? storePickup.CARRIER_CODE : carrierCode || 'manual',
           waybillNumber: waybillNumber || null,
           trackingUrl: trackingUrl || null,
           status: 'created',
@@ -190,13 +191,21 @@ async function moveShipment(workspaceId, orderId, from, to, { carrierCode, waybi
  * @returns {Promise<object>} the order, as GET /orders/:id returns it
  */
 async function changeStage(workspaceId, orderId, data, req) {
-  const exists = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id'] });
+  const exists = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'deliveryMethod'] });
   if (!exists) throw new NotFoundError('Order');
 
   const from = await statusHistory.stageOf(orderId);
   const to = data.status;
   if (from === to) throw new AppError('STATUS_UNCHANGED', `This order is already "${to}"`, 409);
   assertManual(from, to);
+  // A pickup order goes from ready straight to delivered: it never rides with a courier.
+  if (storePickup.isPickup(exists) && storePickup.COURIER_STAGES.includes(to)) {
+    throw new AppError('INVALID_STATUS_TRANSITION', `A pickup order is not moved to "${to}"`, 409, {
+      from,
+      to,
+      allowed: nextStages(from).filter((s) => !storePickup.COURIER_STAGES.includes(s)),
+    });
+  }
 
   const reason = data.reason ? data.reason.trim() : null;
   // Read by orderStateService.trackStage: the history row carries the reason.

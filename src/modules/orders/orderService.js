@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
+const storePickup = require('../shipping/storePickup');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
@@ -256,7 +257,10 @@ async function createOrder(
     manualPayment = null,
   } = {}
 ) {
-  const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
+  const { items, contact, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
+  // Store pickup (shipping/storePickup.js): no address and no shipping fee, whatever was sent.
+  const pickup = payload.deliveryMethod === storePickup.METHOD;
+  const shippingAddress = pickup ? null : payload.shippingAddress;
 
   if (!items || items.length === 0) {
     throw new ValidationError([{ field: 'items', message: 'At least one item is required' }]);
@@ -269,6 +273,7 @@ async function createOrder(
   const isTest = orderMeta.isTestRequest(req, workspaceId);
 
   const run = async (transaction) => {
+    if (pickup) await storePickup.assertAvailable(workspaceId, transaction);
     // Chosen now so the reservations below can name the order they hold stock
     // for (inventory/orderStock.js releases exactly what they reserved).
     const orderId = crypto.randomUUID();
@@ -453,7 +458,7 @@ async function createOrder(
     // order in, and not an add-on order that follows another one.
     if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
     // The governorates the store delivers to, when it limits them (shipping/deliveryAreas.js).
-    if (!req.user && !shippingOverride) await require('../shipping/deliveryAreas').assertAreaServed(workspaceId, shippingAddress, transaction);
+    if (!req.user && !shippingOverride && !pickup) await require('../shipping/deliveryAreas').assertAreaServed(workspaceId, shippingAddress, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
@@ -471,8 +476,8 @@ async function createOrder(
       transaction,
     });
     // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
-    const chosenShipping = await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
-    const shippingAmount = chosenShipping ? chosenShipping.amount : shipping.amount;
+    const chosenShipping = pickup ? null : await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
+    const shippingAmount = pickup ? 0 : chosenShipping ? chosenShipping.amount : shipping.amount;
 
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
@@ -501,6 +506,7 @@ async function createOrder(
         totalAmount,
         contactSnapshot: contact,
         shippingAddressSnapshot: shippingAddress || null,
+        deliveryMethod: pickup ? storePickup.METHOD : null,
         discountsSnapshot,
         notes: notes || null,
         riskFlags,
@@ -858,7 +864,7 @@ async function getOrder(workspaceId, orderId) {
     paymentProvider: providers.get(order.id) || null,
     stage,
     // The stages PATCH /orders/:id/status accepts from here (orderStageChange.js).
-    nextStages: nextStages(stage),
+    nextStages: storePickup.isPickup(order) ? nextStages(stage).filter((s) => !storePickup.COURIER_STAGES.includes(s)) : nextStages(stage),
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
     linkedOrders: linkedOrders.map((o) => o.toJSON()),
     linkedFromOrder: linkedFrom ? linkedFrom.toJSON() : null,
@@ -1291,6 +1297,7 @@ async function createShipment(workspaceId, orderId, data, req) {
     });
     if (!order) throw new NotFoundError('Order');
     carrierShipmentService.assertConfirmedOrPaid(order);
+    storePickup.assertCourierAllowed(order, data.carrierCode);
     await carrierShipmentService.assertNoActiveShipment(order.id, transaction);
 
     const shipment = await insertShipment(

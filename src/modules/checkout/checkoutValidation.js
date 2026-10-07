@@ -48,6 +48,8 @@ module.exports = {
       discountCode: Joi.string().max(100).optional(),
       // The shipping option the shopper picked (shipping/shippingOptions.js); absent = standard.
       shippingOption: Joi.string().max(40).optional(),
+      // 'pickup': collected from the store (shipping/storePickup.js) — no address, no shipping fee.
+      deliveryMethod: Joi.string().valid('delivery', 'pickup').optional(),
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
       notes: Joi.string().max(2000).allow('').optional(),
