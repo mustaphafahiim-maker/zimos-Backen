@@ -85,7 +85,7 @@ async function backToQueue(workspaceId, orderId, { reason }, req) {
 /**
  * Un-cancel. Takes the order's stock again (409 INSUFFICIENT_STOCK when it is
  * gone — the order stays cancelled), clears the cancellation, and puts a COD
- * order back in the call queue. A rejection recorded on a call is uncounted
+ * or store-manual order back in the call queue. A rejection recorded on a call is uncounted
  * from the customer, as a correction would.
  */
 async function reopen(workspaceId, orderId, { reason }, req) {
@@ -115,7 +115,11 @@ async function reopen(workspaceId, orderId, { reason }, req) {
     }
     await order.update({ cancelledAt: null, cancellationReason: null }, { transaction });
     await setConfirmationState(workspaceId, order.id, 'pending', req, transaction);
-    if (order.paymentMethod === 'cod') {
+    // A store-manual order (manualPayments, item 340) is a queue member too.
+    if (
+      order.paymentMethod === 'cod' ||
+      (await require('../manualPayments/manualPaymentService').hasManualPayment(order, transaction))
+    ) {
       await confirmationService.openTaskForOrder(workspaceId, order.id, transaction);
     }
     await trackStage(workspaceId, order.id, { req, transaction, reason });

@@ -283,6 +283,9 @@ async function recordForOrder(order, method, transaction) {
   );
 }
 
+/** Cancelled, or rejected on a confirmation call (confirmationService.assertOrderOpen): no proof is taken or approved. */
+const isCancelled = (order) => Boolean(order.cancelledAt) || order.confirmationState === 'rejected';
+
 function shopperView(order, record) {
   return {
     orderId: order.id,
@@ -292,7 +295,7 @@ function shopperView(order, record) {
     status: record.status,
     rejectionReason: record.status === 'rejected' ? record.rejectionReason : null,
     submittedAt: record.submittedAt,
-    canSubmit: !order.cancelledAt && ['awaiting_proof', 'rejected'].includes(record.status),
+    canSubmit: !isCancelled(order) && ['awaiting_proof', 'rejected'].includes(record.status),
     method: {
       kind: record.kind,
       label: record.label,
@@ -325,16 +328,19 @@ async function getForShopper(workspaceId, orderId, token) {
 /** The shopper's proof: the number they paid from and a screenshot. */
 async function submitProof(workspaceId, orderId, token, { payerNumber, file }, req) {
   let stored = null;
+  let replaced = null;
+  let view;
   try {
-    return await db.sequelize.transaction(async (transaction) => {
+    view = await db.sequelize.transaction(async (transaction) => {
       const { order, record } = await loadForShopper(workspaceId, orderId, token, transaction);
-      if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
+      if (isCancelled(order)) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
       if (!['awaiting_proof', 'rejected'].includes(record.status)) {
         throw new AppError('PROOF_ALREADY_SUBMITTED', 'A payment proof for this order is already under review or approved', 409);
       }
       const upload = await createPaymentProofUpload(workspaceId, file, transaction);
       stored = upload.path;
       const before = { status: record.status };
+      const previousUploadId = record.proofUploadId;
       await record.update(
         {
           status: 'submitted',
@@ -347,6 +353,15 @@ async function submitProof(workspaceId, orderId, token, { payerNumber, file }, r
         },
         { transaction }
       );
+      // A proof sent again after a rejection: the rejected screenshot has nothing pointing to it any more
+      // (no Payment is written before approval), so its row goes now and its file once this commits.
+      if (previousUploadId && previousUploadId !== upload.id) {
+        const old = await db.CustomerUpload.findOne({ where: { id: previousUploadId, workspaceId }, transaction });
+        if (old) {
+          replaced = old.path;
+          await old.destroy({ transaction });
+        }
+      }
       await recordAudit({
         workspaceId,
         action: 'order.manual_payment_submitted',
@@ -368,6 +383,12 @@ async function submitProof(workspaceId, orderId, token, { payerNumber, file }, r
     }
     throw err;
   }
+  if (replaced) {
+    await getStorage()
+      .removePrivate(replaced)
+      .catch(() => {});
+  }
+  return view;
 }
 
 // --------------------------------------------------------------- staff: review
@@ -427,7 +448,7 @@ async function loadForReview(workspaceId, orderId, transaction) {
 async function approve(workspaceId, orderId, req) {
   return db.sequelize.transaction(async (transaction) => {
     const { order, record } = await loadForReview(workspaceId, orderId, transaction);
-    if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
+    if (isCancelled(order)) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
     const now = new Date();
     await record.update({ status: 'approved', reviewedAt: now, reviewedByUserId: req.user.id, rejectionReason: null }, { transaction });
     const outstanding = Math.max(0, Number(order.totalAmount) - Number(order.amountPaid));
