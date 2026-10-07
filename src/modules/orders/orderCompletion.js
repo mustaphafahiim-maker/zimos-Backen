@@ -68,7 +68,7 @@ async function completeOrderInTransaction(order, { discount = null, lateRedempti
 async function afterOrderCompleted(workspaceId, order, { cartId = null, checkoutSessionId = null } = {}) {
   if (cartId) {
     try {
-      await require('../cart/cartService').markConverted(cartId, order.id);
+      await require('../cart/cartService').markConverted(workspaceId, cartId, order.id);
     } catch (err) {
       logger.error('Could not mark a cart converted', { workspaceId, orderId: order.id, message: err.message });
     }

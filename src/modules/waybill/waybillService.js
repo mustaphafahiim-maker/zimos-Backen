@@ -4,30 +4,16 @@ const PDFDocument = require('pdfkit');
 const bwipjs = require('bwip-js');
 const db = require('../../db/models');
 const { NotFoundError } = require('../../core/errors/AppError');
-const logger = require('../../core/utils/logger');
 const { registerFonts, drawText, hasArabic } = require('../../core/pdf/bidiText');
 const { isCarrierBooked, FINISHED_STATUSES, codAmountFor } = require('../shipping/carrierShipmentService');
 const { getAdapter, MANUAL } = require('../shipping/carriers');
+// Best-effort and guarded against private addresses; no logo prints the store name.
+const { fetchLogo } = require('../workspaces/workspaceLogo');
 
 const money = (minor, currency) => `${(Number(minor) / 100).toFixed(2)} ${currency || ''}`.trim();
 
 // One line of QR text: user input may carry newlines.
 const oneLine = (v) => String(v == null ? '' : v).replace(/\s*[\r\n]+\s*/g, ' ').trim();
-
-// Best-effort logo fetch; any failure returns null and the waybill uses text.
-async function tryFetchLogo(url) {
-  if (!url) return null;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return null;
-    const type = res.headers.get('content-type') || '';
-    if (!/^image\/(png|jpe?g)/i.test(type)) return null;
-    return Buffer.from(await res.arrayBuffer());
-  } catch (err) {
-    logger.warn(`[waybill] logo fetch failed for ${url}: ${err.message}`);
-    return null;
-  }
-}
 
 async function barcodePng(text) {
   return bwipjs.toBuffer({
@@ -158,7 +144,7 @@ async function renderWaybillPdf(model) {
   const { order, workspace, shipment, carrier, trackingValue, isCod, storeName, shipTo, address } = model;
 
   const [logo, barcode, qr] = await Promise.all([
-    tryFetchLogo(workspace && workspace.logoUrl),
+    fetchLogo(workspace && workspace.logoUrl),
     barcodePng(trackingValue),
     qrPng(model.qrPayload),
   ]);
