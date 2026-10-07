@@ -420,6 +420,12 @@ async function convert(workspaceId, sessionId, body, req) {
   if (payload.formFields) {
     const workspace = await db.Workspace.findByPk(workspaceId);
     await require('../checkout/checkoutForm').saveCheckoutAnswers(order, workspace, payload.formFields);
+    // The photos the shopper uploaded are the order's now (item 310), as a checkout attaches them —
+    // left pending, the hourly sweep would delete them.
+    const ids = Object.values(payload.formFields).map((v) => String(v || '').trim()).filter((v) => /^[0-9a-f-]{36}$/i.test(v));
+    if (ids.length && session.visitorId) {
+      await db.CustomerUpload.update({ status: 'attached', expiresAt: null }, { where: { id: ids, workspaceId, visitorId: session.visitorId, status: 'pending' } }).catch(() => {});
+    }
   }
 
   await db.sequelize.transaction(async (transaction) => {

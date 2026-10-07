@@ -56,6 +56,16 @@ async function write(workspaceId, next, req, action, metadata) {
   });
 }
 
+/** Whether another store has verified this domain. */
+async function verifiedElsewhere(workspaceId, name) {
+  return (await db.Workspace.count({
+    where: {
+      id: { [Op.ne]: workspaceId },
+      [Op.and]: [db.sequelize.where(db.sequelize.literal(`settings->'${KEY}'->>'domain'`), name), db.sequelize.where(db.sequelize.literal(`settings->'${KEY}'->>'status'`), 'verified')],
+    },
+  })) > 0;
+}
+
 async function get(workspaceId) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'] });
   return { sendingDomain: view(stored(workspace)) };
@@ -64,7 +74,8 @@ async function get(workspaceId) {
 async function add(workspaceId, { domain, localPart }, req) {
   const name = String(domain).trim().toLowerCase().replace(/\.$/, '');
   if (!DOMAIN.test(name)) throw new AppError('VALIDATION_ERROR', 'Enter a domain like mystore.com', 422, [{ field: 'domain', message: 'Enter a domain like mystore.com' }]);
-  const taken = await db.Workspace.count({ where: { id: { [Op.ne]: workspaceId }, [Op.and]: db.sequelize.where(db.sequelize.literal(`settings->'${KEY}'->>'domain'`), name) } });
+  // Only a store that proved the domain (verified) holds it (item 310): a claim left pending can't lock the real owner out.
+  const taken = await verifiedElsewhere(workspaceId, name);
   if (taken) throw new ConflictError('Another store already sends from this domain', 'EMAIL_DOMAIN_TAKEN');
   const p = provider();
   const { providerRef, records } = await p.addDomain(name);
@@ -92,6 +103,8 @@ async function verify(workspaceId, req) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'] });
   const s = stored(workspace);
   if (!s) throw new NotFoundError('Sending domain');
+  // Two stores may wait on the same domain; the first to verify it has it.
+  if (await verifiedElsewhere(workspaceId, s.domain)) throw new ConflictError('Another store already sends from this domain', 'EMAIL_DOMAIN_TAKEN');
   const result = await provider().verify({ domain: s.domain, providerRef: s.providerRef, records: s.records });
   const now = new Date().toISOString();
   const next = { ...s, records: result.records, status: result.verified ? 'verified' : s.status === 'verified' ? 'failed' : 'pending', lastCheckedAt: now, verifiedAt: result.verified ? s.verifiedAt || now : s.verifiedAt };
