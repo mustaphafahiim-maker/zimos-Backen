@@ -283,7 +283,8 @@ async function createOrder(
     if (!req.user && payload[Symbol.for('zimos.exactPrices')] !== true) {
       const limitPhone = normalizePhone(contact && contact.phone);
       if (limitPhone) await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `purchase-limits:${workspaceId}:${limitPhone}` }, transaction });
-      await require('../catalog/purchaseLimits').assertWithin(workspaceId, items.filter((i) => !i[Symbol.for('zimos.freeGift')]), contact, transaction);
+      // A follow-on add-on order (an upsell placed as its own order) counts toward the per-customer limit only (item 321).
+      await require('../catalog/purchaseLimits').assertWithin(workspaceId, items.filter((i) => !i[Symbol.for('zimos.freeGift')]), contact, transaction, { perOrder: orderSource !== 'upsell' });
     }
     const customer = await customerService.findOrCreateByPhone(workspaceId, contact, transaction);
 
@@ -710,8 +711,11 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   const existing = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction });
   // An upsell the shopper takes counts toward the product's purchase limits with the order's own lines (item 313).
   if (isUpsell) {
+    const limits = require('../catalog/purchaseLimits');
     const lines = [...existing.map((i) => ({ variantId: i.variantId, offerId: i.offerId, quantity: i.quantity })), lineInput];
-    await require('../catalog/purchaseLimits').assertWithin(workspaceId, lines, order.contactSnapshot || {}, transaction, { excludeOrderId: order.id });
+    // Only the products the upsell adds (item 321), with the order's own lines of those products.
+    const added = [...(await limits.unitsByProduct(workspaceId, [lineInput], transaction)).keys()];
+    if (added.length) await limits.assertWithin(workspaceId, lines, order.contactSnapshot || {}, transaction, { excludeOrderId: order.id, onlyProductIds: added });
   }
   const newLine = await priceLine(workspaceId, lineInput, transaction);
   for (const consumed of newLine.consumedInventory) {
