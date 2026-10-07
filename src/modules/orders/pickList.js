@@ -71,7 +71,7 @@ async function build(workspaceId, { orderIds, readyToShip, locationId }) {
     line.orders.push({ orderId: o.id, orderNumber: o.orderNumber, quantity: it.quantity });
   }
   // Which lots to take each line from, first expiring first (stockLots/, item 230).
-  for (const lines of groups.values()) for (const line of lines.values()) if (line.variantId) line.lots = await require('../stockLots').suggest(workspaceId, line.variantId, line.quantity);
+  for (const [loc, lines] of groups.entries()) for (const line of lines.values()) if (line.variantId) line.lots = await require('../stockLots').suggest(workspaceId, line.variantId, line.quantity, loc);
   const optText = (opts) => Object.values(opts || {}).join(' / ');
   return {
     orderCount: picked.length,

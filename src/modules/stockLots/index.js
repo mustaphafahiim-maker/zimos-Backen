@@ -42,9 +42,19 @@ const alertDaysOf = (workspace) => {
 /** FEFO order: earliest expiry first, lots without a date last, then oldest received. */
 const FEFO = [[db.sequelize.literal('expires_on IS NULL'), 'ASC'], ['expiresOn', 'ASC'], ['createdAt', 'ASC']];
 
-/** The lots to take `quantity` units of a variant from, without changing anything. */
-async function suggest(workspaceId, variantId, quantity) {
-  const lots = await db.StockLot.findAll({ where: { workspaceId, variantId, quantityRemaining: { [Op.gt]: 0 } }, order: FEFO });
+/**
+ * The lots of one place (item 284): a non-default location's own lots; for the
+ * default (or no location), lots recorded at the default or at none.
+ */
+async function placeWhere(workspaceId, locationId, transaction) {
+  const def = await db.StockLocation.findOne({ where: { workspaceId, isDefault: true }, attributes: ['id'], transaction });
+  if (locationId && (!def || locationId !== def.id)) return { locationId };
+  return { [Op.or]: [{ locationId: null }, ...(def ? [{ locationId: def.id }] : [])] };
+}
+
+/** The lots to take `quantity` units of a variant from at a place (null = the default), without changing anything. */
+async function suggest(workspaceId, variantId, quantity, locationId = null) {
+  const lots = await db.StockLot.findAll({ where: { workspaceId, variantId, quantityRemaining: { [Op.gt]: 0 }, ...(await placeWhere(workspaceId, locationId)) }, order: FEFO });
   const out = [];
   let left = quantity;
   for (const lot of lots) {
@@ -61,13 +71,15 @@ async function consumeForOrder(event) {
   const p = event.payload || {};
   if (!p.orderId) return null;
   await db.sequelize.transaction(async (transaction) => {
-    const order = await db.Order.findByPk(p.orderId, { attributes: ['id', 'workspaceId', 'cancelledAt'], transaction, lock: transaction.LOCK.UPDATE });
+    const order = await db.Order.findByPk(p.orderId, { attributes: ['id', 'workspaceId', 'cancelledAt', 'stockLocationId'], transaction, lock: transaction.LOCK.UPDATE });
     if (!order || order.cancelledAt) return;
     if (await db.StockLotAllocation.count({ where: { orderId: order.id }, transaction })) return;
+    // Only the lots of the place the order ships from (item 284).
+    const place = await placeWhere(order.workspaceId, order.stockLocationId, transaction);
     const items = await db.OrderItem.findAll({ where: { orderId: order.id, variantId: { [Op.ne]: null } }, attributes: ['variantId', 'quantity'], transaction });
     for (const it of items) {
       let left = it.quantity;
-      const lots = await db.StockLot.findAll({ where: { workspaceId: order.workspaceId, variantId: it.variantId, quantityRemaining: { [Op.gt]: 0 } }, order: FEFO, transaction, lock: transaction.LOCK.UPDATE });
+      const lots = await db.StockLot.findAll({ where: { workspaceId: order.workspaceId, variantId: it.variantId, quantityRemaining: { [Op.gt]: 0 }, ...place }, order: FEFO, transaction, lock: transaction.LOCK.UPDATE });
       for (const lot of lots) {
         if (left <= 0) break;
         const take = Math.min(left, lot.quantityRemaining);

@@ -1934,10 +1934,14 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
 - [x] 283. Two click-and-collect orders at once could both take a location's last unit. (backend fix; no UI change — the existing 409 PICKUP_OUT_OF_STOCK)
   - The checkout's early check stays (a quick answer); the order now counts the place again inside its own transaction, after its row (with the place) exists and its units are reserved (`clickAndCollect.claimStock`). Two pickups of the same unit already queue on the variant's row lock taken by the reservation, so the second counts with the first one's order in it and is refused (409 PICKUP_OUT_OF_STOCK, nothing kept).
   - Checked: a branch holding 1 unit, 5 pickups at once → one 201, four 409 (with the recount switched off: five 201); 3 × 30 units at the default holding 99 → three 201.
-- [ ] 284. Stock lots ignored the location: FEFO picked and consumed lots of other locations; a write-off could take a location's count below zero.
+- [x] 284. Stock lots ignored the location: FEFO picked and consumed lots of other locations; a write-off could take a location's count below zero. (backend fix; no UI change)
+  - Lots are taken from the order's place only: a non-default location's own lots; for the default, lots recorded at the default or at no location. The pick list asks per location group, and the shipped order's consumption uses the order's `stockLocationId`.
+  - Taking units out (`purchasing.moveStock` with a negative change: a lot write-off) checks the place's count as well as the store total: 422 INSUFFICIENT_STOCK "Only N on hand at <place>". The default's count is what the other places don't hold.
+  - Checked: a branch lot expiring sooner and a main lot later; an order shipping from main → pick list and consumption take the main lot (before: the branch lot). The branch holding 3 with its lot saying 10 → writing off 10 refused, 3 accepted.
 - [x] 285. A failed checkout left its delivery-slot hold, blocking the shopper's own retry for 10 minutes. (backend fix; no UI change)
   - When the checkout answers 400 or more, a hold not yet attached to an order is deleted (on the response's finish, so every failure path is covered). An attached one stays: it belongs to the order.
   - Checked: a slot with room for 1, a checkout refused for stock (409 INSUFFICIENT_STOCK) → 0 holds left; the retry → 201.
 - [ ] 286. Erasing a customer left the billing address on orders and the phone/email in sign-in codes.
 - [ ] 287. A shopper's address change kept the old area, place and notes when the new address left them out.
 - [ ] 288. Smaller: a stock count whose location was deleted applied to the whole store; one malformed line in a URL-redirect import (or lookup) answered 500 half-way.
+- [ ] 289. Offer and bundle lines counted as one piece in the pick list and in lot consumption (an offer of "3 pieces" picked and taken from lots as 1, a bundle's other variants not at all) — the same expansion scan to pack got in item 271.

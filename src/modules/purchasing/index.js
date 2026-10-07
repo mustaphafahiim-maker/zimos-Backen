@@ -41,6 +41,14 @@ async function locationOf(workspaceId, locationId, transaction = null) {
 async function moveStock(workspaceId, variantId, delta, location, movement, transaction) {
   const variant = await require('../inventory/inventoryService').lockVariant(variantId, workspaceId, transaction);
   if (Number(variant.stockOnHand) + delta < 0) throw new AppError('INSUFFICIENT_STOCK', 'Stock would go below zero', 422);
+  // Taking units out of one place: that place's count can't go below zero either (item 284) — the
+  // default's is what the other places don't hold.
+  if (delta < 0) {
+    const { locations, matrix } = await require('../stockLocations').stockMatrix(workspaceId, [variantId], transaction);
+    const place = location && locations.some((l) => l.id === location.id) ? location : locations.find((l) => l.isDefault);
+    const cell = place && matrix.get(variantId) && matrix.get(variantId).get(place.id);
+    if (cell && cell.onHand + delta < 0) throw new AppError('INSUFFICIENT_STOCK', `Only ${Math.max(0, cell.onHand)} on hand at ${place.name}`, 422);
+  }
   await variant.update({ stockOnHand: Number(variant.stockOnHand) + delta, version: variant.version + 1 }, { transaction });
   await db.InventoryMovement.create({ workspaceId, variantId, quantityDelta: delta, ...movement }, { transaction });
   if (location && !location.isDefault) await require('../stockLocations').bumpRow(location.id, variantId, delta, transaction);
