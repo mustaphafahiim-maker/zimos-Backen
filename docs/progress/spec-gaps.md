@@ -1761,7 +1761,18 @@ breakdowns. No migration needed for any item below.
   - Verified: product in 2 collections counted in both (3 units, 2 orders, 300, delivered 200), cancelled order out, lone product in uncollected, CSV.
 - [x] 246. Sales by variant option: units and revenue per option value (e.g. size M, colour black) across products, for buying decisions; CSV. (backend done, UI in frontend-handoff.md)
   - storeReports /sales-by-option: jsonb_each_text over order_items.variant_options_snapshot (live orders), grouped by lower(trim(name/value)); share per option; option filter.
-  - Verified: M (3 + 2 from " m " on another product) merged to 5 = 83.3%, L 1, Color and Colour kept apart, size filter case-insensitive. Note: a product created with one variant through POST /catalog/products did not keep the variant's optionValues in the test — worth a look in the catalog lane.
+  - Verified: M (3 + 2 from " m " on another product) merged to 5 = 83.3%, L 1, Color and Colour kept apart, size filter case-insensitive. Checked afterwards: by design — POST /catalog/products takes a simple first variant (price, sku, stock, weight) and its validator drops other keys; options go through the variants endpoints.
 - [x] 247. Returns by reason: return requests per reason and per product, the return rate per product (returned units / delivered units), and refunds given; CSV. (backend done, UI in frontend-handoff.md)
   - storeReports /returns: reason code = split_part(reason, ':', 1) (returns store "code: detail"); units from the items JSON; per-product rate for orders placed in the window (delivered or returned stage) vs non-rejected return units; processed refunds in the window.
   - Verified: 3 orders (8 units delivered), returns damaged ×1 refunded, wrong_item ×2 requested, damaged ×4 rejected → rate 37.5%, reasons with rejected/completed counts, refund 100.
+
+## Thirteenth pass (2026-10-07) — operations gap pass
+
+How the list was made: searched under several spellings first. Not listed because already built: product duplicate
+(catalog bulk), dashboard global search, saved views, bulk order tags (orders/bulk add_tag). Left out for now as too
+risky without a design pass with the owner: splitting one order into two, merging two orders into one (totals,
+payments and courier bookings would all have to follow). No migration needed for any item below.
+
+- [ ] 248. Merge duplicate customers: pick the customer to keep and the duplicate; orders, addresses, notes, reviews, wishlist, referrals and every other record move over, points and store credit are added together with a ledger line each, tags and consent merged; the duplicate is removed; audited, refused while either customer has a payment in progress.
+- [ ] 249. Scan to pack: for an order, scan barcodes or type SKUs; the server checks each scan against the order's lines (unknown item, too many, still missing), and when everything is scanned marks the order packed (tag `packed`, timeline entry).
+- [ ] 250. Customer timeline: one feed per customer of orders (placed, delivered, cancelled), returns, refunds, notes and follow-ups, reviews, questions, loyalty and store-credit movements, quotes and privacy requests, newest first, paged.
