@@ -3785,3 +3785,83 @@ No new environment variable or setting. A platform admin with `workspaces.manage
 - **Console → Users** list: deleted accounts are hidden; a toggle «إظهار الحسابات المحذوفة» / "Show deleted accounts" sends `includeDeleted=true`, and deleted rows show the «محذوف» / "Deleted" badge, greyed. Suspended rows show «موقوف» / "Suspended".
 - **Console → Audit log**: `user.suspend` «إيقاف حساب» / "Account suspended", `user.unsuspend` «إلغاء إيقاف حساب» / "Suspension lifted", `user.delete` «حذف حساب» / "Account deleted".
 - **Dashboard and console sign-in**: `ACCOUNT_SUSPENDED` «الحساب ده موقوف. تواصل مع الدعم» / "This account is suspended. Contact support"; `ACCOUNT_DELETED` «الحساب ده اتمسح» / "This account was deleted".
+
+## 338. Console notifications for platform admins, with read state and settings — UI: pending
+
+No new environment variable or setting. The console gets a bell: the server writes one notification per event (a sign-up, a new store, a subscription activated by hand or by a recorded payment, one ending within 7 days or ended, a payment proof sent, a failed subscription charge, a support ticket, a store joining with a referral code, an account suspended). Every console admin sees the same rows, but only the types their console permissions open (below), and each admin has their own read state and their own settings per type. Nothing is sent by email yet: the email switch is stored for later, and the settings answer `emailDelivery: false`.
+
+Who sees which type (besides `overview.view`, which every call needs):
+
+| `type` | needs | label |
+|---|---|---|
+| `user_signup` | workspaces.view | «تسجيل جديد» / "New sign-up" |
+| `workspace_created` | workspaces.view | «متجر جديد» / "New store" |
+| `user_suspended` | workspaces.view | «إيقاف حساب» / "Account suspended" |
+| `subscription_activated` | subscriptions.view | «تفعيل اشتراك» / "Subscription activated" |
+| `subscription_expiring` | subscriptions.view | «اشتراك قرّب يخلص» / "Subscription ending soon" |
+| `subscription_expired` | subscriptions.view | «اشتراك خلص» / "Subscription ended" |
+| `referral_signup` | subscriptions.view | «متجر بكود إحالة» / "Joined with a referral code" |
+| `payment_failed` | subscriptions.view | «فشل دفع اشتراك» / "Subscription payment failed" |
+| `payment_proof_submitted` | payments.record | «إثبات دفع جديد» / "Payment proof sent" |
+| `support_ticket` | support.view | «تذكرة دعم جديدة» / "New support ticket" |
+
+### Endpoints (console)
+- **GET `/admin/notifications?type=&unread=&cursor=&limit=`** (overview.view). Newest first. `type` one of the ten above; `unread` `true`/`false` (or `1`/`0`); `limit` 1–50 (default 20); `cursor` is the previous page's `nextCursor`. Types the admin can't see or turned off are left out. → 200
+  ```json
+  {
+    "notifications": [
+      {
+        "id": "5f0c…",
+        "type": "payment_proof_submitted",
+        "title": "Balance top-up proof sent",
+        "body": null,
+        "link": "/payment-proofs/8b1e…",
+        "data": { "action": "payment_proof.submit", "entityId": "8b1e…", "purpose": "topup", "amount": 10000, "currency": "EGP" },
+        "actorUserId": "9656…",
+        "subjectUserId": null,
+        "subjectUserName": null,
+        "workspaceId": "0c20…",
+        "workspaceName": "Demo Store",
+        "createdAt": "2026-10-07T08:46:23.512Z",
+        "readAt": null
+      }
+    ],
+    "nextCursor": "MjAyNi0xMC0wN1Q…",
+    "unread": 7
+  }
+  ```
+  `title` is English and only a fallback: show the console's own text per `type` (below). `body` is free text when there is one (the note of a manual activation, the reason of a suspension, the failure reason of a charge). `link` is the console page it is about: `/users/{id}`, `/workspaces/{id}`, `/payment-proofs/{id}` or `/tickets/{id}` — map it to the console's routes. `data` per type: `user_signup` `method` (`password` / `google`); `workspace_created` —; `subscription_activated` `pricing { kind, amount, currency }` (a manual activation) or nothing (a recorded payment, `data.action` `billing_invoice.record_payment`); `subscription_expiring` / `subscription_expired` `subscriptionId`, `periodEnd`, `name`, `pricingKind` (from the hourly check), or `pricing` (a free or discounted period that ran out, `data.action` `subscription.manual_pricing_expired`); `payment_proof_submitted` `purpose` (`invoice` / `topup`), `amount` (minor units), `currency`; `payment_failed` `invoiceId`, `amount`, `currency`; `support_ticket` `subject`. Amounts are minor units, as everywhere in billing. 422 `VALIDATION_ERROR` for a bad `cursor` ("Invalid cursor"), an unknown `type` or a `limit` outside 1–50.
+- **GET `/admin/notifications/unread-count`** (overview.view) → 200 `{ "unread": 7 }`. For the bell's badge; poll it (e.g. every 60 s) or refresh after any action.
+- **POST `/admin/notifications/read`** (overview.view) — this admin only.
+  ```json
+  { "ids": ["5f0c…", "77a1…"] }
+  ```
+  or `{ "all": true }` (every unread one this admin can see). Exactly one of the two; `ids` up to 200 uuids. → 200 `{ "unread": 5 }`. Marking one already read changes nothing. 422 `VALIDATION_ERROR` for both, neither, or an id that is not a uuid.
+- **GET `/admin/notification-prefs`** (overview.view) → 200
+  ```json
+  { "prefs": [ { "type": "user_signup", "enabled": true, "email": false }, { "type": "workspace_created", "enabled": true, "email": false } ], "emailDelivery": false }
+  ```
+  One row per type this admin can see, defaults filled in (shown in the console, no email).
+- **PUT `/admin/notification-prefs`** (overview.view)
+  ```json
+  { "prefs": [ { "type": "user_signup", "enabled": false, "email": false } ] }
+  ```
+  1–10 rows; `type` and `enabled` required, `email` optional (default false). Only the types sent change. → 200, the same body as GET. A type turned off disappears from this admin's list and count (not other admins'); its rows are not deleted, turning it back on shows them again. 422 `VALIDATION_ERROR` for an unknown type, an empty list or a row without `enabled`.
+- 401 without a token; 403 `FORBIDDEN` "Missing required platform permission: overview.view" without it.
+
+### Screens
+- **Console top bar → bell**: a badge with `unread` (hidden at 0, «+99» / "99+" above 99). Opening it shows the latest 10: an icon per type, the line below, the store or account name, the time ago («من 5 دقايق» / "5 min ago"), bold while unread. Clicking a row marks it read (`ids: [id]`) and opens its page (`link`). At the bottom: «تعليم الكل كمقروء» / "Mark all as read" (`all: true`) and «عرض الكل» / "See all". Empty: «مفيش إشعارات» / "No notifications".
+- **Console → Notifications** (full page): tabs «الكل» / "All" and «غير المقروء» / "Unread" (`unread=true`), a type filter (the labels in the table, only the types from the settings call), «تحميل المزيد» / "Load more" while `nextCursor` is not null, and «تعليم الكل كمقروء» / "Mark all as read".
+- Row lines (fall back to `title` for anything missing):
+  - `user_signup`: «{subjectUserName} عمل حساب جديد» / "{subjectUserName} signed up"; with `method: google` add «بجوجل» / "with Google".
+  - `workspace_created`: «متجر جديد: {workspaceName}» / "New store: {workspaceName}".
+  - `user_suspended`: «تم إيقاف حساب {subjectUserName}: {body}» / "{subjectUserName}'s account was suspended: {body}".
+  - `subscription_activated`: manual «تم تفعيل اشتراك {workspaceName} يدويًا ({pricing.kind})» / "{workspaceName}'s subscription was activated by hand ({pricing.kind})" with `body` as the note; recorded payment «اتسجل دفع لـ{workspaceName} والاشتراك اتفعّل» / "Payment recorded for {workspaceName}; subscription active". Pricing kind: `paid` «مدفوع» / "paid", `free` «مجاني» / "free", `discounted` «بخصم» / "discounted".
+  - `subscription_expiring`: «اشتراك {workspaceName} هيخلص {periodEnd}» / "{workspaceName}'s subscription ends on {periodEnd}".
+  - `subscription_expired`: «اشتراك {workspaceName} خلص» / "{workspaceName}'s subscription ended"; for `subscription.manual_pricing_expired` «الفترة المجانية أو المخفضة لـ{workspaceName} خلصت ومتجددتش» / "{workspaceName}'s free or discounted period ended and was not renewed".
+  - `payment_proof_submitted`: `invoice` «{workspaceName} بعت إثبات دفع بـ{amount}» / "{workspaceName} sent a payment proof for {amount}"; `topup` «{workspaceName} بعت إثبات شحن رصيد بـ{amount}» / "{workspaceName} sent a balance top-up proof for {amount}".
+  - `payment_failed`: «فشل دفع اشتراك {workspaceName} ({amount}): {body}» / "{workspaceName}'s subscription payment failed ({amount}): {body}".
+  - `support_ticket`: «تذكرة جديدة من {workspaceName}: {data.subject}» / "New ticket from {workspaceName}: {data.subject}".
+  - `referral_signup`: «{workspaceName} دخل بكود إحالة» / "{workspaceName} joined with a referral code".
+- **Console → Settings → Notifications**: one row per type from GET `/admin/notification-prefs` (only the ones this admin can see), the label from the table, two switches «في الكونسول» / "In the console" (`enabled`) and «بالإيميل» / "By email" (`email`). While `emailDelivery` is false, show under the email column «الإيميل لسه مش بيتبعت — اختيارك هيتحفظ» / "Email isn't sent yet — your choice is kept". Save sends the changed rows; then «تم حفظ الإعدادات» / "Settings saved".
+- Errors: «الصفحة دي محتاجة صلاحية على الكونسول» / "This page needs a console permission" (403); «حصل خطأ، جرّب تاني» / "Something went wrong, try again" for anything else.
