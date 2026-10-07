@@ -4193,3 +4193,34 @@ The storefront checkout, shipping quote and coupon preview took any `funnelId`, 
 - Funnel checkout and its order form: on `FUNNEL_NOT_AVAILABLE` or `FUNNEL_PAUSED`, replace the form with «العرض ده مش متاح دلوقتي» / "This offer is not available right now" and keep the shopper's details in the form state.
 - On `FUNNEL_ITEM_NOT_OFFERED`: «المنتج ده مش من العرض ده. ارجع لصفحة العرض واطلب من هناك» / "This product is not part of this offer. Go back to the offer page and order from there", with a link to the funnel's first page.
 - Dashboard → funnel editor: no change. A product element left empty on a page with no product still makes the funnel sell the whole catalogue, so the existing "page sells nothing yet" warning stays as is.
+
+## 358. Team invites wait for the invitee to accept — UI: pending
+
+Inviting an email that already had a ZIMOS account put that account on the team at once, and an invite to an email with no account was never linked when the account was made. Now every invite is pending until the person signs in with an account whose confirmed email is the invited one and accepts it, whether the account existed already or is made later. The inviter's calls are unchanged; the invitee gets a new "Invitations" page (the invite email already links to `{frontend}/invites`).
+
+### Endpoints — inviter (unchanged bodies)
+- **POST `/api/v1/workspaces/:workspaceId/members`** `{ "email", "roleId" }` and **POST `/api/v1/workspaces/:workspaceId/team/invite`** `{ "email", "access", "sections", "permissions" }` (users.manage): always 201 with `membership.status: "invited"`, `userId: null` and `invitedEmail` in lower case, whether or not the email has an account:
+  `{ "membership": { "id": "…", "status": "invited", "invitedEmail": "sara@example.com" }, "role": { … } }`
+  - 409 `ALREADY_MEMBER` — that account is on the team already.
+  - 409 `ALREADY_INVITED` — that email has a pending invite (any letter case).
+  - 409 `INVITEE_NOT_CONFIRMED` is no longer returned: the invitee must confirm their email before they can accept.
+- The person appears under **GET `/invites`** (pending, with Resend) until they accept, and not under ownership-transfer candidates until then. A pending invite still takes a seat.
+
+### Endpoints — invitee (any signed-in account)
+- **GET `/api/v1/me/invites`** →
+  `{ "emailConfirmed": true, "invites": [{ "id": "<membershipId>", "workspace": { "id": "…", "name": "Demo Store", "slug": "demo-store" }, "role": { "id": "…", "key": "custom_…", "name": "Analytics" }, "invitedAt": "2026-10-07T12:07:27.820Z" }] }`
+  An account whose email is not confirmed gets `{ "emailConfirmed": false, "invites": [] }`. Invites to closed stores are left out.
+- **POST `/api/v1/me/invites/:membershipId/accept`** (no body) → 200
+  `{ "membership": { "id": "…", "status": "active" }, "workspace": { "id": "…", "name": "Demo Store", "slug": "demo-store" }, "role": { "id": "…", "key": "…", "name": "Analytics" } }`
+  - 409 `EMAIL_NOT_CONFIRMED` — confirm the account's email first.
+  - 409 `ALREADY_MEMBER` — already on that team (the invite is removed).
+  - 404 `NOT_FOUND` — no such pending invite for this account's email (another email's invite, declined, withdrawn or already used).
+- **POST `/api/v1/me/invites/:membershipId/decline`** (no body) → 200 `{ "declined": true }`; 404 `NOT_FOUND` as above.
+
+### Screens
+- Dashboard → **Invitations** (route `/invites`, also a badge in the store switcher when `GET /me/invites` has any): one card per invite «{store} دعتك تنضم لفريقها بصلاحية {role}» / "{store} invited you to join its team as {role}", buttons «قبول» / "Accept" and «رفض» / "Decline". After accepting: toast «انضممت لفريق {store}» / "You joined {store}'s team", refresh the store list and switch to that store.
+- `emailConfirmed: false`: «أكّد إيميلك عشان تشوف الدعوات اللي جاتلك» / "Confirm your email to see invitations sent to you", with the existing "Send me a code" action. Same text for `EMAIL_NOT_CONFIRMED`.
+- Empty list: «مفيش دعوات دلوقتي» / "No invitations right now".
+- 404 on accept or decline: «الدعوة دي مبقتش متاحة» / "This invitation is no longer available"; reload the list.
+- Sign-up and sign-in: when the person came from the invite link, go to `/invites` after sign-in and after confirming the email.
+- Team → Invite (inviter): the success message for every invite is «اتبعتت الدعوة لـ {email}. هتظهر في الفريق لما يقبلها» / "Invitation sent to {email}. They join the team once they accept it"; remove the `INVITEE_NOT_CONFIRMED` message.

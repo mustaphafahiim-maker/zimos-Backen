@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { Op } = require('sequelize');
 const {
   toWorkspaceSlug,
   suffixSlug,
@@ -436,39 +437,33 @@ function assertCanGrant(rolePermissions, req) {
   }
 }
 
-async function inviteMember({ workspaceId, email, roleId }, req) {
+async function inviteMember({ workspaceId, email: givenEmail, roleId }, req) {
   const role = await db.Role.findOne({ where: { id: roleId, workspaceId } });
   if (!role) throw new NotFoundError('Role');
   assertCanGrant(role.permissions, req);
 
-  const user = await db.User.findOne({ where: { email } });
-
+  // Every invite waits for the person to accept it, whether or not they
+  // already have an account (spec-gaps item 358): nobody is put on a team,
+  // or offered as a store's new owner, without saying yes. The answer is the
+  // same either way, so it does not tell the inviter whether the email has
+  // an account. The invitee accepts with an account whose confirmed email is
+  // this one (workspaces/myInvites, /me/invites), including one made later.
+  const email = String(givenEmail).trim().toLowerCase();
+  const lowerEmail = (column) => db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col(column)), email);
+  const user = await db.User.findOne({ where: lowerEmail('email'), attributes: ['id'] });
   if (user) {
-    // An existing account becomes a member at once, so it must have confirmed
-    // its email: with SIGNUP_CONFIRM_BY_CODE a new account is signed in
-    // before it does, and anyone can sign up with an address they don't own
-    // (spec-gaps item 330). The email itself, not a phone: it was found by
-    // the email, and a squatter can confirm their own phone. This also
-    // covers /team/invite.
-    if (!user.emailVerifiedAt) {
-      throw new ConflictError(
-        "That person's account hasn't confirmed its email yet. Ask them to confirm it, then invite them again.",
-        'INVITEE_NOT_CONFIRMED'
-      );
-    }
     const existing = await db.Membership.findOne({ where: { workspaceId, userId: user.id } });
     if (existing) throw new ConflictError('User is already a member of this workspace', 'ALREADY_MEMBER');
-  } else {
-    const pending = await db.Membership.findOne({ where: { workspaceId, invitedEmail: email } });
-    if (pending) throw new ConflictError('That email already has a pending invite', 'ALREADY_INVITED');
   }
+  const pending = await db.Membership.findOne({ where: { workspaceId, status: 'invited', [Op.and]: [lowerEmail('invited_email')] } });
+  if (pending) throw new ConflictError('That email already has a pending invite', 'ALREADY_INVITED');
 
   const membership = await db.Membership.create({
     workspaceId,
-    userId: user ? user.id : null,
+    userId: null,
     roleId,
-    status: user ? 'active' : 'invited',
-    invitedEmail: user ? null : email,
+    status: 'invited',
+    invitedEmail: email,
   });
 
   const workspace = await db.Workspace.findByPk(workspaceId);

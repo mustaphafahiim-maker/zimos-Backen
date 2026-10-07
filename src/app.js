@@ -168,6 +168,8 @@ v1.use('/me/push', require('./modules/notifications/push/pushService').router);
 v1.use('/me/referrals', require('./modules/referrals/merchantReferrals').me);
 // Help center, Telegram and tutorial links for the dashboard (platformAdmin/educationLinks.js).
 v1.use('/me/education', require('./modules/platformAdmin/educationLinks').me);
+// Team invites sent to the signed-in person's email: list, accept, decline (item 358).
+v1.use('/me/invites', require('./modules/workspaces/myInvites').router);
 // The signed-in person's name and picture (before /auth, which has no such route).
 v1.use('/auth/me/profile', require('./modules/auth/profileRoutes'));
 // Changing the sign-in email, confirmed from the new address (auth/emailChange.js).

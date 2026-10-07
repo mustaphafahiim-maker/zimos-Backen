@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const { Op } = require('sequelize');
 const db = require('../../db/models');
 const env = require('../../config/env');
 const { AppError, AuthenticationError, ValidationError } = require('../../core/errors/AppError');
@@ -97,7 +98,10 @@ async function needsPlan(user) {
 }
 
 async function hasPendingInvite(email) {
-  const invite = await db.Membership.findOne({ where: { invitedEmail: email, status: 'invited' }, attributes: ['id'] });
+  const invite = await db.Membership.findOne({
+    where: { status: 'invited', [Op.and]: [db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('invited_email')), String(email || '').trim().toLowerCase())] },
+    attributes: ['id'],
+  });
   return Boolean(invite);
 }
 
