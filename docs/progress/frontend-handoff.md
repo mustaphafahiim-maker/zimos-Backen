@@ -4098,3 +4098,22 @@ The storefront's code-entry step (shown after the checkout answers 428 `OTP_REQU
 - Always send the Resend call with the same phone the checkout was submitted with; if the shopper edits the phone, submit the order again instead of calling Resend.
 - `OTP_NOT_REQUESTED`: close the code step, keep the form filled and show «اضغط "اطلب" تاني عشان نبعتلك كود جديد» / "Press "Place order" again and we'll send you a new code".
 - `RATE_LIMITED`: «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute"; keep the code field and the Resend countdown as they are.
+
+## 351. Cancelling a courier shipment now cancels it at the courier — UI: pending
+
+The "Cancel shipment" action on the order page (and any status picker that sets a shipment to cancelled) keeps the same call, but for a shipment booked with Bosta, J&T, Mylerz or the sandbox courier that is still waiting for pickup (`created`) or in an exception (`failed`), the backend now cancels it at the courier first. If the courier refuses, nothing changes here and the call answers an error the screen must show. Nothing new to call.
+
+### Endpoint (unchanged body)
+- **PATCH `/api/v1/workspaces/:workspaceId/orders/:orderId/shipments/:shipmentId`** — permission `orders.manage` or `shipping.manage`. Same route on the public API (`PATCH /api/v1/public/orders/:orderId/shipments/:shipmentId`, scope `orders:update`).
+  `{ "status": "cancelled" }` → 200 `{ "shipment": { "id": "…", "status": "cancelled", "cancelMode": "api", "nextPollAt": null, … } }`.
+  - 409 `CARRIER_CANCEL_FAILED` `{ "error": { "code": "CARRIER_CANCEL_FAILED", "message": "Bosta did not cancel shipment 12345678: <courier's reason> The shipment was not cancelled.", "details": { "shipmentId": "…", "carrierCode": "bosta", "carrierErrorCode": null } } }` — the courier refused (usually: it already picked the parcel up). The shipment stays as it was.
+  - 422 `CARRIER_PERMISSION_DENIED` — the courier account may not call its cancel endpoint (J&T); message as sent.
+  - 409 `CARRIER_NOT_CONNECTED` — the courier account was disconnected; connect it again to cancel.
+  - 409 `CARRIER_MANUAL_CANCEL_REQUIRED` (unchanged, couriers without a cancel API) and the existing guards stay as they are.
+
+### Screens (dashboard → Orders → order page → Shipment card)
+- While the call runs, show «جاري إلغاء الشحنة عند شركة الشحن…» / "Cancelling the shipment with the courier…" on the button and disable it.
+- Success on a courier booking: toast «اتلغت الشحنة عند شركة الشحن» / "Shipment cancelled with the courier".
+- `CARRIER_CANCEL_FAILED`: keep the shipment card as it is and show an error box «شركة الشحن رفضت إلغاء الشحنة، فالشحنة لسه شغالة. لو المندوب استلمها، كلّم شركة الشحن» / "The courier refused to cancel this shipment, so it is still live. If the courier already picked it up, contact them", with the server's message underneath and a «حدّث الحالة» / "Sync status" button (the existing POST `.../shipments/:id/sync`).
+- `CARRIER_PERMISSION_DENIED`: «حساب شركة الشحن مش مسموح له يلغي شحنات. ألغيها من لوحة شركة الشحن» / "This courier account isn't allowed to cancel shipments. Cancel it in the courier's dashboard".
+- `CARRIER_NOT_CONNECTED`: «اربط حساب شركة الشحن تاني عشان تلغي الشحنة» / "Connect the courier account again to cancel this shipment", linking to Settings → Shipping → Couriers.

@@ -110,6 +110,17 @@ async function flagUnconfirmedCancel(shipment, result, { trigger, check = null, 
 const cancelsManually = (adapter) => Boolean(adapter && adapter.capabilities.cancel === 'manual');
 
 /**
+ * A carrier-booked shipment the courier could still act on ('created', or
+ * 'failed' — Bosta may re-attempt an exception) whose courier cancels
+ * through its API: cancelling it here must cancel it there too.
+ */
+function cancelsByApi(shipment) {
+  if (!['created', 'failed'].includes(shipment.status) || !isCarrierBooked(shipment)) return false;
+  const adapter = getAdapter(shipment.carrierCode);
+  return Boolean(adapter && adapter.capabilities.cancel === 'api');
+}
+
+/**
  * 409 CARRIER_MANUAL_CANCEL_REQUIRED: these shipments can only be cancelled
  * in the carrier's own dashboard. The request is repeated with
  * acknowledgeManualCancel: true once the merchant has done that.
@@ -616,6 +627,54 @@ async function alreadySettledAtCarrier(adapter, account, credentials, shipment, 
 }
 
 /**
+ * Cancels one carrier-booked shipment at its courier (a carrier with a cancel
+ * API). A refusal for a delivery the courier already cancelled or terminated
+ * counts as done; any other refusal throws 409 CARRIER_CANCEL_FAILED (its
+ * message ends with `notDone`), or 422 CARRIER_PERMISSION_DENIED when the
+ * account may not call the cancel endpoint at all. Writes nothing here: the
+ * caller marks the shipment cancelled once this returns, in its transaction.
+ * Shared by the order cancellation below and PATCH .../shipments/:id
+ * (orderService.updateShipment).
+ *
+ * @returns {Promise<object>} the adapter
+ */
+async function cancelAtCarrier(workspaceId, shipment, { transaction = null, notDone }) {
+  const { adapter, account, credentials } = await accounts.loadConnection(workspaceId, shipment.carrierCode, {
+    transaction,
+  });
+  try {
+    await accounts.withAuthHandling(account, () =>
+      adapter.cancelShipment(credentials, shipment.waybillNumber, {
+        carrierShipmentId: shipment.carrierResponse ? shipment.carrierResponse.carrierShipmentId : null,
+      })
+    );
+  } catch (err) {
+    const check = await alreadySettledAtCarrier(adapter, account, credentials, shipment, err);
+    // Not a refusal of this cancel: the carrier does not let this account
+    // call its cancel endpoint at all (J&T). 422 CARRIER_PERMISSION_DENIED
+    // as it is; nothing is cancelled.
+    if (!check.settled && err instanceof CarrierPermissionError && err.details && err.details.endpoint) throw err;
+    if (!check.settled) {
+      throw new AppError(
+        'CARRIER_CANCEL_FAILED',
+        `${adapter.name} did not cancel shipment ${shipment.waybillNumber}: ${err.message} ${notDone}`,
+        409,
+        { shipmentId: shipment.id, carrierCode: adapter.code, carrierErrorCode: err.code || null }
+      );
+    }
+    logger.info('Carrier refused the cancel but the delivery is already cancelled there', {
+      workspaceId,
+      orderId: shipment.orderId,
+      carrierCode: adapter.code,
+      trackingNumber: shipment.waybillNumber,
+      via: check.via,
+      carrierStateCode: check.code ?? null,
+    });
+  }
+  return adapter;
+}
+
+/**
  * Called by orderService.cancelOrder (and a confirmation correction to
  * rejected) inside its transaction, before anything local changes. Cancels
  * every carrier-booked shipment the courier could still act on — 'created'
@@ -648,38 +707,7 @@ async function cancelCarrierShipmentsForOrder(workspaceId, orderId, transaction,
       await acknowledgeManualCancelOf(workspaceId, shipment, { transaction, req, trigger });
       continue;
     }
-    const { adapter, account, credentials } = await accounts.loadConnection(workspaceId, shipment.carrierCode, {
-      transaction,
-    });
-    try {
-      await accounts.withAuthHandling(account, () =>
-        adapter.cancelShipment(credentials, shipment.waybillNumber, {
-          carrierShipmentId: shipment.carrierResponse ? shipment.carrierResponse.carrierShipmentId : null,
-        })
-      );
-    } catch (err) {
-      const check = await alreadySettledAtCarrier(adapter, account, credentials, shipment, err);
-      // Not a refusal of this cancel: the carrier does not let this account
-      // call its cancel endpoint at all (J&T). 422 CARRIER_PERMISSION_DENIED
-      // as it is; the order is not cancelled.
-      if (!check.settled && err instanceof CarrierPermissionError && err.details && err.details.endpoint) throw err;
-      if (!check.settled) {
-        throw new AppError(
-          'CARRIER_CANCEL_FAILED',
-          `${adapter.name} did not cancel shipment ${shipment.waybillNumber}: ${err.message} The order was not cancelled.`,
-          409,
-          { shipmentId: shipment.id, carrierCode: adapter.code, carrierErrorCode: err.code || null }
-        );
-      }
-      logger.info('Carrier refused the cancel but the delivery is already cancelled there', {
-        workspaceId,
-        orderId,
-        carrierCode: adapter.code,
-        trackingNumber: shipment.waybillNumber,
-        via: check.via,
-        carrierStateCode: check.code ?? null,
-      });
-    }
+    const adapter = await cancelAtCarrier(workspaceId, shipment, { transaction, notDone: 'The order was not cancelled.' });
     const previousStatus = shipment.status;
     await shipment.update({ status: 'cancelled', cancelMode: 'api', nextPollAt: null }, { transaction });
     logger.info('Carrier shipment cancelled with the order', {
@@ -742,5 +770,7 @@ module.exports = {
   syncShipment,
   getShipmentLabel,
   cancelCarrierShipmentsForOrder,
+  cancelAtCarrier,
+  cancelsByApi,
   codAmountFor,
 };
