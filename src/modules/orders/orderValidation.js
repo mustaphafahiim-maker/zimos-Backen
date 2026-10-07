@@ -355,7 +355,8 @@ module.exports = {
         .optional(),
       waybillNumber: Joi.string().max(100).allow(null, '').optional(),
       trackingUrl: Joi.string().uri().max(500).allow(null, '').optional(),
-      // With status 'cancelled' on a booking whose courier has no cancel API.
+      // With status 'cancelled' on a booking whose courier has no cancel API,
+      // or whose cancel by API failed with details.manualCancelAllowed.
       acknowledgeManualCancel: Joi.boolean().optional(),
     })
       .min(1)

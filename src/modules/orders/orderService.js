@@ -25,7 +25,7 @@ const { calculateShippingAmount } = require('../shipping/shippingPricing');
 const { calculateTax } = require('../tax/taxService');
 const { completeOrderInTransaction } = require('./orderCompletion');
 const { recordAudit } = require('../audit/auditService');
-const { setConfirmationState, trackStage, nextStages } = require('./orderStateService');
+const { setConfirmationState, trackStage, nextStages, assertShipmentCancelMove } = require('./orderStateService');
 const { STAGES, STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('./orderStage');
 const { orderSort, orderByClause, afterAnchorClause, anchorValue } = require('./orderSort');
 const gateways = require('../payments/gateways');
@@ -1498,14 +1498,12 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
     // A courier with a cancel API is asked first, before anything here
     // changes: a refusal (409 CARRIER_CANCEL_FAILED) leaves the shipment as
     // it was, instead of a parcel live at the courier that we call cancelled
-    // and whose COD we would then ignore. Not locked: the sandbox courier
-    // writes its own state onto this row.
+    // and whose COD we would then ignore. The stage guard runs before that,
+    // so a refused move never follows a cancel the courier already made.
+    // Not locked: the sandbox courier writes its own state onto this row.
     if (data.status === 'cancelled' && carrierShipmentService.cancelsByApi(shipment)) {
-      await carrierShipmentService.cancelAtCarrier(workspaceId, shipment, {
-        transaction,
-        notDone: 'The shipment was not cancelled.',
-      });
-      Object.assign(extra, { cancelMode: 'api', nextPollAt: null });
+      await assertShipmentCancelMove(orderId, shipment.id, transaction);
+      Object.assign(extra, await carrierShipmentService.apiCancelUpdates(workspaceId, shipment, data, req, transaction));
     }
     if (!extra.cancelMode && carrierShipmentService.TERMINAL_STATUSES.includes(data.status) && shipment.nextPollAt) {
       extra.nextPollAt = null;

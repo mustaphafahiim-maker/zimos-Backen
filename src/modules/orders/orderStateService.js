@@ -25,7 +25,8 @@ const STAGE_TRANSITIONS = Object.freeze({
   awaiting_payment: ['ready_to_ship', 'pending_confirmation', 'cancelled'],
   pending_confirmation: ['ready_to_ship', 'needs_follow_up', 'cancelled'],
   needs_follow_up: ['pending_confirmation', 'ready_to_ship', 'cancelled'],
-  ready_to_ship: ['shipped', 'out_for_delivery', 'delivered', 'cancelled'],
+  // returned: a returned order's new shipment was cancelled before it got anywhere
+  ready_to_ship: ['shipped', 'out_for_delivery', 'delivered', 'returned', 'cancelled'],
   // back to ready_to_ship: the shipment was cancelled before it got anywhere
   shipped: ['out_for_delivery', 'delivered', 'delivery_failed', 'returned', 'ready_to_ship'],
   out_for_delivery: ['delivered', 'delivery_failed', 'returned'],
@@ -98,6 +99,20 @@ async function trackStage(
     reason: reason || (req && req.stageChangeReason) || null,
     guard: enforce && env.orderStatusGuards ? assertTransition : null,
   });
+}
+
+/**
+ * trackStage's guard for a shipment about to be cancelled by hand, run before
+ * the courier is asked to cancel it (orderService.updateShipment): the stage
+ * the order will have once that shipment no longer counts, against the last
+ * one recorded. A refused move (409 INVALID_STATUS_TRANSITION) is then
+ * answered while the parcel is still live at the courier, as it is here.
+ */
+async function assertShipmentCancelMove(orderId, shipmentId, transaction) {
+  if (!env.orderStatusGuards) return;
+  const to = await statusHistory.stageOf(orderId, transaction, { withoutShipmentId: shipmentId });
+  const last = await statusHistory.lastRow(orderId, transaction);
+  if (to && last && last.toStatus !== to) assertTransition(last.toStatus, to);
 }
 
 /**
@@ -197,5 +212,6 @@ module.exports = {
   nextStages,
   canTransition,
   assertTransition,
+  assertShipmentCancelMove,
   trackStage,
 };

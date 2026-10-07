@@ -2,7 +2,7 @@
 
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
-const { STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('./orderStage');
+const { STAGE_SQL, ORDERS_WITH_STAGE_FROM, latestShipmentJoin } = require('./orderStage');
 
 /**
  * The record of an order's moves between pipeline stages.
@@ -18,13 +18,17 @@ const { STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('./orderStage');
 
 const ACTOR_TYPES = ['user', 'system', 'carrier', 'customer', 'api'];
 
-/** The order's stage as the given transaction sees it. */
-async function stageOf(orderId, transaction = null) {
+/**
+ * The order's stage as the given transaction sees it; with
+ * `withoutShipmentId`, the stage it will have once that shipment is cancelled.
+ */
+async function stageOf(orderId, transaction = null, { withoutShipmentId = null } = {}) {
+  const from = withoutShipmentId ? `orders o${latestShipmentJoin(' AND s.id <> $withoutShipmentId')}` : ORDERS_WITH_STAGE_FROM;
   const rows = await db.sequelize.query(
     `SELECT ${STAGE_SQL} AS stage
-       FROM ${ORDERS_WITH_STAGE_FROM}
+       FROM ${from}
       WHERE o.id = $orderId`,
-    { bind: { orderId }, type: QueryTypes.SELECT, ...(transaction ? { transaction } : {}) }
+    { bind: withoutShipmentId ? { orderId, withoutShipmentId } : { orderId }, type: QueryTypes.SELECT, ...(transaction ? { transaction } : {}) }
   );
   return rows.length > 0 ? rows[0].stage : null;
 }
@@ -96,4 +100,4 @@ async function listForOrder(workspaceId, orderId) {
   }));
 }
 
-module.exports = { ACTOR_TYPES, stageOf, actorFrom, sync, listForOrder };
+module.exports = { ACTOR_TYPES, stageOf, lastRow, actorFrom, sync, listForOrder };

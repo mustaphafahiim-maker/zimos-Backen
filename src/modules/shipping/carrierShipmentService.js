@@ -827,6 +827,33 @@ function manualCancelUpdates(shipment, data, req) {
   return manualCancelFields(req && req.user ? req.user.id : null);
 }
 
+// Why a cancel by API did not happen: the courier can't be reached from this
+// store (not available, server key missing, not connected) or it refused
+// (rejected credentials, no cancel permission, any other refusal).
+const ACK_FALLBACK_CODES = ['NOT_FOUND', 'CARRIERS_NOT_CONFIGURED', 'CARRIER_NOT_CONNECTED', 'CARRIER_CANCEL_FAILED', 'CARRIER_PERMISSION_DENIED'];
+
+/**
+ * PATCH .../shipments/:id to 'cancelled' on a booking whose courier cancels
+ * through its API: the courier is asked, and the extra fields the update must
+ * write are returned. When it could not be asked or refused, the merchant can
+ * cancel it in the courier's own dashboard and repeat the request with
+ * acknowledgeManualCancel: the shipment is then marked cancelled as
+ * 'manual_ack' and checked again later, as for a courier without a cancel
+ * API. Without it the error is thrown with details.manualCancelAllowed.
+ */
+async function apiCancelUpdates(workspaceId, shipment, data, req, transaction) {
+  try {
+    await cancelAtCarrier(workspaceId, shipment, { transaction, notDone: 'The shipment was not cancelled.' });
+    return { cancelMode: 'api', nextPollAt: null };
+  } catch (err) {
+    if (!ACK_FALLBACK_CODES.includes(err.code)) throw err;
+    if (data.acknowledgeManualCancel) return manualCancelFields(req && req.user ? req.user.id : null);
+    const details = err.details && typeof err.details === 'object' && !Array.isArray(err.details) ? err.details : {};
+    err.details = { ...details, shipmentId: shipment.id, manualCancelAllowed: true };
+    throw err;
+  }
+}
+
 module.exports = {
   FINISHED_STATUSES,
   TERMINAL_STATUSES,
@@ -849,6 +876,7 @@ module.exports = {
   cancelUncollectedShipments,
   cancelAtCarrier,
   cancelsByApi,
+  apiCancelUpdates,
   codAmountFor,
   // A return pickup resolves the shopper's address the same way (returns/returnPickup.js).
   resolveAddressSource,
