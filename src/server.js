@@ -46,6 +46,15 @@ async function start() {
   // Sign-up and go-live switches (REQUIRE_*), and a verification switch with
   // no email provider behind it (sign-ups are refused until one is set).
   signupPolicy.logBootState(logger);
+  // Public endpoints that can be closed, and the reset link's base (item 331).
+  logger.info(
+    `Public switches: shopper review form ${env.reviews.publicSubmissionEnabled ? 'open' : 'closed'}, password reset by SMS ${
+      env.passwordReset.smsEnabled ? 'on' : 'off'
+    }`
+  );
+  if (env.isProduction && !env.frontendUrlConfigured) {
+    logger.error('FRONTEND_URL is not set: password reset requests are refused (503 PASSWORD_RESET_UNAVAILABLE) until it is');
+  }
   // With REQUIRE_SUBSCRIPTION_TO_GO_LIVE off, drafts left from while it was
   // on become the trials they would have been.
   try {
@@ -73,6 +82,8 @@ async function start() {
     logger.info(`Received ${signal}, shutting down gracefully`);
     webhookWorker.stop();
     server.close(async () => {
+      // Reset emails already answered for go out before the database closes.
+      await require('./modules/auth/authService').settlePasswordResets();
       await workerRuntime.stop();
       await db.sequelize.close();
       process.exit(0);

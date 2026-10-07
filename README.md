@@ -366,6 +366,33 @@ recorded in `notification_logs` as `failed` with its `attempts` count and
 the triggering request still succeeds. Same provider pattern for
 `PAYMENTS_DEFAULT_PROVIDER` (`src/modules/payments/providers/`).
 
+**Password reset by email** (`POST /api/v1/auth/password-reset/request`)
+answers at once and the same way for every address; the lookup, the limit and
+the email happen after the answer. The link is valid 30 minutes and works once,
+a newer one replaces the older; each account gets at most 3 an hour and 10 a
+day (silently), each IP `PASSWORD_RESET_RATE_LIMIT_PER_HOUR` (default 10).
+Confirming it ends every session and confirms an unconfirmed email. In
+production it needs `FRONTEND_URL` (503 `PASSWORD_RESET_UNAVAILABLE` without).
+
+**Switches for public endpoints:** `REVIEWS_PUBLIC_SUBMISSION_ENABLED` (the
+storefront's review form, proved by order number + phone) is open while unset
+and closed by any value but `true` — closed, it answers 404 to every request.
+`PASSWORD_RESET_SMS_ENABLED` (password reset by SMS code) is off unless set to
+exactly `true`; off, the SMS reset gives the same answer for any number
+without sending anything. `AUTH_IP_RATE_LIMIT_MAX` /
+`AUTH_IP_RATE_LIMIT_WINDOW_MS` (default 50 per 15 minutes) cap sign-in
+failures, sign-up, password reset and resend-verification per IP, on top of the
+per-email `AUTH_RATE_LIMIT_MAX`.
+The 6-digit sign-up and confirmation codes are capped per IP in the database
+(`src/modules/otp/verificationCodeService.js`), over every code sent from that
+IP: `VERIFICATION_CODES_PER_IP_PER_HOUR` (default 20),
+`VERIFICATION_CODES_PER_IP_PER_DAY` (default 50) and
+`VERIFICATION_SMS_PER_IP_PER_DAY` (default 5). Unset uses the default; a value
+that isn't a whole number of 1 or more refuses to start. Everyone behind one IP
+shares these, so raise them if the API sees one address for many people. The
+limits per address (5 an hour, 10 a day), per account (3 SMS a day), the
+60-second wait between two codes and the 5 wrong guesses stay fixed.
+
 ### Image storage
 
 `STORAGE_PROVIDER` selects where `POST /api/v1/workspaces/:workspaceId/media`
@@ -420,7 +447,8 @@ and 3 sends per phone per 10 minutes. Two flows use it: phone verification
 right after registration (`POST /api/v1/auth/verify-phone/request` +
 `/confirm`, accepted for a still-`pending_verification` account) and
 password reset by SMS (`POST /api/v1/auth/password-reset/sms/request` +
-`/confirm`, enumeration-safe, only for a verified phone).
+`/confirm`, enumeration-safe, only for a verified phone, and closed unless
+`PASSWORD_RESET_SMS_ENABLED=true`).
 
 ### Google OAuth login
 

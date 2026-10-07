@@ -441,6 +441,57 @@ const publicPlansLimiter = createIpMinuteLimiter('public-plans', env.rateLimit.p
 const verifyCodeLimiter = createIpMinuteLimiter('verify-code', env.rateLimit.verifyMinuteMax, { skip });
 
 /*
+ * Password reset requests, per IP per hour, keyed on the IP alone (unlike
+ * authLimiter, whose key includes the email the caller sends). It answers the
+ * same for every address, so a 429 says nothing about whether one is
+ * registered; the per-account limit lives in the database and is silent
+ * (auth/authService.requestPasswordReset). Item 331, Ziad's 5a33487.
+ */
+function createPasswordResetLimiter({ hourMax, skip: skipAll = () => false }) {
+  return rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: hourMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) => `password-reset:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
+    handler,
+  });
+}
+
+const passwordResetLimiter = createPasswordResetLimiter({ hourMax: env.rateLimit.passwordResetHourMax, skip });
+
+/*
+ * The second limit on the account endpoints, keyed on the IP alone (item 331,
+ * Ziad's be428aa). On top of authLimiter, not instead of it: authLimiter's key
+ * includes the email (or sign-in identifier) the caller sends, so a new one on
+ * each request meant a new allowance and only the general limit was left. Two
+ * counters per IP:
+ *   loginIpLimiter  POST /auth/login, failed attempts only
+ *                   (skipSuccessfulRequests: a sign-in that works, or that
+ *                   answers with a code step, isn't counted);
+ *   authIpLimiter   sign-up, password-reset request and resend-verification,
+ *                   every request.
+ * Everyone behind one IP (an office, a mobile carrier's NAT) shares them.
+ */
+function createAuthIpLimiter({ windowMs, max, failedOnly = false, prefix, skip: skipAll = () => false }) {
+  return rateLimit({
+    windowMs,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: failedOnly,
+    skip: skipAll,
+    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
+    handler,
+  });
+}
+
+const authIpOptions = { windowMs: env.rateLimit.authIpWindowMs, max: env.rateLimit.authIpMax, skip };
+const loginIpLimiter = createAuthIpLimiter({ ...authIpOptions, failedOnly: true, prefix: 'login-ip' });
+const authIpLimiter = createAuthIpLimiter({ ...authIpOptions, prefix: 'auth-ip' });
+
+/*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
  * merchant's Bosta pushes arrive from Bosta's servers, so a per-IP limit would
  * put all merchants in one bucket; each merchant's webhook token gets its own.
@@ -512,4 +563,9 @@ module.exports = {
   publicPlansLimiter,
   verifyCodeLimiter,
   createIpMinuteLimiter,
+  passwordResetLimiter,
+  createPasswordResetLimiter,
+  loginIpLimiter,
+  authIpLimiter,
+  createAuthIpLimiter,
 };

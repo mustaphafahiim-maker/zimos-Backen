@@ -28,6 +28,10 @@ const { generateCode, sameDigest } = require('./otpService');
  * own daily ceilings per IP and per account and only goes to the country
  * codes in VERIFICATION_SMS_COUNTRY_CODES. The code itself never reaches a
  * log line or the audit log.
+ *
+ * The limits per IP come from the environment (env.verificationCodes:
+ * VERIFICATION_CODES_PER_IP_PER_HOUR, _PER_DAY, VERIFICATION_SMS_PER_IP_PER_DAY;
+ * item 331), since everyone behind one IP shares them; the rest are fixed here.
  */
 
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -39,9 +43,9 @@ const DAY_MS = 24 * HOUR_MS;
 const LIMITS = Object.freeze({
   targetPerHour: 5,
   targetPerDay: 10,
-  ipPerHour: 20,
-  ipPerDay: 50,
-  smsPerIpPerDay: 5,
+  ipPerHour: env.verificationCodes.ipPerHour,
+  ipPerDay: env.verificationCodes.ipPerDay,
+  smsPerIpPerDay: env.verificationCodes.smsPerIpPerDay,
   smsPerAccountPerDay: 3,
 });
 

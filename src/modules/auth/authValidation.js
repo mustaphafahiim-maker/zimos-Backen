@@ -125,7 +125,11 @@ module.exports = {
     body: Joi.object({ refreshToken: Joi.string().required() }),
   },
   requestPasswordReset: {
-    body: Joi.object({ email: joiEmail().required() }),
+    body: Joi.object({
+      email: joiEmail().required(),
+      // The language of the reset email; unset, the account's dashboard language, else Arabic.
+      locale: Joi.string().valid('ar', 'en').optional(),
+    }),
   },
   resetPassword: {
     body: Joi.object({ token: Joi.string().required(), newPassword: password }),

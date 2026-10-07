@@ -163,12 +163,12 @@ const changeUsername = [
 ];
 
 const requestPasswordReset = asyncHandler(async (req, res) => {
-  const result = await authService.requestPasswordReset(req.body.email);
+  const result = await authService.requestPasswordReset(req.body.email, { locale: req.body.locale });
   res.json(result);
 });
 
 const resetPassword = asyncHandler(async (req, res) => {
-  const result = await authService.resetPassword(req.body.token, req.body.newPassword);
+  const result = await authService.resetPassword(req.body.token, req.body.newPassword, req);
   res.json(result);
 });
 
@@ -187,6 +187,21 @@ const confirmPhoneVerification = [
     res.json(result);
   }),
 ];
+
+// Password reset by SMS stays closed unless PASSWORD_RESET_SMS_ENABLED is
+// "true" (env.passwordReset; item 331, Ziad's c9a87db): no screen uses it,
+// and an SMS code is the only check. Closed, the request answers success for
+// any number and sends nothing, as it does for a number with no account; the
+// confirmation answers as a wrong code does.
+function smsResetRequestGate(req, res, next) {
+  if (env.passwordReset.smsEnabled) return next();
+  return res.json({ success: true });
+}
+
+function smsResetConfirmGate(req, res, next) {
+  if (env.passwordReset.smsEnabled) return next();
+  return next(new AppError('INVALID_CODE', 'That code is not valid', 422));
+}
 
 const requestPasswordResetSms = asyncHandler(async (req, res) => {
   const result = await authService.requestPasswordResetSms(req.body.phone);
@@ -222,6 +237,8 @@ module.exports = {
   resetPassword,
   requestPhoneVerification,
   confirmPhoneVerification,
+  smsResetRequestGate,
+  smsResetConfirmGate,
   requestPasswordResetSms,
   resetPasswordSms,
 };

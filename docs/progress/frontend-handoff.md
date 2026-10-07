@@ -3442,3 +3442,30 @@ Two server switches, both off unless set to exactly `true`. Read them from **GET
 - **Settings → Transfer store**: `NEW_OWNER_NOT_CONFIRMED` → «الشخص ده لسه مأكدش إيميله» / "That person hasn't confirmed their email yet".
 - **Google callback page**: `ACCOUNT_SUSPENDED` → «الحساب ده موقوف» / "This account has been suspended".
 - **Console (platform-admin) → Admins → Add**: show the `USER_NOT_ACTIVE` message as is, or «الحساب ده لسه مأكدش إيميله» / "That account hasn't confirmed its email yet".
+
+## 331. Password reset that reveals nothing, per-IP sign-in limits, the review-form switch — UI: pending
+
+Server settings, nothing for the UI to read except `reviewFormOpen` below: `PASSWORD_RESET_RATE_LIMIT_PER_HOUR` (10 per IP), `AUTH_IP_RATE_LIMIT_MAX` / `AUTH_IP_RATE_LIMIT_WINDOW_MS` (50 per 15 minutes per IP), `VERIFICATION_CODES_PER_IP_PER_HOUR` / `_PER_DAY` / `VERIFICATION_SMS_PER_IP_PER_DAY` (20 / 50 / 5), `REVIEWS_PUBLIC_SUBMISSION_ENABLED` (unset = open, any value but `true` closes the storefront review form), `PASSWORD_RESET_SMS_ENABLED` (off unless `true`; no screen uses SMS reset — build none).
+
+### Endpoints
+- **POST `/auth/password-reset/request`** (public) `{ "email": "mona@gmail.com", "locale": "ar" }` → 200 `{ "success": true }`, at once and the same for every address.
+  - `locale` (`ar` | `en`, optional) is the email's language; unset, the account's dashboard language, else Arabic. Anything else → 422 `VALIDATION_ERROR` on `locale`.
+  - The link (`{FRONTEND_URL}/reset-password?token=…`, unchanged) is valid **30 minutes** (was one hour), works once, and a newer one replaces the older. Past 3 links an hour or 10 a day for one account the answer is the same and nothing is sent.
+  - 429 `RATE_LIMITED` "Too many requests": 10 requests per hour from one IP, or the per-IP sign-up / reset / resend budget below.
+  - 503 `PASSWORD_RESET_UNAVAILABLE` "Password reset is not available right now. Try again later." (production server without `FRONTEND_URL`; the same for every address).
+- **POST `/auth/password-reset/confirm`** `{ "token": "…", "newPassword": "…" }` → 200 `{ "success": true }`. Unchanged shape. Now it also: signs the account out everywhere (any access token stops at once), forgets remembered browsers, confirms an unconfirmed email and activates a pending account. 400 `INVALID_RESET_TOKEN` for an unknown, used, replaced or expired link.
+- **POST `/auth/login`**: after 50 failed sign-ins in 15 minutes from one IP (whatever emails or usernames were typed) → 429 `RATE_LIMITED`, even with the right password, until the window passes. Successful sign-ins don't count.
+- **POST `/auth/register`**, **POST `/auth/resend-verification`**, **POST `/auth/password-reset/request`**: together 50 requests per 15 minutes per IP → 429 `RATE_LIMITED`.
+- **POST `/auth/me/email/send-code`**, `/auth/verify/send`: 429 `VERIFICATION_LIMIT_REACHED` as before (the per-IP ceilings are now server settings).
+- **GET `/store/:workspaceId/products/:idOrSlug`** adds `"reviewFormOpen": true|false`.
+- **POST `/store/:workspaceId/products/:productId/reviews`** (unchanged body `{ orderNumber, phone, rating, comment, photoIds }`): while closed, every request → 404 `{ "error": { "code": "NOT_FOUND", "message": "Not found" } }`. Open, it answers as today (201/200, 403 `REVIEW_NOT_VERIFIED`, 422 `REVIEW_PHOTO_INVALID`).
+
+### Screens
+- **Merchant dashboard → Forgot password**: send `locale` with the dashboard's language. Keep the one confirmation for every address and change it to «إذا كان هذا البريد الإلكتروني مسجّلًا لدينا، سيصلك رابط لتعيين كلمة مرور جديدة خلال دقائق. الرابط صالح لمدة 30 دقيقة ولمرة واحدة.» / "If this email is registered with us, a link to set a new password will arrive within minutes. The link is valid for 30 minutes and works once."
+  - 429: «طلبات كتير من الشبكة دي — جرّب بعد شوية» / "Too many requests from this network — try again in a while".
+  - 503: «إعادة تعيين كلمة المرور مش متاحة دلوقتي — جرّب كمان شوية» / "Password reset isn't available right now — try again shortly".
+- **Merchant dashboard → Reset password** (`/reset-password?token=`):
+  - `INVALID_RESET_TOKEN`: «الرابط ده انتهى أو اتستخدم قبل كده — اطلب رابط جديد» / "This link has expired or was already used — ask for a new one", with a link «اطلب رابط جديد» / "Ask for a new link" to Forgot password.
+  - Success: «اتغيرت كلمة المرور، وخرجنا من حسابك على كل الأجهزة. سجّل دخولك بكلمة المرور الجديدة.» / "Your password is changed and you've been signed out on every device. Sign in with the new password." Then go to sign-in (clear any stored tokens).
+- **Merchant dashboard → Sign in / Sign up / Resend the email**: on 429 `RATE_LIMITED` show «محاولات كتير من الشبكة دي — استنى ربع ساعة وجرّب تاني» / "Too many attempts from this network — wait 15 minutes and try again". Don't clear the form.
+- **Storefront → product page → reviews**: when `reviewFormOpen` is false, hide «اكتب تقييمًا» / "Write a review" and the form; keep the rating and the approved reviews. If a submission answers 404 `NOT_FOUND`, hide the form and show «التقييمات مقفولة دلوقتي» / "Reviews are closed right now".

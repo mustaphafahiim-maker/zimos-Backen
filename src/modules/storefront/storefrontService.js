@@ -87,6 +87,8 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
     purchaseLimits: require('../catalog/purchaseLimits').limitsOf(product),
     rating,
     reviews,
+    // Whether the review form takes submissions (REVIEWS_PUBLIC_SUBMISSION_ENABLED, item 331).
+    reviewFormOpen: require('../../config/env').reviews.publicSubmissionEnabled,
   };
 }
 

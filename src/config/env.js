@@ -138,6 +138,31 @@ function csvList(raw, fallback) {
     .filter(Boolean);
 }
 
+// A whole number of 1 or more from the environment (item 331, Ziad's a77791e).
+// Unset or blank uses the fallback; anything else refuses to start, naming the
+// variable, so a typo cannot quietly switch a limit off. Under NODE_ENV=test
+// the fallback always wins, so a dev .env can't change what the suite sees.
+function positiveInt(name, fallback) {
+  const raw = process.env[name];
+  if (process.env.NODE_ENV === 'test' || isBlank(raw)) return fallback;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new Error(`${name} must be a whole number of 1 or more (unset, it is ${fallback})`);
+  }
+  return Number(value);
+}
+
+// A public endpoint's switch (item 331). Ziad's rule: only the exact value
+// "true" opens it. Where our frontend uses the endpoint today the default
+// (unset or blank) stays open, and any value but "true" closes it. Under
+// NODE_ENV=test the default always wins; a test that needs the other state
+// sets it on the env object at runtime.
+function publicSwitch(name, defaultOpen) {
+  const raw = process.env[name];
+  if (process.env.NODE_ENV === 'test' || isBlank(raw)) return defaultOpen;
+  return raw === 'true';
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
@@ -198,8 +223,12 @@ const env = {
     redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:4000/api/v1/auth/google/callback',
   },
 
-  // Where the Google callback sends the browser (with tokens in the query).
+  // Where the Google callback sends the browser (with tokens in the query),
+  // and the base of the links emailed to merchants (password reset, …).
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  // Whether FRONTEND_URL was set at all: in production the localhost default
+  // would email a link nobody can open, so password reset refuses without it.
+  frontendUrlConfigured: Boolean((process.env.FRONTEND_URL || '').trim()),
 
   cors: {
     origins: (process.env.CORS_ORIGINS || 'http://localhost:3000')
@@ -212,6 +241,11 @@ const env = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     authMax: parseInt(process.env.AUTH_RATE_LIMIT_MAX || '10', 10),
+    // Sign-in, sign-up, password reset and resend-verification, per IP alone,
+    // on top of authLimiter (whose key includes the email the caller sends,
+    // so a new email meant a new allowance). Sign-in counts failed attempts only.
+    authIpMax: parseInt(process.env.AUTH_IP_RATE_LIMIT_MAX || '50', 10),
+    authIpWindowMs: parseInt(process.env.AUTH_IP_RATE_LIMIT_WINDOW_MS || String(15 * 60 * 1000), 10),
     // Public storefront API only (see core/middleware/rateLimiters.js). Each
     // shopper still gets `max`; these are the ceilings per connecting IP — for
     // everyone sharing one IP (NAT, rotating cart tokens), and for our own
@@ -239,6 +273,38 @@ const env = {
     // on top of the per-address and per-account limits kept in the database
     // (otp/verificationCodeService).
     verifyMinuteMax: parseInt(process.env.VERIFY_RATE_LIMIT_PER_MINUTE || '10', 10),
+    // Password reset requests (POST /auth/password-reset/request), per IP per
+    // hour — on top of the per-account limit kept in the database (authService).
+    passwordResetHourMax: parseInt(process.env.PASSWORD_RESET_RATE_LIMIT_PER_HOUR || '10', 10),
+  },
+
+  // The 6-digit codes' ceilings per IP (otp/verificationCodeService), counted
+  // in the database over every code sent from one IP: at sign-up, at sign-in
+  // while unconfirmed, by the resend button, and to confirm a signed-in
+  // account's email. The limits per address and per account, the wait
+  // between two codes and the wrong guesses allowed are constants there.
+  verificationCodes: {
+    ipPerHour: positiveInt('VERIFICATION_CODES_PER_IP_PER_HOUR', 20),
+    ipPerDay: positiveInt('VERIFICATION_CODES_PER_IP_PER_DAY', 50),
+    smsPerIpPerDay: positiveInt('VERIFICATION_SMS_PER_IP_PER_DAY', 5),
+  },
+
+  // Public endpoints that can be closed until their identity checks are
+  // stronger (item 331, Ziad's b0ae907 and c9a87db).
+  //   reviews.publicSubmissionEnabled  POST /store/:id/products/:productId/reviews.
+  //                                    Ours proves the purchase with the order
+  //                                    number and its phone, and the storefront's
+  //                                    review form uses it, so unset keeps it
+  //                                    open; any value but "true" closes it
+  //                                    (the same 404 for every request).
+  //   passwordReset.smsEnabled         POST /auth/password-reset/sms/request and
+  //                                    /confirm. No screen uses them; closed
+  //                                    unless exactly "true", as in his.
+  reviews: {
+    publicSubmissionEnabled: publicSwitch('REVIEWS_PUBLIC_SUBMISSION_ENABLED', true),
+  },
+  passwordReset: {
+    smsEnabled: publicSwitch('PASSWORD_RESET_SMS_ENABLED', false),
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is
