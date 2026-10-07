@@ -16,8 +16,12 @@ const { QUEUE_NAMES, policyFor, isPermanent } = require('./queues');
  */
 
 const WORKER_ID = `${os.hostname()}:${process.pid}`;
-// An `active` job whose worker died is handed out again after this long.
-const STALE_LOCK_MS = 10 * 60 * 1000;
+// An `active` job whose lock is older than this had its worker stop: it is
+// handed out again, or failed when it may not run twice (item 365). A running
+// job renews its lock every heartbeatMs, so a long job is never taken from a
+// live worker. Set by start() (QUEUE_STALE_LOCK_MS).
+let staleLockMs = 10 * 60 * 1000;
+const heartbeatMs = () => Math.min(60 * 1000, Math.max(1000, Math.floor(staleLockMs / 4)));
 const SCHEDULE_TICK_MS = 5000;
 
 const handlers = new Map(); // queue → (job) => Promise
@@ -32,6 +36,16 @@ let kicked = false;
 let inFlight = 0;
 let stopped = true;
 let lastStaleSweep = 0;
+// "queue/name" of jobs that are never run again after their worker stopped
+// mid-run (a courier booking: it may have gone through), and what is told
+// when that happens (index.js). Set by configureInterruptions.
+let onceKeys = [];
+let onInterrupted = null;
+
+function configureInterruptions({ once = [], interrupted = null } = {}) {
+  onceKeys = [...once];
+  onInterrupted = interrupted;
+}
 
 async function add(queue, name, payload = {}, { delayMs = 0, dedupeKey = null, workspaceId = null, transaction = null } = {}) {
   const policy = policyFor(queue);
@@ -86,12 +100,17 @@ async function claim(limit) {
   );
 }
 
+// Only while this worker still holds the job: one taken back as stale (its
+// lock not renewed for staleLockMs) belongs to the sweep or another worker.
+const HELD = `id = :id AND locked_by = :worker AND status = 'active'`;
+
 async function finish(job, err) {
   if (!err) {
-    await db.sequelize.query(
-      `UPDATE queue_jobs SET status = 'completed', finished_at = NOW(), locked_at = NULL, locked_by = NULL, last_error = NULL, updated_at = NOW() WHERE id = :id`,
-      { replacements: { id: job.id } }
+    const [, meta] = await db.sequelize.query(
+      `UPDATE queue_jobs SET status = 'completed', finished_at = NOW(), locked_at = NULL, locked_by = NULL, last_error = NULL, updated_at = NOW() WHERE ${HELD}`,
+      { replacements: { id: job.id, worker: WORKER_ID } }
     );
+    if (meta && meta.rowCount === 0) logger.warn(`[queue] ${job.queue}/${job.name} ${job.id} finished after its lock was taken back`);
     return;
   }
   const message = String(err && err.message ? err.message : err).slice(0, 2000);
@@ -101,14 +120,14 @@ async function finish(job, err) {
     const delayMs = policy.delays[job.attempts - 1] ?? policy.delays[policy.delays.length - 1] ?? 0;
     await db.sequelize.query(
       `UPDATE queue_jobs SET status = 'pending', run_at = NOW() + (:delayMs * INTERVAL '1 millisecond'),
-              locked_at = NULL, locked_by = NULL, last_error = :message, updated_at = NOW() WHERE id = :id`,
-      { replacements: { id: job.id, delayMs, message } }
+              locked_at = NULL, locked_by = NULL, last_error = :message, updated_at = NOW() WHERE ${HELD}`,
+      { replacements: { id: job.id, worker: WORKER_ID, delayMs, message } }
     );
     logger.warn(`[queue] ${job.queue}/${job.name} attempt ${job.attempts} failed, retrying in ${Math.round(delayMs / 1000)}s: ${message}`);
   } else {
     await db.sequelize.query(
-      `UPDATE queue_jobs SET status = 'failed', finished_at = NOW(), locked_at = NULL, locked_by = NULL, last_error = :message, updated_at = NOW() WHERE id = :id`,
-      { replacements: { id: job.id, message } }
+      `UPDATE queue_jobs SET status = 'failed', finished_at = NOW(), locked_at = NULL, locked_by = NULL, last_error = :message, updated_at = NOW() WHERE ${HELD}`,
+      { replacements: { id: job.id, worker: WORKER_ID, message } }
     );
     logger.error(`[queue] ${job.queue}/${job.name} failed for good after ${job.attempts} attempt(s): ${message}`);
   }
@@ -116,12 +135,20 @@ async function finish(job, err) {
 
 async function runJob(job) {
   inFlight += 1;
+  // The heartbeat: the lock stays fresh while the handler runs, however long.
+  const heartbeat = setInterval(() => {
+    db.sequelize
+      .query(`UPDATE queue_jobs SET locked_at = NOW() WHERE ${HELD}`, { replacements: { id: job.id, worker: WORKER_ID }, logging: false })
+      .catch((err) => logger.warn(`[queue] could not renew the lock of job ${job.id}: ${err.message}`));
+  }, heartbeatMs());
   try {
     let failure = null;
     try {
       await handlers.get(job.queue)(job);
     } catch (err) {
       failure = err || new Error('job failed');
+    } finally {
+      clearInterval(heartbeat);
     }
     await finish(job, failure);
   } catch (err) {
@@ -133,13 +160,28 @@ async function runJob(job) {
   }
 }
 
+const INTERRUPTED = 'Its worker stopped while it was running; not run again';
+
 async function releaseStale() {
-  if (Date.now() - lastStaleSweep < 60 * 1000) return;
+  if (Date.now() - lastStaleSweep < Math.min(60 * 1000, staleLockMs / 2)) return;
   lastStaleSweep = Date.now();
+  // Jobs that may not run twice, and jobs that had their last attempt, fail.
+  const failed = await db.sequelize.query(
+    `UPDATE queue_jobs SET status = 'failed', finished_at = NOW(), locked_at = NULL, locked_by = NULL, last_error = :message, updated_at = NOW()
+      WHERE status = 'active' AND locked_at < NOW() - (:staleMs * INTERVAL '1 millisecond')
+        AND (attempts >= max_attempts OR (queue || '/' || name) IN (:once))
+  RETURNING id, queue, name, payload, attempts, max_attempts AS "maxAttempts", workspace_id AS "workspaceId"`,
+    { replacements: { staleMs: staleLockMs, message: INTERRUPTED, once: onceKeys.length ? onceKeys : [''] }, type: QueryTypes.SELECT, logging: false }
+  );
+  for (const job of failed) {
+    logger.error(`[queue] ${job.queue}/${job.name} ${job.id} was cut off on attempt ${job.attempts} and is not run again`);
+    if (onInterrupted) await onInterrupted(job);
+  }
+  // The rest go back in line.
   await db.sequelize.query(
     `UPDATE queue_jobs SET status = 'pending', locked_at = NULL, locked_by = NULL, updated_at = NOW()
       WHERE status = 'active' AND locked_at < NOW() - (:staleMs * INTERVAL '1 millisecond')`,
-    { replacements: { staleMs: STALE_LOCK_MS }, logging: false }
+    { replacements: { staleMs: staleLockMs }, logging: false }
   );
 }
 
@@ -210,6 +252,7 @@ async function start(options = {}) {
   if (!stopped) return;
   pollMs = options.pollMs || pollMs;
   concurrency = options.concurrency || concurrency;
+  staleLockMs = options.staleLockMs || staleLockMs;
   for (const [name, schedule] of schedules) {
     // First run one interval from now; a changed interval takes effect at once.
     await db.sequelize.query(
@@ -322,6 +365,7 @@ module.exports = {
   add,
   process: process_,
   every,
+  configureInterruptions,
   start,
   stop,
   stats,

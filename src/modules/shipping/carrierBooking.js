@@ -148,4 +148,28 @@ async function autoBook(event) {
   }
 }
 
-module.exports = { AUTO_CREATE_ON, bookingSchema, updateBooking, autoBook, autoCourierFor };
+/**
+ * The worker stopped (a restart, a crash) while autoBook was running for this
+ * event. The courier may have booked the parcel before the shipment was
+ * saved, so it is not run again (shipping/jobs.js, once): unless the order has
+ * its shipment by now, the merchant is told to check the courier and book by
+ * hand (item 365).
+ */
+async function autoBookInterrupted(event) {
+  const moment = TRIGGER_FOR[event.type];
+  const orderId = event.payload && event.payload.orderId;
+  if (!moment || !orderId) return null;
+  const { workspaceId } = event;
+  const order = await db.Order.findOne({ where: { id: orderId, workspaceId } });
+  if (!order || order.cancelledAt) return null;
+  if (await db.Shipment.count({ where: { orderId, status: ['created', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered'] } })) return null;
+  const account = await autoCourierFor(workspaceId, moment);
+  if (!account) return null;
+  const adapter = carriers.getAdapter(account.carrierCode);
+  const reason = `The automatic booking stopped before it finished. Check ${adapter ? adapter.name : account.carrierCode} for this order before booking it.`;
+  await tellMerchant(workspaceId, order, account.carrierCode, reason);
+  logger.warn('Automatic booking interrupted', { workspaceId, orderId, carrierCode: account.carrierCode });
+  return { interrupted: true };
+}
+
+module.exports = { AUTO_CREATE_ON, bookingSchema, updateBooking, autoBook, autoBookInterrupted, autoCourierFor };

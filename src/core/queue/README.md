@@ -81,6 +81,26 @@ A handler that throws is retried with the queue's policy (`queues.js`):
 Throw an error with `err.permanent = true` to stop retrying. Handlers must be
 safe to run twice (at-least-once delivery).
 
+### A worker that stops mid-job
+
+On the Postgres driver a running job renews its lock (`locked_at`) every
+minute, so a long job (a 500-order bulk booking) is never handed to a second
+worker. A job whose lock is older than `QUEUE_STALE_LOCK_MS` (10 minutes) had
+its worker stop (a restart, a crash):
+
+- it goes back in line when it has attempts left (the handler resumes it);
+- it is failed ("Its worker stopped while it was running; not run again") when
+  that was its last attempt (every `io` job), or when its consumer or
+  processor says `once: true` — work that may have gone through and cannot be
+  repeated, like the automatic courier booking. `onInterrupted` (called with
+  the event for a consumer, the job for a processor) tells the merchant.
+
+```js
+{ name: 'carrier_auto_booking', queue: 'carriers', events: ['order.confirmed'], handle, once: true, onInterrupted: (event) => {} }
+```
+
+BullMQ renews its own locks; `once` and `onInterrupted` are not used there.
+
 ## Running it
 
 - **In the API process** (default): `WORKER_IN_PROCESS` is on, nothing else to

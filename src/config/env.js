@@ -609,6 +609,10 @@ const env = {
     inProcess: process.env.NODE_ENV !== 'test' && process.env.WORKER_IN_PROCESS !== 'false',
     pollMs: Math.max(250, parseInt(process.env.QUEUE_POLL_MS || '1000', 10) || 1000),
     concurrency: Math.max(1, parseInt(process.env.QUEUE_CONCURRENCY || '10', 10) || 10),
+    // A running job renews its lock while it runs (Postgres driver); one whose
+    // lock is older than this had its worker stop and is handed out again,
+    // or failed when it may not run twice (item 365).
+    staleLockMs: Math.max(10000, parseInt(process.env.QUEUE_STALE_LOCK_MS || '600000', 10) || 600000),
   },
 
   // Outbound webhooks to merchants' own systems (modules/webhooks).

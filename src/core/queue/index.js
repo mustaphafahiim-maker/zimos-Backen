@@ -21,11 +21,33 @@ const { QUEUE_NAMES } = require('./queues');
 const driver = env.queue.redisUrl ? require('./bullmqDriver') : require('./postgresDriver');
 
 const jobHandlers = new Map(); // "queue/name" → handle(job)
+const jobOptions = new Map(); // "queue/name" → { once, onInterrupted }
 const scheduleHandlers = new Map(); // name → { everyMs, handle }
 
-/** Registers what runs for jobs called `name` on `queue`. One handler per pair. */
-function handle(queue, name, fn) {
-  jobHandlers.set(`${queue}/${name}`, fn);
+/**
+ * Registers what runs for jobs called `name` on `queue`. One handler per pair.
+ * Options: `once` — a job whose worker stopped mid-run is failed instead of
+ * run again (it may have done its work: a courier booking); `onInterrupted(job)`
+ * — called when that happens, to tell the merchant.
+ */
+function handle(queue, name, fn, options = {}) {
+  const key = `${queue}/${name}`;
+  jobHandlers.set(key, fn);
+  if (options.once || options.onInterrupted) jobOptions.set(key, { once: Boolean(options.once), onInterrupted: options.onInterrupted || null });
+  else jobOptions.delete(key);
+}
+
+/** A job the driver failed because its worker stopped while running it. */
+async function interrupted(job) {
+  const options = jobOptions.get(`${job.queue}/${job.name}`);
+  if (!options || !options.onInterrupted) return;
+  await requestContext.run({ jobId: `${job.queue}/${job.name}:${job.id}`, ...(job.workspaceId ? { workspaceId: job.workspaceId } : {}) }, async () => {
+    try {
+      await options.onInterrupted(job);
+    } catch (err) {
+      logger.error(`[queue] ${job.queue}/${job.name} ${job.id}: could not report the interruption: ${err.message}`);
+    }
+  });
 }
 
 /** Registers a repeatable job: `fn` runs about every `everyMs`, on one worker at a time. */
@@ -90,7 +112,11 @@ async function start() {
   for (const [name, schedule] of scheduleHandlers) {
     driver.every(name, schedule.everyMs, (...args) => requestContext.run({ jobId: `schedule/${name}` }, () => schedule.handle(...args)));
   }
-  await driver.start({ pollMs: env.queue.pollMs, concurrency: env.queue.concurrency });
+  if (driver.configureInterruptions) {
+    const once = [...jobOptions].filter(([, options]) => options.once).map(([key]) => key);
+    driver.configureInterruptions({ once, interrupted });
+  }
+  await driver.start({ pollMs: env.queue.pollMs, concurrency: env.queue.concurrency, staleLockMs: env.queue.staleLockMs });
   logger.info(`Queue worker running on the ${driver.name} driver`, {
     queues: [...used],
     schedules: [...scheduleHandlers.keys()],
