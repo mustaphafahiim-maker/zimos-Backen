@@ -107,6 +107,9 @@ async function erase(customer, { force = false, req, transaction }) {
   await db.sequelize.query('DELETE FROM payment_methods_saved WHERE customer_id = :c', { replacements: { c: id }, transaction });
   await db.sequelize.query('DELETE FROM wishlist_items WHERE customer_id = :c', { replacements: { c: id }, transaction });
   await db.sequelize.query('UPDATE reviews SET author_name = NULL WHERE customer_id = :c', { replacements: { c: id }, transaction });
+  // The email lists the store syncs to drop the old address (item 308): an internal event only — not a
+  // webhook topic — since it carries the address that was just erased here.
+  if (email) await require('../../core/outbox/outbox').record(transaction, 'contact.erased', { workspaceId: customer.workspaceId, customerId: id, formerEmail: email });
   await recordAudit({ workspaceId: customer.workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'customer.erase', entityType: 'Customer', entityId: id, after: { force }, req, transaction });
 }
 

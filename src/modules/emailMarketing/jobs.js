@@ -12,7 +12,7 @@ module.exports = {
     {
       name: 'email_marketing_contacts',
       queue: 'default',
-      events: ['lead.created', 'customer.created', 'contact.updated'],
+      events: ['lead.created', 'customer.created', 'contact.updated', 'contact.erased'],
       handle: (event) => svc().onContactEvent(event),
     },
   ],
