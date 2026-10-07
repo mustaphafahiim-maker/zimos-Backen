@@ -278,7 +278,8 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req, variantI
     return { merged: publicOrder(order, order.items), addedItemId: item.id };
   }
 
-  // Too late to join it: its own order, as before, without a second shipping fee.
+  // Too late to join it: its own order, as before, without a second shipping
+  // fee or a second pay-per-order fee (billing/walletService).
   const { order: followOn } = await orderService.createOrder(
     workspaceId,
     {
@@ -289,7 +290,7 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req, variantI
       funnelId,
     },
     { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? clientIp(req) : null },
-    { transaction, skipFraudRules: true, shippingOverride: { amount: 0 }, source: 'upsell' }
+    { transaction, skipFraudRules: true, shippingOverride: { amount: 0 }, source: 'upsell', chargeFee: false }
   );
   await db.Order.update({ linkedFromOrderId: order.id }, { where: { id: followOn.id, workspaceId }, transaction });
   await db.FunnelOfferAcceptance.create(

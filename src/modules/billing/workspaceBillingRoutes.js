@@ -10,6 +10,7 @@ const controller = require('./billingController');
 const schemas = require('./billingValidation');
 const { createIpMinuteLimiter, paymentProofLimiter } = require('../../core/middleware/rateLimiters');
 const payments = require('./paymentController');
+const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
 const env = require('../../config/env');
 
 // Trying referral codes is limited per IP, so codes can't be walked.
@@ -55,5 +56,12 @@ router.post(
   payments.submitInvoiceProof
 );
 router.get('/payment-proofs', payments.listPaymentProofs);
+// The prepaid balance and the pay-per-order plan (billing/walletService,
+// WALLET_ENABLED; item 335, Ziad's ead64d1): the balance, its ledger, a
+// top-up transfer's proof, and choosing the plan.
+router.get('/wallet', payments.getWallet);
+router.get('/wallet/ledger', validate(schemas.walletLedger), payments.getWalletLedger);
+router.post('/wallet/topups', paymentProofLimiter, payments.acceptProofFile, validate(schemas.submitTopup), payments.submitTopup);
+router.post('/pay-per-order', requireConfirmedAccount, payments.choosePayPerOrder);
 
 module.exports = router;

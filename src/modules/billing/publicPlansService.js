@@ -50,9 +50,14 @@ const PLAN_ORDER = Object.freeze([
   ['name', 'ASC'],
 ]);
 
+// A pay-per-order plan (a fee per order, nothing monthly) is never listed
+// with the others or chosen at sign-up: it is chosen from the Subscription
+// section, while WALLET_ENABLED is on (billing/walletService; item 335).
+const OFFERED = { isPublic: true, isActive: true, perOrderFeeAmount: 0 };
+
 async function loadOffered(transaction) {
   return db.Plan.findAll({
-    where: { isPublic: true, isActive: true },
+    where: OFFERED,
     order: PLAN_ORDER,
     transaction,
   });
@@ -72,13 +77,13 @@ function invalidate() {
 
 /** Whether any plan is offered right now (read fresh, never cached). */
 async function anyOffered(transaction) {
-  return (await db.Plan.count({ where: { isPublic: true, isActive: true }, transaction })) > 0;
+  return (await db.Plan.count({ where: OFFERED, transaction })) > 0;
 }
 
 /** The offered plan `planId`, or 422 PLAN_NOT_AVAILABLE (unknown, private or inactive). */
 async function findOfferedPlan(planId, transaction) {
   const plan = planId ? await db.Plan.findByPk(planId, { transaction }) : null;
-  if (!plan || !plan.isActive || !plan.isPublic) {
+  if (!plan || !plan.isActive || !plan.isPublic || Number(plan.perOrderFeeAmount) > 0) {
     throw new AppError('PLAN_NOT_AVAILABLE', 'This plan is not available', 422, [
       { field: 'planId', message: 'Choose one of the plans on offer' },
     ]);

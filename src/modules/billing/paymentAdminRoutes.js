@@ -27,6 +27,14 @@ router.patch(
   payments.adminUpdatePaymentMethodAccount
 );
 
+// A store's prepaid balance and its ledger (billing/walletService; item 335).
+router.get(
+  '/workspaces/:workspaceId/wallet',
+  ...allow(P.SUBSCRIPTIONS_VIEW),
+  validate(schemas.adminWorkspaceWallet),
+  payments.adminWorkspaceWallet
+);
+
 router.get('/payment-proofs', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminListProofs), payments.adminListProofs);
 router.get('/payment-proofs/:proofId', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminProofParams), payments.adminGetProof);
 router.post('/payment-proofs/:proofId/approve', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminApproveProof), payments.adminApproveProof);

@@ -53,6 +53,10 @@ const planBody = Joi.object({
   // Shown on the marketing site and offered at sign-up.
   isPublic: Joi.boolean().optional(),
   displayOrder: Joi.number().integer().min(0).max(10000).optional(),
+  // The pay-per-order fee for one order, minor units (50 = EGP 0.50). Only on
+  // a plan with no monthly price, in EGP (platformAdminService.savePlan).
+  // Left out: kept as it is.
+  perOrderFee: Joi.number().integer().min(0).max(100000).optional(),
 });
 
 const flagBody = Joi.object({

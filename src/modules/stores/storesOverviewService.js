@@ -94,7 +94,9 @@ async function overview(userId) {
 
     const alerts = [];
     if (access.suspension.suspended) alerts.push({ code: 'suspended' });
-    else if (access.restricted) alerts.push({ code: 'billing_restricted' });
+    else if (access.reasons.includes('billing')) alerts.push({ code: 'billing_restricted' });
+    // The pay-per-order balance can't pay the next order's fee (billing/walletService).
+    if (access.reasons.includes('balance') && !access.suspension.suspended) alerts.push({ code: 'balance_exhausted' });
     if (access.draft) alerts.push({ code: 'draft' });
     if (seesOrders && f && f.pending_confirmation > 0) alerts.push({ code: 'pending_confirmation', count: f.pending_confirmation });
     if (lowStock.get(ws.id)) alerts.push({ code: 'low_stock', count: lowStock.get(ws.id) });

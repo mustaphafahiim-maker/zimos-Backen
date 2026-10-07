@@ -15,6 +15,7 @@ const platformBlocklist = require('../risk/platformBlocklistService');
 const gateways = require('./gateways');
 const gatewayRuntime = require('./gatewayRuntime');
 const methodsService = require('./paymentMethodsService');
+const wallet = require('../billing/walletService');
 
 /**
  * Online (gateway) payments for storefront orders.
@@ -459,8 +460,12 @@ async function recordPaymentTransaction(account, tx) {
 
     if (platformBlock) {
       await platformBlocklist.recordOrderBlocked(order, platformBlock, { on: 'payment', transaction });
+      // Cancelled for a blocklisted customer: the pay-per-order fee goes back (billing/walletService).
+      await wallet.reverseOrderFee(order, { reason: 'customer_blocked' }, transaction);
       return 'paid_blocked';
     }
+    // Reopened by a late payment: its fee, given back at expiry, is charged again.
+    if (reopened) await wallet.rechargeOrderFee(order, {}, transaction);
     return reopened ? 'paid_reopened' : 'paid';
   });
 
@@ -583,6 +588,8 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
       after: { cancelledAt: locked.cancelledAt, cancellationReason: EXPIRED_REASON },
       transaction,
     });
+    // The pay-per-order fee goes back to the store (billing/walletService).
+    await wallet.reverseOrderFee(locked, { reason: 'payment_expired' }, transaction);
     return 'expired';
   });
   // An order that was never paid is a lost order the merchant can win back (never throws).

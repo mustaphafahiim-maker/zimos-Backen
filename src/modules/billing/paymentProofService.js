@@ -12,6 +12,7 @@ const { ACCEPTED_IMAGE_TYPES } = require('../customerUploads/customerUploadServi
 const charges = require('./subscriptionChargeService');
 const paymentMethods = require('./paymentMethodService');
 const { serializeInvoice } = require('./merchantPlansService');
+const wallet = require('./walletService');
 const { signedProofImageUrl } = require('./proofLinks');
 
 /**
@@ -36,12 +37,18 @@ const { signedProofImageUrl } = require('./proofLinks');
  *            compared with it. One image is never accepted twice (its
  *            SHA-256 is unique), one proof waits per charge, and at most
  *            MAX_OPEN_PER_WORKSPACE per store.
+ *   top-up   POST /workspaces/:id/billing/wallet/topups (WALLET_ENABLED;
+ *            item 335, Ziad's ead64d1): the same checks, for an amount the
+ *            merchant chooses between walletService.MIN_TOPUP_AMOUNT and
+ *            MAX_TOPUP_AMOUNT, at most walletService.MAX_OPEN_TOPUPS waiting.
  *   review   the console (payments.record): the image through a signed
  *            five-minute link. Approving takes the amount that arrived; for
  *            a charge it must be exactly the amount asked, and the charge is
  *            settled through settlePaid — the path every payment takes — at
  *            the frozen price. Anything else is not settled: the proof is
- *            rejected with a note. Approving twice changes nothing.
+ *            rejected with a note. A top-up credits what arrived, whatever was
+ *            asked, through walletService.creditTopup (topup:<proofId>).
+ *            Approving twice changes nothing.
  */
 
 const PROOF_MAX_BYTES = 8 * 1024 * 1024;
@@ -308,6 +315,69 @@ async function submitForInvoice(workspaceId, invoiceId, { methodCode, senderPhon
   return serializeForMerchant(proof, method);
 }
 
+/**
+ * POST /workspaces/:id/billing/wallet/topups — a transfer to top up the
+ * prepaid balance. The amount is the merchant's request, in minor units,
+ * checked against the named limits; what is credited is what the console
+ * sees arrive.
+ */
+async function submitTopup(workspaceId, { requestedAmount, methodCode, senderPhone, file }, req) {
+  if (!wallet.enabled()) throw wallet.disabledError();
+  const amount = Number(requestedAmount);
+  if (!Number.isSafeInteger(amount) || amount < wallet.MIN_TOPUP_AMOUNT || amount > wallet.MAX_TOPUP_AMOUNT) {
+    throw new AppError(
+      'TOPUP_AMOUNT_OUT_OF_RANGE',
+      'A top-up is between the minimum and the maximum the balance allows.',
+      422,
+      { min: wallet.MIN_TOPUP_AMOUNT, max: wallet.MAX_TOPUP_AMOUNT, currency: wallet.WALLET_CURRENCY }
+    );
+  }
+  const { method, phone, imageSha256 } = await readSubmission({ methodCode, senderPhone, file });
+
+  const proof = await withStoredImage(workspaceId, file, (image) =>
+    db.sequelize.transaction(async (transaction) => {
+      await assertRoomForAnother(workspaceId, transaction);
+      const openTopups = await db.PaymentProof.count({ where: { workspaceId, purpose: 'topup', status: 'pending' }, transaction });
+      if (openTopups >= wallet.MAX_OPEN_TOPUPS) {
+        throw new ConflictError(
+          `At most ${wallet.MAX_OPEN_TOPUPS} top-ups can wait for review at a time. Wait for one to be reviewed.`,
+          'TOO_MANY_OPEN_TOPUPS'
+        );
+      }
+      const row = await createRow(
+        {
+          workspaceId,
+          purpose: 'topup',
+          billingInvoiceId: null,
+          paymentMethodId: method.id,
+          methodCode: method.code,
+          receivingNumber: method.accountNumber,
+          senderPhone: phone,
+          currency: wallet.WALLET_CURRENCY,
+          requestedAmount: amount,
+          submittedByUserId: req.user.id,
+          imageSha256,
+          ...image,
+        },
+        transaction
+      );
+      await recordAudit({
+        workspaceId,
+        actorUserId: req.user.id,
+        action: 'payment_proof.submit',
+        entityType: 'PaymentProof',
+        entityId: row.id,
+        after: { status: row.status, amount, currency: wallet.WALLET_CURRENCY },
+        metadata: { purpose: 'topup', method: method.code, senderPhone: maskPhone(phone) },
+        req,
+        transaction,
+      });
+      return row;
+    })
+  );
+  return serializeForMerchant(proof, method);
+}
+
 /** GET /workspaces/:id/billing/payment-proofs — the store's latest proofs, newest first. */
 async function listForWorkspace(workspaceId, { limit = 20 } = {}) {
   const rows = await db.PaymentProof.findAll({
@@ -383,6 +453,7 @@ async function getForReview(proofId) {
   const proof = await db.PaymentProof.findByPk(proofId, { include: ADMIN_INCLUDE });
   if (!proof) throw new NotFoundError('Payment proof');
   const invoice = proof.billingInvoiceId ? await db.BillingInvoice.findByPk(proof.billingInvoiceId) : null;
+  const balance = proof.purpose === 'topup' ? await db.WorkspaceWallet.findOne({ where: { workspaceId: proof.workspaceId } }) : null;
   const image = signedProofImageUrl(proof.id);
   const blockers = [];
   if (invoice && proof.status === 'pending') {
@@ -402,6 +473,8 @@ async function getForReview(proofId) {
           paidAt: invoice.paidAt,
         }
       : null,
+    // A top-up: the store's balance now.
+    wallet: proof.purpose === 'topup' ? { balance: balance ? Number(balance.cashBalance) : 0, currency: wallet.WALLET_CURRENCY } : null,
     // Why approving would be refused now; empty when it can go through.
     approvalBlockers: blockers,
     image: { url: image.url, expiresAt: image.expiresAt, mime: proof.imageMime },
@@ -436,6 +509,35 @@ async function approve(proofId, { receivedAmount }, req) {
     if (proof.status === 'rejected') throw new ConflictError('This proof was rejected.', 'PROOF_ALREADY_REVIEWED');
 
     const requested = Number(proof.requestedAmount);
+    if (proof.purpose === 'topup') {
+      // The balance grows by what arrived, whatever was asked; the console
+      // showed the two side by side before this.
+      if (!(receivedAmount > 0)) {
+        throw new AppError('RECEIVED_AMOUNT_REQUIRED', 'Enter the amount that arrived. If nothing arrived, reject the proof with a note.', 422);
+      }
+      const entry = await wallet.creditTopup(proof, receivedAmount, req.user.id, transaction);
+      await proof.update({ status: 'approved', receivedAmount, reviewedByUserId: req.user.id, reviewedAt: new Date() }, { transaction });
+      await recordAudit({
+        actorUserId: req.user.id,
+        action: 'payment_proof.approve',
+        entityType: 'PaymentProof',
+        entityId: proof.id,
+        before: { status: 'pending' },
+        after: { status: 'approved', receivedAmount },
+        metadata: {
+          workspaceId: proof.workspaceId,
+          purpose: 'topup',
+          requestedAmount: requested,
+          currency: proof.currency,
+          receivedDiffers: receivedAmount !== requested,
+          ledgerEntryId: entry ? entry.id : null,
+        },
+        req,
+        transaction,
+      });
+      return { proof, alreadyApproved: false };
+    }
+
     if (receivedAmount !== requested) {
       throw new AppError(
         'RECEIVED_AMOUNT_MISMATCH',
@@ -494,7 +596,9 @@ async function approve(proofId, { receivedAmount }, req) {
     });
     return { proof, alreadyApproved: false };
   });
-  if (!result.alreadyApproved) logger.info(`payment proof ${proofId} approved: charge settled`);
+  if (!result.alreadyApproved) {
+    logger.info(`payment proof ${proofId} approved: ${result.proof.purpose === 'topup' ? 'balance credited' : 'charge settled'}`);
+  }
   return { ...(await getForReview(proofId)), alreadyApproved: result.alreadyApproved };
 }
 
@@ -529,6 +633,7 @@ module.exports = {
   NEXT_CHARGE,
   openInvoice,
   submitForInvoice,
+  submitTopup,
   listForWorkspace,
   listQueue,
   getForReview,

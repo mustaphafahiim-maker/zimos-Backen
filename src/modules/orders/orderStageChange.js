@@ -132,6 +132,9 @@ async function reopen(workspaceId, orderId, { reason }, req) {
       req,
       transaction,
     });
+    // Back from cancelled: the pay-per-order fee given back then is charged
+    // again, as a corrected rejection is (billing/walletService). Last lock.
+    await require('../billing/walletService').rechargeOrderFee(order, { actorUserId: req.user.id }, transaction);
   });
 }
 

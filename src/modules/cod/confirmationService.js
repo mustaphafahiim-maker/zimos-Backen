@@ -12,6 +12,7 @@ const carrierShipmentService = require('../shipping/carrierShipmentService');
 const orderStock = require('../inventory/orderStock');
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { QUEUE_DEFAULT_SORT, orderSort, orderByClause, afterAnchorClause, anchorValue } = require('../orders/orderSort');
+const wallet = require('../billing/walletService');
 
 /*
  * Task lifecycle
@@ -388,6 +389,8 @@ async function applyOutcome(task, order, { outcome, notes, rejectionReason, sour
     // no permanent deduction since nothing shipped.
     await releaseOrderStock(workspaceId, order.id, 'order_rejected', req.user.id, transaction);
     await db.Customer.increment('totalRejectedOrders', { by: 1, where: { id: order.customerId }, transaction });
+    // The pay-per-order fee goes back to the store (billing/walletService).
+    await wallet.reverseOrderFee(order, { reason: 'order_rejected', actorUserId: req.user.id }, transaction);
   }
 }
 
@@ -589,6 +592,13 @@ async function correctOutcome(workspaceId, taskId, { outcome, reason, notes, ack
       req,
       transaction,
     });
+    // The pay-per-order fee follows the order: back to the store on a
+    // rejection, charged again when a rejection is corrected (billing/walletService). Last lock.
+    if (outcome === 'rejected') {
+      await wallet.reverseOrderFee(order, { reason: 'order_rejected', actorUserId: req.user.id }, transaction);
+    } else {
+      await wallet.rechargeOrderFee(order, { actorUserId: req.user.id }, transaction);
+    }
 
     return loadTask(workspaceId, task.id, transaction);
   });

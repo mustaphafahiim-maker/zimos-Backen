@@ -65,6 +65,8 @@ function serializePlan(p) {
     // On the marketing site and at sign-up, in this order.
     isPublic: p.isPublic,
     displayOrder: p.displayOrder,
+    // The pay-per-order fee, minor units; 0 = none (billing/walletService).
+    perOrderFee: Number(p.perOrderFeeAmount || 0),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   };
@@ -231,6 +233,22 @@ async function savePlan(input, req) {
   if (input.maxFunnelsPerMonth !== undefined) fields.maxFunnelsPerMonth = input.maxFunnelsPerMonth;
   if (input.isPublic !== undefined) fields.isPublic = input.isPublic;
   if (input.displayOrder !== undefined) fields.displayOrder = input.displayOrder;
+  if (input.perOrderFee !== undefined) fields.perOrderFeeAmount = input.perOrderFee;
+
+  // A fee per order belongs to a plan with nothing monthly, in EGP — the
+  // balance's currency (billing/walletService; item 335, Ziad's Q13).
+  const assertFeeAllowed = (plan) => {
+    const fee = fields.perOrderFeeAmount !== undefined ? fields.perOrderFeeAmount : Number((plan && plan.perOrderFeeAmount) || 0);
+    const currency = fields.currency || (plan && plan.currency) || 'EGP';
+    if (fee > 0 && (fields.monthlyPriceAmount !== 0 || currency !== 'EGP')) {
+      throw new AppError(
+        'PER_ORDER_FEE_NOT_ALLOWED',
+        'A fee per order is only for a plan priced 0 a month, in EGP.',
+        422,
+        [{ field: 'perOrderFee', message: 'Set the monthly price to 0 and the currency to EGP, or the fee to 0' }]
+      );
+    }
+  };
 
   // New limits apply from the next store or funnel created; nothing that
   // exists is touched. The public list drops its cached copy either way.
@@ -246,6 +264,7 @@ async function savePlan(input, req) {
       const plan = await db.Plan.findByPk(input.id, { transaction, lock: transaction.LOCK.UPDATE });
       if (!plan) throw new NotFoundError('Plan');
       assertFeaturesAllowed(fields.features, featureList(plan.features));
+      assertFeeAllowed(plan);
       const before = auditState(serializePlan(plan));
       await plan.update(fields, { transaction });
       const after = serializePlan(plan);
@@ -253,6 +272,7 @@ async function savePlan(input, req) {
       return after;
     }
     assertFeaturesAllowed(fields.features, []);
+    assertFeeAllowed(null);
     const created = serializePlan(await db.Plan.create(fields, { transaction }));
     await audit(req, { action: 'plan.create', entityType: 'Plan', entityId: created.id, after: auditState(created) }, transaction);
     return created;

@@ -956,11 +956,12 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
     // The buyer's own accepted add-on to the order they just placed: it
     // shares that order's customer and often its variant, so duplicate_order
     // would flag (or refuse) every upsell. The original order already went
-    // through the storefront rules.
+    // through the storefront rules. No second pay-per-order fee (billing/walletService).
     {
       transaction,
       skipFraudRules: true,
       source: 'upsell',
+      chargeFee: false,
       // Not a sale until the card is charged; left unpaid it expires like any online order.
       ...(card ? { awaitingPayment: oneClickHold() } : {}),
     }

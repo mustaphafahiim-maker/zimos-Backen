@@ -41,6 +41,7 @@ const { applyOrderFilters } = require('./orderFilters');
 const { effectiveVariantPrice } = require('../catalog/productPage');
 const { applyBundleTiers } = require('../bundles/bundlePricing');
 const pixelMatching = require('../marketing/pixelMatching');
+const wallet = require('../billing/walletService');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -234,6 +235,11 @@ async function recordRefusal(workspaceId, refusal, req) {
  * it as an online payment: the blocklist still refuses, any other rule set to
  * "block" only flags.
  *
+ * `chargeFee` (default true): the pay-per-order fee (billing/walletService,
+ * WALLET_ENABLED). False for an add-on placed as its own order (the funnel
+ * offer after its window, the funnel follow-on, the thank-you upsell after an
+ * online payment): one purchase split in two pays one fee (Ziad's Q14).
+ *
  * The platform blocklist (risk/platformBlocklistService) is not a fraud rule
  * and none of the above exempts an order from it: an active entry matching
  * the order's phone, email or shipping address refuses every order — storefront
@@ -252,6 +258,7 @@ async function createOrder(
     confirmationAvailableAt = null,
     shippingOverride = null,
     source = null,
+    chargeFee = true,
   } = {}
 ) {
   // A picked place names the address it prices (places/placePricing.alignAddress, item 314).
@@ -643,6 +650,12 @@ async function createOrder(
         transaction
       );
     }
+
+    // The pay-per-order fee, after Order.create and as this transaction's
+    // last lock (billing/walletService). Refused past the overdraft, which
+    // rolls the whole order back: 402 in the dashboard, 423 for a shopper.
+    // Once per order: the order's own ledger rows are read under the lock.
+    if (chargeFee) await wallet.chargeOrderFee(order, { staff: Boolean(req.user) }, transaction);
 
     await recordAudit({
       workspaceId,
@@ -1306,6 +1319,9 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       req,
       transaction,
     });
+    // The pay-per-order fee goes back to the store (the last lock taken
+    // here); nothing when a rejection already gave it back.
+    await wallet.reverseOrderFee(order, { reason: 'order_cancelled', actorUserId: req.user ? req.user.id : null }, transaction);
 
     return db.Order.findByPk(order.id, { include: [{ model: db.OrderItem, as: 'items' }], transaction });
   });

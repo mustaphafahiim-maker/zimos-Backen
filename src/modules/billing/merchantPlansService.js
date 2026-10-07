@@ -7,6 +7,7 @@ const access = require('../workspaces/workspaceAccessService');
 const referralCodes = require('../referrals/referralCodeService');
 const goLive = require('./goLiveService');
 const publicPlans = require('./publicPlansService');
+const wallet = require('./walletService');
 const { planPrice, BILLING_CYCLES } = require('./planPricing');
 
 /**
@@ -20,7 +21,8 @@ const { planPrice, BILLING_CYCLES } = require('./planPricing');
  * percentage of any plan, or a fixed amount in the code's own currency.
  *
  * Item 333, Ziad's f757e0d (and the shared plan order and feature list of
- * his 1d70df5). His pay-per-order card (WALLET_ENABLED) is item 335.
+ * his 1d70df5). His pay-per-order card (WALLET_ENABLED, `payPerOrder`) is
+ * item 335 (his 6c2e7cc).
  */
 
 const { PLAN_ORDER } = publicPlans;
@@ -53,12 +55,29 @@ async function loadSubscription(workspaceId, transaction, { lock = false } = {})
 
 /** The plans on offer, plus the store's own when it isn't one of them. */
 async function plansFor(subscription, transaction) {
-  const offered = await db.Plan.findAll({ where: { isPublic: true, isActive: true }, order: PLAN_ORDER, transaction });
+  // The pay-per-order plan has its own card (`payPerOrder` in listPlans).
+  const offered = await db.Plan.findAll({ where: { isPublic: true, isActive: true, perOrderFeeAmount: 0 }, order: PLAN_ORDER, transaction });
   if (subscription.planId && !offered.some((p) => p.id === subscription.planId)) {
     const current = await db.Plan.findByPk(subscription.planId, { transaction });
-    if (current) offered.unshift(current);
+    if (current && !(Number(current.perOrderFeeAmount) > 0)) offered.unshift(current);
   }
   return offered;
+}
+
+/**
+ * The pay-per-order card: offered while WALLET_ENABLED is on and a
+ * pay-per-order plan is public. `current` when the store is on it.
+ */
+async function payPerOrderFor(subscription) {
+  const current = subscription.planId ? await db.Plan.findByPk(subscription.planId, { attributes: ['id', 'name', 'perOrderFeeAmount', 'currency'] }) : null;
+  const onIt = Boolean(current && Number(current.perOrderFeeAmount) > 0);
+  const plan = wallet.enabled() ? await wallet.offeredFeePlan() : null;
+  const shown = plan || (onIt ? current : null);
+  return {
+    available: Boolean(plan),
+    current: onIt,
+    plan: shown ? { id: shown.id, name: shown.name, fee: Number(shown.perOrderFeeAmount), currency: shown.currency } : null,
+  };
 }
 
 /**
@@ -98,6 +117,7 @@ async function listPlans(workspaceId) {
     planChange: planChangeMode(subscription),
     referralCode: code ? referralCodes.serializeCodeForMerchant(code) : null,
     plans: plans.map((plan) => serializePlan(plan, { code: usable, currentPlanId: subscription.planId })),
+    payPerOrder: await payPerOrderFor(subscription),
   };
 }
 
