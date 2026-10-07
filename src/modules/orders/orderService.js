@@ -716,7 +716,7 @@ async function createOrder(
   } catch (err) {
     if (err instanceof fraudRules.OrderRejectedError) await recordRefusal(workspaceId, err.refusal, req);
     // Nothing was saved; the shopper is sent a code and asked for it.
-    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone);
+    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone, { req });
     throw err;
   }
 }

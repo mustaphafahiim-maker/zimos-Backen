@@ -4092,12 +4092,15 @@ The storefront's code-entry step (shown after the checkout answers 428 `OTP_REQU
   - 409 `OTP_NOT_REQUESTED` `{ "error": { "code": "OTP_NOT_REQUESTED", "message": "Place the order again to get a code" } }`: this store sent no code to that phone in the last 30 minutes (the shopper changed the phone, or came back much later). Nothing is sent.
   - 429 `OTP_RESEND_TOO_SOON` / `OTP_RATE_LIMITED` (unchanged), 422 `INVALID_PHONE` (unchanged).
   - 429 `RATE_LIMITED`: over 10 verify + resend calls a minute from one IP.
+  - 429 `OTP_RATE_LIMITED` also when one IP has had 3 checkout codes in the last minute or 10 in the last hour, across every store (review of item 348).
 - **POST `/api/v1/store/:workspaceId/checkout/otp/verify`** `{ "phone", "code" }` → 200 `{ "verified": true, "otpToken": "…" }` (unchanged); can now answer 429 `RATE_LIMITED` as above.
+- **POST `/api/v1/store/:workspaceId/checkout`** and **POST `/api/v1/store/:workspaceId/orders/:orderId/payment/switch-to-cod`**: where they would answer 428 `OTP_REQUIRED` and send the first code, they answer 429 `OTP_RATE_LIMITED` `{ "error": { "code": "OTP_RATE_LIMITED", "message": "Too many codes requested — try again later" } }` instead once that IP budget is spent; nothing is sent and no code step opens.
 
 ### Screens (storefront → checkout → code step)
 - Always send the Resend call with the same phone the checkout was submitted with; if the shopper edits the phone, submit the order again instead of calling Resend.
 - `OTP_NOT_REQUESTED`: close the code step, keep the form filled and show «اضغط "اطلب" تاني عشان نبعتلك كود جديد» / "Press "Place order" again and we'll send you a new code".
 - `RATE_LIMITED`: «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute"; keep the code field and the Resend countdown as they are.
+- `OTP_RATE_LIMITED` from the checkout or the COD switch: keep the form filled and show «طلبت أكواد كتير — جرّب بعد شوية» / "Too many codes requested — try again a bit later".
 
 ## 351. Cancelling a courier shipment now cancels it at the courier — UI: pending
 
