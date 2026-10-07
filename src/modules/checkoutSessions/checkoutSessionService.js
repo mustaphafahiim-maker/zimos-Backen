@@ -49,7 +49,15 @@ function cleanAttribution(attribution) {
   return out;
 }
 
-async function capture(workspaceId, { contact, items, source = 'store', visitorId, attribution = null }, visitor = {}) {
+/** { funnelId, websiteId } the session is on — each kept only when it is this store's (item 302). */
+async function placeOf(workspaceId, { funnelId, websiteId }) {
+  const out = {};
+  if (funnelId && (await db.Funnel.count({ where: { id: funnelId, workspaceId } }))) out.funnelId = funnelId;
+  if (websiteId && (await db.Website.count({ where: { id: websiteId, workspaceId } }))) out.websiteId = websiteId;
+  return out;
+}
+
+async function capture(workspaceId, { contact, items, source = 'store', visitorId, attribution = null, funnelId = null, websiteId = null }, visitor = {}) {
   const phoneNormalized = contact.phone ? normalizePhone(contact.phone) : null;
   if (contact.phone && !phoneNormalized) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
   if (!phoneNormalized && !(contact.fullName && String(contact.fullName).trim())) {
@@ -99,8 +107,9 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
        -- The latest address the shopper saved from (SPEC §6.1: IP and country on the lost order).
        ip_address = COALESCE(EXCLUDED.ip_address, checkout_sessions.ip_address),
        ip_country = CASE WHEN EXCLUDED.ip_address IS NULL THEN checkout_sessions.ip_country ELSE EXCLUDED.ip_country END,
-       -- How the shopper came (first / last touch): the latest pair the storefront sent, kept when a save sends none.
-       attribution = CASE WHEN EXCLUDED.attribution = '{}'::jsonb THEN checkout_sessions.attribution ELSE EXCLUDED.attribution END,
+       -- How the shopper came (first / last touch) and the funnel / website it is on: what this save sent
+       -- wins, what it left out is kept (item 302).
+       attribution = COALESCE(checkout_sessions.attribution, '{}'::jsonb) || EXCLUDED.attribution,
        last_activity_at = now(),
        updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`,
@@ -118,7 +127,7 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
         source,
         ipAddress: visitor.ip || null,
         ipCountry: visitor.ipCountry || null,
-        attribution: JSON.stringify(cleanAttribution(attribution)),
+        attribution: JSON.stringify({ ...cleanAttribution(attribution), ...(await placeOf(workspaceId, { funnelId, websiteId })) }),
       },
       type: QueryTypes.SELECT,
     }

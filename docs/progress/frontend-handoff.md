@@ -3324,3 +3324,7 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - On funnel pages, send the header `X-Funnel-Id: <funnelId>` on every `/store/:ws/...` call the funnel's checkout makes (places, payment methods, shipping quote, delivery estimate / slots, checkout sessions, uploads, checkout). With a "coming soon" or password store whose funnels stay open, those calls then work; without the header they answer 423 `STORE_LOCKED` unless the body / query already carries `funnelId`.
 - No change for the store's own pages: they show the gate as before.
+
+## 302. Checkout autosave — funnel and website — UI: pending (storefront)
+
+- `POST /store/:ws/checkout-sessions` now accepts `funnelId` and `websiteId` (uuid, optional) beside `source`. Send `funnelId` from funnel checkouts and `websiteId` from the store's website pages. With them, a lost checkout gets that funnel's / website's own cart-recovery email, and the dashboard and Live View filters count it. No visible change.

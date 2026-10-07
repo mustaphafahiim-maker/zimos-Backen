@@ -46,6 +46,10 @@ module.exports = {
       // How the shopper reached the store (storefront lib/touches.ts: first and last touch, SPEC §13.4),
       // kept on the lost order (SPEC §6.1 attribution) and passed to the order it becomes.
       attribution: Joi.object({ first: touch, last: touch }).optional(),
+      // The funnel or website the checkout is on (item 302): its own cart-recovery email, and the
+      // dashboard and Live View filters, find the session by them.
+      funnelId: uuid.optional(),
+      websiteId: uuid.optional(),
       // The bot guard's fields (autosaveGuard.js), taken off before the save.
       website: Joi.string().max(500).allow('').optional(),
       botToken: Joi.string().max(500).optional(),
