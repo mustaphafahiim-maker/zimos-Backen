@@ -29,6 +29,8 @@ module.exports = (sequelize, DataTypes) => {
       isUpsell: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_upsell' },
       // A free gift the server added (freeGifts/, item 276; migration 513); null on older lines.
       isFreeGift: { type: DataTypes.BOOLEAN, allowNull: true, field: 'is_free_gift' },
+      // A line staff priced themselves (orders/staffPricing.js, item 382; migration 518): { kind: override|custom, catalogUnitPriceAmount?, actorUserId, actorName, at }.
+      priceOverride: { type: DataTypes.JSONB, allowNull: true, field: 'price_override' },
       // One unit of the line (one bundle for an offer); null when unknown.
       unitWeightGrams: { type: DataTypes.INTEGER, allowNull: true, field: 'unit_weight_grams' },
       // What the shopper filled in for the product's custom fields, labels

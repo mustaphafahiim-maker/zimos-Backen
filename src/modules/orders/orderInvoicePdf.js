@@ -135,7 +135,12 @@ function drawInvoice(doc, { order, invoice, workspace }) {
     y += bold ? 18 : 15;
   };
   totalRow('Subtotal', money(order.subtotalAmount, currency));
-  if (Number(order.discountAmount) > 0) totalRow('Discount', `-${money(order.discountAmount, currency)}`);
+  // Staff's manual discount on its own row, apart from the code (item 382).
+  const manual = require('./staffPricing').manualOf(order);
+  const manualAmount = manual ? Number(manual.amount) || 0 : 0;
+  const couponAmount = Number(order.discountAmount) - manualAmount;
+  if (couponAmount > 0) totalRow('Discount', `-${money(couponAmount, currency)}`);
+  if (manualAmount > 0) totalRow('Staff discount', `-${money(manualAmount, currency)}`);
   totalRow('Shipping', money(order.shippingAmount, currency));
   if (Number(order.taxAmount) > 0) totalRow('Tax', money(order.taxAmount, currency));
   doc.moveTo(right - 240, y).lineTo(right, y).stroke('#000');

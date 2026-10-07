@@ -72,6 +72,33 @@ const address = Joi.object({
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
 
+// Staff price changes (item 382, staffPricing.js; needs orders.price_override): a catalogue line's
+// own unitPrice, a custom line with no variant, and a manual discount on the whole order.
+const unitPrice = Joi.number().integer().min(0).max(1000000000000);
+const customLine = (edit) =>
+  Joi.object({
+    // An edit keeps a custom line the order already has by naming it.
+    ...(edit ? { orderItemId: uuid.optional() } : {}),
+    // No product behind it (with stripUnknown a variantId would quietly be dropped).
+    variantId: Joi.forbidden(),
+    offerId: Joi.forbidden(),
+    title: Joi.string().trim().min(1).max(300).required(),
+    unitPrice: unitPrice.required(),
+    quantity: Joi.number().integer().min(1).max(10000).required(),
+    sku: Joi.string().trim().max(100).allow('', null).optional(),
+    weightGrams: Joi.number().integer().min(0).max(1000000).optional(),
+  });
+const manualDiscount = Joi.object({
+  type: Joi.string().valid('amount', 'percent').required(),
+  // amount: minor units; percent: 0–100, two decimals.
+  value: Joi.when('type', {
+    is: 'percent',
+    then: Joi.number().min(0).max(100).precision(2).required(),
+    otherwise: Joi.number().integer().min(0).max(1000000000000).required(),
+  }),
+  reason: Joi.string().trim().min(1).max(500).required(),
+});
+
 module.exports = {
   create: {
     params: Joi.object({ workspaceId: uuid.required() }),
@@ -82,10 +109,15 @@ module.exports = {
             variantId: uuid.required(),
             offerId: uuid.optional(),
             quantity: Joi.number().integer().min(1).required(),
-          })
+            unitPrice: unitPrice.optional(),
+            // A catalogue line is not a custom one (with stripUnknown it would quietly become one).
+            title: Joi.forbidden(),
+          }),
+          customLine(false)
         )
         .min(1)
         .required(),
+      manualDiscount: manualDiscount.optional(),
       contact: contact.required(),
       shippingAddress: address.optional(),
       paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).required(),
@@ -107,10 +139,15 @@ module.exports = {
             variantId: uuid.required(),
             offerId: uuid.optional(),
             quantity: Joi.number().integer().min(1).required(),
-          })
+            unitPrice: unitPrice.optional(),
+            // A catalogue line is not a custom one (with stripUnknown it would quietly become one).
+            title: Joi.forbidden(),
+          }),
+          customLine(false)
         )
         .min(1)
         .required(),
+      manualDiscount: manualDiscount.optional(),
       contact: Joi.object({ fullName: Joi.string().max(200).allow(''), phone: Joi.string().max(32).allow('') })
         .unknown(true)
         .optional(),
@@ -215,11 +252,17 @@ module.exports = {
             variantId: uuid.required(),
             offerId: uuid.allow(null).optional(),
             quantity: Joi.number().integer().min(1).max(10000).required(),
-          })
+            unitPrice: unitPrice.optional(),
+            // A catalogue line is not a custom one (with stripUnknown it would quietly become one).
+            title: Joi.forbidden(),
+          }),
+          customLine(true)
         )
         .min(1)
         .max(100)
         .required(),
+      // Set or replace the order's manual discount; null removes it; left out it stays (re-applied on the new subtotal).
+      manualDiscount: manualDiscount.allow(null).optional(),
     }),
   },
   refundQuote: {

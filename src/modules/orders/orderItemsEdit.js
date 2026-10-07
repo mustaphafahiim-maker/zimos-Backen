@@ -11,6 +11,7 @@ const { recordAudit } = require('../audit/auditService');
 const { assertNotShipped } = require('./shipmentLifecycle');
 const orderService = require('./orderService');
 const { applyBundleTiers } = require('../bundles/bundlePricing');
+const staffPricing = require('./staffPricing');
 
 /**
  * Editing an order's items before it ships (SPEC §4.4 "Editing"): add
@@ -54,7 +55,8 @@ async function consumedBy(workspaceId, line, transaction) {
   return facts ? facts.consumedInventory : [{ variantId: line.variantId, quantity: line.quantity }];
 }
 
-async function apply(workspaceId, orderId, requested, req, transaction) {
+// `manual`: { present, value } — the body's manualDiscount (item 382): left out keeps the order's, null removes it.
+async function apply(workspaceId, orderId, requested, req, transaction, manual = { present: false, value: undefined }) {
   const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
   if (!order) throw new NotFoundError('Order');
   if (order.cancelledAt || order.confirmationState === 'rejected') {
@@ -78,6 +80,13 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
 
   const seen = new Set();
   for (const line of requested) {
+    // A custom line (item 382) has no product to repeat; one the order has is named once only.
+    if (staffPricing.isCustom(line)) {
+      if (!line.orderItemId) continue;
+      if (seen.has(`custom:${line.orderItemId}`)) throw new ValidationError([{ field: 'items.orderItemId', message: 'The same line appears twice' }]);
+      seen.add(`custom:${line.orderItemId}`);
+      continue;
+    }
     if (seen.has(keyOf(line))) {
       throw new ValidationError([{ field: 'items', message: 'The same product and offer appears twice; change its quantity instead' }]);
     }
@@ -86,9 +95,29 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
 
   const existing = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction });
   const before = totalsOf(order);
-  const beforeItems = existing.map((i) => ({ name: i.productNameSnapshot, quantity: i.quantity }));
+  const beforeItems = existing.map((i) => ({ name: i.productNameSnapshot, quantity: i.quantity, unitPriceAmount: String(i.unitPriceAmount) }));
   const existingByKey = new Map();
-  for (const item of existing) if (!existingByKey.has(keyOf(item))) existingByKey.set(keyOf(item), item);
+  for (const item of existing) if (item.variantId && !existingByKey.has(keyOf(item))) existingByKey.set(keyOf(item), item);
+  // Lines with no variant: custom lines staff typed in (item 382), kept by naming their orderItemId.
+  const customById = new Map(existing.filter((i) => !i.variantId).map((i) => [i.id, i]));
+
+  // ---- staff price changes (item 382): a new or changed price, a custom line added or changed, the manual
+  // discount set, changed or removed need orders.price_override; a quantity alone does not.
+  const oldManual = staffPricing.manualOf(order);
+  const customChanged = (wanted, kept) =>
+    !kept ||
+    kept.productNameSnapshot !== String(wanted.title).trim() ||
+    Number(kept.unitPriceAmount) !== Number(wanted.unitPrice) ||
+    (kept.skuSnapshot || null) !== (wanted.sku ? String(wanted.sku).trim() : null);
+  const priceChanged = (wanted) => {
+    if (staffPricing.isCustom(wanted)) return customChanged(wanted, wanted.orderItemId ? customById.get(wanted.orderItemId) : null);
+    if (!staffPricing.hasUnitPrice(wanted)) return false;
+    const kept = existingByKey.get(keyOf(wanted));
+    return !kept || Number(kept.unitPriceAmount) !== Number(wanted.unitPrice);
+  };
+  const manualChanged = manual.present && !staffPricing.sameManual(manual.value, oldManual);
+  const pricesTouched = requested.some(priceChanged) || manualChanged;
+  if (pricesTouched && !staffPricing.canChangePrices(req)) throw staffPricing.forbidden();
 
   // ---- stock: what the order held, what it will hold
   const held = new Map();
@@ -99,6 +128,21 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   // ---- the new lines
   const lines = [];
   for (const wanted of requested) {
+    if (staffPricing.isCustom(wanted)) {
+      const keptCustom = wanted.orderItemId ? customById.get(wanted.orderItemId) : null;
+      if (wanted.orderItemId && !keptCustom) throw new ValidationError([{ field: 'items.orderItemId', message: 'Not a custom line of this order' }]);
+      const line = staffPricing.customLine(wanted, req, keptCustom);
+      line.currency = order.currency;
+      // Re-sent without a weight, a kept line keeps the one it had.
+      if (keptCustom && wanted.weightGrams === undefined && Number(keptCustom.unitWeightGrams) > 0) {
+        line.weightUnits = [{ weightGrams: Number(keptCustom.unitWeightGrams), quantity: 1, weightless: false }];
+      }
+      // Changed: priced again by whoever changed it.
+      if (keptCustom && customChanged(wanted, keptCustom)) line.priceOverride = staffPricing.customLine(wanted, req).priceOverride;
+      line.priceChanged = !keptCustom || customChanged(wanted, keptCustom);
+      lines.push(line);
+      continue;
+    }
     const kept = existingByKey.get(keyOf(wanted));
     if (kept) {
       const facts = await orderService
@@ -133,13 +177,21 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       const priced = await orderService.priceLine(workspaceId, wanted, transaction);
       lines.push({ ...priced, kept: null, lineTotalAmount: Number(priced.lineTotalAmount) });
     }
+    // Staff's own price (item 382). A kept line compares with the catalogue price it carries, or the price it sold at.
+    const line = lines[lines.length - 1];
+    line.priceOverride = kept ? kept.priceOverride || null : null;
+    if (priceChanged(wanted)) {
+      const catalog = kept ? (kept.priceOverride && kept.priceOverride.catalogUnitPriceAmount != null ? kept.priceOverride.catalogUnitPriceAmount : kept.unitPriceAmount) : line.unitPriceAmount;
+      staffPricing.overrideLine(line, wanted.unitPrice, req, catalog);
+      line.priceChanged = true;
+    }
   }
 
   // ---- which products the edit touches: a line added, removed or with a new quantity. Lines of any other
   // product keep their stored price and bundle saving as sold, even if the bundle has changed or ended since
   // (item 344 review); a bundle entry of the order is priced again only when one of its products is touched.
   const touched = new Set();
-  for (const line of lines) if (!line.kept || line.kept.quantity !== line.quantity) touched.add(line.productId);
+  for (const line of lines) if (!line.kept || line.kept.quantity !== line.quantity || line.priceChanged) touched.add(line.productId);
   const keptItemIds = new Set(lines.filter((l) => l.kept).map((l) => l.kept.id));
   for (const item of existing) if (!keptItemIds.has(item.id)) touched.add(item.productId);
   const oldBundles = (order.discountsSnapshot || []).filter((d) => d && d.kind === 'bundle');
@@ -155,7 +207,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   }
 
   for (const line of lines) {
-    if (!line.kept || touched.has(line.productId)) continue;
+    if (!line.kept || line.custom || touched.has(line.productId)) continue;
     line.frozen = true;
     line.lineTotalAmount = Number(line.kept.lineTotalAmount);
     line.lineDiscountAmount = Number(line.kept.lineDiscountAmount) || 0;
@@ -178,7 +230,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   // Quantity bundles and mix-and-match boxes priced again on the new quantities, as createOrder prices them
   // (item 344); a quote's order keeps the merchant's exact prices (quotes/, item 275).
   const fromQuote = (await db.QuoteRequest.count({ where: { orderId: order.id, workspaceId }, transaction })) > 0;
-  const bundleSnapshots = fromQuote ? [] : await applyBundleTiers(workspaceId, lines.filter((l) => !l.frozen), transaction);
+  // A line at staff's own price takes no tier on top (item 382).
+  const bundleSnapshots = fromQuote ? [] : await applyBundleTiers(workspaceId, lines.filter((l) => !l.frozen && !l.priceOverride), transaction);
   // The bundle entries of untouched products stay as sold, free shipping included.
   const keptBundles = oldBundles.filter((entry) => !productsOf(entry).some((id) => touched.has(id)));
   for (const entry of keptBundles) {
@@ -198,8 +251,13 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   // A free-shipping code beats an offer's own shipping price (item 353 review).
   const offerShippingOverride = orderService.couponShipsFree(order) ? null : lines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
-  let discountAmount = Number(order.discountAmount);
-  let discountsSnapshot = [...keptBundles, ...bundleSnapshots, ...(order.discountsSnapshot || []).filter((d) => !d || d.kind !== 'bundle')];
+  // The code's share, without staff's manual discount (item 382), which is worked out again below.
+  let discountAmount = Number(order.discountAmount) - (oldManual ? Number(oldManual.amount) || 0 : 0);
+  let discountsSnapshot = [
+    ...keptBundles,
+    ...bundleSnapshots,
+    ...(order.discountsSnapshot || []).filter((d) => !d || (d.kind !== 'bundle' && d.kind !== staffPricing.MANUAL)),
+  ];
   let redeemedDiscount = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
@@ -215,6 +273,14 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     redeemedDiscount = await orderService.placedDiscount(order, transaction);
   }
   discountAmount = Math.min(discountAmount, subtotal);
+  // Staff's manual discount on what the code leaves: the one asked for, or the order's own re-applied.
+  const manualWanted = manual.present ? manual.value : oldManual;
+  const manualDiscount = manualWanted
+    ? staffPricing.manualEntry(manualWanted, subtotal - discountAmount, req, manualChanged ? null : oldManual)
+    : null;
+  if (manualDiscount) discountsSnapshot.push(manualDiscount);
+  const couponAmount = discountAmount;
+  discountAmount += manualDiscount ? manualDiscount.amount : 0;
 
   const address = order.shippingAddressSnapshot || null;
   // Shipping the merchant typed in by hand stays as typed.
@@ -241,8 +307,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
-    // Taxed after the order's discount, as createOrder taxes it (item 356).
-    lines: await require('../tax/taxService').taxableLines(lines, discountAmount, redeemedDiscount, transaction),
+    // Taxed after the order's discount, as createOrder taxes it (items 356, 382).
+    lines: await staffPricing.taxableLines(lines, couponAmount, redeemedDiscount, manualDiscount ? manualDiscount.amount : 0, transaction),
     shippingAmount,
     transaction,
   });
@@ -263,7 +329,16 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   for (const [index, line] of lines.entries()) {
     if (line.kept) {
       await line.kept.update(
-        { quantity: line.quantity, lineDiscountAmount: line.lineDiscountAmount || 0, lineTotalAmount: line.lineTotalAmount, unitWeightGrams: shipping.lineWeights[index] },
+        {
+          quantity: line.quantity,
+          lineDiscountAmount: line.lineDiscountAmount || 0,
+          lineTotalAmount: line.lineTotalAmount,
+          unitWeightGrams: shipping.lineWeights[index],
+          // Staff's price and custom lines (item 382).
+          unitPriceAmount: line.unitPriceAmount,
+          priceOverride: line.priceOverride || null,
+          ...(line.custom ? { productNameSnapshot: line.productName, skuSnapshot: line.sku } : {}),
+        },
         { transaction }
       );
       items.push(line.kept);
@@ -286,6 +361,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
             isFreeGift: false,
+            priceOverride: line.priceOverride || null,
           },
           { transaction }
         )
@@ -337,17 +413,36 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     action: 'order.items_update',
     entityType: 'Order',
     entityId: order.id,
-    before: { ...before, items: beforeItems },
-    after: { ...after, items: items.map((i) => ({ name: i.productNameSnapshot, quantity: i.quantity })) },
+    before: { ...before, items: beforeItems, manualDiscount: oldManual },
+    after: { ...after, items: items.map((i) => ({ name: i.productNameSnapshot, quantity: i.quantity, unitPriceAmount: String(i.unitPriceAmount) })), manualDiscount },
     req,
     transaction,
   });
+  // Staff price changes on their own line of the log too (item 382), as on a new order.
+  if (pricesTouched) {
+    await recordAudit({
+      workspaceId,
+      actorUserId,
+      action: 'order.price_change',
+      entityType: 'Order',
+      entityId: order.id,
+      before: { items: beforeItems, manualDiscount: oldManual },
+      after: {
+        items: items.map((i) => ({ name: i.productNameSnapshot, quantity: i.quantity, unitPriceAmount: String(i.unitPriceAmount), ...staffPricing.presentLine(i) })),
+        manualDiscount,
+      },
+      req,
+      transaction,
+    });
+  }
 
   return {
     currency: order.currency,
     before,
     after,
     differenceAmount: String(Number(after.totalAmount) - Number(before.totalAmount)),
+    // Staff's manual discount apart from the code (item 382); after.discountAmount is both together.
+    manualDiscount,
     items: items.map((i) => ({
       id: i.id,
       variantId: i.variantId,
@@ -358,6 +453,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       quantity: i.quantity,
       unitPriceAmount: String(i.unitPriceAmount),
       lineTotalAmount: String(i.lineTotalAmount),
+      sku: i.skuSnapshot,
+      ...staffPricing.presentLine(i),
     })),
   };
 }
@@ -370,10 +467,12 @@ class PreviewDone extends Error {
 }
 
 /** POST /orders/:id/items/preview — what saving would do, saved nowhere. */
-async function previewItems(workspaceId, orderId, { items }, req) {
+const manualOfBody = (body) => ({ present: body.manualDiscount !== undefined, value: body.manualDiscount === undefined ? undefined : body.manualDiscount });
+
+async function previewItems(workspaceId, orderId, body, req) {
   try {
     await db.sequelize.transaction(async (transaction) => {
-      throw new PreviewDone(await apply(workspaceId, orderId, items, req, transaction));
+      throw new PreviewDone(await apply(workspaceId, orderId, body.items, req, transaction, manualOfBody(body)));
     });
   } catch (err) {
     if (err instanceof PreviewDone) return err.result;
@@ -383,8 +482,8 @@ async function previewItems(workspaceId, orderId, { items }, req) {
 }
 
 /** PUT /orders/:id/items */
-async function updateItems(workspaceId, orderId, { items }, req) {
-  await db.sequelize.transaction((transaction) => apply(workspaceId, orderId, items, req, transaction));
+async function updateItems(workspaceId, orderId, body, req) {
+  await db.sequelize.transaction((transaction) => apply(workspaceId, orderId, body.items, req, transaction, manualOfBody(body)));
   return orderService.getOrder(workspaceId, orderId);
 }
 
@@ -400,7 +499,11 @@ async function refundQuote(workspaceId, orderId, { lines }) {
   if (!order) throw new NotFoundError('Order');
   const byId = new Map(order.items.map((i) => [i.id, i]));
   let subtotal = Number(order.subtotalAmount);
-  const discount = Number(order.discountAmount);
+  // Staff's manual discount (item 382) was spread over every line; the code's over its covered lines.
+  const fullSubtotal = subtotal;
+  const manual = staffPricing.manualOf(order);
+  const manualAmount = manual ? Number(manual.amount) || 0 : 0;
+  const discount = Math.max(0, Number(order.discountAmount) - manualAmount);
   // A product- or collection-limited code was taken off its covered lines
   // only (item 345), so only those lines give a share of it back.
   let covered = null;
@@ -424,7 +527,9 @@ async function refundQuote(workspaceId, orderId, { lines }) {
       throw new ValidationError([{ field: 'lines.quantity', message: `At most ${item.quantity} can be refunded for this line` }]);
     }
     const gross = Number(item.unitPriceAmount) * line.quantity;
-    const share = subtotal > 0 && (!covered || covered.has(item.id)) ? Math.round((discount * gross) / subtotal) : 0;
+    const share =
+      (subtotal > 0 && (!covered || covered.has(item.id)) ? Math.round((discount * gross) / subtotal) : 0) +
+      (fullSubtotal > 0 ? Math.round((manualAmount * gross) / fullSubtotal) : 0);
     amount += gross - share;
     out.push({ orderItemId: item.id, name: item.productNameSnapshot, quantity: line.quantity, amount: String(gross - share) });
   }

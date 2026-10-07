@@ -157,6 +157,9 @@ const COLUMNS = [
   { key: 'currency', en: 'Currency', ar: 'العملة', value: (o) => o.currency },
   { key: 'subtotal', en: 'Subtotal', ar: 'إجمالي المنتجات', value: (o) => money(o.subtotalAmount) },
   { key: 'discount', en: 'Discount', ar: 'الخصم', value: (o) => money(o.discountAmount) },
+  // Staff's manual discount and its reason, apart from the code (item 382); `discount` is both together.
+  { key: 'staffDiscount', en: 'Staff discount', ar: 'خصم يدوي', value: (o) => { const m = require('./staffPricing').manualOf(o); return m ? money(m.amount) : ''; } },
+  { key: 'staffDiscountReason', en: 'Staff discount reason', ar: 'سبب الخصم اليدوي', value: (o) => { const m = require('./staffPricing').manualOf(o); return m ? m.reason : ''; } },
   { key: 'shipping', en: 'Shipping', ar: 'الشحن', value: (o) => money(o.shippingAmount) },
   { key: 'tax', en: 'Tax', ar: 'الضريبة', value: (o) => money(o.taxAmount) },
   { key: 'total', en: 'Total', ar: 'الإجمالي', value: (o) => money(o.totalAmount) },

@@ -62,6 +62,8 @@ module.exports = {
       // (payments/savedMethods/consentedSave.js). Online card payments only.
       saveCard: Joi.boolean().optional(),
       discountCode: Joi.string().max(100).optional(),
+      // Staff's manual discount (item 382) is for the dashboard only.
+      manualDiscount: Joi.forbidden(),
       // A gift card paying part or all of a cash-on-delivery order (giftCards, item 189).
       giftCardCode: Joi.string().trim().max(40).optional(),
       // Gift wrap / gift message (giftOptions, item 214).
@@ -97,6 +99,8 @@ module.exports = {
         variantId: uuid.required(),
         offerId: uuid.optional(),
         quantity: Joi.number().integer().min(1).default(1),
+        // Prices are the server's: staff price changes (orders/staffPricing.js, item 382) are refused here.
+        unitPrice: Joi.forbidden(),
         // Answers to the product's custom fields (see cartValidation.addItem).
         customizations: customizationsInputSchema.optional(),
       }).optional(),

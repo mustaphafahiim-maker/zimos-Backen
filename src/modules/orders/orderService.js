@@ -279,6 +279,9 @@ async function createOrder(
     payload = { ...payload, shippingAddress: await require('../places/placePricing').alignAddress(workspaceId, payload.shippingAddress, outerTransaction) };
   }
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
+  // Staff price changes (item 382): a teammate with orders.price_override only, never a shopper.
+  const staffPricing = require('./staffPricing');
+  staffPricing.assertAllowedFor(payload, req);
 
   if (!items || items.length === 0) {
     throw new ValidationError([{ field: 'items', message: 'At least one item is required' }]);
@@ -409,9 +412,13 @@ async function createOrder(
       const isOrderBump = item.isOrderBump === true;
       const bumpFailure = (err) =>
         isOrderBump && (err instanceof NotFoundError || (err && err.code === 'INSUFFICIENT_STOCK')) ? orderBumpUnavailable() : err;
-      const line = await priceLine(workspaceId, item, transaction).catch((err) => {
-        throw bumpFailure(err);
-      });
+      // A custom line staff typed in has no variant and holds no stock; a catalogue line may carry staff's own price (item 382).
+      const line = staffPricing.isCustom(item)
+        ? staffPricing.customLine(item, req)
+        : await priceLine(workspaceId, item, transaction).catch((err) => {
+            throw bumpFailure(err);
+          });
+      if (!line.custom && staffPricing.hasUnitPrice(item)) staffPricing.overrideLine(line, item.unitPrice, req);
       line.isOrderBump = isOrderBump;
       // The shopper's answers to the product's custom fields, checked against
       // its current definition (catalog/customFields.js). Required fields are
@@ -450,6 +457,7 @@ async function createOrder(
       }
     }
 
+    await staffPricing.settleCurrency(workspaceId, pricedLines, transaction);
     // A funnel with a currency of its own takes orders in it only (funnels/funnelCurrency.js).
     await require('../funnels/funnelCurrency').assertOrderCurrency(workspaceId, funnelId, pricedLines[0] && pricedLines[0].currency, transaction);
 
@@ -460,7 +468,8 @@ async function createOrder(
     const exactPrices = payload[Symbol.for('zimos.exactPrices')] === true;
     // A click-and-collect place (clickAndCollect/, items 282–283): { locationId, name, address, isDefault }.
     const pickupPlace = payload[Symbol.for('zimos.pickup')] || null;
-    const bundleSnapshots = exactPrices ? [] : await applyBundleTiers(workspaceId, pricedLines, transaction);
+    // A line at staff's own price takes no tier on top (item 382).
+    const bundleSnapshots = exactPrices ? [] : await applyBundleTiers(workspaceId, pricedLines.filter((l) => !l.priceOverride), transaction);
     // A VIP tier with free shipping (vipTiers/, item 218) sets this on the checkout's payload: every line ships free.
     if (payload[Symbol.for('zimos.freeShipping')]) {
       for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
@@ -468,7 +477,7 @@ async function createOrder(
 
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     // A free gift's product doesn't meet a discount's product condition (item 276).
-    const productIds = pricedLines.filter((l) => !l.freeGift).map((l) => l.productId);
+    const productIds = pricedLines.filter((l) => !l.freeGift && l.productId).map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
     // `shippingOverride` (a funnel add-on placed as its own order after the
     // order it follows: the shopper pays shipping once) wins over any offer's.
@@ -525,6 +534,10 @@ async function createOrder(
     if (!req.user && !shippingOverride) await require('../dropship/supplierRules').assertMinimums(workspaceId, pricedLines, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
+    // Staff's manual discount (item 382) on what the code left, as its own entry; orderDiscount is both.
+    const manualDiscount = staffPricing.manualEntry(payload.manualDiscount, subtotal - discountAmount, req);
+    if (manualDiscount) discountsSnapshot.push(manualDiscount);
+    const orderDiscount = discountAmount + (manualDiscount ? manualDiscount.amount : 0);
 
     // Always priced, even without an address (amount 0 then): the weight
     // and tier are stored on the order either way.
@@ -552,8 +565,8 @@ async function createOrder(
     let { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
-      // Taxed on what the shopper pays: the code's or automatic discount comes off first (item 356).
-      lines: await require('../tax/taxService').taxableLines(pricedLines, discountAmount, discountRecord, transaction),
+      // Taxed on what the shopper pays: the code's or automatic discount comes off first (item 356), then staff's (item 382).
+      lines: await staffPricing.taxableLines(pricedLines, discountAmount, discountRecord, manualDiscount ? manualDiscount.amount : 0, transaction),
       shippingAmount,
       transaction,
     });
@@ -561,8 +574,8 @@ async function createOrder(
     if (taxExempt) taxAmount = 0;
 
     // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
-    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction, pricedLines[0].currency);
-    const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
+    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - orderDiscount + shippingAmount, transaction, pricedLines[0].currency);
+    const totalAmount = subtotal - orderDiscount + shippingAmount + taxAmount + paymentAdjustment.amount;
     // Pay later on account: only an approved signed-in business customer, within their limit (accountCredit/, item 229).
     const onAccount = await require('../accountCredit').checkOrder(customer, paymentMethod, totalAmount, payload, req, transaction);
 
@@ -580,7 +593,7 @@ async function createOrder(
         paymentMethod,
         currency: pricedLines[0].currency,
         subtotalAmount: subtotal,
-        discountAmount,
+        discountAmount: orderDiscount,
         shippingAmount,
         taxAmount,
         totalAmount,
@@ -659,6 +672,7 @@ async function createOrder(
             customizations: line.customizations || null,
             isOrderBump: line.isOrderBump,
             isFreeGift: line.freeGift === true,
+            priceOverride: line.priceOverride || null,
           },
           { transaction }
         )
@@ -709,6 +723,11 @@ async function createOrder(
       req,
       transaction,
     });
+    // Staff's own prices and discount, against the catalogue's (item 382).
+    const priceAudit = staffPricing.auditOfCreate(pricedLines, manualDiscount);
+    if (priceAudit) {
+      await recordAudit({ workspaceId, actorUserId: req.user ? req.user.id : null, action: 'order.price_change', entityType: 'Order', entityId: order.id, ...priceAudit, req, transaction });
+    }
 
     // Merchant automations (WhatsApp templates) and server-side ad-platform
     // conversions run after commit and never fail the order. An order waiting
@@ -844,7 +863,10 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
 
   // The code the order was placed with, on the new subtotal. It was checked
   // and redeemed when the order was placed and is not checked again.
-  let discountAmount = before.discountAmount;
+  // Staff's manual discount (item 382) is part of discountAmount; the code's share is worked out without it.
+  const staffPricing = require('./staffPricing');
+  const oldManual = staffPricing.manualOf(order);
+  let discountAmount = before.discountAmount - (oldManual ? Number(oldManual.amount) || 0 : 0);
   let discountsSnapshot = order.discountsSnapshot || [];
   let redeemedDiscount = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
@@ -859,6 +881,11 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   } else {
     redeemedDiscount = await placedDiscount(order, transaction);
   }
+  // …and stays, on what the code leaves of the new subtotal.
+  const manualDiscount = oldManual ? staffPricing.manualEntry(oldManual, Math.max(0, subtotal - discountAmount), null, oldManual) : null;
+  if (oldManual) discountsSnapshot = [...discountsSnapshot.filter((d) => !d || d.kind !== staffPricing.MANUAL), manualDiscount];
+  const couponAmount = discountAmount;
+  discountAmount += manualDiscount ? manualDiscount.amount : 0;
 
   const address = order.shippingAddressSnapshot || null;
   const shipping = await calculateShippingAmount(workspaceId, {
@@ -881,8 +908,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
-    // Taxed after the order's discount, as createOrder taxes it (item 356).
-    lines: await require('../tax/taxService').taxableLines(lines, discountAmount, redeemedDiscount, transaction),
+    // Taxed after the order's discount, as createOrder taxes it (items 356, 382).
+    lines: await staffPricing.taxableLines(lines, couponAmount, redeemedDiscount, manualDiscount ? manualDiscount.amount : 0, transaction),
     shippingAmount,
     transaction,
   });
@@ -1014,6 +1041,8 @@ async function getOrder(workspaceId, orderId) {
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
     linkedOrders: linkedOrders.map((o) => o.toJSON()),
     linkedFromOrder: linkedFrom ? linkedFrom.toJSON() : null,
+    // Staff's manual discount, shown apart from the code (item 382); also in discountsSnapshot as kind 'manual'.
+    manualDiscount: require('./staffPricing').manualOf(json),
   };
 }
 
