@@ -34,23 +34,37 @@ async function check(workspaceId, orderId, scans) {
   const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'orderNumber', 'cancelledAt', 'tags'] });
   if (!order) throw new NotFoundError('Order');
   if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'The order is cancelled', 409);
-  const items = await db.OrderItem.findAll({ where: { orderId: order.id }, attributes: ['id', 'variantId', 'productNameSnapshot', 'variantOptionsSnapshot', 'skuSnapshot', 'quantity'], order: [['createdAt', 'ASC'], ['id', 'ASC']] });
-  const variants = new Map((await db.ProductVariant.findAll({ where: { id: items.map((i) => i.variantId).filter(Boolean) }, attributes: ['id', 'sku', 'barcode'] })).map((v) => [v.id, v]));
+  const items = await db.OrderItem.findAll({ where: { orderId: order.id }, attributes: ['id', 'variantId', 'offerId', 'productNameSnapshot', 'variantOptionsSnapshot', 'skuSnapshot', 'quantity'], order: [['createdAt', 'ASC'], ['id', 'ASC']] });
 
-  // One entry per variant (a variant on two lines is one pile to fill).
+  // The physical pieces each line holds, as the order reserved them (orderService.resolveLine, item 271):
+  // an offer line counts offers, not pieces ("3 pieces" × 1), and a bundle holds several variants.
+  const offerIds = [...new Set(items.map((i) => i.offerId).filter(Boolean))];
+  const offers = new Map(offerIds.length ? (await db.Offer.findAll({ where: { id: offerIds }, paranoid: false, include: [{ model: db.OfferVariant, as: 'lines', attributes: ['variantId', 'quantity'] }] })).map((o) => [o.id, o]) : []);
+  const units = [];
+  for (const it of items) {
+    const offer = it.offerId && offers.get(it.offerId);
+    const lines = offer && offer.lines && offer.lines.length ? offer.lines : null;
+    if (!lines) units.push({ it, variantId: it.variantId, quantity: it.quantity, own: true });
+    else if (lines.length === 1 && lines[0].variantId !== it.variantId) units.push({ it, variantId: it.variantId, quantity: lines[0].quantity * it.quantity, own: true });
+    else for (const l of lines) units.push({ it, variantId: l.variantId, quantity: l.quantity * it.quantity, own: l.variantId === it.variantId });
+  }
+  const variants = new Map((await db.ProductVariant.findAll({ where: { id: [...new Set(units.map((u) => u.variantId).filter(Boolean))] }, paranoid: false, attributes: ['id', 'sku', 'barcode', 'optionValues'] })).map((v) => [v.id, v]));
+
+  // One entry per variant (a variant on two lines, or in a bundle and on its own, is one pile to fill).
   const byVariant = new Map();
   const manual = [];
-  for (const it of items) {
-    if (!it.variantId) { manual.push({ name: it.productNameSnapshot, quantity: it.quantity }); continue; }
-    const v = variants.get(it.variantId);
-    if (!byVariant.has(it.variantId)) {
-      byVariant.set(it.variantId, {
-        variantId: it.variantId, name: it.productNameSnapshot, options: it.variantOptionsSnapshot || {},
-        sku: (v && v.sku) || it.skuSnapshot || null, barcode: (v && v.barcode) || null,
-        codes: [v && v.sku, v && v.barcode, it.skuSnapshot].filter(Boolean).map(norm), expected: 0, scanned: 0,
+  for (const u of units) {
+    const { it } = u;
+    if (!u.variantId) { manual.push({ name: it.productNameSnapshot, quantity: u.quantity }); continue; }
+    const v = variants.get(u.variantId);
+    if (!byVariant.has(u.variantId)) {
+      byVariant.set(u.variantId, {
+        variantId: u.variantId, name: it.productNameSnapshot, options: (u.own ? it.variantOptionsSnapshot : v && v.optionValues) || {},
+        sku: (v && v.sku) || (u.own ? it.skuSnapshot : null) || null, barcode: (v && v.barcode) || null,
+        codes: [v && v.sku, v && v.barcode, u.own ? it.skuSnapshot : null].filter(Boolean).map(norm), expected: 0, scanned: 0,
       });
     }
-    byVariant.get(it.variantId).expected += it.quantity;
+    byVariant.get(u.variantId).expected += u.quantity;
   }
   const lines = [...byVariant.values()];
   const unknown = [];
