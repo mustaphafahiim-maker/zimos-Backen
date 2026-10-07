@@ -218,6 +218,8 @@ v1.use('/workspaces/:workspaceId/invoices', invoiceRoutes);
 v1.use('/workspaces/:workspaceId/whatsapp', whatsappRoutes.staff);
 v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
+// A store's own couriers (self delivery).
+v1.use('/workspaces/:workspaceId/couriers', require('./modules/couriers/couriersRoutes'));
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);

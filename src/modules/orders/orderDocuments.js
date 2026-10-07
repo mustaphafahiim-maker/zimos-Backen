@@ -142,7 +142,7 @@ async function waybillsPdf(workspaceId, { orderIds, format = 'a4x4' }) {
  * courier. Returns { day, rows } where day is YYYY-MM-DD (null for a named
  * selection) and each row carries what the courier needs at the door.
  */
-async function manifestRows(workspaceId, { orderIds, date, carrier } = {}) {
+async function manifestRows(workspaceId, { orderIds, date, carrier, courierId } = {}) {
   const where = { workspaceId, status: { [Op.notIn]: ['cancelled', 'returned'] } };
   let day = null;
   if (orderIds && orderIds.length) {
@@ -153,10 +153,14 @@ async function manifestRows(workspaceId, { orderIds, date, carrier } = {}) {
     where.createdAt = { [Op.gte]: window.start, [Op.lt]: window.end };
   }
   if (carrier) where.carrierCode = { [Op.iLike]: carrier };
+  if (courierId) where.courierId = courierId;
 
   const shipments = await db.Shipment.findAll({
     where,
-    include: [{ model: db.Order, as: 'order' }],
+    include: [
+      { model: db.Order, as: 'order' },
+      { model: db.Courier, as: 'courier', attributes: ['id', 'name', 'phone'] },
+    ],
     order: [['carrierCode', 'ASC'], ['createdAt', 'ASC']],
     limit: 1000,
   });
@@ -178,7 +182,9 @@ async function manifestRows(workspaceId, { orderIds, date, carrier } = {}) {
       city: address.city || '',
       addressLine: address.addressLine || '',
       addressNotes: address.notes || '',
-      courier: s.carrierCode || '',
+      // The store's courier by name (a renamed courier shows the new name), else the text typed.
+      courier: (s.courier && s.courier.name) || s.carrierCode || '',
+      courierId: s.courierId || null,
       // Collected from the store: on the sheet, but not for a courier.
       pickup: o.deliveryMethod === 'pickup',
       paymentMethod: o.paymentMethod,
@@ -186,6 +192,11 @@ async function manifestRows(workspaceId, { orderIds, date, carrier } = {}) {
       currency: o.currency,
     };
   });
+  // Grouped by courier (id, else the name typed), in the order the parcels were handed over.
+  const key = (r) => r.courierId || `name:${r.courier.toLowerCase()}`;
+  const firstSeen = new Map();
+  rows.forEach((r, i) => { if (!firstSeen.has(key(r))) firstSeen.set(key(r), i); });
+  rows.sort((a, b) => firstSeen.get(key(a)) - firstSeen.get(key(b)));
   return { day, rows };
 }
 

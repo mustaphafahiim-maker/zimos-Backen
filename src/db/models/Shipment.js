@@ -13,6 +13,8 @@ module.exports = (sequelize, DataTypes) => {
       // Generated with a collision-retry loop; unique per the DB index.
       trackingCode: { type: DataTypes.STRING(16), allowNull: false, field: 'tracking_code' },
       carrierCode: { type: DataTypes.STRING(100), allowNull: false, field: 'carrier_code' },
+      // One of the store's own couriers (migration 216, modules/couriers); null = none picked.
+      courierId: { type: DataTypes.UUID, allowNull: true, field: 'courier_id' },
       waybillNumber: { type: DataTypes.STRING(100), allowNull: true, field: 'waybill_number' },
       status: {
         type: DataTypes.ENUM('created', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'failed', 'returned', 'cancelled'),
@@ -42,6 +44,7 @@ module.exports = (sequelize, DataTypes) => {
   );
   Shipment.associate = (models) => {
     Shipment.belongsTo(models.Order, { foreignKey: 'orderId', as: 'order' });
+    Shipment.belongsTo(models.Courier, { foreignKey: 'courierId', as: 'courier' });
   };
   return Shipment;
 };

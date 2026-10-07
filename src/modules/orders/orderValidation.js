@@ -154,6 +154,8 @@ module.exports = {
       // A shipping stage on an order with no shipment yet: the manual
       // shipment that is created to carry it.
       carrierCode: Joi.string().trim().min(1).max(100).optional(),
+      // One of the store's own couriers (modules/couriers): wins over carrierCode.
+      courierId: uuid.optional(),
       waybillNumber: Joi.string().trim().max(100).allow('', null).optional(),
       trackingUrl: Joi.string().uri().max(500).allow('', null).optional(),
     }),
@@ -190,6 +192,8 @@ module.exports = {
       orderIds: Joi.array().items(uuid).min(1).max(200).optional(),
       date: Joi.date().iso().optional(),
       carrier: Joi.string().trim().max(100).optional(),
+      // One of the store's own couriers (modules/couriers).
+      courierId: uuid.optional(),
     }),
   },
   // POST /:orderId/items/preview and PUT /:orderId/items — the whole new list of lines.
@@ -250,6 +254,8 @@ module.exports = {
         followUp: Joi.string().valid('unreachable', 'postponed').optional(),
         tags: tagList.optional(),
         carrierCode: Joi.string().trim().min(1).max(100).optional(),
+        // set_status to a shipping stage: the store's courier who takes the orders.
+        courierId: uuid.optional(),
         notes: Joi.string().max(500).allow('', null).optional(),
       }).default({}),
     }).xor('orderIds', 'filter'),

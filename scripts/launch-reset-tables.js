@@ -141,6 +141,7 @@ const TABLES = {
   catalog_imports: wipe(STORE),
   cod_settlement_lines: wipe(STORE),
   cod_settlements: wipe(STORE),
+  couriers: wipe("a store's own couriers (migration 216)"),
   course_modules: wipe('store courses (each module)'),
   courses: wipe(STORE),
   cross_sell_rules: wipe(STORE),

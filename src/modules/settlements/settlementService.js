@@ -9,7 +9,7 @@ const { setFinancialState } = require('../orders/orderStateService');
 const n = (v) => Number(v || 0);
 
 /** Delivered COD orders not yet on any settlement, with their delivering carrier. */
-async function listUnsettled(workspaceId, { carrierCode } = {}) {
+async function listUnsettled(workspaceId, { carrierCode, courierId } = {}) {
   const orders = await db.Order.findAll({
     where: {
       workspaceId,
@@ -24,7 +24,15 @@ async function listUnsettled(workspaceId, { carrierCode } = {}) {
         ),
       ],
     },
-    include: [{ model: db.Shipment, as: 'shipments', required: true, where: { status: 'delivered' } }],
+    include: [
+      {
+        model: db.Shipment,
+        as: 'shipments',
+        required: true,
+        where: { status: 'delivered' },
+        include: [{ model: db.Courier, as: 'courier', attributes: ['id', 'name'] }],
+      },
+    ],
     order: [['createdAt', 'ASC']],
   });
 
@@ -35,7 +43,9 @@ async function listUnsettled(workspaceId, { carrierCode } = {}) {
         orderId: o.id,
         orderNumber: o.orderNumber,
         customerName: (o.contactSnapshot || {}).fullName || null,
-        carrierCode: shipment.carrierCode,
+        // The store's own courier (by id, shown by name), else the shipping company or name typed.
+        carrierCode: shipment.courier ? shipment.courier.name : shipment.carrierCode,
+        courierId: shipment.courierId || null,
         shipmentId: shipment.id,
         waybillNumber: shipment.waybillNumber,
         deliveredAt: shipment.deliveredAt,
@@ -45,11 +55,13 @@ async function listUnsettled(workspaceId, { carrierCode } = {}) {
         dueAmount: Math.max(0, n(o.totalAmount) - n(o.amountPaid)),
       };
     })
-    .filter((r) => !carrierCode || r.carrierCode === carrierCode);
+    .filter((r) => (!carrierCode || r.carrierCode === carrierCode) && (!courierId || r.courierId === courierId));
 
+  // Grouped by courier id for the store's own couriers, by carrier code otherwise.
   const byCarrier = {};
   for (const r of rows) {
-    const c = (byCarrier[r.carrierCode] = byCarrier[r.carrierCode] || { carrierCode: r.carrierCode, orders: 0, dueAmount: 0 });
+    const k = r.courierId ? `courier:${r.courierId}` : r.carrierCode;
+    const c = (byCarrier[k] = byCarrier[k] || { carrierCode: r.carrierCode, courierId: r.courierId, orders: 0, dueAmount: 0 });
     c.orders += 1;
     c.dueAmount += r.dueAmount;
   }
@@ -71,6 +83,7 @@ async function detail(workspaceId, settlementId) {
   return {
     id: s.id,
     carrierCode: s.carrierCode,
+    courierId: s.courierId || null,
     reference: s.reference,
     periodStart: s.periodStart,
     periodEnd: s.periodEnd,
@@ -108,6 +121,7 @@ async function list(workspaceId, { status, limit = 50, before } = {}) {
     settlements: rows.map((s) => ({
       id: s.id,
       carrierCode: s.carrierCode,
+      courierId: s.courierId || null,
       reference: s.reference,
       periodStart: s.periodStart,
       periodEnd: s.periodEnd,
@@ -150,12 +164,15 @@ async function buildLines(workspaceId, lines, { excludeSettlementId } = {}) {
 
 async function create(workspaceId, body, req) {
   const built = await buildLines(workspaceId, body.lines);
+  // A settlement with one of the store's couriers carries their id, and their name as its carrier.
+  const courier = body.courierId ? await require('../couriers/couriersService').findForStore(workspaceId, body.courierId) : null;
   return db.sequelize.transaction(async (transaction) => {
     const t = totals(built);
     const s = await db.CodSettlement.create(
       {
         workspaceId,
-        carrierCode: body.carrierCode,
+        carrierCode: body.carrierCode || (courier && courier.name),
+        courierId: courier ? courier.id : null,
         reference: body.reference || null,
         periodStart: body.periodStart || null,
         periodEnd: body.periodEnd || null,
