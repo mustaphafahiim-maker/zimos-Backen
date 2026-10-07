@@ -694,6 +694,8 @@ async function resetPassword(rawToken, newPassword, req) {
       { consumedAt: now },
       { where: { userId: user.id, consumedAt: null }, transaction }
     );
+    // and the account's wrong second-step codes stop counting (item 359).
+    await require('./twoFactorService').forgiveWrongCodes(user.id, transaction);
     // A change of the email still pending (by link: its confirm needs no
     // session) and live account codes die too, as in takeOverUnconfirmed.
     const [emailChangesClosed] = await db.EmailChange.update({ usedAt: now }, { where: { userId: user.id, usedAt: null }, transaction });
@@ -824,6 +826,8 @@ async function resetPasswordSms(phone, code, newPassword) {
   await user.update({ passwordHash: await hashPassword(newPassword) });
   await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
   await db.TrustedDevice.destroy({ where: { userId: user.id } });
+  // Sign-ins waiting for their second step end; wrong codes stop counting (item 359).
+  await require('./twoFactorService').forgiveWrongCodes(user.id);
   await recordAudit({ actorUserId: user.id, action: 'user.password_reset_sms', entityType: 'User', entityId: user.id });
   return { success: true };
 }

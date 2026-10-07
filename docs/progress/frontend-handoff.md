@@ -4224,3 +4224,19 @@ Inviting an email that already had a ZIMOS account put that account on the team 
 - 404 on accept or decline: «الدعوة دي مبقتش متاحة» / "This invitation is no longer available"; reload the list.
 - Sign-up and sign-in: when the person came from the invite link, go to `/invites` after sign-in and after confirming the email.
 - Team → Invite (inviter): the success message for every invite is «اتبعتت الدعوة لـ {email}. هتظهر في الفريق لما يقبلها» / "Invitation sent to {email}. They join the team once they accept it"; remove the `INVITEE_NOT_CONFIRMED` message.
+
+## 359. Wrong sign-in codes now lock the account's second step for a while — UI: pending
+
+The "Enter your code" step of a sign-in (authenticator app, email code, WhatsApp code or a backup code) had only 5 tries per sign-in, and anyone with the password could sign in again for 5 more, without end. Now an account gets at most 10 wrong codes in 15 minutes and 30 in 24 hours, over all its sign-ins; after that every code is refused, even the right one, until the time passes or the password is reset. Parallel tries are counted properly too.
+
+### Endpoint (unchanged body)
+- **POST `/api/v1/auth/two-factor/verify`** (no auth) `{ "challengeToken": "<uuid>", "code": "123456", "rememberDevice": true }` → 200 `{ "user": {…}, "accessToken": "…", "refreshToken": "…" }` as before.
+  - 401 `INVALID_TWO_FACTOR_CODE` — wrong or expired code (as before).
+  - 429 `TOO_MANY_ATTEMPTS` — 5 wrong codes on this sign-in (as before): go back to the sign-in form.
+  - **new** 429 `TWO_FACTOR_LOCKED` — too many wrong codes on this account: `{ "error": { "code": "TWO_FACTOR_LOCKED", "message": "Too many wrong codes for this account. Try again later, or reset your password." } }`
+- The same 429 `TWO_FACTOR_LOCKED` can come back on the Google sign-in's code step and the WhatsApp sign-in's follow-up step, since they finish through this endpoint.
+- A password reset (`POST /auth/password-reset/confirm`, `POST /auth/password-reset/sms/confirm`) clears the lock and ends any sign-in still waiting for its code.
+
+### Screens
+- Sign-in → "Enter your code" step, on `TWO_FACTOR_LOCKED`: disable the code field and show «اتكتب أكواد غلط كتير على الحساب ده. استنى شوية وجرّب تاني، أو غيّر كلمة المرور» / "Too many wrong codes were entered for this account. Wait a while and try again, or reset your password", with a link «نسيت كلمة المرور؟» / "Forgot your password?" to the reset page and a "Back to sign-in" button. Don't show a countdown (the API gives none).
+- No settings change.
