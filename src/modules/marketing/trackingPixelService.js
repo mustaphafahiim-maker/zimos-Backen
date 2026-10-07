@@ -4,6 +4,7 @@ const db = require('../../db/models');
 const secretBox = require('../../core/utils/secretBox');
 const { NotFoundError, ConflictError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { eventsFor } = require('./browserPixelEvents');
 
 /**
  * Tracking pixels (SPEC §13.1, §13.5): the store's ad and analytics tags.
@@ -20,6 +21,8 @@ const { recordAudit } = require('../audit/auditService');
  *   gtm        Tag Manager container      —
  *   clarity    Microsoft Clarity project  —
  *   pinterest  Pinterest Tag              Conversions API (per ad account: config.adAccountId)
+ *   x, taboola, outbrain, kwai, reddit, microsoft (UET)   browser tag only (item 251;
+ *              event names in browserPixelEvents.js, X event ids in config.eventIds)
  *
  * The public half (platform, pixelId, scope) is served to the storefront by
  * publicPixels(); the token never leaves the server.
@@ -35,6 +38,14 @@ const PLATFORMS = Object.freeze({
   // The Pinterest Tag id: digits, about 13 of them.
   // Its Conversions API is per ad account (config.adAccountId; pixelProviders/pinterestCapi.js).
   pinterest: { idPattern: /^\d{10,16}$/, capi: true, testEventCode: true },
+  // Browser-only (item 251): X pixel id, Taboola account id, Outbrain marketer id,
+  // Kwai pixel id, Reddit pixel (t2_/a2_), Microsoft Ads UET tag id.
+  x: { idPattern: /^[a-z0-9]{4,12}$/i, capi: false, testEventCode: false },
+  taboola: { idPattern: /^\d{4,10}$/, capi: false, testEventCode: false },
+  outbrain: { idPattern: /^[a-f0-9]{20,40}$/i, capi: false, testEventCode: false },
+  kwai: { idPattern: /^\d{10,25}$/, capi: false, testEventCode: false },
+  reddit: { idPattern: /^(t2|a2)_[a-z0-9]{4,20}$/i, capi: false, testEventCode: false },
+  microsoft: { idPattern: /^\d{5,12}$/, capi: false, testEventCode: false },
 });
 const PLATFORM_NAMES = Object.keys(PLATFORMS);
 const SCOPE_TYPES = ['all', 'funnels', 'products'];
@@ -224,6 +235,7 @@ async function publicPixels(workspaceId) {
     pixelId: p.pixelId,
     scope: { type: p.scopeType, ids: p.scopeIds || [] },
     ...(p.platform === 'google' ? adsConversion(p) : {}),
+    ...(eventsFor(p.platform, p.config) ? { events: eventsFor(p.platform, p.config) } : {}),
   }));
 }
 

@@ -3017,3 +3017,33 @@ Nothing is stored between calls: the page keeps the list of scans and sends all 
 
 ### Screen
 - Customer page → tab «كل اللي حصل» / "Timeline": a vertical feed with an icon per kind, the time («من ساعتين» / "2 hours ago", full date on hover), a one-line summary from `data` and a link to the order (`orderNumber`) or product; filter chips «طلبات» / "Orders" (order_* + return_requested + refund), «ملاحظات ومتابعات» / "Notes & follow-ups", «تقييمات وأسئلة» / "Reviews & questions", «نقاط ورصيد» / "Points & credit", «تاني» / "Other"; «تحميل المزيد» / "Load more" while `next` is set. Empty: «لسه مفيش حاجة مع العميل ده» / "Nothing with this customer yet".
+
+## 251. More ad platforms for tracking pixels — UI: pending
+
+### Same endpoints: `/api/v1/workspaces/:ws/tracking-pixels` (`marketing` permissions as before)
+New `platform` values (browser tag only — `capiSupported: false`, no token field, «اختبار» test-send answers 422 `TRACKING_PIXEL_NO_SERVER_API`):
+
+| platform | label | ID field (validation) | example |
+|---|---|---|---|
+| `x` | X (Twitter) | Pixel ID, 4–12 letters/digits | `o1abc` |
+| `taboola` | Taboola | Account ID, 4–10 digits | `1234567` |
+| `outbrain` | Outbrain | Marketer ID, 20–40 hex | `00a1b2c3…` |
+| `kwai` | Kwai | Pixel ID, 10–25 digits | `248123456789012345` |
+| `reddit` | Reddit | Pixel ID `t2_…` or `a2_…` | `a2_abc123def` |
+| `microsoft` | Microsoft Ads (Bing UET) | UET tag ID, 5–12 digits | `187654321` |
+
+- X only: `config.eventIds = { page_view?, view_content?, add_to_cart?, begin_checkout?, add_payment_info?, purchase?, lead? }`, each an X Ads Manager event id `tw-<pixel>-<event>` (422 otherwise). An event without an id isn't sent to X.
+- Scope (all / funnels / products), label and on/off work as for the other platforms.
+
+### Storefront: `GET /store/:ws` → `trackingPixels[]`
+These pixels carry `events`: our event → the platform's name, `null` = don't send:
+```json
+{ "platform": "taboola", "pixelId": "1234567", "scope": { "type": "all", "ids": [] },
+  "events": { "page_view": "page_view", "view_content": "view_content", "add_to_cart": "add_to_cart", "begin_checkout": "start_checkout",
+              "add_payment_info": "add_payment_info", "purchase": "make_purchase", "lead": "lead" } }
+```
+- Load each tag the platform's standard way: X `twq('config', id)` + `twq('event', eventId, { value, currency, conversion_id: orderId })`; Taboola `_tfa.push({ notify: 'event', name, id: pixelId, revenue, currency })`; Outbrain `obApi('track', name, { orderValue, currency, orderId })`; Kwai `kwaiq.load(id); kwaiq.page()` + `kwaiq.instance(id).track(name, { value, currency })`; Reddit `rdt('init', id); rdt('track', name, { value, currency, transactionId })`; Microsoft `uetq.push('event', name, { revenue_value, currency })` (page load is automatic).
+- Same consent rule as the other pixels (cookie consent, «Send Lead instead of Purchase» → fire `lead` instead of `purchase`), same event id per order.
+
+### Screen
+- Marketing → Tracking pixels → «إضافة بكسل» / "Add pixel": six new tiles with logos; the ID field with the hint per platform («رقم الحساب من Taboola Ads» / "Account ID from Taboola Ads"…); for X a small table «أكواد الأحداث» / "Event IDs" (Purchase, Lead, Add to cart, Checkout…). No «Conversions API» switch for these: a note «البكسل ده بيشتغل من المتصفح بس» / "This pixel works in the browser only".

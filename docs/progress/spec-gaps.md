@@ -1785,3 +1785,14 @@ payments and courier bookings would all have to follow). No migration needed for
   - Read-only: one UNION over the tables that already hold each event (orders, shipments, return requests, refunds, notes, follow-ups, reviews, questions, loyalty and credit ledgers, quotes, privacy requests, referrals, form submissions); no table, no migration.
   - Delivered/shipped come from shipments (orders.completed_at is the checkout completion, not delivery). Product questions have no customer link, so they match the customer email.
   - Cursor paging on (time, kind, id) with microsecond time in the cursor, so new events do not shift pages; kinds filter; customers.view.
+
+## Fourteenth pass (2026-10-07) — Lightfunnels parity, second look
+
+The owner, 2026-10-07: "شوف لايت فانل شغال ازاي واعمل زيه". Lightfunnels' own hosts are still blocked here, so this pass compares what is known of their product (search excerpts, their published feature lists) with the code module by module. Already matched and not listed: funnels and steps, split tests, one-click upsells/downsells, bumps, bundles and quantity offers, COD flows, abandoned checkout by email/SMS/WhatsApp (official API), pixels with server events for Meta/TikTok/Snapchat/Google/Pinterest, GTM, Clarity, product feeds, Google Sheets, Zapier-style webhooks, popups, multi-currency, translations, custom domains with a home funnel, floating WhatsApp button (wa.me), shared funnels, store duplication, team roles, public API keys, digital products, subscriptions, courses (LightSchool stays out), reviews import. Migration 499 is the last of this range, so these items avoid migrations.
+
+- [x] 251. More ad platforms for tracking pixels: X (Twitter), Taboola, Outbrain, Kwai, Reddit and Microsoft Ads (UET), with their id formats, and the storefront told which standard events each one takes. (backend done, UI in frontend-handoff.md)
+  - Browser tags only: none of the six has a server API wired here (X, Reddit and Microsoft have conversion APIs; they can follow as interface + sandbox adapters when the owner wants server events for them). capiEnabled is forced off, so the relay never targets them; no migration (platform is a string column).
+  - The storefront gets each pixel's event names (browserPixelEvents.js), with null where the platform has no such event, so the storefront needs no per-platform table of its own.
+  - X conversions are per-pixel event ids made in X Ads Manager (config.eventIds), validated tw-<pixel>-<event>.
+- [ ] 252. Transfer a store to another owner: the owner hands the store to a member of its team (password confirmed, the new owner told by email); the old owner stays as an admin.
+- [ ] 253. Cart offers: merchant rules that show a product in the cart ("add X for Y% off") when the cart has a product or reaches a subtotal; the offer price is honoured in the cart quote and at checkout.
