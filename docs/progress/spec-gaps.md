@@ -1829,7 +1829,7 @@ The owner, 2026-10-07: "شوف لايت فانل شغال ازاي واعمل ز
 
 ## Seventeenth pass (2026-10-07) — SPEC §4–§20 audit against the code
 
-An audit of every SPEC section against the code (more than 250 named capabilities checked) found these left. Not queued: a full partner OAuth app system (§16.3, P2) — it needs new tables (partner apps, grants), and migration 499 is the last of this range; it waits for the owner's new range.
+An audit of every SPEC section against the code (more than 250 named capabilities checked) found these left. A full partner OAuth app system (§16.3, P2) needs new tables; queued as 265 now that the owner's "don't ask, build it like Lightfunnels" (2026-10-07, LANES) opened migrations 500–549.
 
 - [x] 260. Excel (xlsx) for lost orders and courier tracking: `format=xlsx` on the lost-orders export (§6.3) and an xlsx upload on `POST /orders/import-tracking` (§12.3, manual carriers). (backend done, UI in frontend-handoff.md)
   - The lost-orders export builds one table for both formats; xlsx comes back base64 in the JSON like the CSV text (the dashboard builds the file), through the existing xlsx writer.
@@ -1838,3 +1838,4 @@ An audit of every SPEC section against the code (more than 250 named capabilitie
 - [ ] 262. Merchant sign-in with a WhatsApp code (§20.1): request a code to the verified phone, verify, get a session — with the same new-device and lockout rules as the password sign-in.
 - [ ] 263. Dropship suppliers (§16.5): "use the supplier's shipping rates" and "refuse an order below the supplier's minimum" — optional adapter methods, a provider setting, and the hooks in the shipping quote and checkout.
 - [ ] 264. Product feeds per channel (§7.8, §7.10): each channel (Google, Meta, TikTok, Snapchat) with its own on/off, collections and stock rule; optionally keep the Google feed off until the Merchant checklist passes.
+- [ ] 265. Partner apps with OAuth (§16.3, like Lightfunnels' app platform): registered apps (client id / secret, redirect URIs, scopes), the authorization-code flow and token exchange with refresh, tokens that work on the public API with the granted scopes, uninstall/revoke; embedded (iframe) app pages. App charges stay out (§17.4). Migrations from 500.
