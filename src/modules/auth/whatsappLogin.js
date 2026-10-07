@@ -38,7 +38,9 @@ const invalid = () => new AuthenticationError('That code is not correct or has e
 
 async function request({ phone, locale = 'ar' }, req) {
   const normalized = normalizePhone(phone);
-  const users = normalized ? await db.User.findAll({ where: { phone: normalized }, limit: 2 }) : [];
+  // Only accounts that verified this phone count (item 368): a sign-up that merely typed the
+  // number, unverified, can neither take the code nor stop it reaching the phone's owner.
+  const users = normalized ? await db.User.findAll({ where: { phone: normalized, phoneVerifiedAt: { [db.Sequelize.Op.ne]: null } }, limit: 2 }) : [];
   // Only one active account with this phone verified; anything else answers the same way and sends nothing.
   const user = users.length === 1 && users[0].phoneVerifiedAt && users[0].status === 'active' ? users[0] : null;
   // Every answer has this one shape, account or not (item 269): the typed number masked, channel "phone"

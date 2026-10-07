@@ -807,11 +807,23 @@ async function confirmPhoneVerification(user, phone, code, req) {
 
 // --- Password reset by SMS ------------------------------------------------
 
+// The account a reset code for this phone belongs to: only one that verified
+// the phone (item 368), so an unverified sign-up that typed the same number
+// can't hide the owner's account. Newest verification first, so the request
+// and the confirm always pick the same account.
+function findByVerifiedPhone(normalized) {
+  if (!normalized) return null;
+  return db.User.findOne({
+    where: { phone: normalized, phoneVerifiedAt: { [Op.ne]: null } },
+    order: [['phoneVerifiedAt', 'DESC']],
+  });
+}
+
 async function requestPasswordResetSms(phone) {
   const normalized = normalizePhone(phone);
-  const user = normalized ? await db.User.findOne({ where: { phone: normalized } }) : null;
+  const user = await findByVerifiedPhone(normalized);
   // Enumeration-safe: same response whether or not a verified phone matches.
-  if (user && user.phoneVerifiedAt) {
+  if (user) {
     await otpService.generateAndSendOtp(phone, 'password_reset');
   }
   return { success: true };
@@ -820,7 +832,7 @@ async function requestPasswordResetSms(phone) {
 async function resetPasswordSms(phone, code, newPassword) {
   await otpService.verifyOtp(phone, 'password_reset', code);
   const normalized = normalizePhone(phone);
-  const user = await db.User.findOne({ where: { phone: normalized } });
+  const user = await findByVerifiedPhone(normalized);
   if (!user) throw new AppError('INVALID_CODE', 'That code is not valid', 422);
 
   await user.update({ passwordHash: await hashPassword(newPassword) });
