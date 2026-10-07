@@ -3300,3 +3300,8 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 - `POST …/catalog/bulk-update/preview` (and apply) now answer `ignoredColumns: ["name", …]` (+ `summary.ignoredColumns`): show «الأعمدة دي مش هتتغير: {list}» / "These columns are not updated: {list}".
 - Amounts may be typed "249.50" or "249,50"; the row error for an unclear amount reads "price must be an amount like 249.50 (at most 2 decimals)" — show it as is, or «اكتب السعر زي 249.50» / "Type the price like 249.50".
 - A damaged .xlsx answers 422 `VALIDATION_ERROR` on `file`: «الملف بايظ — احفظه تاني أو ابعته CSV» / "The file is damaged — save it again or send a CSV".
+
+## 293. Store reports — date ranges — UI: pending (small)
+
+- Every `/workspaces/:ws/store-reports/*` report now takes `from` / `to` as a day: `?from=2026-09-01&to=2026-09-30` means 1–30 September in the store's time zone, both days included. Send the date picker's days as YYYY-MM-DD (no time, no "Z"). Full ISO timestamps still work as before (`to` exclusive).
+- `from` after `to` → 422 `VALIDATION_ERROR` on `from`: «تاريخ البداية بعد تاريخ النهاية» / "The start date is after the end date".

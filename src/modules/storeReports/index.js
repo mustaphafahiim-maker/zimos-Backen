@@ -11,6 +11,7 @@ const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('../orders/orderStage');
+const { ValidationError } = require('../../core/errors/AppError');
 // An order's amounts in the store currency: the order's own base total over its total, which carries
 // the minor-unit difference (KWD has 3 digits) that the per-unit rate doesn't (item 291).
 const { factorSql } = require('../currencies/baseAmounts');
@@ -37,22 +38,37 @@ const PIECE_OWN = '(x.n IS NULL OR x.n = 1 OR x.variant_id = oi.variant_id)';
 const run = (sql, replacements) => db.sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
 const PLACE_SQL = "coalesce(nullif(o.shipping_address_snapshot->>'province', ''), nullif(o.shipping_address_snapshot->>'governorate', ''), nullif(o.shipping_address_snapshot->>'city', ''), '—')";
 
+const DAY_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 async function contextOf(req) {
   const w = await db.Workspace.findByPk(req.tenant.workspaceId, { attributes: ['id', 'timezone', 'defaultCurrency'] });
-  const to = req.query.to ? new Date(req.query.to) : new Date();
-  const from = req.query.from ? new Date(req.query.from) : new Date(to.getTime() - 90 * 86400000);
   let tz = (w && w.timezone) || 'UTC';
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
   } catch {
     tz = 'UTC';
   }
+  // A plain date is a day of the store's calendar (item 293): `from` its midnight there, `to` the end
+  // of that day (inclusive). A full timestamp is taken as it is.
+  const { zonedMidnight } = require('../../core/utils/zonedMonth');
+  const at = (v, endOfDay) => {
+    if (typeof v === 'string' && DAY_ONLY.test(v)) {
+      const [y, m, d] = v.split('-').map(Number);
+      return zonedMidnight(y, m - 1, d + (endOfDay ? 1 : 0), tz);
+    }
+    return new Date(v);
+  };
+  const to = req.query.to ? at(req.query.to, true) : new Date();
+  const from = req.query.from ? at(req.query.from, false) : new Date(to.getTime() - 90 * 86400000);
+  if (!(from < to)) throw new ValidationError([{ field: 'from', message: '`from` must be before `to`' }]);
   return { ws: w.id, from, to, tz, currency: (w && w.defaultCurrency) || 'EGP' };
 }
 
 const csvCell = (v) => {
-  const s = v == null ? '' : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = v == null ? '' : String(v);
+  // A cell a spreadsheet would run as a formula (a product name "=HYPERLINK(…)") is kept as text (item 293).
+  if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 function sendCsv(res, name, columns, rows) {
   res.set('Content-Type', 'text/csv; charset=utf-8');
@@ -64,7 +80,9 @@ function sendCsv(res, name, columns, rows) {
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
 const ws = { workspaceId: Joi.string().uuid().required() };
-const range = { from: Joi.date().iso(), to: Joi.date().iso(), format: Joi.string().valid('json', 'csv').default('json') };
+// A day (YYYY-MM-DD, the store's calendar) or a full ISO timestamp.
+const when = Joi.alternatives().try(Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/), Joi.date().iso());
+const range = { from: when, to: when, format: Joi.string().valid('json', 'csv').default('json') };
 
 // ------------------------------------------------------------ 238. tax --
 
@@ -92,7 +110,7 @@ router.get('/tax', requirePermission(PERMISSIONS.FINANCIAL_REPORTS_VIEW), valida
             COALESCE(ROUND(SUM(tax * fx)), 0)::bigint AS tax,
             COALESCE(ROUND(SUM(CASE WHEN total > 0 THEN tax * fx * LEAST(refunded, total)::numeric / total ELSE 0 END)), 0)::bigint AS "taxRefunded"
        FROM o
-      WHERE stage = 'delivered' OR financial_state = 'paid'
+      WHERE stage = 'delivered' OR financial_state IN ('paid', 'partially_refunded')
       GROUP BY 1, 2 ORDER BY 1, 2`,
     { ws: c.ws, from: c.from, to: c.to, tz: c.tz }
   );
@@ -130,7 +148,7 @@ router.get('/inventory-value', requirePermission(PERMISSIONS.FINANCIAL_REPORTS_V
     for (const r of rows) {
       const cells = matrix.get(r.variantId);
       if (!cells) continue;
-      r.locations = locations.map((l) => ({ locationId: l.id, units: (cells.get(l.id) || {}).onHand || 0 })).filter((x) => x.units);
+      r.locations = locations.map((l) => ({ locationId: l.id, units: (cells.get(l.id) || {}).onHand || 0, reserved: Math.max(0, (cells.get(l.id) || {}).reserved || 0) })).filter((x) => x.units);
       if (r.unitCost != null) for (const x of r.locations) { const b = byLocation.get(x.locationId); b.units += x.units; b.value += x.units * Number(r.unitCost); }
     }
   }
@@ -141,7 +159,8 @@ router.get('/inventory-value', requirePermission(PERMISSIONS.FINANCIAL_REPORTS_V
     value: r.unitCost == null ? null : String(r.onHand * Number(r.unitCost)),
     ...(r.locations ? { locations: r.locations } : {}),
   }));
-  if (req.query.locationId) list = list.filter((r) => (r.locations || []).some((x) => x.locationId === req.query.locationId)).map((r) => { const u = r.locations.find((x) => x.locationId === req.query.locationId).units; return { ...r, onHand: u, value: r.unitCost == null ? null : String(u * Number(r.unitCost)) }; });
+  // One location: its own units, reserved and free (item 293), not the store's.
+  if (req.query.locationId) list = list.filter((r) => (r.locations || []).some((x) => x.locationId === req.query.locationId)).map((r) => { const x = r.locations.find((y) => y.locationId === req.query.locationId); return { ...r, onHand: x.units, reserved: x.reserved, free: Math.max(0, x.units - x.reserved), value: r.unitCost == null ? null : String(x.units * Number(r.unitCost)) }; });
   if (req.query.format === 'csv') return sendCsv(res, 'inventory-value', ['productName', 'sku', 'onHand', 'reserved', 'free', 'unitCost', 'value'], list.map((r) => ({ ...r, productName: [r.productName, Object.values(r.options || {}).join(' / ')].filter(Boolean).join(' — ') })));
   const costed = list.filter((r) => r.value != null);
   return res.json({
@@ -258,11 +277,13 @@ router.get('/order-heatmap', requirePermission(PERMISSIONS.ANALYTICS_VIEW), vali
   const c = await contextOf(req);
   const rows = await run(
     `SELECT EXTRACT(DOW FROM o.created_at AT TIME ZONE :tz)::int AS weekday, EXTRACT(HOUR FROM o.created_at AT TIME ZONE :tz)::int AS hour,
-            COUNT(*)::int AS orders, COALESCE(ROUND(SUM(coalesce(o.total_amount_base, o.total_amount))), 0)::bigint AS revenue,
+            COUNT(*) FILTER (WHERE o.confirmation_state <> 'rejected')::int AS orders,
+            COALESCE(ROUND(SUM(coalesce(o.total_amount_base, o.total_amount)) FILTER (WHERE o.confirmation_state <> 'rejected')), 0)::bigint AS revenue,
+            -- The confirmation rate counts the orders rejected on the call too (item 293).
             COUNT(*) FILTER (WHERE o.payment_method = 'cod')::int AS cod,
             COUNT(*) FILTER (WHERE o.payment_method = 'cod' AND o.confirmation_state = 'confirmed')::int AS confirmed
        FROM orders o
-      WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'
+      WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL
         AND o.created_at >= :from AND o.created_at < :to
       GROUP BY 1, 2`,
     { ws: c.ws, from: c.from, to: c.to, tz: c.tz }
@@ -381,8 +402,7 @@ router.get('/returns', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({
        FROM return_requests r
       WHERE r.workspace_id = :ws AND r.created_at >= :from AND r.created_at < :to
       GROUP BY 1 ORDER BY requests DESC`, p);
-  const products = await run(
-    `WITH o AS (SELECT o.id, ${STAGE_SQL} AS stage FROM ${ORDERS_WITH_STAGE_FROM}
+  const RETURN_CTES = `WITH o AS (SELECT o.id, ${STAGE_SQL} AS stage FROM ${ORDERS_WITH_STAGE_FROM}
                 WHERE o.workspace_id = :ws AND o.is_test = false AND o.created_at >= :from AND o.created_at < :to),
           sold AS (SELECT oi.product_id, MIN(oi.product_name_snapshot) AS name, SUM(oi.quantity)::int AS delivered
                      FROM order_items oi JOIN o ON o.id = oi.order_id WHERE o.stage IN ('delivered', 'returned') GROUP BY 1),
@@ -391,7 +411,9 @@ router.get('/returns', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({
                      FROM return_requests r JOIN o ON o.id = r.order_id
                      CROSS JOIN LATERAL jsonb_array_elements(r.items) it
                      JOIN order_items oi ON oi.id = (it->>'orderItemId')::uuid
-                    WHERE r.status <> 'rejected' GROUP BY 1)
+                    WHERE r.status <> 'rejected' GROUP BY 1)`;
+  const products = await run(
+    `${RETURN_CTES}
      SELECT COALESCE(sold.product_id, back.product_id) AS "productId", COALESCE(sold.name, p.name) AS name,
             COALESCE(sold.delivered, 0) AS delivered, COALESCE(back.returned, 0) AS returned, back.reasons
        FROM sold FULL JOIN back ON back.product_id = sold.product_id
@@ -401,11 +423,13 @@ router.get('/returns', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({
   const [ref] = await run(
     `SELECT COUNT(*)::int AS refunds, COALESCE(ROUND(SUM(f.amount * ${factorSql()})), 0)::bigint AS amount
        FROM refunds f JOIN orders o ON o.id = f.order_id
-      WHERE o.workspace_id = :ws AND o.is_test = false AND f.status = 'processed' AND f.created_at >= :from AND f.created_at < :to`, p);
+      WHERE o.workspace_id = :ws AND o.is_test = false AND f.status = 'processed'
+        AND COALESCE(f.processed_at, f.created_at) >= :from AND COALESCE(f.processed_at, f.created_at) < :to`, p);
+  // The return rate over every product, not the 500 listed (item 293).
+  const [all] = await run(`${RETURN_CTES} SELECT (SELECT COALESCE(SUM(delivered), 0) FROM sold)::int AS delivered, (SELECT COALESCE(SUM(returned), 0) FROM back)::int AS returned`, p);
   const rows = products.map((r) => ({ ...r, returnRate: r.delivered ? Math.round((r.returned / r.delivered) * 1000) / 10 : null, reasons: r.reasons ? r.reasons.split(',') : [] }));
   if (req.query.format === 'csv') return sendCsv(res, 'returns-by-product', ['name', 'delivered', 'returned', 'returnRate', 'reasons'], rows.map((r) => ({ ...r, reasons: r.reasons.join(' ') })));
-  const delivered = rows.reduce((n, r) => n + r.delivered, 0);
-  const returned = rows.reduce((n, r) => n + r.returned, 0);
+  const { delivered, returned } = all;
   return res.json({
     from: c.from, to: c.to, currency: c.currency,
     totals: { requests: reasons.reduce((n, r) => n + r.requests, 0), units: reasons.reduce((n, r) => n + r.units, 0), returnRate: delivered ? Math.round((returned / delivered) * 1000) / 10 : null, refunds: ref.refunds, refunded: String(ref.amount) },

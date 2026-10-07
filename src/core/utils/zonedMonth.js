@@ -62,4 +62,4 @@ function monthWindow(now = new Date(), timeZone = 'Africa/Cairo') {
   };
 }
 
-module.exports = { monthWindow, zonedParts };
+module.exports = { monthWindow, zonedParts, zonedMidnight };
