@@ -3354,3 +3354,37 @@ No new endpoint; what changes in the existing ones (`/api/v1/workspaces/:ws/doma
   - «سعر الدومين مش متاح دلوقتي — جرّب كمان شوية» / "This domain's price isn't available right now — try again in a bit".
 - Search results can come back with `price: null` while `available: true` (a TLD the registrar didn't price). Show «السعر مش متاح» / "Price not available" and disable «اشتري».
 - Screens: Store settings → Domains → «اشتري دومين» (search list, buy dialog) and «جدّد» (renew dialog). Format prices in the returned currency (EGP for Egypt), e.g. «735 ج.م في السنة» / "EGP 735 / year".
+
+## 326. Domain owner details in the buy dialog (Dynadot) — UI: pending
+
+All under `/api/v1/workspaces/:ws/domains` (`domain.manage`).
+- **GET `/registrant`** → `{ "required": true, "contact": { "fullName": "Mona Ali", "organization": "Mona Store", "email": "mona@gmail.com", "phoneCountryCode": "20", "phone": "1001234567", "address1": "12 Tahrir St", "address2": null, "city": "Cairo", "state": "Cairo", "postalCode": "11511", "country": "EG" } | null }`.
+  - `required` is false in the sandbox. There the form can be skipped.
+- **POST `/purchases`** takes a new optional field `contact`, with the same fields as above:
+  - required: `fullName` (2–100), `email`, `phoneCountryCode` (1–3 digits), `phone` (4–14 digits, national number without the leading 0), `address1` (≤100), `city` (≤60), `state` (≤60, the governorate), `postalCode` (2–20 letters/digits), `country` (ISO-2);
+  - optional: `organization` (≤100) and `address2` (≤100).
+  - If it's left out, the saved contact is used.
+  - When `required` and nothing is saved → **422 `DOMAIN_CONTACT_REQUIRED`**: «أضف بيانات صاحب الدومين» / "Add the domain owner's details".
+- New error codes on purchase and renew:
+  - **502 `REGISTRAR_REFUSED`**: «شركة الدومينات رفضت الطلب — راجع البيانات وجرّب تاني» / "The domain registrar refused — check the details and try again". The message carries the registrar's reason.
+  - **502 `REGISTRAR_UNAVAILABLE`**: «شركة الدومينات مش بترد دلوقتي — جرّب كمان شوية» / "The domain registrar isn't answering — try again shortly".
+  - **503 `DOMAIN_PRICE_UNAVAILABLE`** also on renew (handoff 325).
+
+### Screen: Store settings → Domains → «اشتري دومين» → buy dialog
+- When `required` is true, add a step «صاحب الدومين» / "Domain owner", pre-filled from `GET /registrant` (or from the store's details the first time).
+- Fields:
+
+  | ar | en |
+  |---|---|
+  | الاسم بالكامل | Full name |
+  | اسم الشركة (اختياري) | Company (optional) |
+  | الإيميل | Email |
+  | كود الدولة + الموبايل | Country code + phone (from the country select, e.g. +20) |
+  | العنوان | Address |
+  | المدينة | City |
+  | المحافظة | Governorate / State |
+  | الرقم البريدي | Postal code |
+  | الدولة | Country |
+
+- A note under the form: «الدومين هيتسجل باسمك وانت صاحبه. هيوصلك إيميل من الجهة المسؤولة عن الدومينات لتأكيد الإيميل — لازم تأكده خلال 15 يوم وإلا الدومين يتوقف.» / "The domain is registered in your name and you own it. You'll get an email from the domain authority to confirm your address — confirm it within 15 days or the domain is suspended."
+- When saved details exist, show them as a summary with «تعديل» / "Edit".

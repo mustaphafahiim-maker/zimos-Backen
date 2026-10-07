@@ -71,15 +71,50 @@ async function search(workspaceId, q) {
   };
 }
 
+// The domain's owner of record (item 326): asked once in the buy dialog, kept on the store for the next purchase.
+const CONTACT = Joi.object({
+  fullName: Joi.string().trim().min(2).max(100).required(),
+  organization: Joi.string().trim().max(100).allow('', null),
+  email: Joi.string().trim().email().max(150).required(),
+  phoneCountryCode: Joi.string().pattern(/^\d{1,3}$/).required(),
+  phone: Joi.string().pattern(/^\d{4,14}$/).required(),
+  address1: Joi.string().trim().min(2).max(100).required(),
+  address2: Joi.string().trim().max(100).allow('', null),
+  city: Joi.string().trim().min(2).max(60).required(),
+  state: Joi.string().trim().min(2).max(60).required(),
+  postalCode: Joi.string().trim().pattern(/^[A-Za-z0-9 -]{2,20}$/).required(),
+  country: Joi.string().trim().length(2).uppercase().required(),
+});
+
+async function savedRegistrant(workspaceId) {
+  const ws = await db.Workspace.findByPk(workspaceId, { attributes: ['settings'] });
+  const saved = ws && ws.settings && ws.settings.domain_registrant;
+  if (!saved) return null;
+  const { value, error } = CONTACT.validate(saved, { stripUnknown: true });
+  return error ? null : value;
+}
+
+async function saveRegistrant(workspaceId, contact) {
+  await db.sequelize.query(
+    `UPDATE workspaces SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{domain_registrant}', CAST(:c AS jsonb)), updated_at = now() WHERE id = :id`,
+    { replacements: { c: JSON.stringify(contact), id: workspaceId } }
+  );
+}
+
+async function registrant(workspaceId) {
+  return { required: Boolean(registrar().needsContact), contact: await savedRegistrant(workspaceId) };
+}
+
 async function list(workspaceId) {
   return { purchases: (await db.DomainPurchase.findAll({ where: { workspaceId }, order: [['createdAt', 'DESC']] })).map(view) };
 }
 
-async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice }, req) {
+async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice, contact }, req) {
   const host = String(domain).trim().toLowerCase();
   const hostParts = host.split('.');
   if (hostParts.length !== 2 || !TLDS.includes(hostParts[1]) || !candidates(host).includes(host)) throw new AppError('VALIDATION_ERROR', `Enter a domain like mystore.com (${TLDS.map((t) => `.${t}`).join(', ')})`, 422, [{ field: 'domain', message: 'Enter a domain like mystore.com' }]);
   const r = registrar();
+  if (typeof r.assertReady === 'function') r.assertReady();
   const [quote] = await r.search([host]);
   if (!quote || !quote.available || (await db.Domain.count({ where: { hostname: host } }))) throw new ConflictError('This domain is not available', 'DOMAIN_UNAVAILABLE');
   const price = await sellPrice(quote.price);
@@ -101,6 +136,11 @@ async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice }, 
     throw new ConflictError(`${counterpartHost} is connected to another store`, 'DOMAIN_UNAVAILABLE');
   }
 
+  // A real registrar needs the owner of record; the last one given is used again.
+  const owner = contact || (await savedRegistrant(workspaceId));
+  if (r.needsContact && !owner) throw new AppError('DOMAIN_CONTACT_REQUIRED', "Add the domain owner's details", 422, [{ field: 'contact', message: "Add the domain owner's details" }]);
+  if (contact) await saveRegistrant(workspaceId, contact);
+
   const row = await db.DomainPurchase.create({
     workspaceId, hostname: host, registrar: r.name, status: 'pending', years, autoRenew,
     priceAmount: price ? price.amount : null, currency: price ? price.currency : null,
@@ -112,8 +152,8 @@ async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice }, 
 
   let bought = false;
   try {
-    const contact = await db.User.findByPk(req.user.id, { attributes: ['fullName', 'email', 'phone'] });
-    const reg = await r.register({ domain: host, years, contact: contact ? contact.toJSON() : {} });
+    const user = owner ? null : await db.User.findByPk(req.user.id, { attributes: ['fullName', 'email', 'phone'] });
+    const reg = await r.register({ domain: host, years, contact: owner || (user ? user.toJSON() : {}) });
     bought = true;
     await row.update({ providerRef: reg.providerRef, expiresAt: reg.expiresAt });
 
@@ -187,8 +227,13 @@ async function renewNow(workspaceId, id, years, req, acceptPrice) {
   if (!['active', 'expired'].includes(row.status)) throw new ConflictError('Only a bought domain can be renewed', 'DOMAIN_NOT_ACTIVE');
   // As for a purchase: the price the merchant was shown must still be the price.
   let quoted = null;
-  if (acceptPrice !== undefined) {
+  // As for a purchase, a real registrar never renews at an unknown price.
+  if (registrar().name !== 'sandbox') {
     quoted = await quoteRenewal(row, years);
+    if (!quoted.price) throw new AppError('DOMAIN_PRICE_UNAVAILABLE', 'The price of this renewal is not available right now — try again later', 503);
+  }
+  if (acceptPrice !== undefined) {
+    quoted = quoted || (await quoteRenewal(row, years));
     const { price } = quoted;
     const same = (a, b) => (a === null && b === null) || (a && b && a.amount === b.amount && a.currency === b.currency);
     if (!same(price, acceptPrice)) throw new AppError('DOMAIN_PRICE_CHANGED', 'The price changed — check it and confirm again', 409, { price });
@@ -235,10 +280,11 @@ const money = Joi.object({ amount: Joi.number().integer().min(0).required(), cur
 /** Registers the routes on the domains router (domain.manage), before /:domainId. */
 function mount(router) {
   router.get('/search', validate({ params, query: Joi.object({ q: Joi.string().trim().min(1).max(253).required() }) }), asyncHandler(async (req, res) => res.json(await search(req.tenant.workspaceId, req.query.q))));
+  router.get('/registrant', validate({ params }), asyncHandler(async (req, res) => res.json(await registrant(req.tenant.workspaceId))));
   router.get('/purchases', validate({ params }), asyncHandler(async (req, res) => res.json(await list(req.tenant.workspaceId))));
   router.post(
     '/purchases',
-    validate({ params, body: Joi.object({ domain: Joi.string().trim().max(253).required(), years: Joi.number().integer().min(1).max(10).default(1), autoRenew: Joi.boolean().default(true), acceptPrice: money.allow(null).required() }) }),
+    validate({ params, body: Joi.object({ domain: Joi.string().trim().max(253).required(), years: Joi.number().integer().min(1).max(10).default(1), autoRenew: Joi.boolean().default(true), acceptPrice: money.allow(null).required(), contact: CONTACT }) }),
     requireLive,
     // A bought domain is a connected domain: the plan's number of custom domains applies (billing/planLimits.js).
     require('../billing/planLimits').requirePlanLimit('domains'),

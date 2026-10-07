@@ -10,9 +10,17 @@
  *   register({ domain, years, contact })     → { providerRef, expiresAt }
  *   setRecords({ domain, providerRef, records }) → void   (records: [{ type, name, value }])
  *   renew({ domain, providerRef, years })    → { expiresAt }
+ *
+ * Optional: renewQuote({ domain, providerRef, years }), assertReady() (throws
+ * before a purchase when the adapter is not set up), needsContact (the buy
+ * asks for the registrant's details).
  */
 
-const ADAPTERS = { sandbox: () => require('./sandboxRegistrar') };
+const ADAPTERS = {
+  sandbox: () => require('./sandboxRegistrar'),
+  // The owner's pick (item 326); Namecheap is the fallback (item 327).
+  dynadot: () => require('./dynadotRegistrar'),
+};
 
 function registrar() {
   const name = process.env.DOMAIN_REGISTRAR || 'sandbox';

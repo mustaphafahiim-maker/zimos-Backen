@@ -42,7 +42,48 @@ the rounded price asks the merchant to confirm again.
 | `DOMAIN_REGISTRAR` | |
 |---|---|
 | `sandbox` (default) | Availability from a real NS lookup (a name with name servers is taken; "taken" in the name is taken). Prices from `DOMAIN_SANDBOX_PRICES` (JSON per TLD), else null. Register / DNS / renew only log. |
-| a real registrar (to add) | Needs the owner's reseller account (e.g. Namecheap, Cloudflare Registrar, OpenSRS). Map the four calls above; keep its API key sealed in env. |
+| `dynadot` (item 326, the owner's pick) | Dynadot API3, JSON. See below. |
+
+Not used, and why (research 2026-10-07): **Hostinger** forbids reselling in its terms. **Cloudflare
+Registrar**'s API is beta and cannot renew yet. **Namecheap** works, but its API prices are retail, so a
+.com renewal costs more than we would sell it for. It is the fallback (item 327).
+
+## Dynadot (`DOMAIN_REGISTRAR=dynadot`)
+
+| Env | |
+|---|---|
+| `DYNADOT_API_KEY` | The account's API key (Tools → API). Never logged: the key travels in the URL, so only the command name is logged. |
+| `DYNADOT_API_URL` | Default `https://api.dynadot.com/api3.json`. For the sandbox key use `https://api-sandbox.dynadot.com/api3.json`. |
+| `DYNADOT_CURRENCY` | The account's currency, default `USD`. |
+| `PLATFORM_APEX_IPS` | **Required.** Dynadot has no ALIAS record, so a root domain is pointed with A records. Without it buying is 503 `DOMAIN_PURCHASE_UNAVAILABLE`, before anything is bought. |
+
+**How each step works:**
+- **Calls:** `search` (with `show_price`, all names in one call), `tld_price` (renewal price per TLD, cached for an hour), `create_contact` then `register`, `set_dns2` and `renew`.
+- **Ownership:** the merchant's details become the domain's registrant contact, so they own the domain. Admin, tech and billing stay the account's defaults.
+- **DNS:** `set_dns2` replaces the zone, and we send the whole set: the root's A records, the `www` CNAME and the verification TXT.
+- **Premium names** are never sold.
+- **One call at a time:** Dynadot temporarily bans accounts that send API3 calls in parallel. Every call waits for the one before it in this process, so run the daily `domains.renew_due` job on one worker.
+- **Errors:** a refusal answers 502 `REGISTRAR_REFUSED`, with Dynadot's message. No answer gives 502 `REGISTRAR_UNAVAILABLE`.
+
+**Owner's setup:**
+1. Open a new Dynadot account in the company's name, with no domains in it.
+2. Apply for the free reseller account.
+3. Verify identity and phone, and turn on two-step login.
+4. Top up in USD (Payoneer, Wise or a USD card; Egyptian cards have foreign-currency limits).
+5. Tools → API: create a live key and a sandbox key. Add the server's fixed IP if asked.
+6. Put the keys in the server's environment, never in chat.
+
+**Before going live**, run this against the sandbox. The adapter was written from the API3 documentation and tested against a stand-in, because Dynadot's site could not be reached from where it was built.
+1. Search a free name and a taken one. Prices must come back as "10.88 in USD"-style text.
+2. Buy a name with a registrant. The registrant must show on the domain, and the zone must hold the A, www and TXT records.
+3. Renew it. The new expiry must come back.
+4. Read `tld_price`: the renew price per TLD must be found. If the answer is nested differently, adjust `tldPrices()`.
+
+## The domain's owner (registrant)
+
+A real registrar needs the merchant's details as the domain's owner of record. The buy dialog asks for them once, `POST /purchases` sends them as `contact`, and they are kept in `workspace.settings.domain_registrant` for the next purchase. `GET /registrant` returns `{ required, contact }`. If a contact is required but none is given or saved, the answer is 422 `DOMAIN_CONTACT_REQUIRED`. ICANN then emails the registrant to confirm the address, and the domain is suspended if they don't confirm within 15 days.
+
+A renewal with a real registrar needs a price, like a purchase (503 `DOMAIN_PRICE_UNAVAILABLE`). The daily automatic renewal still renews when it has no price, because losing the domain is worse; its audit entry then has `price: null`.
 
 ## Who pays
 

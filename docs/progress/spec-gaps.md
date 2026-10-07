@@ -2135,5 +2135,15 @@ the registrar sites were blocked from here, so numbers are to be confirmed at si
   - Search, purchase, renew quote and renew all use the selling price; the 409 `DOMAIN_PRICE_CHANGED` compares selling prices. With a real registrar a name without a price cannot be bought: 503 `DOMAIN_PRICE_UNAVAILABLE`.
   - Migration 504 adds `cost_amount` / `cost_currency` to `domain_purchases`. Renewals by hand (`domain.renew`) and the automatic ones (new `domain.auto_renew_done` entry) record price and cost in the audit, so billing (Ziad's, unchanged) can invoice them.
   - Verified with sandbox prices ($10.88 .com, rate 48, margin 40 %, step 500): search showed 735 EGP. The cost sent as `acceptPrice` → 409 with 735 EGP. The purchase stored 73500 EGP / 1088 USD. A 2-year renew quote came to 1465 EGP, with the renew audit holding both. The automatic renewal's audit held 735 EGP / $10.88.
-- [ ] 326. Dynadot registrar adapter (`DOMAIN_REGISTRAR=dynadot`): search with prices, register with the merchant as registrant, DNS, renew, renewal quote; calls sent one at a time (its API bans parallel calls); premium names not sold; the registrant contact asked in the buy dialog.
+- [x] 326. Dynadot registrar adapter (`DOMAIN_REGISTRAR=dynadot`): search with prices, register with the merchant as registrant, DNS, renew, renewal quote; calls sent one at a time (its API bans parallel calls); premium names not sold; the registrant contact asked in the buy dialog. (backend done, UI in frontend-handoff.md)
+  - `registrar/dynadotRegistrar.js` covers API3 (JSON): `search` with prices, `tld_price` for renewals (cached an hour), `create_contact` → `register` with the merchant as registrant, `set_dns2` for the whole zone, and `renew`. The key lives in env and never in logs. Calls run one at a time (Dynadot bans parallel API3 calls). Premium names are never sold.
+  - Dynadot has no ALIAS record, so it needs `PLATFORM_APEX_IPS`. Without it the adapter's `assertReady` answers 503 before anything is bought.
+  - The registrant: `contact` on `POST /purchases` (name, organization, email, phone as country code + number, address, city, governorate/state, postal code, ISO country). It is kept in `settings.domain_registrant` and returned by `GET /domains/registrant` as `{ required, contact }`. Missing → 422 `DOMAIN_CONTACT_REQUIRED`.
+  - A renewal by hand with a real registrar and no price → 503, as for a purchase. The daily auto-renew still renews (losing the domain is worse) and records a null price.
+  - Verified against a stand-in for API3. Dynadot's site was blocked from here, so the README has a sandbox checklist to run before going live. Results:
+    - search showed 735 EGP (.com) with a 740 EGP renewal, and a premium name as not available;
+    - a buy without a contact → 422; with one → 201 active (create_contact phonecc 20, register registrant_contact, set_dns2 root A + www CNAME + TXT), and the contact was saved;
+    - renew quote and renew worked;
+    - three parallel searches → at most 1 call in flight;
+    - the key never reached the server log; a wrong key → 502 `REGISTRAR_REFUSED`; no key / no apex IPs → 503.
 - [ ] 327. Namecheap registrar adapter (`DOMAIN_REGISTRAR=namecheap`) as the fallback: same contract over its XML API (whitelisted IPv4, full host list on every DNS write).
