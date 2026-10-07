@@ -1327,10 +1327,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
     });
 
     // Cancel any shipment that was created but never collected.
-    await db.Shipment.update(
-      { status: 'cancelled' },
-      { where: { orderId: order.id, status: 'created' }, transaction }
-    );
+    await carrierShipmentService.cancelUncollectedShipments(workspaceId, order.id, transaction, { req, trigger: 'order_cancel' });
 
     // Close any confirmation task still in the queue for this order, recorded
     // as an order-page rejection so the queue's Done tab shows who and why.

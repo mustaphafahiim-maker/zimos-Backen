@@ -733,7 +733,11 @@ async function cancelCarrierShipmentsForOrder(workspaceId, orderId, transaction,
     }
     const adapter = await cancelAtCarrier(workspaceId, shipment, { transaction, notDone: 'The order was not cancelled.' });
     const previousStatus = shipment.status;
-    await shipment.update({ status: 'cancelled', cancelMode: 'api', nextPollAt: null }, { transaction });
+    await markCancelled(workspaceId, shipment, { cancelMode: 'api', nextPollAt: null }, {
+      transaction,
+      req,
+      metadata: { source: 'merchant', trigger, carrierCode: shipment.carrierCode, cancelMode: 'api' },
+    });
     logger.info('Carrier shipment cancelled with the order', {
       workspaceId,
       orderId,
@@ -741,6 +745,42 @@ async function cancelCarrierShipmentsForOrder(workspaceId, orderId, transaction,
       trackingNumber: shipment.waybillNumber,
       previousStatus,
     });
+  }
+}
+
+/**
+ * Sets one shipment to 'cancelled' as part of an order cancellation, with
+ * its 'shipment.update' audit row, from which auditEventBridge records
+ * shipment.status_changed (webhooks, sheets). The order's stage is left to
+ * the cancellation itself, which records it once the order is cancelled.
+ */
+async function markCancelled(workspaceId, shipment, extra, { transaction, req, metadata }) {
+  const before = shipment.toJSON();
+  await shipment.update({ ...extra, status: 'cancelled' }, { transaction });
+  await recordAudit({
+    workspaceId,
+    actorUserId: req && req.user ? req.user.id : null,
+    action: 'shipment.update',
+    entityType: 'Shipment',
+    entityId: shipment.id,
+    before,
+    after: shipment.toJSON(),
+    metadata,
+    req,
+    transaction,
+  });
+}
+
+/**
+ * After cancelCarrierShipmentsForOrder: every shipment of the order still
+ * 'created' (a manual one, never collected) is cancelled too, each with its
+ * audit row and shipment.status_changed event. Used by
+ * orderService.cancelOrder and a confirmation correction to rejected.
+ */
+async function cancelUncollectedShipments(workspaceId, orderId, transaction, { req = null, trigger = 'order_cancel' } = {}) {
+  const shipments = await db.Shipment.findAll({ where: { workspaceId, orderId, status: 'created' }, transaction });
+  for (const shipment of shipments) {
+    await markCancelled(workspaceId, shipment, {}, { transaction, req, metadata: { source: 'merchant', trigger } });
   }
 }
 
@@ -796,6 +836,7 @@ module.exports = {
   syncShipment,
   getShipmentLabel,
   cancelCarrierShipmentsForOrder,
+  cancelUncollectedShipments,
   cancelAtCarrier,
   cancelsByApi,
   codAmountFor,

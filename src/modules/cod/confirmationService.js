@@ -558,7 +558,10 @@ async function correctOutcome(workspaceId, taskId, { outcome, reason, notes, ack
         req,
         trigger: 'confirmation_correction',
       });
-      await db.Shipment.update({ status: 'cancelled' }, { where: { orderId: order.id, status: 'created' }, transaction });
+      await carrierShipmentService.cancelUncollectedShipments(workspaceId, order.id, transaction, {
+        req,
+        trigger: 'confirmation_correction',
+      });
       await releaseOrderStock(workspaceId, order.id, 'order_rejected', req.user.id, transaction);
       await db.Customer.increment('totalRejectedOrders', { by: 1, where: { id: order.customerId }, transaction });
     } else {
