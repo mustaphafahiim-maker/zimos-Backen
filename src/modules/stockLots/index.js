@@ -76,8 +76,10 @@ async function consumeForOrder(event) {
     if (await db.StockLotAllocation.count({ where: { orderId: order.id }, transaction })) return;
     // Only the lots of the place the order ships from (item 284).
     const place = await placeWhere(order.workspaceId, order.stockLocationId, transaction);
-    const items = await db.OrderItem.findAll({ where: { orderId: order.id, variantId: { [Op.ne]: null } }, attributes: ['variantId', 'quantity'], transaction });
-    for (const it of items) {
+    const items = await db.OrderItem.findAll({ where: { orderId: order.id, variantId: { [Op.ne]: null } }, attributes: ['variantId', 'offerId', 'quantity'], transaction });
+    // Pieces, not lines (item 289): an offer of "3 pieces" takes 3 from the lots, a bundle each of its variants.
+    for (const it of await require('../orders/orderUnits').physicalUnits(items, transaction)) {
+      if (!it.variantId) continue;
       let left = it.quantity;
       const lots = await db.StockLot.findAll({ where: { workspaceId: order.workspaceId, variantId: it.variantId, quantityRemaining: { [Op.gt]: 0 }, ...place }, order: FEFO, transaction, lock: transaction.LOCK.UPDATE });
       for (const lot of lots) {

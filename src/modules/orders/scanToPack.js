@@ -36,18 +36,8 @@ async function check(workspaceId, orderId, scans) {
   if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'The order is cancelled', 409);
   const items = await db.OrderItem.findAll({ where: { orderId: order.id }, attributes: ['id', 'variantId', 'offerId', 'productNameSnapshot', 'variantOptionsSnapshot', 'skuSnapshot', 'quantity'], order: [['createdAt', 'ASC'], ['id', 'ASC']] });
 
-  // The physical pieces each line holds, as the order reserved them (orderService.resolveLine, item 271):
-  // an offer line counts offers, not pieces ("3 pieces" × 1), and a bundle holds several variants.
-  const offerIds = [...new Set(items.map((i) => i.offerId).filter(Boolean))];
-  const offers = new Map(offerIds.length ? (await db.Offer.findAll({ where: { id: offerIds }, paranoid: false, include: [{ model: db.OfferVariant, as: 'lines', attributes: ['variantId', 'quantity'] }] })).map((o) => [o.id, o]) : []);
-  const units = [];
-  for (const it of items) {
-    const offer = it.offerId && offers.get(it.offerId);
-    const lines = offer && offer.lines && offer.lines.length ? offer.lines : null;
-    if (!lines) units.push({ it, variantId: it.variantId, quantity: it.quantity, own: true });
-    else if (lines.length === 1 && lines[0].variantId !== it.variantId) units.push({ it, variantId: it.variantId, quantity: lines[0].quantity * it.quantity, own: true });
-    else for (const l of lines) units.push({ it, variantId: l.variantId, quantity: l.quantity * it.quantity, own: l.variantId === it.variantId });
-  }
+  // The physical pieces each line holds (orderUnits.js, items 271, 289).
+  const units = await require('./orderUnits').physicalUnits(items);
   const variants = new Map((await db.ProductVariant.findAll({ where: { id: [...new Set(units.map((u) => u.variantId).filter(Boolean))] }, paranoid: false, attributes: ['id', 'sku', 'barcode', 'optionValues'] })).map((v) => [v.id, v]));
 
   // One entry per variant (a variant on two lines, or in a bundle and on its own, is one pile to fill).
