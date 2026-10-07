@@ -28,6 +28,8 @@ const providers = require('./providers');
  */
 
 const CACHE_MS = 10 * 60 * 1000;
+// Bounded (item 272): its keys include what shoppers type (the city), so it must not grow without end.
+const CACHE_MAX = 2000;
 const cache = new Map();
 const NOT_OVERRIDDEN = ['no_destination', 'offer_override', 'all_items_free', 'free_threshold'];
 
@@ -35,7 +37,10 @@ async function cached(key, fn) {
   const hit = cache.get(key);
   if (hit && hit.at > Date.now() - CACHE_MS) return hit.value;
   const value = await fn();
+  cache.delete(key);
   cache.set(key, { at: Date.now(), value });
+  // Oldest first out (a Map keeps insertion order).
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
   return value;
 }
 

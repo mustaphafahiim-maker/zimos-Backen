@@ -219,7 +219,23 @@ async function renderFeed(workspace, format, channel) {
   return entry;
 }
 
-const dropCache = (workspaceId) => CHANNELS.forEach((channel) => FORMATS.forEach((format) => cache.delete(`${workspaceId}:${channel}:${format}`)));
+// The Google checklist's verdict for the public feed (item 272): the checklist reads the whole catalogue,
+// so a held-back feed must not run it on every request. Same life as the feed, bounded.
+const readyCache = new Map(); // workspaceId → { at, ready }
+async function checklistReady(workspaceId) {
+  const hit = readyCache.get(workspaceId);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.ready;
+  const { ready } = await merchantChecklist(workspaceId);
+  readyCache.delete(workspaceId);
+  readyCache.set(workspaceId, { at: Date.now(), ready });
+  while (readyCache.size > 5000) readyCache.delete(readyCache.keys().next().value);
+  return ready;
+}
+
+const dropCache = (workspaceId) => {
+  readyCache.delete(workspaceId);
+  CHANNELS.forEach((channel) => FORMATS.forEach((format) => cache.delete(`${workspaceId}:${channel}:${format}`)));
+};
 
 // ------------------------------------------------------------------ staff --
 
@@ -360,7 +376,7 @@ publicRouter.get(
     // The Google feed is the Google Merchant app (apps/appCatalogue.js): taken off, Google gets nothing.
     if (match[1] === 'google' && !(await require('../apps/appGate').isEnabled(workspace.id, 'google_merchant'))) throw new NotFoundError('Feed');
     // Google held back until the Merchant checklist passes, when the merchant asked for it (item 264).
-    if (match[1] === 'google' && configFor(workspace.settings, 'google').requireChecklist && !(await merchantChecklist(workspace.id)).ready) throw new NotFoundError('Feed');
+    if (match[1] === 'google' && configFor(workspace.settings, 'google').requireChecklist && !(await checklistReady(workspace.id))) throw new NotFoundError('Feed');
     const feed = await renderFeed(workspace, match[2], match[1]);
     res.set('Content-Type', match[2] === 'csv' ? 'text/csv; charset=utf-8' : 'application/xml; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=600');
