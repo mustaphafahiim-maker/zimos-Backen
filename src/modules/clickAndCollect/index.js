@@ -89,6 +89,24 @@ async function assertStock(workspace, location, items) {
   if (short.length) throw new AppError('PICKUP_OUT_OF_STOCK', 'Some items are not available at this place; choose another place or delivery', 409, { variantIds: short });
 }
 
+/**
+ * Inside the order's transaction, once the order row (with its place) exists
+ * and its units are reserved (item 283): the place must not be short. Two
+ * pickups of the same unit queue on the variant's row lock (the reservation),
+ * so the second counts here with the first one's order already in.
+ */
+async function claimStock(workspaceId, place, lines, transaction) {
+  const ids = [...new Set(lines.flatMap((l) => (l.consumedInventory || []).map((c) => c.variantId)).filter(Boolean))];
+  if (!ids.length) return;
+  const { locations, matrix } = await require('../stockLocations').stockMatrix(workspaceId, ids, transaction);
+  if (!locations.some((l) => l.id === place.locationId)) throw refuse('Pickup is not offered at this place; choose another');
+  const short = ids.filter((id) => {
+    const cell = matrix.get(id) && matrix.get(id).get(place.locationId);
+    return !cell || cell.onHand - cell.reserved < 0;
+  });
+  if (short.length) throw new AppError('PICKUP_OUT_OF_STOCK', 'Some items are not available at this place; choose another place or delivery', 409, { variantIds: short });
+}
+
 /** After the order exists: the pickup row and the order's location. Never throws. */
 async function attach(order, location) {
   if (!location) return null;
@@ -275,4 +293,4 @@ store.get(
   })
 );
 
-module.exports = { staff, store, prepare, assertStock, attach, onOrderCancelled, waybillLines, settingsOf, pickupLocations };
+module.exports = { staff, store, prepare, assertStock, claimStock, attach, onOrderCancelled, waybillLines, settingsOf, pickupLocations };

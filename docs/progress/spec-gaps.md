@@ -1931,7 +1931,9 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
 - [x] 282. A pickup at the default location was moved to another warehouse by the order-assignment job. (backend fix; no UI change)
   - The checkout marks the order with the chosen place (payload marker `zimos.pickup`); the order is created with `shippingSnapshot.pickup` and, for a place other than the default, its `stockLocationId` — in the order's own transaction, before order.created fires. The assignment job leaves any order with a pickup (snapshot or `order_pickups` row).
   - Checked: default location at priority 9, a branch at priority 0 holding stock → a pickup at the default stays at the default after the job; a pickup at the branch has the branch at once; a delivered order is still assigned to the branch.
-- [ ] 283. Two click-and-collect orders at once could both take a location's last unit.
+- [x] 283. Two click-and-collect orders at once could both take a location's last unit. (backend fix; no UI change — the existing 409 PICKUP_OUT_OF_STOCK)
+  - The checkout's early check stays (a quick answer); the order now counts the place again inside its own transaction, after its row (with the place) exists and its units are reserved (`clickAndCollect.claimStock`). Two pickups of the same unit already queue on the variant's row lock taken by the reservation, so the second counts with the first one's order in it and is refused (409 PICKUP_OUT_OF_STOCK, nothing kept).
+  - Checked: a branch holding 1 unit, 5 pickups at once → one 201, four 409 (with the recount switched off: five 201); 3 × 30 units at the default holding 99 → three 201.
 - [ ] 284. Stock lots ignored the location: FEFO picked and consumed lots of other locations; a write-off could take a location's count below zero.
 - [x] 285. A failed checkout left its delivery-slot hold, blocking the shopper's own retry for 10 minutes. (backend fix; no UI change)
   - When the checkout answers 400 or more, a hold not yet attached to an order is deleted (on the response's finish, so every failure path is covered). An attached one stays: it belongs to the order.

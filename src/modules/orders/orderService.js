@@ -572,6 +572,8 @@ async function createOrder(
       { transaction }
     );
     if (risk) await aiOrderCheck.queueFor(workspaceId, order.id, risk.level, transaction);
+    // A pickup takes its units from that place's shelf, counted again now that the order holds them (item 283).
+    if (pickupPlace) await require('../clickAndCollect').claimStock(workspaceId, pickupPlace, pricedLines, transaction);
 
     // Sequential, not Promise.all — see note in workspaceService: one
     // transaction = one pooled connection, so concurrent queries on it are unsafe.
