@@ -2800,3 +2800,19 @@ Body for create / edit / preview:
 - **Waybill PDF and emoji (214):** the waybill's customer-details lines (gift message, custom-field answers, pickup and delivery-slot lines) drop emoji, flags, skin tones and joiners before drawing — the PDF fonts have no glyphs for them. «Happy birthday ❤️🎉 يا حبيبتي» prints as «Happy birthday يا حبيبتي». The order itself keeps the message as typed.
 - **Cart: the product a free gift needs (208):** each `freeGifts[]` entry of the cart now has `neededProducts: [{ id, name, slug }]` (filled when `needsProduct` is true, active products only). Nudge: «ضيف Box cap وخد هدية» / "Add Box cap to get a free gift", linking to `/products/<slug>`.
 - **Mix-and-match box prices (215):** new `POST /api/v1/store/:ws/bundles/:bundleId/quote` `{ picks: [{ variantId, quantity }] }` → `{ units, currency, full, discount, total, freeShipping, tiers: [{ tierId, title, sku, quantity, packs }], nextTier: { id, title, quantity, missingUnits } | null, ignored: [variantIds not in this box] }` — the same tier pricing the cart and checkout use. Show «الإجمالي 400 ج بدل 450» / "Total EGP 400 instead of 450" and «ضيف قطعة كمان وتوصل للعرض» / "Add 1 more to unlock the offer" from `nextTier.missingUnits`.
+
+## 237. RFM customer scores — UI: pending
+
+### `/api/v1/workspaces/:ws/rfm` (`customers.view`)
+- `GET /` → `{ total, computedAt, labels: [{ label, customers, spent, avgOrders }] }` — every label in a fixed order, zeros included.
+- `GET /customers?label=&sort=spent|recent|orders&limit≤200&offset=` → `{ total, customers: [{ customerId, fullName, lastOrderAt, daysSinceLastOrder, orders, spent, scores: { r, f, m }, label }] }`. Unknown label → 422.
+- `GET /customers/:customerId` → `{ rfm }` (null when the customer has no delivered order).
+- Scores 1–5 by quintile among this store's customers with at least one **delivered** order (refunds off, test and cancelled orders left out). Labels: `champions`, `cant_lose`, `at_risk`, `loyal`, `new`, `potential`, `lost`, `hibernating`, `need_attention`.
+
+### Wording (ar / en)
+«أبطال» Champions · «مينفعش نخسرهم» Can't lose them · «في خطر» At risk · «أوفياء» Loyal · «جداد» New · «واعدين» Promising · «ضاعوا» Lost · «نايمين» Hibernating · «محتاجين اهتمام» Need attention.
+
+### Screens
+- Customers → «تقسيم العملاء» / "Customer groups": a grid of the 9 labels (customers, money, avg orders), each opening the list; short help text per label («اشتروا كتير ومؤخرًا» / "Bought a lot, recently"…).
+- Customer list: a filter «المجموعة» / "Group" using `/customers?label=`. Customer page: a badge with the label and the R/F/M scores.
+- Note for the team: these groups are for looking and for targeting in their own work (e.g. a VIP tier or a personal call); nothing here sends messages.
