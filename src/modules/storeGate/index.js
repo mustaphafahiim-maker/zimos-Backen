@@ -79,13 +79,26 @@ function tokenValid(token, workspaceId, version) {
   return sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
 }
 
+// What a funnel's checkout calls besides its own pages (item 312): open while funnels are, for a funnel
+// of this store that is live — named in the body, the query or the X-Funnel-Id header.
+const FUNNEL_CHECKOUT = /^\/(checkout|checkout-sessions|shipping-quote|payment-methods|places|delivery-estimate|delivery-slots|uploads)(\/|$|\?)/;
+
+async function liveFunnelOf(req, workspaceId) {
+  const id = (req.body && req.body.funnelId) || (req.query && req.query.funnelId) || req.headers['x-funnel-id'];
+  if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return false;
+  return (await db.Funnel.count({ where: { id, workspaceId, status: 'published' } })) > 0;
+}
+
 /** resolvePublicWorkspace: 423 STORE_LOCKED for a locked store's own routes. */
-function enforce(req, workspace) {
+async function enforce(req, workspace) {
   const s = settingsOf(workspace);
   if (s.mode === 'off') return;
-  const rest = String(req.originalUrl || '').replace(/^\/api\/v\d+\/store\/[^/?]+/, '');
+  // The path as routed, after the host rewrite (item 312): a store's own domain turns "/" into /shop/<id>,
+  // its catalogue page, which originalUrl still shows as "/".
+  const rest = String(`${req.baseUrl || ''}${req.url || ''}` || req.originalUrl || '').replace(/^\/api\/v\d+\/store\/[^/?]+/, '');
   if (rest === '' || rest === '/' || rest.startsWith('?') || OPEN.test(rest)) return;
   if (!s.lockFunnels && /^\/funnels(\/|$|\?)/.test(rest)) return;
+  if (!s.lockFunnels && FUNNEL_CHECKOUT.test(rest) && (await liveFunnelOf(req, workspace.id))) return;
   if (require('../../core/security/storePreview').isStorePreviewRequest(req, workspace.id)) return;
   if (s.mode === 'password' && tokenValid(req.headers['x-store-gate'], workspace.id, s.passwordVersion)) return;
   throw new AppError('STORE_LOCKED', s.mode === 'coming_soon' ? 'This store opens soon' : 'This store is password protected', 423, { gate: publicView(workspace) });

@@ -369,10 +369,12 @@ publicRouter.get(
     if (!match || !CHANNELS.includes(match[1])) throw new NotFoundError('Feed');
     const workspace = await db.Workspace.findOne({
       where: { slug: String(req.params.workspaceSlug).toLowerCase() },
-      attributes: ['id', 'name', 'slug', 'settings'],
+      attributes: ['id', 'name', 'slug', 'settings', 'status'],
     });
     // The store's feed and this channel's own switch (item 264).
     if (!workspace || !configFor(workspace.settings, match[1]).enabled) throw new NotFoundError('Feed');
+    // Not for a store that is closed, or locked behind a password / "coming soon" (item 312).
+    if (workspace.status !== 'active' || require('../storeGate').settingsOf(workspace).mode !== 'off') throw new NotFoundError('Feed');
     // The Google feed is the Google Merchant app (apps/appCatalogue.js): taken off, Google gets nothing.
     if (match[1] === 'google' && !(await require('../apps/appGate').isEnabled(workspace.id, 'google_merchant'))) throw new NotFoundError('Feed');
     // Google held back until the Merchant checklist passes, when the merchant asked for it (item 264).

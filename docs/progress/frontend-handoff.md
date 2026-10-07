@@ -3319,3 +3319,8 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - Search and buy can answer 503 `DOMAIN_PURCHASE_UNAVAILABLE` (no registrar connected on this server): hide or disable «اشتري دومين» / "Buy a domain" and show «شراء الدومين مش متاح دلوقتي — اربط دومين عندك» / "Buying a domain isn't available yet — connect one you own" with a link to Connect domain.
 - Buying needs a name like mystore.com on .com .net .store .shop .online .co; anything else → 422 on `domain`.
+
+## 312. Funnels on a locked store — UI: pending (storefront)
+
+- On funnel pages, send the header `X-Funnel-Id: <funnelId>` on every `/store/:ws/...` call the funnel's checkout makes (places, payment methods, shipping quote, delivery estimate / slots, checkout sessions, uploads, checkout). With a "coming soon" or password store whose funnels stay open, those calls then work; without the header they answer 423 `STORE_LOCKED` unless the body / query already carries `funnelId`.
+- No change for the store's own pages: they show the gate as before.
