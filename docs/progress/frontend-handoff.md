@@ -4046,3 +4046,19 @@ Domains added before this change: the dashboard now shows them the TXT on `_zimo
 - **Errors**: `DOMAIN_NOT_ALLOWED` «الدومين ده مينفعش يتوصل بمتجر» / "This domain can't be connected to a store"; `APEX_NOT_SUPPORTED` «وصّل دومين فرعي زي {suggestion}، وحوّل الدومين الأساسي له من عند شركة الدومين» / "Connect a subdomain such as {suggestion}, and forward the main domain to it at your domain registrar" (button «استخدم {suggestion}» / "Use {suggestion}" fills the field); `DOMAIN_ALREADY_ADDED` «الدومين ده متضاف للمتجر خلاص» / "This domain is already on your store"; `DOMAIN_TAKEN` «الدومين ده متوصل بمتجر تاني» / "This domain is connected to another store"; `DOMAIN_LIMIT_REACHED` as above; `DOMAIN_VERIFICATION_EXPIRED` «عدّت المدة ومتأكدش — امسحه وضيفه تاني» / "It wasn't verified in time — remove it and add it again"; `RATE_LIMITED` «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute".
 - **Buy a domain** tab: hidden when `subdomainsOnly` is true (the API answers `APEX_NOT_SUPPORTED`).
 - **Console → a store → support view → Domains**: show `suspendedReason` («موقوف: المتجر موقوف» / "Paused: store suspended", «موقوف: الباقة» / "Paused: plan") and `sslDetail` beside the certificate state.
+
+## 346. Team: nobody gives, changes or removes access above their own — UI: pending
+
+A teammate with `users.manage` / `roles.manage` (the Admin, or a custom role) can no longer make themselves Owner, invite an Owner, demote or remove an Owner, or create a role with permissions they do not hold. Only an Owner (`*`) works with Owner access. Nothing new to call; the existing calls can now answer one new error.
+
+### Endpoints (all `/api/v1/workspaces/:workspaceId`, Bearer, unchanged permissions)
+- **POST `/members`** `{ "email", "roleId" }` (users.manage), **POST `/team/invite`** `{ "access": "admin" | "partial", … }` (users.manage): 403 `ROLE_ABOVE_YOURS` when the role holds Owner access or a permission the caller lacks (a non-admin teammate inviting with `access: "admin"` gets it too).
+- **PATCH `/members/:membershipId`** `{ "roleId" }` (users.manage): 403 `ROLE_ABOVE_YOURS` when the teammate's current role or the new one is beyond the caller's (so an Owner row cannot be changed by a non-Owner).
+- **DELETE `/members/:membershipId`** (users.manage): 403 `ROLE_ABOVE_YOURS` when the teammate's role is beyond the caller's.
+- **POST `/roles`** `{ "name", "key", "permissions": [...] }` (roles.manage): 403 `ROLE_ABOVE_YOURS` naming the permissions the caller lacks.
+- Error body: `{ "error": { "code": "ROLE_ABOVE_YOURS", "message": "Only an Owner can give, change or remove Owner access" } }` or `{ "error": { "code": "ROLE_ABOVE_YOURS", "message": "You cannot give or change access you do not have: billing.manage", "details": [ { "field": "permissions", "message": "Not held by you: billing.manage" } ] } }`.
+
+### Screens (dashboard → Settings → Team)
+- **Members list**: for a caller who is not an Owner, hide or disable "Change role" and "Remove" on rows whose role is Owner (`role.key === "owner"`), with the tooltip «بس المالك يقدر يغيّر صلاحيات المالك» / "Only an Owner can change an Owner's access". In the role picker, leave the Owner role out unless the caller is an Owner.
+- **Create role / partial invite**: untick and disable permissions the caller does not hold (`GET /team/access-options` already lists them; compare with the caller's own role).
+- **Error `ROLE_ABOVE_YOURS`**: toast «مينفعش تدّي أو تغيّر صلاحيات أعلى من صلاحياتك» / "You can't give or change access above your own"; for the Owner case «بس المالك يقدر يدّي أو يغيّر أو يشيل صلاحيات المالك» / "Only an Owner can give, change or remove Owner access".

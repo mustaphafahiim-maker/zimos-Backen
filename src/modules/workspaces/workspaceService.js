@@ -413,9 +413,33 @@ async function listWorkspacesForUser(userId) {
   }));
 }
 
+/**
+ * Nobody hands out more access than they hold (spec-gaps item 346): a role
+ * with '*' (Owner) only by someone who holds '*', any other role only when
+ * the caller holds every permission in it. Checked for invites, role changes
+ * and new custom roles, and on the teammate's current role before changing
+ * or removing them, so an Admin can neither make themselves Owner nor demote
+ * or remove one.
+ */
+function assertCanGrant(rolePermissions, req) {
+  const permissions = rolePermissions || [];
+  if (permissions.includes('*')) {
+    const callerIsOwner = ((req.tenant.role && req.tenant.role.permissions) || []).includes('*');
+    if (!callerIsOwner) throw new AppError('ROLE_ABOVE_YOURS', 'Only an Owner can give, change or remove Owner access', 403);
+    return;
+  }
+  const beyond = [...new Set(permissions.filter((p) => !req.tenant.hasPermission(p)))];
+  if (beyond.length > 0) {
+    throw new AppError('ROLE_ABOVE_YOURS', `You cannot give or change access you do not have: ${beyond.join(', ')}`, 403, [
+      { field: 'permissions', message: `Not held by you: ${beyond.join(', ')}` },
+    ]);
+  }
+}
+
 async function inviteMember({ workspaceId, email, roleId }, req) {
   const role = await db.Role.findOne({ where: { id: roleId, workspaceId } });
   if (!role) throw new NotFoundError('Role');
+  assertCanGrant(role.permissions, req);
 
   const user = await db.User.findOne({ where: { email } });
 
@@ -509,11 +533,14 @@ async function resendInvite({ workspaceId, membershipId }, req) {
 }
 
 async function updateMemberRole({ workspaceId, membershipId, roleId }, req) {
-  const membership = await db.Membership.findOne({ where: { id: membershipId, workspaceId } });
+  const membership = await db.Membership.findOne({ where: { id: membershipId, workspaceId }, include: [{ model: db.Role, as: 'role' }] });
   if (!membership) throw new NotFoundError('Membership');
 
   const role = await db.Role.findOne({ where: { id: roleId, workspaceId } });
   if (!role) throw new NotFoundError('Role');
+  // Both ends: the teammate's current access and the one they get.
+  assertCanGrant(membership.role && membership.role.permissions, req);
+  assertCanGrant(role.permissions, req);
 
   const targetOwnerRole = await db.Role.findOne({ where: { workspaceId, key: 'owner' } });
   if (membership.roleId === targetOwnerRole.id && role.id !== targetOwnerRole.id) {
@@ -543,6 +570,7 @@ async function updateMemberRole({ workspaceId, membershipId, roleId }, req) {
 async function removeMember({ workspaceId, membershipId }, req) {
   const membership = await db.Membership.findOne({ where: { id: membershipId, workspaceId }, include: [{ model: db.Role, as: 'role' }] });
   if (!membership) throw new NotFoundError('Membership');
+  assertCanGrant(membership.role.permissions, req);
 
   if (membership.role.key === 'owner') {
     const ownerCount = await db.Membership.count({
@@ -573,6 +601,7 @@ async function listRoles(workspaceId) {
 }
 
 async function createCustomRole({ workspaceId, name, key, permissions }, req) {
+  assertCanGrant(permissions, req);
   const role = await db.Role.create({ workspaceId, key, name, isSystem: false, permissions });
   await recordAudit({
     workspaceId,
@@ -599,4 +628,5 @@ module.exports = {
   removeMember,
   listRoles,
   createCustomRole,
+  assertCanGrant,
 };
