@@ -644,6 +644,7 @@ async function createOrder(
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,
             isOrderBump: line.isOrderBump,
+            isFreeGift: line.freeGift === true,
           },
           { transaction }
         )

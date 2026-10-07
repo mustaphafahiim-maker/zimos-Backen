@@ -21,7 +21,8 @@ const { applyBundleTiers } = require('../bundles/bundlePricing');
  * (same variant and offer) keeps the price it was sold at, whatever the
  * catalogue says today; a new line is priced from the catalogue like any
  * order line. The order is then priced again as createOrder would price it:
- * quantity bundles on the new quantities, the discount code on the new
+ * quantity bundles on the new quantities (a product the edit leaves alone
+ * keeps its bundle saving as sold), the discount code on the new
  * subtotal, shipping (weight, free-shipping threshold, the option the shopper
  * picked, free shipping the order was granted), tax, total. Stock follows in the same transaction — more is
  * reserved, less is released — and the invoice is brought to the new total.
@@ -101,11 +102,15 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
         offerId: kept.offerId,
         isOrderBump: kept.isOrderBump,
         isUpsell: kept.isUpsell,
-        // A free gift (freeGifts/, item 276) is stored as a labelled line at 0; it never unlocks a tier.
-        freeGift: !kept.offerId && Number(kept.unitPriceAmount) === 0 && Boolean(kept.offerNameSnapshot),
+        // A free gift (freeGifts/, item 276) never unlocks a tier; recorded on the line since migration 513,
+        // guessed for older lines from a labelled plain line at 0.
+        freeGift: kept.isFreeGift !== null && kept.isFreeGift !== undefined
+          ? kept.isFreeGift === true
+          : !kept.offerId && Number(kept.unitPriceAmount) === 0 && Boolean(kept.offerNameSnapshot),
         quantity: wanted.quantity,
         unitPriceAmount: Number(kept.unitPriceAmount),
-        // Full price here; the bundle tiers below take their saving off again (item 344).
+        // Full price here; the bundle tiers below take their saving off again (item 344), unless the product
+        // is untouched (below).
         lineTotalAmount: Number(kept.unitPriceAmount) * wanted.quantity,
         lineDiscountAmount: 0,
         consumedInventory: facts ? facts.consumedInventory : [{ variantId: kept.variantId, quantity: wanted.quantity }],
@@ -119,6 +124,32 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       const priced = await orderService.priceLine(workspaceId, wanted, transaction);
       lines.push({ ...priced, kept: null, lineTotalAmount: Number(priced.lineTotalAmount) });
     }
+  }
+
+  // ---- which products the edit touches: a line added, removed or with a new quantity. Lines of any other
+  // product keep their stored price and bundle saving as sold, even if the bundle has changed or ended since
+  // (item 344 review); a bundle entry of the order is priced again only when one of its products is touched.
+  const touched = new Set();
+  for (const line of lines) if (!line.kept || line.kept.quantity !== line.quantity) touched.add(line.productId);
+  const keptItemIds = new Set(lines.filter((l) => l.kept).map((l) => l.kept.id));
+  for (const item of existing) if (!keptItemIds.has(item.id)) touched.add(item.productId);
+  const oldBundles = (order.discountsSnapshot || []).filter((d) => d && d.kind === 'bundle');
+  const productsOf = (entry) => (Array.isArray(entry.productIds) ? entry.productIds : [entry.productId]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const entry of oldBundles) {
+      if (productsOf(entry).some((id) => touched.has(id)) && !productsOf(entry).every((id) => touched.has(id))) {
+        for (const id of productsOf(entry)) touched.add(id);
+        grew = true;
+      }
+    }
+  }
+
+  for (const line of lines) {
+    if (!line.kept || touched.has(line.productId)) continue;
+    line.frozen = true;
+    line.lineTotalAmount = Number(line.kept.lineTotalAmount);
+    line.lineDiscountAmount = Number(line.kept.lineDiscountAmount) || 0;
   }
 
   const wantedStock = new Map();
@@ -138,7 +169,15 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   // Quantity bundles and mix-and-match boxes priced again on the new quantities, as createOrder prices them
   // (item 344); a quote's order keeps the merchant's exact prices (quotes/, item 275).
   const fromQuote = (await db.QuoteRequest.count({ where: { orderId: order.id, workspaceId }, transaction })) > 0;
-  const bundleSnapshots = fromQuote ? [] : await applyBundleTiers(workspaceId, lines, transaction);
+  const bundleSnapshots = fromQuote ? [] : await applyBundleTiers(workspaceId, lines.filter((l) => !l.frozen), transaction);
+  // The bundle entries of untouched products stay as sold, free shipping included.
+  const keptBundles = oldBundles.filter((entry) => !productsOf(entry).some((id) => touched.has(id)));
+  for (const entry of keptBundles) {
+    if (entry.freeShipping !== true) continue;
+    for (const line of lines) {
+      if (line.frozen && line.shippingRule && productsOf(entry).includes(line.productId)) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+    }
+  }
   // Free shipping a VIP tier, a referral or a pickup gave the order still holds (as for an added line, item 277).
   const keptShipping = order.shippingSnapshot || {};
   if (keptShipping.freeShippingGranted === true) {
@@ -150,7 +189,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
   let discountAmount = Number(order.discountAmount);
-  let discountsSnapshot = [...bundleSnapshots, ...(order.discountsSnapshot || []).filter((d) => !d || d.kind !== 'bundle')];
+  let discountsSnapshot = [...keptBundles, ...bundleSnapshots, ...(order.discountsSnapshot || []).filter((d) => !d || d.kind !== 'bundle')];
   let redeemedDiscount = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
@@ -234,6 +273,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
             lineDiscountAmount: line.lineDiscountAmount || 0,
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
+            isFreeGift: false,
           },
           { transaction }
         )
