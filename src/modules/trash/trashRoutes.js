@@ -8,12 +8,15 @@ const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { AuthorizationError } = require('../../core/errors/AppError');
+const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
+const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const trash = require('./trashService');
 
 /**
  * /workspaces/:workspaceId/trash — deleted funnels, websites and pages
  * (trashService.js). A funnel needs funnels.manage, a website or page
- * website.edit; the list shows the kinds the teammate may manage.
+ * website.edit; the list shows the kinds the teammate may manage. Restoring
+ * a published funnel or website also needs the publish gates.
  */
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
@@ -21,6 +24,16 @@ router.use(authenticate, resolveTenant);
 const kind = Joi.string().valid(...trash.KIND_NAMES);
 const itemParams = { params: Joi.object({ workspaceId: Joi.string().uuid().required(), kind: kind.required(), id: Joi.string().uuid().required() }) };
 const kindPermission = (req, res, next) => requirePermission(trash.KINDS[req.params.kind].permission)(req, res, next);
+
+// A published funnel or website comes back live at once: that restore needs
+// what publishing needs (funnels.publish / website.publish, a confirmed
+// account, a live store), as publish, rollback and resume do.
+const liveRestoreGates = asyncHandler(async (req, res, next) => {
+  if (!(await trash.restoresLive(req.tenant.workspaceId, req.params.kind, req.params.id))) return next();
+  const gates = [requirePermission(trash.KINDS[req.params.kind].publishPermission), requireConfirmedAccount, requireLive];
+  const run = (i, err) => (err || i === gates.length ? next(err) : gates[i](req, res, (e) => run(i + 1, e)));
+  run(0);
+});
 
 router.get(
   '/',
@@ -39,6 +52,7 @@ router.post(
   '/:kind/:id/restore',
   validate(itemParams),
   kindPermission,
+  liveRestoreGates,
   asyncHandler(async (req, res) => res.json(await trash.restore(req.tenant.workspaceId, req.params.kind, req.params.id, req)))
 );
 

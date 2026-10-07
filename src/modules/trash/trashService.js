@@ -16,8 +16,9 @@ const Op = db.Sequelize.Op;
  * edges, revisions and sessions, a website's pages, revisions, redirects and
  * domains. Orders keep their funnel_id, and analytics events theirs.
  *
- *   restore  puts it back exactly as it was (a published funnel is live
- *            again at once; a page needs its website out of the trash)
+ *   restore  puts it back exactly as it was (a published funnel or website
+ *            is live again at once, so that restore asks what publishing
+ *            asks; a page needs its website out of the trash)
  *   purge    deletes it for good, as the old delete did; a purged funnel's
  *            name is written on its orders (orders.funnel_name) first, and a
  *            purged website's domains move to another website of the store
@@ -31,8 +32,8 @@ const RETENTION_DAYS = 30;
 const DAY = 24 * 60 * 60 * 1000;
 
 const KINDS = {
-  funnel: { model: () => db.Funnel, permission: PERMISSIONS.FUNNELS_MANAGE, entityType: 'Funnel', action: 'funnel' },
-  website: { model: () => db.Website, permission: PERMISSIONS.WEBSITE_EDIT, entityType: 'Website', action: 'website' },
+  funnel: { model: () => db.Funnel, permission: PERMISSIONS.FUNNELS_MANAGE, publishPermission: PERMISSIONS.FUNNELS_PUBLISH, entityType: 'Funnel', action: 'funnel' },
+  website: { model: () => db.Website, permission: PERMISSIONS.WEBSITE_EDIT, publishPermission: PERMISSIONS.WEBSITE_PUBLISH, entityType: 'Website', action: 'website' },
   page: { model: () => db.WebsitePage, permission: PERMISSIONS.WEBSITE_EDIT, entityType: 'WebsitePage', action: 'page' },
 };
 const KIND_NAMES = Object.keys(KINDS);
@@ -122,6 +123,21 @@ async function list(workspaceId, kinds) {
       .map(({ kind, row }) => present(kind, row, userMap, siteMap))
       .sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)),
   };
+}
+
+/**
+ * Whether restoring this item puts it live at once: a published funnel or
+ * website (a page never: the store serves the website's published snapshot).
+ * The restore route then asks what publishing asks (trashRoutes.js).
+ */
+async function restoresLive(workspaceId, kind, id) {
+  if (!KINDS[kind].publishPermission) return false;
+  const row = await KINDS[kind].model().findOne({
+    where: { id, workspaceId, deletedAt: { [Op.ne]: null } },
+    attributes: ['id', 'status', 'publishedRevisionId'],
+    paranoid: false,
+  });
+  return Boolean(row && row.status === 'published' && row.publishedRevisionId);
 }
 
 /** POST /trash/:kind/:id/restore */
@@ -235,4 +251,4 @@ async function sweep({ now = new Date(), limit = 200 } = {}) {
   return { purged };
 }
 
-module.exports = { RETENTION_DAYS, KINDS, KIND_NAMES, allowedKinds, moveToTrash, list, restore, purge, sweep, purgeAt };
+module.exports = { RETENTION_DAYS, KINDS, KIND_NAMES, allowedKinds, moveToTrash, list, restoresLive, restore, purge, sweep, purgeAt };

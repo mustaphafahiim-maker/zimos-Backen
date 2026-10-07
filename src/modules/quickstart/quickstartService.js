@@ -153,7 +153,9 @@ async function regenerateStorePage(workspaceId, req) {
   const tree = storeHomeTree(workspace.name);
   const seo = { title: workspace.name, _store: { storeName: workspace.name, regeneratedAt: new Date().toISOString() } };
 
-  const page = await db.WebsitePage.findOne({ where: { workspaceId, websiteId: website.id, path: '/' } });
+  const page = await db.WebsitePage.findOne({ where: { workspaceId, websiteId: website.id, path: '/' }, paranoid: false });
+  // A home page in the trash still holds '/': bring it back and rewrite it.
+  if (page && page.deletedAt) await require('../trash/trashService').restore(workspaceId, 'page', page.id, req);
   if (page) {
     await pagesService.updatePage(workspaceId, website.id, page.id, { title: workspace.name, draftData: tree, seo }, req);
   } else {
