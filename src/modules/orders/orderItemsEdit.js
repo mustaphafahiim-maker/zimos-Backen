@@ -379,15 +379,30 @@ async function updateItems(workspaceId, orderId, { items }, req) {
 /**
  * POST /orders/:id/refund-quote — the amount a refund of these lines comes
  * to: each line's price for the units returned, less its share of the
- * order's discount. Shipping is not included. The merchant may still change
+ * order's discount (only the lines a product- or collection-limited code
+ * covered take a share of it). Shipping is not included. The merchant may still change
  * the amount before refunding (POST /orders/:id/refunds does the refund).
  */
 async function refundQuote(workspaceId, orderId, { lines }) {
   const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, include: [{ model: db.OrderItem, as: 'items' }] });
   if (!order) throw new NotFoundError('Order');
   const byId = new Map(order.items.map((i) => [i.id, i]));
-  const subtotal = Number(order.subtotalAmount);
+  let subtotal = Number(order.subtotalAmount);
   const discount = Number(order.discountAmount);
+  // A product- or collection-limited code was taken off its covered lines
+  // only (item 345), so only those lines give a share of it back.
+  let covered = null;
+  const redemption = discount > 0 ? await db.DiscountRedemption.findOne({ where: { orderId: order.id } }) : null;
+  const code = redemption ? await db.Discount.findByPk(redemption.discountId) : null;
+  if (code) {
+    const priced = order.items.filter((i) => !i.isFreeGift);
+    const eligible = await discountService.eligibleProducts(code, priced.map((i) => i.productId));
+    const base = eligible ? discountService.eligibleSubtotal(eligible, priced, 0) : 0;
+    if (eligible && base > 0) {
+      covered = new Set(priced.filter((i) => eligible.has(i.productId)).map((i) => i.id));
+      subtotal = base;
+    }
+  }
   let amount = 0;
   const out = [];
   for (const line of lines) {
@@ -397,7 +412,7 @@ async function refundQuote(workspaceId, orderId, { lines }) {
       throw new ValidationError([{ field: 'lines.quantity', message: `At most ${item.quantity} can be refunded for this line` }]);
     }
     const gross = Number(item.unitPriceAmount) * line.quantity;
-    const share = subtotal > 0 ? Math.round((discount * gross) / subtotal) : 0;
+    const share = subtotal > 0 && (!covered || covered.has(item.id)) ? Math.round((discount * gross) / subtotal) : 0;
     amount += gross - share;
     out.push({ orderItemId: item.id, name: item.productNameSnapshot, quantity: line.quantity, amount: String(gross - share) });
   }
