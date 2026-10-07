@@ -51,7 +51,77 @@ async function evaluate(workspaceId, code, { subtotal, productIds, lines = null,
     }
   }
 
-  return { discount, amount: amountFor(discount, eligibleSubtotal(eligible, lines, subtotal)) };
+  // A buy-X-get-Y code needs enough covered units in the cart to give one away (item 353).
+  if (discount.type === 'buy_x_get_y') {
+    const offer = buyXGetY(discount, eligible, lines);
+    if (!offer) throw new AppError('DISCOUNT_NOT_APPLICABLE', 'Discount code does not apply to items in this order', 422);
+    if (offer.amount <= 0) {
+      throw new AppError('DISCOUNT_QUANTITY_NOT_MET', 'Add more items to use this discount code', 422, [
+        { field: 'items', buyQuantity: offer.buyQuantity, getQuantity: offer.getQuantity, units: offer.units, remainingUnits: Math.max(0, offer.buyQuantity + offer.getQuantity - offer.units) },
+      ]);
+    }
+    return { discount, amount: offer.amount };
+  }
+  return { discount, amount: amountOn(discount, eligible, lines, subtotal) };
+}
+
+/**
+ * A buy_x_get_y discount's settings: buy `buyQuantity` units, get
+ * `getQuantity` more at `getDiscountBasisPoints` off (10000 = free, the
+ * default). null when they are missing or broken.
+ */
+function buyXGetYConfig(discount) {
+  const c = discount.buyXGetYConfig || {};
+  const buyQuantity = Number(c.buyQuantity);
+  const getQuantity = Number(c.getQuantity);
+  const bp = c.getDiscountBasisPoints === undefined || c.getDiscountBasisPoints === null ? 10000 : Number(c.getDiscountBasisPoints);
+  if (!Number.isInteger(buyQuantity) || buyQuantity < 1 || !Number.isInteger(getQuantity) || getQuantity < 1) return null;
+  if (!Number.isInteger(bp) || bp < 1 || bp > 10000) return null;
+  return { buyQuantity, getQuantity, getDiscountBasisPoints: bp };
+}
+
+/**
+ * What a buy_x_get_y discount takes off the priced lines (item 353): the
+ * covered units (the code's products or collections, else every line; never
+ * a free gift) are counted, every full group of buy + get units gives
+ * `getQuantity` units away, and the cheapest units are the ones given, at
+ * the price the line is sold at (after any bundle tier). Returns
+ * { amount, units, buyQuantity, getQuantity }, or null when the discount's
+ * settings are broken.
+ */
+function buyXGetY(discount, eligible, lines) {
+  const config = buyXGetYConfig(discount);
+  if (!config) return null;
+  const groups = [];
+  let units = 0;
+  for (const line of Array.isArray(lines) ? lines : []) {
+    const quantity = Number(line.quantity);
+    const total = Number(line.lineTotalAmount);
+    if (line.freeGift || !(quantity > 0) || (eligible && !eligible.has(line.productId))) continue;
+    // The line's total spread over its units in whole minor units.
+    const base = Math.floor(total / quantity);
+    const extra = total - base * quantity;
+    groups.push({ price: base, count: quantity - extra }, { price: base + 1, count: extra });
+    units += quantity;
+  }
+  let free = Math.floor(units / (config.buyQuantity + config.getQuantity)) * config.getQuantity;
+  let value = 0;
+  for (const group of groups.filter((g) => g.count > 0).sort((a, b) => a.price - b.price)) {
+    if (free <= 0) break;
+    const take = Math.min(free, group.count);
+    value += take * group.price;
+    free -= take;
+  }
+  return { amount: applyBasisPoints(value, config.getDiscountBasisPoints), units, buyQuantity: config.buyQuantity, getQuantity: config.getQuantity };
+}
+
+/** What a discount takes off these lines: a buy-X-get-Y one by units, the others on the covered subtotal. */
+function amountOn(discount, eligible, lines, subtotal) {
+  if (discount.type === 'buy_x_get_y') {
+    const offer = buyXGetY(discount, eligible, lines);
+    return offer ? offer.amount : 0;
+  }
+  return amountFor(discount, eligibleSubtotal(eligible, lines, subtotal));
 }
 
 /**
@@ -92,14 +162,14 @@ function eligibleSubtotal(eligible, lines, subtotal) {
 async function amountForLines(discount, lines, transaction) {
   const subtotal = lines.reduce((sum, l) => sum + Number(l.lineTotalAmount), 0);
   const eligible = await eligibleProducts(discount, lines.filter((l) => !l.freeGift).map((l) => l.productId), transaction);
-  return amountFor(discount, eligibleSubtotal(eligible, lines, subtotal));
+  return amountOn(discount, eligible, lines, subtotal);
 }
 
 /**
- * What a code takes off `subtotal`. free_shipping and buy_x_get_y are applied
- * by the caller against shipping/line totals respectively using
- * discount.buyXGetYConfig; this only covers the subtotal-level percentage /
- * fixed cases. Also used when an order's subtotal changes after the code was
+ * What a code takes off `subtotal`. A free_shipping code makes the order ship
+ * free (orders/orderService.createOrder) and a buy_x_get_y one is worked out
+ * on the lines (buyXGetY / amountOn, item 353); this only covers the
+ * subtotal-level percentage / fixed cases. Also used when an order's subtotal changes after the code was
  * redeemed (an upsell joined to it), so the same code is not checked again.
  */
 function amountFor(discount, subtotal) {
@@ -131,4 +201,4 @@ async function redeem(discountId, { orderId, customerId, amountAllocated }, tran
   );
 }
 
-module.exports = { evaluate, redeem, amountFor, amountForLines, eligibleProducts, eligibleSubtotal };
+module.exports = { evaluate, redeem, amountFor, amountOn, amountForLines, eligibleProducts, eligibleSubtotal, buyXGetYConfig, buyXGetY };

@@ -489,6 +489,12 @@ async function createOrder(
         discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
       }
     }
+    // A free-shipping code (item 353): every line ships free, as a VIP tier's free shipping does,
+    // and the order keeps it when a line joins later or its items are edited (freeShippingGranted below).
+    const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping');
+    if (couponFreeShipping) {
+      for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+    }
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
     if (!req.user && !shippingOverride && !exactPrices) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
@@ -579,8 +585,8 @@ async function createOrder(
         weightEstimated: shipping.weightEstimated,
         // With the option the shopper picked, when not the standard one.
         shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}),
-          // Free shipping a VIP tier, a referral or a pickup gave: kept when a line joins later (item 277).
-          ...(payload[Symbol.for('zimos.freeShipping')] ? { freeShippingGranted: true } : {}),
+          // Free shipping a VIP tier, a referral, a pickup or a free-shipping code gave: kept when a line joins later (items 277, 353).
+          ...(payload[Symbol.for('zimos.freeShipping')] || couponFreeShipping ? { freeShippingGranted: true } : {}),
           // Set with the order, so the assignment job leaves a pickup where the shopper picked it (item 282).
           ...(pickupPlace ? { pickup: { locationId: pickupPlace.locationId, name: pickupPlace.name, address: pickupPlace.address } } : {}) },
         ...(pickupPlace && !pickupPlace.isDefault ? { stockLocationId: pickupPlace.locationId } : {}),

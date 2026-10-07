@@ -4133,3 +4133,25 @@ An order booked with Bosta, J&T, Mylerz or the sandbox courier whose shipment is
 - Dashboard → Orders → order page → "Edit items" and "Edit address / customer": when the order has a shipment with `status` `created` or `failed` booked with a courier (it has a `waybillNumber` and a courier `carrierCode`, not `manual`), show the buttons disabled with the hint «الطلب محجوز مع شركة الشحن. ألغِ الشحنة الأول عشان تعدّل الطلب، وبعدين احجزه تاني» / "This order is booked with a courier. Cancel the shipment first to edit the order, then book it again", with a «إلغاء الشحنة» / "Cancel shipment" link to the Shipment card's cancel action.
 - On a 409 `SHIPMENT_BOOKED` from any of the three calls (another tab booked it meanwhile): keep the form open with the same message as an error box and the "Cancel shipment" link; the order is unchanged.
 - Storefront order page / tracking page: when `canChangeAddress` is false the "Change address" button stays hidden as today; if the shopper's POST gets `ADDRESS_CHANGE_NOT_ALLOWED`, show «العنوان مينفعش يتغير من هنا دلوقتي، كلّم المتجر» / "The address can no longer be changed here — contact the store".
+
+## 353. Free-shipping and buy-X-get-Y codes now take something off — UI: pending
+
+A discount code of type `free_shipping` now makes the whole order ship free (shipping 0) when the shopper uses it, and a `buy_x_get_y` code takes the given units off the order ("buy 2, get 1 free", or "buy 2, get the third at 50% off"). Before, both were accepted at checkout and used up a redemption without changing the total. Automatic discounts (no code) can now be buy-X-get-Y too.
+
+### Endpoints
+- **POST `/api/v1/workspaces/:workspaceId/discounts`** — permission `discounts.manage` (also the public API `POST /discounts`, scope `discounts:write`). For `type: "buy_x_get_y"`, `buyXGetYConfig` is now required:
+  `{ "code": "B2G1", "type": "buy_x_get_y", "buyXGetYConfig": { "buyQuantity": 2, "getQuantity": 1, "getDiscountBasisPoints": 10000 }, "productRestrictions": [] }`
+  `buyQuantity` and `getQuantity` are whole numbers 1–1000; `getDiscountBasisPoints` is how much comes off each given unit, 1–10000 (10000 = free, the default when left out). `value` is not used for this type. Without the config: 422 `VALIDATION_ERROR`, field `buyXGetYConfig`. Leave `code` out for an automatic one.
+- **PATCH `/api/v1/workspaces/:workspaceId/discounts/:discountId`** — permission `discounts.manage`. Same config shape; a change that would leave a buy-X-get-Y discount without a valid config (type changed to `buy_x_get_y` with no config, or `buyXGetYConfig: null`) is refused 422 `VALIDATION_ERROR` `{ "field": "buyXGetYConfig", "message": "Enter how many units to buy and how many are given" }`.
+- **POST `/api/v1/store/:workspaceId/coupon-preview`** (storefront, public) — answers now carry `freeShipping`:
+  `{ "coupon": { "valid": true, "code": "FREESHIP", "type": "free_shipping", "amount": 0, "freeShipping": true, "subtotal": 25000, "reason": null } }`
+  `{ "coupon": { "valid": true, "code": "B2G1", "type": "buy_x_get_y", "amount": 25000, "freeShipping": false, "subtotal": 75000, "reason": null } }`
+  Too few units for a buy-X-get-Y code:
+  `{ "coupon": { "valid": false, "code": "B2G1", "type": null, "amount": 0, "freeShipping": false, "subtotal": 50000, "reason": "DISCOUNT_QUANTITY_NOT_MET", "details": [{ "field": "items", "buyQuantity": 2, "getQuantity": 1, "units": 2, "remainingUnits": 1 }] } }`
+- **POST `/api/v1/store/:workspaceId/checkout`** (and funnel checkouts) — a buy-X-get-Y code with too few units is refused 422 `DISCOUNT_QUANTITY_NOT_MET` with the same `details`; the order is not placed and the code is not used. With a free-shipping code the order's `shippingAmount` is 0 and `shippingSnapshot.freeShippingGranted` is true.
+- Shipping quote (`automaticDiscount`): may now have `type: "buy_x_get_y"` with `value: 0`; show its `amount`.
+
+### Screens
+- Dashboard → Discounts → new / edit discount: for the type «اشترِ X واحصل على Y» / "Buy X get Y", show three fields: «عدد القطع اللي يشتريها» / "Units to buy" (`buyQuantity`), «عدد القطع اللي ياخدها» / "Units given" (`getQuantity`), and «الخصم على القطع دي» / "Discount on those units" as a percentage (100% = «مجانًا» / "Free"; sent as `getDiscountBasisPoints` = percent × 100). Hide the value field for this type and for «شحن مجاني» / "Free shipping". Hint under the fields: «القطع الأرخص في السلة هي اللي بتتخصم» / "The cheapest units in the cart are the ones discounted". Show the 422 field error under the fields.
+- Discount list: describe a buy-X-get-Y discount as «اشترِ 2 واحصل على 1 مجانًا» / "Buy 2, get 1 free" (or «… بخصم 50%» / "… at 50% off").
+- Storefront and funnel checkout, code box: for `freeShipping: true` show «الشحن مجاني بالكود ده» / "This code gives you free shipping" and show shipping as «مجاني» / "Free" in the summary. For `DISCOUNT_QUANTITY_NOT_MET` show «زوّد {remainingUnits} قطعة كمان عشان تستخدم الكود ده» / "Add {remainingUnits} more item(s) to use this code" (from `details[0]`), and the same text on that checkout refusal.

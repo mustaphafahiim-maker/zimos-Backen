@@ -3,6 +3,8 @@
 const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { recordAudit } = require('../audit/auditService');
+const { ValidationError } = require('../../core/errors/AppError');
+const { buyXGetYConfig } = require('./discountService');
 
 async function createDiscount(workspaceId, data, req) {
   const discount = await db.Discount.create({ ...data, workspaceId });
@@ -28,6 +30,12 @@ async function setDiscountStatus(workspaceId, discountId, status, req) {
 async function updateDiscount(workspaceId, discountId, data, req) {
   const discount = await scoped(db.Discount, workspaceId).findByPkOrThrow(discountId);
   const before = discount.toJSON();
+  // A buy-X-get-Y discount always says what to buy and what is given (item 353).
+  const type = data.type || discount.type;
+  const config = data.buyXGetYConfig !== undefined ? data.buyXGetYConfig : discount.buyXGetYConfig;
+  if (type === 'buy_x_get_y' && !buyXGetYConfig({ buyXGetYConfig: config })) {
+    throw new ValidationError([{ field: 'buyXGetYConfig', message: 'Enter how many units to buy and how many are given' }]);
+  }
   await discount.update(data);
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'discount.update', entityType: 'Discount', entityId: discount.id, before, after: discount.toJSON(), req });
   return discount;
