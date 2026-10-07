@@ -2107,6 +2107,8 @@ A multi-agent review of the 27 commits of items 290–316, each finding checked 
 - [x] 322. Checkout sessions (item 302) kept a funnel / website from an earlier save after the visitor moved to another checkout. (backend fix; UI note in frontend-handoff.md)
   - On each save the session's funnel / website come from that save only (the old ones are dropped before merging); the touches still merge as before. Funnel checkouts must send `funnelId` on every save (handoff 302 updated).
   - Checked: a funnel save → funnelId kept; a later save from the store checkout without it → no funnelId, the touch updated; the Live View for that funnel then counts 0.
-- [ ] 323. Bulk update (item 297): a number cell of an .xlsx computed by a formula (249.4999999…) is refused for having too many decimals; number cells should be rounded, typed text still checked.
+- [x] 323. Bulk update (item 297): a number cell of an .xlsx computed by a formula (249.4999999…) is refused for having too many decimals; number cells should be rounded, typed text still checked. (backend fix; no UI change)
+  - The xlsx reader marks which cells were stored as numbers (a non-enumerable set on each row and record, so other callers see the same plain rows); the bulk update rounds a number cell to the currency's digits and keeps the strict check for amounts typed as text (and for CSV).
+  - Checked: an .xlsx with price 249.49999999999997 as a number → 24950; the same price typed as the text "1.299" → refused as before.
 - [ ] 324. Customer merge (older): when the merge changes consent, email or the blacklist, Mailchimp / Klaviyo are not told (no contact.updated).
 

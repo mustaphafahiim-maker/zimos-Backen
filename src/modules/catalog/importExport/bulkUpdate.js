@@ -123,7 +123,10 @@ async function plan(workspaceId, req) {
     for (const [col, key, clearable] of [['price', 'priceAmount', false], ['compare_at', 'compareAtAmount', true], ['cost', 'costAmount', false]]) {
       if (!r[col]) continue;
       const digits = require('../../currencies/fxService').minorDigits(v.currency || 'EGP');
-      const m = minor(r[col], digits);
+      // A number cell of an .xlsx is a number already (item 323): rounded to the currency's digits.
+      const numericCell = r.__numeric && (r.__numeric.has(col) || (col === 'compare_at' && r.__numeric.has('compare_at_price')));
+      const asNumber = Number(r[col]);
+      const m = numericCell ? (Number.isFinite(asNumber) && asNumber >= 0 ? Math.round(asNumber * 10 ** digits) : null) : minor(r[col], digits);
       if (m === null) { bad(`${col} must be an amount like 249.50 (at most ${digits} decimals)`); failed = true; break; }
       if (key === 'priceAmount' && m === 0) { bad('price cannot be 0'); failed = true; break; }
       const to = clearable && m === 0 ? null : m;
