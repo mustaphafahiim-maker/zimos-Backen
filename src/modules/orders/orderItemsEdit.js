@@ -63,6 +63,15 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   await assertNotShipped(order, transaction);
   // A courier booking would still collect the old COD amount (item 352).
   await require('../shipping/carrierShipmentService').assertNoCarrierBooking(order.id, transaction);
+  // A parcel carrying part of the order holds its lines and its own COD amount (item 375): editing would leave both stale.
+  const splitParcel = await db.Shipment.findOne({
+    where: { orderId: order.id, status: { [db.Sequelize.Op.notIn]: ['cancelled', 'returned'] }, items: { [db.Sequelize.Op.ne]: null } },
+    attributes: ['id'],
+    transaction,
+  });
+  if (splitParcel) {
+    throw new AppError('ORDER_SPLIT_SHIPPED', 'Part of this order is in a parcel. Cancel its parcels before editing its items.', 409, { shipmentId: splitParcel.id });
+  }
   if (Number(order.amountPaid) > 0) {
     throw new AppError('ORDER_ALREADY_PAID', 'This order has been paid; correct it with a refund instead of editing its items', 409);
   }

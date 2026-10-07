@@ -3,7 +3,7 @@
 const PDFDocument = require('pdfkit');
 const bwipjs = require('bwip-js');
 const db = require('../../db/models');
-const { NotFoundError } = require('../../core/errors/AppError');
+const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const logger = require('../../core/utils/logger');
 const { registerFonts, drawText, hasArabic } = require('../../core/pdf/bidiText');
 const { isCarrierBooked, FINISHED_STATUSES } = require('../shipping/carrierShipmentService');
@@ -94,7 +94,7 @@ function buildQrPayload(model) {
     ['Name', shipTo.fullName],
     ['Phone', shipTo.phone],
     ['Address', addressText(address).join(', ')],
-    ['COD', isCod ? money(order.totalAmount, order.currency) : `${money(0, order.currency)} (prepaid)`],
+    ['COD', isCod ? money(collectFigure(model), order.currency) : `${money(0, order.currency)} (prepaid)`],
     ['Date', new Date(order.createdAt).toISOString().slice(0, 10)],
   ];
   return lines
@@ -104,8 +104,31 @@ function buildQrPayload(model) {
     .join('\n');
 }
 
+// What the courier collects: the parcel's own amount (hand-built sample models may only have the order total).
+const collectFigure = (model) => (model.amountToCollect !== null && model.amountToCollect !== undefined ? model.amountToCollect : model.order.totalAmount);
+
+/**
+ * The parcels a waybill can be printed for when none is named: the live ones
+ * (not cancelled or returned), leaving out delivered ones while another is
+ * still to go. More than one split parcel here means the caller must choose
+ * (item 375).
+ */
+function printableShipments(shipments) {
+  const live = (shipments || []).filter((s) => !FINISHED_STATUSES.includes(s.status));
+  const open = live.filter((s) => s.status !== 'delivered');
+  return (open.length ? open : live).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** The shipment ids to print one label each for an order: one per live split parcel, else [undefined] (the order's own). */
+async function waybillShipmentIds(workspaceId, orderId) {
+  const shipments = await db.Shipment.findAll({ where: { workspaceId, orderId }, attributes: ['id', 'status', 'items', 'createdAt'] });
+  const split = printableShipments(shipments).filter((s) => Array.isArray(s.items));
+  return split.length > 1 ? split.reverse().map((s) => s.id) : [undefined];
+}
+
 // Everything the waybill needs from an order, independent of rendering.
-async function computeWaybillModel(workspaceId, orderId) {
+// `shipmentId` picks one parcel of an order sent as several (item 375).
+async function computeWaybillModel(workspaceId, orderId, { shipmentId } = {}) {
   const order = await db.Order.findOne({
     where: { id: orderId, workspaceId },
     include: [{ model: db.Shipment, as: 'shipments' }],
@@ -117,9 +140,20 @@ async function computeWaybillModel(workspaceId, orderId) {
   // goes in the barcode, or the order number when there's no shipment. A
   // shipment booked with a connected courier carries the courier's own
   // tracking number instead: that is what the courier scans.
-  const shipment = (order.shipments || [])
-    .filter((s) => !FINISHED_STATUSES.includes(s.status))
-    .sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+  let shipment;
+  if (shipmentId) {
+    shipment = (order.shipments || []).find((s) => s.id === shipmentId && !FINISHED_STATUSES.includes(s.status));
+    if (!shipment) throw new NotFoundError('Shipment');
+  } else {
+    const candidates = printableShipments(order.shipments);
+    const split = candidates.filter((s) => Array.isArray(s.items));
+    if (split.length > 1) {
+      throw new AppError('SHIPMENT_REQUIRED', 'This order is sent as several parcels: choose the parcel to print', 422, {
+        shipmentIds: split.map((s) => s.id),
+      });
+    }
+    shipment = candidates[0] || null;
+  }
   const trackingValue = isCarrierBooked(shipment)
     ? shipment.waybillNumber : (shipment && shipment.trackingCode) || order.orderNumber;
   const isCod = order.paymentMethod === 'cod';
@@ -154,8 +188,8 @@ function label(doc, text, x, y) {
 }
 
 // Renders the A5 waybill for an order and returns it as a PDF Buffer.
-async function generateWaybillPdf(workspaceId, orderId) {
-  return renderWaybillPdf(await computeWaybillModel(workspaceId, orderId));
+async function generateWaybillPdf(workspaceId, orderId, options) {
+  return renderWaybillPdf(await computeWaybillModel(workspaceId, orderId, options));
 }
 
 // Renders a computed model; no database access (scripts/waybill-samples.js
@@ -267,7 +301,7 @@ async function renderWaybillPdf(model) {
   if (isCod) {
     doc.rect(left, y, width, 46).fillAndStroke('#fff4e5', '#e08a00');
     doc.fillColor('#8a4b00').fontSize(10).font('Helvetica-Bold').text('COLLECT ON DELIVERY (CASH)', left + 10, y + 8, { lineBreak: false });
-    doc.fontSize(18).text(money(order.totalAmount, order.currency), left + 10, y + 20, { lineBreak: false });
+    doc.fontSize(18).text(money(collectFigure(model), order.currency), left + 10, y + 20, { lineBreak: false });
     doc.fillColor('#000');
     y += 56;
   } else {
@@ -286,4 +320,4 @@ async function renderWaybillPdf(model) {
   return done;
 }
 
-module.exports = { generateWaybillPdf, renderWaybillPdf, computeWaybillModel, buildQrPayload, carrierInfo, qrPng };
+module.exports = { generateWaybillPdf, renderWaybillPdf, computeWaybillModel, waybillShipmentIds, buildQrPayload, carrierInfo, qrPng };

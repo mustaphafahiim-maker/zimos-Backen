@@ -259,7 +259,7 @@ router.post(
 
 router.get(
   '/:orderId/waybill',
-  validate(schemas.get),
+  validate(schemas.waybill),
   requirePermission(PERMISSIONS.ORDERS_VIEW),
   waybillController.waybill
 );

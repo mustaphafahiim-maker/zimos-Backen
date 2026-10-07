@@ -60,6 +60,13 @@ const STAGES = [
  * answered by the newest one. Cancelled shipments are excluded outright: a
  * cancelled waybill is not where the order is, and an order whose only
  * shipment was cancelled correctly falls back to being ready to ship.
+ *
+ * An order sent as several parcels (shipments.items set, item 375) is where
+ * its unfinished parcels are, not where its newest one is: a split parcel
+ * that is neither delivered nor returned comes first, one on the road (or
+ * failed) before one still on the desk, so a delivered second parcel does
+ * not move the order to Delivered while the first is in transit, and booking
+ * the next parcel does not drop a shipped order back to Ready to ship.
  */
 const latestShipmentJoin = (extraCondition = '') => `
     LEFT JOIN LATERAL (
@@ -67,7 +74,9 @@ const latestShipmentJoin = (extraCondition = '') => `
         FROM shipments s
        WHERE s.order_id = o.id
          AND s.status <> 'cancelled'${extraCondition}
-       ORDER BY s.created_at DESC, s.id DESC
+       ORDER BY CASE WHEN s.items IS NULL OR s.status IN ('delivered', 'returned') THEN 2
+                     WHEN s.status = 'created' THEN 1 ELSE 0 END,
+                s.created_at DESC, s.id DESC
        LIMIT 1
     ) ls ON TRUE`;
 const LATEST_SHIPMENT_JOIN = latestShipmentJoin();

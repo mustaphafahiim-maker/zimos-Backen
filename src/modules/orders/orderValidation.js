@@ -133,6 +133,8 @@ module.exports = {
   },
   manualOptions: { params: Joi.object({ workspaceId: uuid.required() }) },
   get: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }) },
+  // GET /:orderId/waybill — shipmentId picks one parcel of an order sent as several (item 375).
+  waybill: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }), query: Joi.object({ shipmentId: uuid.optional() }) },
   cancel: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
     body: Joi.object({

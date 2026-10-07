@@ -96,11 +96,19 @@ async function detail(workspaceId, settlementId) {
     include: [{ model: db.CodSettlementLine, as: 'lines', include: [{ model: db.Order, as: 'order', attributes: ['id', 'orderNumber', 'contactSnapshot', 'totalAmount', 'financialState'] }] }],
   });
   if (!s) throw new NotFoundError('Settlement');
-  // What confirm actually added to each order (less than collected when the order was paid another way first).
+  // What confirm actually added to each line (less than collected when the order was paid another way first).
+  // Payments name their line (settlement:<id>:<lineId>, item 375); older ones only the settlement, keyed by order.
   const applied = {};
   if (s.status === 'confirmed') {
-    const pays = await db.Payment.findAll({ where: { workspaceId, providerReference: `settlement:${s.id}` }, attributes: ['orderId', 'amount'], raw: true });
-    for (const p of pays) applied[p.orderId] = (applied[p.orderId] || 0) + n(p.amount);
+    const pays = await db.Payment.findAll({
+      where: { workspaceId, providerReference: { [Op.or]: [`settlement:${s.id}`, { [Op.like]: `settlement:${s.id}:%` }] } },
+      attributes: ['orderId', 'amount', 'providerReference'],
+      raw: true,
+    });
+    for (const p of pays) {
+      const key = p.providerReference.split(':')[2] || p.orderId;
+      applied[key] = (applied[key] || 0) + n(p.amount);
+    }
   }
   return {
     id: s.id,
@@ -126,7 +134,7 @@ async function detail(workspaceId, settlementId) {
       financialState: l.order ? l.order.financialState : null,
       collectedAmount: n(l.collectedAmount),
       feeAmount: n(l.feeAmount),
-      appliedAmount: s.status === 'confirmed' ? applied[l.orderId] || 0 : null,
+      appliedAmount: s.status === 'confirmed' ? applied[l.id] || applied[l.orderId] || 0 : null,
     })),
   };
 }
@@ -272,7 +280,7 @@ async function confirm(workspaceId, settlementId, req) {
       if (applied < n(line.collectedAmount)) skipped.push({ orderId: order.id, orderNumber: order.orderNumber, collectedAmount: n(line.collectedAmount), appliedAmount: applied, financialState: order.financialState, cancelled: Boolean(order.cancelledAt) });
       if (applied <= 0) continue;
       await db.Payment.create(
-        { workspaceId, orderId: order.id, providerCode: 'cod', status: 'captured', amount: applied, currency: order.currency, providerReference: `settlement:${s.id}` },
+        { workspaceId, orderId: order.id, providerCode: 'cod', status: 'captured', amount: applied, currency: order.currency, providerReference: `settlement:${s.id}:${line.id}` },
         { transaction }
       );
       const paid = n(order.amountPaid) + applied;
