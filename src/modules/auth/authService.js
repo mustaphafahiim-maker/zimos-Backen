@@ -617,7 +617,7 @@ function invalidResetToken() {
  * name their session, core/security/sessionGate), remembered browsers are
  * forgotten (two-step sign-in stays on and asks again), sign-ins waiting for
  * a second step are closed, and the account's other open reset links stop
- * working. The link reached the address's owner, so an email not confirmed
+ * working, nor does a pending email change (by link or account code). The link reached the address's owner, so an email not confirmed
  * yet counts as confirmed (and a pending account becomes active; a suspended
  * one stays suspended); the audit row says so.
  */
@@ -662,12 +662,19 @@ async function resetPassword(rawToken, newPassword, req) {
       { consumedAt: now },
       { where: { userId: user.id, consumedAt: null }, transaction }
     );
+    // A change of the email still pending (by link: its confirm needs no
+    // session) and live account codes die too, as in takeOverUnconfirmed.
+    const [emailChangesClosed] = await db.EmailChange.update({ usedAt: now }, { where: { userId: user.id, usedAt: null }, transaction });
+    const [accountCodesClosed] = await db.VerificationCode.update(
+      { supersededAt: now },
+      { where: { userId: user.id, purpose: verificationCodes.ACCOUNT_PURPOSES, consumedAt: null, supersededAt: null }, transaction }
+    );
     await recordAudit({
       actorUserId: user.id,
       action: 'user.password_reset',
       entityType: 'User',
       entityId: user.id,
-      metadata: { emailConfirmed: confirmsEmail, sessionsRevoked, devicesForgotten, challengesClosed },
+      metadata: { emailConfirmed: confirmsEmail, sessionsRevoked, devicesForgotten, challengesClosed, emailChangesClosed, accountCodesClosed },
       req,
       transaction,
     });

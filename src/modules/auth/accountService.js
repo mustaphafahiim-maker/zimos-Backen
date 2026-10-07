@@ -281,6 +281,7 @@ async function confirmPhoneChange(user, code, req) {
 module.exports = {
   NAME,
   closeAfterEmailChange,
+  assertOwner,
   changeName,
   sendReauthCode,
   requestEmailChange,
