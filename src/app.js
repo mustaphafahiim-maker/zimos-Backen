@@ -311,6 +311,7 @@ v1.use('/workspaces/:workspaceId/price-history', require('./modules/priceHistory
 v1.use('/workspaces/:workspaceId/privacy-requests', require('./modules/privacyRequests').staff);
 v1.use('/workspaces/:workspaceId/post-purchase-survey', require('./modules/postPurchaseSurvey').staff);
 v1.use('/workspaces/:workspaceId/rfm', require('./modules/rfm').router);
+v1.use('/workspaces/:workspaceId/store-reports', require('./modules/storeReports').router);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);

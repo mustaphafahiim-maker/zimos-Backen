@@ -2816,3 +2816,18 @@ Body for create / edit / preview:
 - Customers → «تقسيم العملاء» / "Customer groups": a grid of the 9 labels (customers, money, avg orders), each opening the list; short help text per label («اشتروا كتير ومؤخرًا» / "Bought a lot, recently"…).
 - Customer list: a filter «المجموعة» / "Group" using `/customers?label=`. Customer page: a badge with the label and the R/F/M scores.
 - Note for the team: these groups are for looking and for targeting in their own work (e.g. a VIP tier or a personal call); nothing here sends messages.
+
+## 238. Tax report — UI: pending
+
+New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report answers JSON, or CSV with `?format=csv` (UTF-8 with BOM, opens in Excel with Arabic); `from` / `to` ISO dates (default last 90 days); months/dates in the store's time zone.
+
+### `GET /store-reports/tax?from=&to=&format=` (`financial_reports.view`)
+```json
+{ "from": "…", "to": "…", "timezone": "Africa/Cairo", "currency": "EGP",
+  "totals": { "orders": 1, "taxable": "25000", "tax": "3500", "taxRefunded": "1750", "netTax": "1750", "exemptOrders": 1, "exemptSales": "25000" },
+  "rows": [{ "month": "2026-10", "place": "القاهرة", "orders": 1, "taxable": "25000", "tax": "3500", "taxRefunded": "1750", "netTax": "1750", "exemptOrders": 0, "exemptSales": "0" }] }
+```
+- Counts orders that were delivered or paid (not cancelled, not test). `taxable` = subtotal − discount; a refund takes off its share of the tax; tax-exempt orders (item 228) are in `exemptOrders` / `exemptSales`. Amounts in minor units of the store currency.
+
+### Screen
+- Reports → «تقرير الضريبة» / "Tax report": date range, totals cards («الضريبة المحصّلة» / "Tax collected", «المرتجع» / "Refunded", «الصافي» / "Net", «مبيعات معفاة» / "Exempt sales"), table by month × governorate, «تنزيل CSV» / "Download CSV".

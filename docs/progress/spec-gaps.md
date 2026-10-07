@@ -1726,7 +1726,9 @@ profit, stock forecast and RFM were read first. The gaps are reports a merchant 
 decisions. All of them read existing tables: no migration (only 499 is left of this pass's range; a new range is the
 owner's call and is noted in LANES when given).
 
-- [ ] 238. Tax report: tax collected per month and per rate/governorate for delivered and paid orders, refunds taken off, tax-exempt orders counted apart, with CSV.
+- [x] 238. Tax report: tax collected per month and per rate/governorate for delivered and paid orders, refunds taken off, tax-exempt orders counted apart, with CSV. (backend done, UI in frontend-handoff.md)
+  - storeReports/index.js (new home for items 238–242, mounted at /store-reports, JSON or CSV). Orders delivered or paid, by month (store tz) × governorate; refunds take their share of tax; exempt orders apart; fx-converted. Per-rate split is not possible (orders keep one tax amount), so the place stands in for it.
+  - Verified: delivered taxed order with half refunded (3500 → net 1750), exempt order apart, pending order left out, CSV.
 - [ ] 239. Inventory valuation: on-hand units × unit cost per variant and per stock location, the total, and the variants without a cost; CSV.
 - [ ] 240. Slow-moving and dead stock: variants with stock but no sale in 30/60/90 days, units and value tied up, last sale date; CSV.
 - [ ] 241. Discount code performance: per code — uses, orders, revenue, discount given, average order, new vs returning customers, and cancellations; for a date range.
