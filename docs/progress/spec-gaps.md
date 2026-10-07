@@ -2540,3 +2540,23 @@ Four reviewers read the order and checkout core, auth and tenancy, the public su
     - the current owner trying to accept → 404; a decline → listed no more;
     - a new offer with keepAs owner, then accept → 200 and the owner changed; accepting twice → 404;
     - the store's owner, the roles and the test user were restored and removed.
+
+## Twenty-eighth pass (2026-10-07) — Lightfunnels parity, fourth look
+
+A gap pass against Lightfunnels (everything except LightSchool), with absence confirmed in the code and in items 1–379.
+Already built and ruled out: bulk/automatic codes, custom roles, revisions with rollback, order archive, line refunds,
+tracking links, collection facets, analytics compare/cohorts, the webhook topics, funnel share codes. Decision on 380:
+`savedMethods/README.md` gives real-gateway tokenization to the integrations team. Real adapters were still built here
+(items 183, 299, 326, 327), so it is queued, and it stays behind each gateway's own switch.
+
+- [ ] 380. [high] One-click upsells and subscription renewals on real card gateways — `supportsTokenization`, `tokenize`, `chargeSaved` (and `createCardSetup` / `completeCardSetup`) on Stripe, Paymob and Kashier, and PayPal vault; `savedMethods/` and `offers/upsellFollowOn.js` already call this contract.
+- [ ] 381. [high] Short sequential order numbers (#1001) with a store prefix, suffix and start number — a per-store counter (row-locked like `invoice_counters`); `settings.order_number = { prefix, suffix, start }`; the next number is taken inside the order's transaction; old ORD-… numbers stay searchable.
+- [ ] 382. [medium] Staff price changes on manual orders and order edits — an order-level `manualDiscount { type, value, reason }`, an optional per-line `unitPrice`, and custom lines without a variant, on create, the manual preview and the item edit; a new permission; audited; shown apart from the coupon.
+- [ ] 383. [medium] Customer messages in the shopper's language — `orders.locale` from X-Store-Locale at checkout; order email templates per locale with fallback; GET/PUT /order-emails?locale=; WhatsApp order templates picked by the order's language.
+- [ ] 384. [medium] Online payments ledger with gateway fees and payouts — GET /payments/transactions (filters, CSV); fee/net/payout on payments from an optional adapter `fetchFees()`; `gateway_payouts` with GET /payments/payouts(/:id) from an optional `listPayouts()` (sandbox first, then Stripe).
+- [ ] 385. [medium] DNS records and transfer-out for domains bought here — GET/PUT /domains/purchases/:id/dns-records (MX, TXT, CNAME, A; our routing records locked), POST /domains/purchases/:id/transfer-code (owner only, audited); the sending-domain records added on a bought domain; registrar `getRecords`, `unlock`, `authCode`.
+- [ ] 386. [medium] Delivery status for customer emails and SMS — signed Brevo and Twilio status webhooks; `notification_logs.status` gains delivered / bounced / complained / undelivered; an email suppression list checked before every send; "email bounced" on the order timeline and the customer.
+- [ ] 387. [medium] Tracking for manual and imported waybills — a tracking-provider interface + sandbox adapter + README; a job polls live manual shipments and writes `shipment_events` and status (delivered fires `order.delivered`); setting `tracking_provider.enabled`; the shipment sync works for manual parcels too.
+- [ ] 388. [medium] The shopper confirms a cash-on-delivery order from a link, for stores without the WhatsApp API — POST /store/:ws/orders/:orderId/self-service/confirm (signed tracking token; pending_review / unreachable / postponed only; source `customer_link`); a `{{confirm_link}}` variable for SMS and email automation steps; store setting `order_self_service.confirm`.
+- [ ] 389. [low] Stock movement history — GET /inventory/:variantId/movements and GET /inventory/movements?variantId&type&from&to&format=csv over the existing `inventory_movements`.
+- [ ] 390. [low] Sold-out products in store listings — `storefront_catalog.sold_out = show | last | hide` and an `available=true` filter on GET /store/:ws/products (honouring overselling and pre-orders); facets count only what is shown.
