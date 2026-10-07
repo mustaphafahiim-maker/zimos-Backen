@@ -223,6 +223,21 @@ function parseWebhook({ body, headers, rawBody }, creds) {
   }
 }
 
+/** An attempt cancelled here: its Checkout Session stops taking payment (item 300). An expired or paid one is left. */
+async function cancelPayment(creds, { payment }) {
+  if (!payment.providerOrderId) return;
+  await call(creds, 'POST', `/v1/checkout/sessions/${encodeURIComponent(payment.providerOrderId)}/expire`, { what: 'the payment' }).catch((err) => {
+    if (!(err instanceof GatewayRejectedError)) throw err;
+  });
+}
+
+/** The sweep's retry of a stored event (item 300): Stripe's own answer about the session, asked again. */
+async function refetchTransaction(creds, payload) {
+  if (!payload || !payload.session) return null;
+  const session = await call(creds, 'GET', `/v1/checkout/sessions/${encodeURIComponent(payload.session)}?expand[]=payment_intent.latest_charge`, { what: 'the payment' });
+  return fromSession(session);
+}
+
 // The way back from Checkout carries nothing signed: the return asks Stripe (inquire).
 const parseRedirect = () => null;
 
@@ -247,6 +262,8 @@ module.exports = {
   inquireTransaction,
   inquireRefund,
   refund,
+  cancelPayment,
+  refetchTransaction,
   parseWebhook,
   parseRedirect,
   signatureValid,

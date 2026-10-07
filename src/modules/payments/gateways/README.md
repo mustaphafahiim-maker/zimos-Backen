@@ -150,3 +150,12 @@ know it. The pending-refund sweep uses it when present (Stripe, PayPal); otherwi
 with the refund's reference. `refund` also receives `refundId` (our Refund row): use it as the gateway's
 duplicate-request key, so two refunds of the same amount stay two.
 
+### Optional: `cancelPayment(credentials, { payment })` and `refetchTransaction(credentials, payload)`
+
+- `cancelPayment`: an attempt cancelled or expired on our side stops taking payment at the gateway (Stripe
+  expires the Checkout Session). Called after the change commits, best effort; refusals for an already
+  closed page are ignored.
+- `refetchTransaction`: for a gateway whose stored event payload keeps only ids, the sweep asks the
+  gateway again and gets the normalized transaction (same shape as `parseWebhook`'s `transaction`).
+  Used when the adapter has no `normalizeTransaction`.
+

@@ -124,8 +124,20 @@ async function reprocessPending({ limit = 50 } = {}) {
   let processed = 0;
   for (const event of events) {
     const adapter = gateways.getAdapter(event.providerCode);
-    if (!adapter || !adapter.normalizeTransaction) continue;
-    const transaction = adapter.normalizeTransaction(event.payload || {});
+    if (!adapter) continue;
+    let transaction = null;
+    if (adapter.normalizeTransaction) transaction = adapter.normalizeTransaction(event.payload || {});
+    else if (adapter.refetchTransaction) {
+      // A gateway that stores only ids (Stripe) is asked again for the transaction (item 300).
+      try {
+        const ctx = await require('./gatewayRuntime').contextFor(event.workspaceId, event.providerCode);
+        transaction = await adapter.refetchTransaction(ctx.credentials, event.payload || {});
+      } catch (err) {
+        require('../../core/utils/logger').warn('[payments] could not ask the gateway again for a stored event', { eventId: event.id, reason: err.message });
+        continue;
+      }
+    }
+    if (!transaction) continue;
     if (!transaction.providerOrderId && event.providerOrderId) transaction.providerOrderId = event.providerOrderId;
     const result = await processEvent(
       { id: event.accountId, workspaceId: event.workspaceId, providerCode: event.providerCode },

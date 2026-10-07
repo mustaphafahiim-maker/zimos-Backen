@@ -70,6 +70,15 @@ const methodsService = require('./paymentMethodsService');
 const PAID_STATES = ['paid', 'partially_paid', 'refunded', 'partially_refunded'];
 const OPEN_ATTEMPT = 'initialized';
 const EXPIRED_REASON = 'payment_expired';
+
+/** Cancels the order's open attempts (but `keepId`) and, once that commits, closes them at the gateway (item 300). */
+async function cancelOpenAttempts(order, transaction, keepId = null) {
+  const where = { orderId: order.id, status: OPEN_ATTEMPT, ...(keepId ? { id: { [Op.ne]: keepId } } : {}) };
+  const open = await db.Payment.findAll({ where, attributes: ['id', 'providerCode', 'providerOrderId'], transaction });
+  if (!open.length) return;
+  await db.Payment.update({ status: 'cancelled' }, { where: { id: open.map((p) => p.id) }, transaction });
+  transaction.afterCommit(() => gatewayRuntime.closeAttempts(order.workspaceId, open.map((p) => p.toJSON())).catch(() => {}));
+}
 const BLOCKED_REASON = 'customer_blocked';
 // How often a shopper's status check may ask the gateway about one attempt.
 const INQUIRY_THROTTLE_MS = 5000;
@@ -348,10 +357,7 @@ async function recordPaymentTransaction(account, tx) {
       if (!order.cancelledAt) {
         // What expiry does on the way out; an expired order has done it already.
         await releaseStock(order, transaction, 'order_customer_blocked');
-        await db.Payment.update(
-          { status: 'cancelled' },
-          { where: { orderId: order.id, status: OPEN_ATTEMPT, id: { [Op.ne]: payment.id } }, transaction }
-        );
+        await cancelOpenAttempts(order, transaction, payment.id);
       }
     } else if (order.cancelledAt) {
       if (order.cancellationReason === EXPIRED_REASON && (await reReserveStock(order, transaction))) {
@@ -545,10 +551,13 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
     await releaseStock(locked, transaction, 'order_payment_expired');
     // A gift card or points held for it go back (heldTenders.js).
     await require('./heldTenders').release(locked.id, transaction, 'payment expired');
+    const lapsed = await db.Payment.findAll({ where: { orderId: locked.id, status: OPEN_ATTEMPT }, attributes: ['id', 'providerCode', 'providerOrderId'], transaction });
     await db.Payment.update(
       { status: 'expired' },
       { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction }
     );
+    // The gateway's page stops taking payment too (item 300).
+    if (lapsed.length) transaction.afterCommit(() => gatewayRuntime.closeAttempts(locked.workspaceId, lapsed.map((p) => p.toJSON())).catch(() => {}));
     await locked.update({ cancelledAt: new Date(), cancellationReason: EXPIRED_REASON }, { transaction });
     await trackStage(locked.workspaceId, locked.id, { transaction, reason: EXPIRED_REASON });
     await recordAudit({
@@ -758,7 +767,7 @@ async function retry(workspaceId, orderId, token, body, req) {
     if (count >= env.payments.maxAttemptsPerOrder) {
       throw new AppError('PAYMENT_RETRY_LIMIT', 'This order cannot start another payment. Choose cash on delivery or place a new order.', 409);
     }
-    await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
+    await cancelOpenAttempts(locked, transaction);
     // The retry gets a full window of its own; the attempt cap bounds how long
     // one order can hold its stock this way.
     const expiresAt = new Date(Date.now() + ttlMinutesFor(method.method) * 60 * 1000);
@@ -838,7 +847,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
     assertAwaiting(locked);
     const before = { paymentMethod: locked.paymentMethod };
 
-    await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
+    await cancelOpenAttempts(locked, transaction);
     // The online method's fee or discount comes off; cash on delivery's goes on.
     const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
     const riskFlags = [...new Set([...(locked.riskFlags || []), ...codChecks.flags])];

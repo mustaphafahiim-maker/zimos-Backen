@@ -75,9 +75,12 @@ async function send(opts) {
   }
 }
 
-async function token(creds, environment = creds.environment) {
-  const key = `${environment}:${creds.clientId}`;
-  const hit = tokens.get(key);
+async function token(creds, environment = creds.environment, { fresh = false } = {}) {
+  // Keyed by the secret too (item 300): the client id is public, so knowing it must not reuse another
+  // store's cached sign-in. Checking keys always signs in again.
+  const secretTag = require('crypto').createHash('sha256').update(String(creds.clientSecret || '')).digest('hex').slice(0, 16);
+  const key = `${environment}:${creds.clientId}:${secretTag}`;
+  const hit = fresh ? null : tokens.get(key);
   if (hit && hit.until > Date.now()) return hit.value;
   const res = await send({
     method: 'POST',
@@ -117,7 +120,7 @@ async function call(creds, method, path, { body, requestId, what = 'the request'
 async function verifyCredentials(creds) {
   for (const environment of ['live', 'sandbox']) {
     try {
-      await token(creds, environment);
+      await token(creds, environment, { fresh: true });
       const credentials = { clientId: creds.clientId, clientSecret: creds.clientSecret, environment };
       return { mode: modeFromCredentials(credentials), credentials };
     } catch (err) {
