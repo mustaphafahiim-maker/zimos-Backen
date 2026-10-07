@@ -840,4 +840,6 @@ module.exports = {
   cancelAtCarrier,
   cancelsByApi,
   codAmountFor,
+  // A return pickup resolves the shopper's address the same way (returns/returnPickup.js).
+  resolveAddressSource,
 };

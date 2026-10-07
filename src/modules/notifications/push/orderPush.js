@@ -35,6 +35,9 @@ const MESSAGES = {
   'order.out_for_delivery': { ar: ['طلبك في الطريق إليك', 'المندوب في الطريق بطلبك {n} النهارده.'], en: ['Out for delivery', 'Order {n} arrives today.'] },
   'order.delivered': { ar: ['تم توصيل طلبك', 'وصل طلبك {n}. شكرًا لثقتك!'], en: ['Delivered', 'Order {n} was delivered. Thank you!'] },
   'order.cancelled': { ar: ['تم إلغاء طلبك', 'طلبك {n} اتلغى.'], en: ['Order cancelled', 'Order {n} was cancelled.'] },
+  // Item 372: the answer to the shopper's return or exchange.
+  'return.approved': { ar: ['تمت الموافقة على الإرجاع', 'طلب الإرجاع أو الاستبدال لطلبك {n} اتقبل. التفاصيل في صفحة الطلب.'], en: ['Return approved', 'Your return or exchange for order {n} was approved. See the order page for the next step.'] },
+  'return.rejected': { ar: ['بخصوص طلب الإرجاع', 'طلب الإرجاع أو الاستبدال لطلبك {n} ماتقبلش. السبب في صفحة الطلب.'], en: ['Return not accepted', 'Your return or exchange for order {n} was not accepted. See the order page for why.'] },
 };
 const EVENTS = Object.keys(MESSAGES);
 

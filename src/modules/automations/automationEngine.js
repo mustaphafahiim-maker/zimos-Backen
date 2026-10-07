@@ -35,8 +35,10 @@ const ORDER_TRIGGERS = [
   'order.digital_delivered',
 ];
 const CHECKOUT_TRIGGERS = ['checkout.abandoned', 'lost_order.created'];
+// A return or exchange (returns/, item 372): about its order, and an answer the shopper is waiting for — not marketing.
+const RETURN_TRIGGERS = ['return.requested', 'return.approved', 'return.rejected', 'return.received'];
 const OTHER_TRIGGERS = ['review.request', 'lead.created', 'subscription.renewal_failed', 'subscription.created'];
-const TRIGGERS = [...ORDER_TRIGGERS, ...CHECKOUT_TRIGGERS, ...OTHER_TRIGGERS];
+const TRIGGERS = [...ORDER_TRIGGERS, ...RETURN_TRIGGERS, ...CHECKOUT_TRIGGERS, ...OTHER_TRIGGERS];
 
 // The outbox events the automations consumer listens to (review.request is derived).
 const EVENTS = TRIGGERS.filter((t) => t !== 'review.request');
@@ -74,4 +76,4 @@ function emit(workspaceId, trigger, subject) {
   return env.isTest ? work : undefined;
 }
 
-module.exports = { TRIGGERS, EVENTS, ORDER_TRIGGERS, CHECKOUT_TRIGGERS, TOKENS, emit, run, render };
+module.exports = { TRIGGERS, EVENTS, ORDER_TRIGGERS, RETURN_TRIGGERS, CHECKOUT_TRIGGERS, TOKENS, emit, run, render };

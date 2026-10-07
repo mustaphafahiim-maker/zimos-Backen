@@ -82,6 +82,23 @@ async function createShipment(creds, input) {
   };
 }
 
+/**
+ * A return pickup (item 372): the courier collects the parcel from the
+ * shopper's address and brings it back to the store. The sandbox answers with
+ * a waybill like SBX-R-12345678 and keeps nothing; the return itself holds
+ * the booking (return_requests.pickup).
+ */
+async function createReturnPickup(creds, input) {
+  const { order, returnRequest, address } = input;
+  const path = address && Array.isArray(address.path) ? address.path : [];
+  return {
+    trackingNumber: `SBX-R-${crypto.randomInt(0, 1e8).toString().padStart(8, '0')}`,
+    carrierShipmentId: null,
+    trackingUrl: null,
+    raw: { sandbox: true, kind: 'return_pickup', city: path[0] ? path[0].id : null, district: path[1] ? path[1].id : null, reference: order.orderNumber, returnId: returnRequest ? returnRequest.id : null },
+  };
+}
+
 async function findShipment(trackingNumber) {
   return db.Shipment.findOne({ where: { carrierCode: CODE, waybillNumber: String(trackingNumber) } });
 }
@@ -149,6 +166,7 @@ module.exports = defineAdapter({
     polling: true,
     bulkStatus: true,
     addressLevels: ['city', 'district'],
+    returnPickup: true,
   },
   pollIntervalMinutes: 5,
   credentialFields: [{ key: 'apiKey', label: 'Any key (8+ characters)', secret: true }],
@@ -162,6 +180,7 @@ module.exports = defineAdapter({
   getShipments,
   cancelShipment,
   isCancelSettled,
+  createReturnPickup,
   // For the dev advance endpoint (../sandboxCarrierRoutes.js).
   PATH,
   ENDINGS,

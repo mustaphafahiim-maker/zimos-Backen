@@ -64,6 +64,20 @@ const TEMPLATES = Object.freeze({
     subject: 'تم تفعيل اشتراكك في {{product_name}}',
     body: 'مرحبًا {{customer_name}}،\n\nشكرًا لاشتراكك في {{product_name}} من {{store_name}} ({{order_total}}).\n\nمن صفحة اشتراكك تقدر تتابعه، تغيّر البطاقة اللي بيتسحب منها، أو تلغيه في أي وقت:\n{{subscription_link}}',
   },
+  // Item 372: the answer to a return or exchange the customer asked for. On unless the store turns it
+  // off (`defaultOn`): it answers the customer's own request; "Don't tell the customer" skips it.
+  return_approved: {
+    event: 'return.approved',
+    defaultOn: true,
+    subject: 'تمت الموافقة على طلب الإرجاع لطلبك {{order_number}}',
+    body: 'مرحبًا {{customer_name}}،\n\nوافق {{store_name}} على طلب الإرجاع أو الاستبدال الخاص بطلبك رقم {{order_number}}.\n\nتابع التفاصيل والخطوة التالية من هنا:\n{{order_link}}',
+  },
+  return_rejected: {
+    event: 'return.rejected',
+    defaultOn: true,
+    subject: 'بخصوص طلب الإرجاع لطلبك {{order_number}}',
+    body: 'مرحبًا {{customer_name}}،\n\nللأسف لم يتمكن {{store_name}} من قبول طلب الإرجاع أو الاستبدال الخاص بطلبك رقم {{order_number}}.\n\nتجد السبب والتفاصيل هنا:\n{{order_link}}',
+  },
   digital_delivery: {
     event: 'order.digital_delivered',
     subject: 'منتجك الرقمي من {{store_name}} جاهز',

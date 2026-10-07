@@ -42,6 +42,7 @@ typed the waybill of. Any `carrierCode` without an adapter behaves the same.
 | `bulkStatus` | `getShipments()` reads many in one call | `getShipments()` |
 | `addressLevels` | names of the courier's address levels, top first. `['city', 'district']` keeps the city/district API | `listCities()` or `listAddressTree()` for city/district; `listAddressTree()` otherwise |
 | `typedAddressNames` | a booking may send typed names when the courier refuses its address list | `typedAddress()` |
+| `returnPickup` | the courier collects a returned parcel from the shopper and brings it back (item 372) | `createReturnPickup()` |
 
 A capability claimed without the function behind it throws at require time.
 
@@ -65,6 +66,7 @@ Amounts (`cod`, `goodsValue`) are in **our** minor units; the adapter converts.
 | `parseWebhook(req)` | `{ ref, status?, carrierStatus? }` or `null` |
 | `verifyWebhook(req, { account, credentials })` (optional) | boolean |
 | `isSandbox(creds)` (optional) | the credentials point at the courier's own test environment |
+| `createReturnPickup(creds, { order, returnRequest, address, itemsCount, description, notes, carrierSettings })` (`returnPickup`) | `{ trackingNumber, carrierShipmentId, trackingUrl?, raw }` — a pickup at the order's address (`address` as for `createShipment`), nothing to collect in cash. Stored on the return (`return_requests.pickup`), not as a shipment. Never retried |
 
 `address` for `createShipment` is `{ path: [{ id, name, nameAr, level, meta }], firstLine, secondLine }`,
 plus `cityId`, `cityName`, `districtId`, `zoneId` for city/district couriers.
@@ -89,6 +91,7 @@ The whole contract with no network, for building and testing features:
   platform's cities under each (`geo_regions`). North Coast towns sit under
   Alexandria or Matrouh, as on most real couriers' lists;
 - waybills are `SBX-` + 8 digits; no label (the store's own waybill PDF is used);
+- a return pickup (`createReturnPickup`) answers a waybill `SBX-R-` + 8 digits and keeps nothing;
 - the courier's side of a parcel lives on the shipment (`carrier_response.sandboxStatus`),
   starting at `created`; it can be cancelled while `created`;
 - it moves only when someone calls

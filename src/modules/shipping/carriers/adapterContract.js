@@ -35,6 +35,9 @@
  *                   (connection.verification.locationList 'unavailable'),
  *                   a booking may send the carrier's own names as typed
  *                   (carrierAddress.names) and the carrier checks them
+ *   returnPickup    the courier collects a returned parcel from the shopper:
+ *                   createReturnPickup() books it (returns/returnPickup.js,
+ *                   item 372)
  *
  * Tunables: pollIntervalMinutes (default 60), alreadyCancelledPattern (the
  * carrier's wording for "already cancelled" in a refused cancel), and
@@ -52,6 +55,7 @@ const DEFAULT_CAPABILITIES = Object.freeze({
   addressLevels: ['city', 'district'],
   reserveNameWhenUnconnected: false,
   typedAddressNames: false,
+  returnPickup: false,
 });
 
 const DEFAULT_ALREADY_CANCELLED = /already\s+(been\s+)?(cancell?ed|terminated)/i;
@@ -97,6 +101,8 @@ function defineAdapter(spec) {
   if (capabilities.typedAddressNames && typeof spec.typedAddress !== 'function') {
     fail(code, 'typedAddressNames needs typedAddress()');
   }
+
+  if (capabilities.returnPickup && typeof spec.createReturnPickup !== 'function') fail(code, 'returnPickup needs createReturnPickup()');
 
   const levels = capabilities.addressLevels;
   if (!Array.isArray(levels) || levels.length < 1 || levels.some((l) => typeof l !== 'string' || !l)) {

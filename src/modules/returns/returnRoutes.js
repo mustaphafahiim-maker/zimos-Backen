@@ -24,5 +24,6 @@ router.post(
   requirePermission(PERMISSIONS.INVENTORY_MANAGE),
   controller.restock
 );
+router.post('/:returnId/pickup', validate(schemas.pickup), requirePermission(PERMISSIONS.ORDERS_MANAGE), controller.pickup);
 
 module.exports = router;

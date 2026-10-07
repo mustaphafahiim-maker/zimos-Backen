@@ -27,4 +27,10 @@ const restock = asyncHandler(async (req, res) => {
   res.json({ return: await service.restockReturn(wid(req), req.params.returnId, req) });
 });
 
-module.exports = { create, listForOrder, list, moderate, restock };
+// Item 372: the courier collects the parcel from the shopper (returnPickup.js).
+const pickup = asyncHandler(async (req, res) => {
+  const ret = await require('./returnPickup').bookPickup(wid(req), req.params.returnId, req.body, req);
+  res.status(201).json({ return: require('./shopperReturns').withPhotos(ret) });
+});
+
+module.exports = { create, listForOrder, list, moderate, restock, pickup };

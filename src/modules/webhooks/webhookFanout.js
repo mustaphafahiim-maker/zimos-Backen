@@ -103,6 +103,15 @@ async function build(topic, event) {
     return { subject: {}, data: { contact: customer.toJSON() } };
   }
 
+  // Item 372: a return or exchange, with its order.
+  if (aggregate === 'return' && payload.returnId) {
+    const ret = await db.ReturnRequest.findOne({ where: { id: payload.returnId, workspaceId } });
+    if (!ret) return null;
+    const subject = (await orderSubject(workspaceId, ret.orderId)) || {};
+    const { photoUploadIds, ...rest } = ret.toJSON();
+    return { subject, data: { return: { ...rest, photos: (photoUploadIds || []).length }, source: payload.source || null, order: await orderData(workspaceId, ret.orderId) } };
+  }
+
   if (aggregate === 'review' && payload.reviewId) {
     const review = await db.Review.findOne({ where: { id: payload.reviewId, workspaceId } });
     if (!review) return null;

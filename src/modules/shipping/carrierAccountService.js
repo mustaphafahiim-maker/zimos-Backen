@@ -201,6 +201,8 @@ function describeAdapter(adapter) {
       polling: adapter.capabilities.polling,
       addressLevels: adapter.capabilities.addressLevels,
       typedAddressNames: Boolean(adapter.capabilities.typedAddressNames),
+      // The courier collects returns from the shopper (returns/returnPickup.js, item 372).
+      returnPickup: Boolean(adapter.capabilities.returnPickup),
     },
   };
 }
