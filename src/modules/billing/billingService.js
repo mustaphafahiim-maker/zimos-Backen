@@ -197,6 +197,9 @@ async function expireStaleTrials(now = new Date()) {
         status: ['trialing', 'active'],
         currentPeriodEnd: { [Op.lt]: now },
         externalSubscriptionId: { [Op.is]: null }, // no real paid subscription behind it
+        // A free or discounted one is left to billing.manual_pricing_sweep, which
+        // also stamps pricingExpiredAt and audits it (manualSubscriptionService).
+        pricingKind: 'paid',
       },
     }
   );

@@ -345,7 +345,9 @@ async function endNow(workspaceId, body, req) {
  * there, as for any lapsed period), keeps its pricing as a record, and is
  * audited as subscription.manual_pricing_expired so the console hears of it
  * (platformNotifications). Run by the billing.manual_pricing_sweep schedule;
- * each row in its own transaction, a failure logged and never thrown.
+ * each row in its own transaction, a failure logged and never thrown. A row
+ * already moved to past_due (by an expire_trials run from before that job left
+ * free and discounted rows to this sweep) is still stamped and audited.
  */
 async function expireManualPricing(now = new Date()) {
   const { Op } = db.Sequelize;
@@ -353,7 +355,7 @@ async function expireManualPricing(now = new Date()) {
     where: {
       pricingKind: { [Op.in]: ['free', 'discounted'] },
       pricingExpiredAt: null,
-      status: { [Op.in]: ['active', 'trialing'] },
+      status: { [Op.in]: ['active', 'trialing', 'past_due'] },
       currentPeriodEnd: { [Op.lte]: now },
     },
     attributes: ['id'],
