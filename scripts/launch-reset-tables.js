@@ -43,6 +43,9 @@ const TABLES = {
   platform_settings: keep(
     "the console's own settings (merchant referral program, education links); a setting last saved by an admin other than the creator points at an account that goes, so --apply refuses (and lists it) until the creator saves it again"
   ),
+  queue_schedules: keep(
+    'the repeatable jobs (name, interval, last run); no store or account in them. Kept: a running worker registers its schedules only when it starts, so emptying this table stopped every scheduled job until a restart'
+  ),
   template_versions: keep('the store templates (each version)'),
   templates: keep('the store templates'),
   themes: keep('the theme catalogue, seeded by migrations 417 and 429'),
@@ -191,7 +194,6 @@ const TABLES = {
   purchase_order_lines: wipe('store purchase orders (each line)'),
   purchase_orders: wipe(STORE),
   queue_jobs: wipe('background jobs, most of them for a store'),
-  queue_schedules: wipe('when each repeatable job last ran; registered again when a worker starts'),
   quote_requests: wipe(STORE),
   referral_codes: wipe('referral codes of agents (accounts that go; agent_id is NOT NULL, ON DELETE RESTRICT) (decided: wipe)'),
   referral_payout_requests: wipe('merchants asking to be paid their referral share (accounts that go)'),

@@ -4,9 +4,9 @@
  * Empties the database before launch: every store, every account but the
  * creator's, and everything under them, while the platform's own setup
  * (plans, templates, themes, the app catalogue, payment methods, flags,
- * console roles and settings, the place list, exchange rates, migrations)
- * stays exactly as it is. What happens to each table is in
- * scripts/launch-reset-tables.js.
+ * console roles and settings, the place list, exchange rates, the job
+ * schedules, migrations) stays exactly as it is. What happens to each table
+ * is in scripts/launch-reset-tables.js.
  *
  *   node scripts/launch-reset.js                     # dry run: counts, changes nothing
  *   node scripts/launch-reset.js --apply --confirm-db <name> --i-know-this-is-production --expect-keep 1
