@@ -135,6 +135,8 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
     offerId: null,
     // The rule a server-added or offer-priced plain line came from (cart offer, free gift; item 256).
     offerName: line[Symbol.for('zimos.lineLabel')] || null,
+    // A free gift the server added (freeGifts/, item 276): it never counts toward a bundle tier or a discount's products.
+    freeGift: line[Symbol.for('zimos.freeGift')] === true,
     quantity,
     unitPriceAmount,
     unitCostAmount: variant.costAmount,
@@ -427,7 +429,8 @@ async function createOrder(
     }
 
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
-    const productIds = pricedLines.map((l) => l.productId);
+    // A free gift's product doesn't meet a discount's product condition (item 276).
+    const productIds = pricedLines.filter((l) => !l.freeGift).map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
     // `shippingOverride` (a funnel add-on placed as its own order after the
     // order it follows: the shopper pays shipping once) wins over any offer's.

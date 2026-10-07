@@ -133,7 +133,8 @@ function allocate(discount, amounts) {
  * shipping, for the order's `discountsSnapshot`.
  */
 async function applyBundleTiers(workspaceId, lines, transaction) {
-  const eligible = lines.filter((line) => line.productId && !line.offerId && !line.isOrderBump && !line.isUpsell);
+  // A free gift's units never unlock a tier (item 276).
+  const eligible = lines.filter((line) => line.productId && !line.offerId && !line.isOrderBump && !line.isUpsell && !line.freeGift);
   if (eligible.length === 0) return [];
   const bundles = await bundlesForProducts(
     workspaceId,

@@ -1900,7 +1900,9 @@ A review of the points, store credit, gift card, quote and bundle code found the
   - The order is marked with the payload marker `zimos.exactPrices`: no bundle tier, no automatic discount and no store minimum on top of the quoted prices (the merchant set them). A dropshipping supplier's own minimum still applies.
   - Quote numbers are taken under a per-store advisory lock.
   - Checked: 5 quote requests at once → five 201, five numbers; 3 accepts at once → one 201, two 409, one order at exactly 3 × 700 with no discount, while a plain checkout of the same 3 units still got the 2-unit tier and the 10% automatic discount; accept and decline at once → the quote ends accepted with its order.
-- [ ] 276. Free-gift lines counted as units in quantity-bundle and mix-and-match tiers (a gift unlocking a tier discount).
+- [x] 276. Free-gift lines counted as units in quantity-bundle and mix-and-match tiers (a gift unlocking a tier discount). (backend fix; no UI change)
+  - The gift line the server adds carries the marker `zimos.freeGift`; the priced line keeps it as `freeGift`. Quantity-bundle and mix-and-match tiers skip those lines, and so does a discount's "contains product" condition (a gift product no longer qualifies the order for a discount limited to it).
+  - Checked: a 2-unit 50% tier on product A and a gift rule giving one A → buying 1 A: no tier (before: 500 off); buying 2 A: the tier applies (1000 off). An automatic 10% limited to product G with G as the gift → not applied.
 - [ ] 277. An upsell joined to an open order re-added tax for a tax-exempt business customer and shipping for a free-shipping (VIP / referral) order.
 
 Not queued: points earned on an order that is returned after they were spent are not clawed back below zero (the balance never goes negative) — the design's stated choice, left to the owner.
