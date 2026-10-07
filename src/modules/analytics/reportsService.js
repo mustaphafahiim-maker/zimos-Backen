@@ -104,7 +104,8 @@ function windowSql(workspaceId, { start, end }, tz) {
   const replacements = { workspaceId, start, end, tz };
   const run = (sql, extra) =>
     db.sequelize.query(sql, { replacements: { ...replacements, ...extra }, type: db.Sequelize.QueryTypes.SELECT });
-  const fx = 'coalesce(o.fx_rate_to_base, 1)';
+  // The order's factor to base (currencies/baseAmounts.js, item 291), not the per-unit rate.
+  const fx = require('../currencies/baseAmounts').factorSql('o');
   const ORDERS = `
     SELECT o.id, o.customer_id, o.created_at, o.confirmed_at, o.payment_method, o.confirmation_state,
            coalesce(o.total_amount_base, o.total_amount) AS total,

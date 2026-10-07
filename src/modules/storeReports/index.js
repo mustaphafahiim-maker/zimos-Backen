@@ -11,6 +11,9 @@ const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('../orders/orderStage');
+// An order's amounts in the store currency: the order's own base total over its total, which carries
+// the minor-unit difference (KWD has 3 digits) that the per-unit rate doesn't (item 291).
+const { factorSql } = require('../currencies/baseAmounts');
 
 /*
  * Reports for accounts and stock decisions (spec-gaps items 238–242), beside
@@ -64,7 +67,7 @@ router.get('/tax', requirePermission(PERMISSIONS.FINANCIAL_REPORTS_VIEW), valida
   const c = await contextOf(req);
   const rows = await run(
     `WITH o AS (
-       SELECT o.id, o.created_at, ${PLACE_SQL} AS place, coalesce(o.fx_rate_to_base, 1) AS fx,
+       SELECT o.id, o.created_at, ${PLACE_SQL} AS place, ${factorSql()} AS fx,
               o.subtotal_amount - o.discount_amount AS taxable, o.tax_amount AS tax, o.total_amount AS total, o.amount_refunded AS refunded,
               coalesce((o.contact_snapshot->>'taxExempt')::boolean, false) AS exempt, ${STAGE_SQL} AS stage, o.financial_state
          FROM ${ORDERS_WITH_STAGE_FROM}
@@ -198,7 +201,7 @@ router.get('/discounts', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate
   const c = await contextOf(req);
   const rows = await run(
     `WITH r AS (
-       SELECT d.id AS discount_id, d.code, d.type, o.id AS order_id, o.customer_id, o.created_at, coalesce(o.fx_rate_to_base, 1) AS fx,
+       SELECT d.id AS discount_id, d.code, d.type, o.id AS order_id, o.customer_id, o.created_at, ${factorSql()} AS fx,
               o.total_amount AS total, o.amount_refunded AS refunded, dr.amount_allocated AS given,
               (o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected') AS live, o.stage,
               NOT EXISTS (SELECT 1 FROM orders p WHERE p.customer_id = o.customer_id AND p.workspace_id = o.workspace_id
@@ -272,7 +275,7 @@ router.get('/order-heatmap', requirePermission(PERMISSIONS.ANALYTICS_VIEW), vali
 router.get('/sales-by-collection', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({ params: Joi.object(ws), query: Joi.object(range) }), asyncHandler(async (req, res) => {
   const c = await contextOf(req);
   const lines = `
-    SELECT oi.product_id, oi.order_id, oi.quantity, ROUND((oi.line_total_amount) * coalesce(o.fx_rate_to_base, 1)) AS amount, o.stage
+    SELECT oi.product_id, oi.order_id, oi.quantity, ROUND((oi.line_total_amount) * ${factorSql()}) AS amount, o.stage
       FROM order_items oi
       JOIN (SELECT o.*, ${STAGE_SQL} AS stage FROM ${ORDERS_WITH_STAGE_FROM}
              WHERE o.workspace_id = :ws AND o.is_test = false AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'
@@ -314,7 +317,7 @@ router.get('/sales-by-option', requirePermission(PERMISSIONS.ANALYTICS_VIEW), va
   const rows = await run(
     `SELECT MIN(trim(kv.key)) AS option, MIN(trim(kv.value)) AS value, lower(trim(kv.key)) AS ok, lower(trim(kv.value)) AS ov,
             SUM(oi.quantity)::int AS units, COUNT(DISTINCT oi.order_id)::int AS orders, COUNT(DISTINCT oi.product_id)::int AS products,
-            COALESCE(ROUND(SUM(oi.line_total_amount * coalesce(o.fx_rate_to_base, 1))), 0)::bigint AS revenue
+            COALESCE(ROUND(SUM(oi.line_total_amount * ${factorSql()})), 0)::bigint AS revenue
        FROM order_items oi
        JOIN orders o ON o.id = oi.order_id
        CROSS JOIN LATERAL jsonb_each_text(CASE WHEN jsonb_typeof(oi.variant_options_snapshot) = 'object' THEN oi.variant_options_snapshot ELSE '{}'::jsonb END) kv
@@ -375,9 +378,9 @@ router.get('/returns', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({
       WHERE COALESCE(back.returned, 0) > 0 OR COALESCE(sold.delivered, 0) > 0
       ORDER BY returned DESC, delivered DESC LIMIT 500`, p);
   const [ref] = await run(
-    `SELECT COUNT(*)::int AS refunds, COALESCE(SUM(f.amount), 0)::bigint AS amount
+    `SELECT COUNT(*)::int AS refunds, COALESCE(ROUND(SUM(f.amount * ${factorSql()})), 0)::bigint AS amount
        FROM refunds f JOIN orders o ON o.id = f.order_id
-      WHERE o.workspace_id = :ws AND f.status = 'processed' AND f.created_at >= :from AND f.created_at < :to`, p);
+      WHERE o.workspace_id = :ws AND o.is_test = false AND f.status = 'processed' AND f.created_at >= :from AND f.created_at < :to`, p);
   const rows = products.map((r) => ({ ...r, returnRate: r.delivered ? Math.round((r.returned / r.delivered) * 1000) / 10 : null, reasons: r.reasons ? r.reasons.split(',') : [] }));
   if (req.query.format === 'csv') return sendCsv(res, 'returns-by-product', ['name', 'delivered', 'returned', 'returnRate', 'reasons'], rows.map((r) => ({ ...r, reasons: r.reasons.join(' ') })));
   const delivered = rows.reduce((n, r) => n + r.delivered, 0);
