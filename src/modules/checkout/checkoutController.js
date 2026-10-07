@@ -231,7 +231,7 @@ const checkout = asyncHandler(async (req, res) => {
     const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
     const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
     if ((giftCard && giftCard.applied) || (points && points.applied) || (credit && credit.applied)) await order.reload();
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}) });
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}), trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -274,6 +274,8 @@ const checkout = asyncHandler(async (req, res) => {
       const { coversOrder, ...card } = giftCard || {};
       return res.status(201).json({
         order: { ...paidOrder.toJSON(), items: orderItems },
+        // The signed tracking token: the thank-you page's proof for the tracking page, self-service and the survey (postPurchaseSurvey, item 236).
+        trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order),
         ...(giftCard ? { giftCard: { ...card, held: false } } : {}),
         ...(credit ? { storeCredit: { ...credit, held: false } } : {}),
         ...(points ? { loyalty: { ...points, held: false } } : {}),
@@ -298,6 +300,7 @@ const checkout = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     order: { ...order.toJSON(), items: orderItems },
+    trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order),
     ...(pickup ? { pickup } : {}),
     payment: {
       id: attempt.id,

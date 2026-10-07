@@ -2774,3 +2774,23 @@ Body for create / edit / preview:
 ### Screens
 - Storefront account → «الخصوصية» / "Privacy": «نزّل بياناتي» / "Download my data", «امسح حسابي» / "Delete my account" (reason, confirm «هنمسح بياناتك الشخصية؛ فواتيرك هتفضل محفوظة من غير اسمك» / "We'll remove your personal details; your invoices stay, without your name"), and the request status «تحت المراجعة» / "Under review", «اتمسح» / "Done", «اترفض» / "Declined" with the store's note.
 - Dashboard → Customers → «طلبات الخصوصية» / "Privacy requests" (badge with `pending`): complete (confirm, warning that it can't be undone, force option when blocked), decline with a note. Customer page: «نزّل بيانات العميل» / "Export data" and «امسح العميل» / "Erase customer".
+
+## 236. Post-purchase survey — UI: pending
+
+### Checkout change
+- Every checkout 201 now carries **`trackingToken`** (the order's signed tracking token, the same one as the `/track?t=` link). The thank-you page keeps it for the survey, the tracking page and self-service (item 220).
+
+### Settings — `/api/v1/workspaces/:ws/post-purchase-survey` (read `orders.view`, save `workspace.manage`)
+- `GET` / `PUT` `{ enabled, questions: [{ id?, type: "choice" | "score" | "text", text: { ar, en }, options: [{ id?, label: { ar, en } }] (choice: 2–12), allowOther (choice), required }] }` (≤ 3 questions; ids are generated and must be kept on later saves).
+- `GET /orders/:orderId` → `{ answers, answeredAt }` for the order page.
+- `GET /report?from=&to=` (default last 90 days) → `{ responses, questions: [choice: { options: [{ id, label, count }], other, otherTexts }, score: { average, nps, distribution[0..10], answers }, text: { latest: [{ text, orderNumber, at }] }] }`.
+
+### Storefront — `/api/v1/store/:ws/survey`
+- `GET /` → `{ questions: [{ id, type, text, options?, allowOther?, required }] }` or 404 when off.
+- `GET /orders/:orderId?token=<trackingToken>` → `{ answered, answers, open }`.
+- `PUT /orders/:orderId` `{ token, answers: { "<questionId>": "<optionId>" | { other: "…" } | 0–10 | "text" } }` → `{ answered: true, answers }`. Proof: `token` (tracking token), or `X-Shopper-Token`, or `X-Payment-Token` for an online order. Changeable for 7 days, then 409 `SURVEY_CLOSED`. 422 per question: «مطلوب» / "Required", «اختار من الاختيارات» / "Pick one of the options", «من 0 لـ 10» / "A score from 0 to 10".
+
+### Screens
+- Settings → Orders → «استبيان بعد الشراء» / "Post-purchase survey": on/off, up to 3 questions (type: «اختيار» / "Choice", «تقييم 0–10» / "Score 0–10", «نص» / "Text"), options, «ومكان لـ "حاجة تانية"» / "Allow other", required.
+- Thank-you page: the questions under the order summary, «ابعت» / "Send", then «شكرًا على رأيك!» / "Thanks for your feedback!"; skippable.
+- Order page: the answers. Analytics → «نتائج الاستبيان» / "Survey results": bar per option, average and NPS for the score, latest texts.
