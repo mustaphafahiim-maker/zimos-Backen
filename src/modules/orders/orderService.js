@@ -272,6 +272,15 @@ async function createOrder(
     // Chosen now so the reservations below can name the order they hold stock
     // for (inventory/orderStock.js releases exactly what they reserved).
     const orderId = crypto.randomUUID();
+    // Each product's purchase limits for every shopper order (item 313) — the store, funnels, the WhatsApp
+    // bot, /shop — counted again here under a lock on the phone, so two orders at once can't both pass the
+    // per-customer limit. Staff orders and quotes (the merchant's own quantities) are not limited; a free
+    // gift the store adds doesn't count.
+    if (!req.user && payload[Symbol.for('zimos.exactPrices')] !== true) {
+      const limitPhone = normalizePhone(contact && contact.phone);
+      if (limitPhone) await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `purchase-limits:${workspaceId}:${limitPhone}` }, transaction });
+      await require('../catalog/purchaseLimits').assertWithin(workspaceId, items.filter((i) => !i[Symbol.for('zimos.freeGift')]), contact, transaction);
+    }
     const customer = await customerService.findOrCreateByPhone(workspaceId, contact, transaction);
 
     // An active platform blocklist entry refuses the order outright, in every
@@ -695,6 +704,11 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   };
 
   const existing = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction });
+  // An upsell the shopper takes counts toward the product's purchase limits with the order's own lines (item 313).
+  if (isUpsell) {
+    const lines = [...existing.map((i) => ({ variantId: i.variantId, offerId: i.offerId, quantity: i.quantity })), lineInput];
+    await require('../catalog/purchaseLimits').assertWithin(workspaceId, lines, order.contactSnapshot || {}, transaction, { excludeOrderId: order.id });
+  }
   const newLine = await priceLine(workspaceId, lineInput, transaction);
   for (const consumed of newLine.consumedInventory) {
     await inventoryService.reserve(

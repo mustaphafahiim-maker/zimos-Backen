@@ -197,6 +197,11 @@ async function handle({ workspace, conversation, message, lang }) {
     }
     case 'confirm': {
       if (!has(text, YES)) return { text: `${t.again}${lang === 'en' ? 'reply "confirm" or "cancel".' : 'اكتب «تأكيد» أو «إلغاء».'}` };
+      // A store behind a password or "coming soon" takes no orders here either (item 313); the team answers.
+      if (require('../../storeGate').settingsOf(workspace).mode !== 'off') {
+        await save(null);
+        return { text: lang === 'en' ? 'The store is not taking orders yet — someone from the team will reply to you.' : 'المتجر مش بياخد طلبات لسه — حد من الفريق هيرد عليك.', handoff: true };
+      }
       try {
         const { order } = await require('../../orders/orderService').createOrder(
           workspace.id,
