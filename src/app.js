@@ -256,6 +256,11 @@ v1.use('/workspaces/:workspaceId/api-keys', appGate.requireAppForChanges('public
 v1.use('/workspaces/:workspaceId/webhooks', appGate.requireAppForChanges('webhooks'), webhookRoutes);
 // Lane 7: the app store, the app install link and dropshipping providers.
 // Features that are apps take changes only while the store has the app (apps/appGate.js).
+// Partner apps with OAuth (partnerApps/, item 265): developers, the merchant's approval, the token exchange, the app's page.
+v1.use('/partner-apps', require('./modules/partnerApps').developer);
+v1.use('/workspaces/:workspaceId/oauth', require('./modules/partnerApps').merchant);
+v1.use('/workspaces/:workspaceId/apps/partner', require('./modules/partnerApps').embed);
+v1.use('/oauth', require('./modules/partnerApps').oauth);
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 // Google Sheets sync: the account, the sheets, "Sync existing" (modules/sheets, SPEC §16.4).
 // Smart collections: the "All products" collection and a manual re-fill (catalog/smartCollections.js).

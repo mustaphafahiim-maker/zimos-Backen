@@ -3211,3 +3211,29 @@ Same endpoints: `GET / PUT /api/v1/workspaces/:ws/offers/feed`. The PUT body (wh
 
 ### Screen
 - Marketing → «فيد المنتجات» / "Product feeds": keep the store-wide settings on top; below, one card per channel (logo, «شغال / مقفول» / "Live / Off" switch, its link with copy, items count), «استخدم إعدادات المتجر» / "Use the store settings" ticked by default, else its own collections picker and «استبعد المنتجات الخلصانة» / "Leave out sold-out items". Google card: «متنشرش غير لما قايمة جوجل تكمل» / "Don't publish until the Google checklist is complete", and when `heldBackByChecklist` a link to the checklist.
+
+## 265. Partner apps with OAuth — UI: pending
+
+Developer guide: `src/modules/partnerApps/README.md` (link it from the developer screen).
+
+### Developers (`/api/v1/partner-apps`, any signed-in account)
+- `GET /` → `{ apps: [{ id, name, description, iconUrl, appUrl, redirectUris, scopes, clientId, status }], scopes: [all scope names] }`
+- `POST /` `{ name, description, iconUrl (https), appUrl (https), redirectUris: [1–10, https or http://localhost, no #], scopes: [≥1] }` → 201 `{ app: { …, clientSecret } }` (secret shown once). 409 `PARTNER_APP_LIMIT` (20).
+- `PATCH /:id` (any of those fields), `POST /:id/rotate-secret` → `{ app: { …, clientSecret } }`, `GET /:id/installs` → `{ installs: [{ storeId, storeName, scopes, installedAt }] }`, `DELETE /:id` (uninstalls it everywhere).
+
+### Merchant approval (dashboard route `/oauth/authorize?client_id&redirect_uri&scope&state`) — `apps.manage`
+- `GET /api/v1/workspaces/:ws/oauth/authorize?client_id=…&redirect_uri=…&scope=…&state=…` → `{ app: { name, description, iconUrl, developer, status, redirectHost }, scopes, installed }`. 404 unknown/suspended app; 422 unregistered redirect or scope; 403 `APP_IN_DEVELOPMENT`.
+- `POST …/oauth/authorize` same fields + `approve: true|false` → `{ redirectTo }` → `window.location = redirectTo`.
+- The app then shows on the Apps page like other outside apps (uninstall = the existing external uninstall).
+
+### The app's page — any store member
+- `GET /api/v1/workspaces/:ws/apps/partner/:installId/embed` → `{ url, name }` (signed, valid 5 minutes) — render in an `<iframe sandbox="allow-scripts allow-forms allow-same-origin allow-popups">`; ask for a fresh url each time it opens. 404 when the app has no page. Installs with a page have `external.embedded`.
+
+### Platform admin
+- `GET /api/v1/admin/partner-apps?status=` (`providers.view`), `PATCH /api/v1/admin/partner-apps/:id { status: development | published | suspended }` (`providers.manage`; suspending removes its installs).
+
+### Screens
+- Account → «المطوّرين» / "Developers": my apps, create (name, icon, page URL, callback URLs, permissions), «انسخ Client ID / Secret» with «مش هيظهر تاني» / "Shown once", rotate, installs.
+- `/oauth/authorize`: store picker (stores where I have apps.manage), the app card, «التطبيق ده عايز:» / "This app wants to:" with each scope in words, «سماح» / «رفض» (Allow / Deny), a note for development apps «تطبيق تحت التطوير» / "App in development".
+- Apps → an installed partner app with a page: «افتح» / "Open" → full-width frame.
+- Platform admin → «تطبيقات الشركاء» / "Partner apps": list by status, publish / suspend.
