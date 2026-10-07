@@ -8,7 +8,7 @@ const env = require('../../config/env');
  * tiny module so tests can mock them and so there is exactly one resolver.
  * It asks public DNS servers (DOMAIN_VERIFY_RESOLVERS, unset = 1.1.1.1 and
  * 8.8.8.8; item 341, Ziad's d051b79), never the host's own resolver, so a
- * name only our network can see is never answered. Set but empty, the
+ * name only our network can see is never answered. Set to "system", the
  * server's own resolver is used, as before.
  * Each throws on NXDOMAIN / no records (ENOTFOUND / ENODATA).
  */

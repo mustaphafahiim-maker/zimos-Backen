@@ -693,8 +693,8 @@ const env = {
   //    domain expires after that many days (verify refuses, the job removes
   //    it); unset, it waits for its TXT however long it takes, as before.
   //  - resolvers (DOMAIN_VERIFY_RESOLVERS): the public DNS servers that
-  //    verification and the DNS check ask; unset = 1.1.1.1,8.8.8.8, set but
-  //    empty = this server's own resolver.
+  //    verification and the DNS check ask; unset or blank = 1.1.1.1,8.8.8.8,
+  //    "system" = this server's own resolver.
   // Under NODE_ENV=test each takes its default; a test sets them here.
   customDomains: {
     enabled: publicSwitch('CUSTOM_DOMAINS_ENABLED', true),
@@ -708,7 +708,10 @@ const env = {
             .replace(/\.$/, ''),
     maxPerStore: optionalPositiveInt('CUSTOM_DOMAINS_MAX_PER_STORE'),
     pendingTtlDays: optionalPositiveInt('CUSTOM_DOMAINS_PENDING_TTL_DAYS'),
-    resolvers: csvList(process.env.DOMAIN_VERIFY_RESOLVERS, '1.1.1.1,8.8.8.8'),
+    resolvers:
+      String(process.env.DOMAIN_VERIFY_RESOLVERS || '').trim().toLowerCase() === 'system' && process.env.NODE_ENV !== 'test'
+        ? []
+        : csvList(isBlank(process.env.DOMAIN_VERIFY_RESOLVERS) ? undefined : process.env.DOMAIN_VERIFY_RESOLVERS, '1.1.1.1,8.8.8.8'),
     // Cloudflare for SaaS custom hostnames (domains/certificates/cloudflare.js,
     // CERTIFICATE_PROVIDER=cloudflare). The token needs Zone > SSL and
     // Certificates: Edit on that zone only. Empty under NODE_ENV=test, so a

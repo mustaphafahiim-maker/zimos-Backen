@@ -170,9 +170,25 @@ async function refreshCertificate(domain) {
   }
   const provider = getCertificateProvider();
   const first = domain.sslStatus === 'none' || !domain.sslProviderRef;
-  const result = first
-    ? await provider.requestCertificate({ hostname: domain.hostname })
-    : await provider.getStatus({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
+  let result;
+  try {
+    result = first
+      ? await provider.requestCertificate({ hostname: domain.hostname })
+      : await provider.getStatus({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
+  } catch (err) {
+    // A first request that failed is recorded: the job's batch moves on to the
+    // others, the merchant sees why, and the 72 hours also cover a request the
+    // provider keeps refusing (domainJobs.js).
+    if (first) {
+      await domain.update({
+        sslCheckedAt: new Date(),
+        sslDetail: (err instanceof CertificateProviderError ? err.message : 'The certificate provider could not be reached').slice(0, 300),
+        sslRequestedAt: domain.sslRequestedAt || new Date(),
+      });
+    }
+    throw err;
+  }
+  if (first && result.providerRef) await keepProviderRef(provider.code, result.providerRef);
   const sslStatus = SSL_STATUSES.includes(result.status) ? result.status : 'pending';
   const now = new Date();
   await domain.update({
@@ -188,6 +204,15 @@ async function refreshCertificate(domain) {
   });
   const counterpartDetail = await syncCounterpartCertificate(domain, provider);
   return { ...result, counterpartDetail };
+}
+
+/**
+ * A hostname claimed again at the provider can come back with the id of a
+ * deletion still queued for retry (Cloudflare answers a duplicate with the
+ * existing custom hostname): that deletion must not remove it now.
+ */
+async function keepProviderRef(provider, providerRef) {
+  await db.DomainProviderDeletion.destroy({ where: { provider, providerRef: String(providerRef) } });
 }
 
 /**
@@ -245,10 +270,11 @@ async function syncCounterpartCertificate(domain, provider) {
   const hostname = rootDomains.counterpartOf(domain.hostname);
   if (!c || !c.redirect || !hostname) return null;
   try {
-    const result =
-      c.sslStatus === 'none' || !c.sslProviderRef
-        ? await provider.requestCertificate({ hostname })
-        : await provider.getStatus({ hostname, providerRef: c.sslProviderRef });
+    const firstRequest = c.sslStatus === 'none' || !c.sslProviderRef;
+    const result = firstRequest
+      ? await provider.requestCertificate({ hostname })
+      : await provider.getStatus({ hostname, providerRef: c.sslProviderRef });
+    if (firstRequest && result.providerRef) await keepProviderRef(provider.code, result.providerRef);
     await domain.update({
       counterpart: {
         ...c,

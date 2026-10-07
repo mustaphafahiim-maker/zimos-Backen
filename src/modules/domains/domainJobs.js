@@ -58,13 +58,18 @@ async function pollPendingCertificates(now = Date.now()) {
   return each(rows, async (domain) => {
     // The 72 hours count from the provider request (migration 505), not from the
     // verification: a domain verified before a provider was set up gets its full time.
-    const since = domain.sslStatus === 'pending' && domain.sslRequestedAt ? new Date(domain.sslRequestedAt).getTime() : null;
+    // A first request the provider kept refusing ('none', its attempts recorded by
+    // refreshCertificate) runs out the same way, with the provider's last answer.
+    const since = domain.sslRequestedAt ? new Date(domain.sslRequestedAt).getTime() : null;
     if (since !== null && now - since > CERTIFICATE_DEADLINE_MS) {
+      const neverRequested = domain.sslStatus === 'none' && domain.sslDetail;
       await domain.update({
         sslStatus: 'failed',
         sslCheckedAt: new Date(now),
         // A root domain points by A records or an ALIAS, not a CNAME (rootDomains.js).
-        sslDetail: 'The certificate was not issued within 72 hours: check that the DNS records point at the store',
+        sslDetail: neverRequested
+          ? `The certificate could not be requested within 72 hours: ${domain.sslDetail}`.slice(0, 300)
+          : 'The certificate was not issued within 72 hours: check that the DNS records point at the store',
       });
     } else {
       await refreshCertificate(domain);

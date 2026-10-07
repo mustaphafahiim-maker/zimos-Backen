@@ -104,7 +104,9 @@ async function listDomains(workspaceId) {
     status: d.status,
     verifiedAt: d.verifiedAt,
     record: txtRecordFor(d),
-    cname: { type: 'CNAME', name: d.hostname, value: target },
+    // A root cannot take a CNAME: it points by A records or an ALIAS (rootDomains.js).
+    cname: require('./rootDomains').isRoot(d.hostname) ? null : { type: 'CNAME', name: d.hostname, value: target },
+    routing: require('./rootDomains').routingFor(d.hostname, target).records,
   }));
 }
 
