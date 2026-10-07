@@ -15,6 +15,14 @@ const { lookupTxt } = require('../../src/modules/domains/dnsVerifier');
 
 jest.mock('../../src/modules/domains/dnsVerifier', () => ({ lookupTxt: jest.fn() }));
 
+// The domains routes are closed unless CUSTOM_DOMAINS_ENABLED (domains/domainsGate.js).
+beforeAll(() => {
+  env.customDomains.enabled = true;
+});
+afterAll(() => {
+  env.customDomains.enabled = false;
+});
+
 const ORIGINAL_ENFORCEMENT = env.planFeatures.enforcement;
 afterEach(() => {
   env.planFeatures.enforcement = ORIGINAL_ENFORCEMENT;
@@ -176,7 +184,7 @@ describe('PLAN_FEATURE_ENFORCEMENT', () => {
     const role = await db.Role.findOne({ where: { workspaceId: ctx.wid, key: 'editor' } });
     return request(app).post(`/api/v1/workspaces/${ctx.wid}/members`).set(ctx.H).send({ email: member.email, roleId: role.id });
   };
-  const addDomain = (ctx, hostname = `${key()}.com`) =>
+  const addDomain = (ctx, hostname = `www.${key()}.com`) =>
     request(app).post(`/api/v1/workspaces/${ctx.wid}/domains`).set(ctx.H).send({ hostname });
   const webStats = (ctx) => request(app).get(`/api/v1/workspaces/${ctx.wid}/analytics/web/stats`).set(ctx.H);
   const summary = (ctx) => request(app).get(`/api/v1/workspaces/${ctx.wid}/analytics/summary`).set(ctx.H);
@@ -238,7 +246,7 @@ describe('PLAN_FEATURE_ENFORCEMENT', () => {
 
   it('on: verifying a pending domain needs the feature too; listing and removing stay open', async () => {
     const ctx = await withWebsite(await storeOn(await makePlan({ features: [] })));
-    const added = await addDomain(ctx, 'pendingshop.com');
+    const added = await addDomain(ctx, 'www.pendingshop.com');
     expect(added.status).toBe(201);
     env.planFeatures.enforcement = true;
     lookupTxt.mockResolvedValueOnce([[added.body.record.value]]);

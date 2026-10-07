@@ -591,6 +591,36 @@ const env = {
     enabled: process.env.NODE_ENV !== 'test' && process.env.SITE_ANALYTICS_ENABLED === 'true',
     origins: csvList(process.env.SITE_ANALYTICS_ORIGINS, ''),
   },
+
+  // Merchant custom domains (modules/domains). Off unless exactly "true": every
+  // dashboard route under /workspaces/:id/domains answers 404 like an unknown
+  // path. Domains already verified keep resolving: GET /store/resolve-host and
+  // the host resolver are not behind it. Under NODE_ENV=test it starts off; a
+  // test flips it on this object.
+  // cnameTarget is the one host every merchant domain points its CNAME at (the
+  // Cloudflare for SaaS entry, e.g. customers.zimos.co); unset, customers.
+  // under PLATFORM_ROOT_DOMAIN. maxPerStore counts every domain of a store,
+  // verified or not. resolvers are the public DNS servers verification and
+  // the DNS check ask, so a lookup never goes to the host's internal resolver.
+  customDomains: {
+    enabled: process.env.NODE_ENV !== 'test' && process.env.CUSTOM_DOMAINS_ENABLED === 'true',
+    cnameTarget: (
+      process.env.CUSTOM_DOMAIN_CNAME_TARGET || `customers.${process.env.PLATFORM_ROOT_DOMAIN || 'zimos.test'}`
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/\.$/, ''),
+    maxPerStore: positiveInt('CUSTOM_DOMAINS_MAX_PER_STORE', 1),
+    resolvers: csvList(process.env.DOMAIN_VERIFY_RESOLVERS, '1.1.1.1,8.8.8.8'),
+    // Cloudflare for SaaS custom hostnames (domains/certificates/cloudflare.js,
+    // CERTIFICATE_PROVIDER=cloudflare). The token needs Zone > SSL and
+    // Certificates: Edit on that zone only. Empty under NODE_ENV=test, so a
+    // dev .env never reaches the suite; a test sets them here.
+    cloudflare: {
+      apiToken: process.env.NODE_ENV === 'test' ? '' : (process.env.CLOUDFLARE_API_TOKEN || '').trim(),
+      zoneId: process.env.NODE_ENV === 'test' ? '' : (process.env.CLOUDFLARE_ZONE_ID || '').trim(),
+    },
+  },
 };
 
 module.exports = env;

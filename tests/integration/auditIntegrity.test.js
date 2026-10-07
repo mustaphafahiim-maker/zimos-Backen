@@ -9,6 +9,15 @@
 const bwipjs = require('bwip-js');
 const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace, confirmCodOrder } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const env = require('../../src/config/env');
+
+// The domains routes are closed unless CUSTOM_DOMAINS_ENABLED (domains/domainsGate.js).
+beforeAll(() => {
+  env.customDomains.enabled = true;
+});
+afterAll(() => {
+  env.customDomains.enabled = false;
+});
 
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 
@@ -71,7 +80,7 @@ describe('audit logging on every new mutating endpoint', () => {
     // domain
     await request(app).post(`/api/v1/workspaces/${workspace.id}/quickstart`).set(H).type('form')
       .send({ productName: 'W', price: '10.00' });
-    const dom = (await request(app).post(`/api/v1/workspaces/${workspace.id}/domains`).set(H).send({ hostname: 'audit-del.com' })).body.domain;
+    const dom = (await request(app).post(`/api/v1/workspaces/${workspace.id}/domains`).set(H).send({ hostname: 'www.audit-del.com' })).body.domain;
     await request(app).delete(`/api/v1/workspaces/${workspace.id}/domains/${dom.id}`).set(H).expect(200);
     const domDel = await auditRow('domain.delete', dom.id);
     expect(domDel.beforeState).not.toBeNull();

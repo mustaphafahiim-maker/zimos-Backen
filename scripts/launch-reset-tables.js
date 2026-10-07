@@ -61,6 +61,7 @@ const TABLES = {
   customers: wipe(STORE),
   discount_redemptions: wipe(STORE),
   discounts: wipe(STORE),
+  domain_provider_deletions: wipe('custom hostnames still to remove at the certificate provider; before launch there are none in production'),
   domains: wipe(STORE),
   experiment_assignments: wipe('store experiments'),
   experiments: wipe(STORE),

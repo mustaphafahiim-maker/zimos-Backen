@@ -1,13 +1,21 @@
 'use strict';
 
 // Control the single DNS lookup. Hoisted above the app require by Jest.
-jest.mock('../../src/modules/domains/dnsVerifier', () => ({ lookupTxt: jest.fn() }));
-const { lookupTxt } = require('../../src/modules/domains/dnsVerifier');
+jest.mock('../../src/modules/domains/dnsVerifier', () => ({ lookupTxt: jest.fn(), lookupCname: jest.fn() }));
+const { lookupTxt, lookupCname } = require('../../src/modules/domains/dnsVerifier');
 
 const { app, request, registerAndActivate, createWorkspace } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const env = require('../../src/config/env');
 
-beforeEach(() => lookupTxt.mockReset());
+beforeEach(() => {
+  lookupTxt.mockReset();
+  lookupCname.mockReset();
+  env.customDomains.enabled = true;
+});
+afterAll(() => {
+  env.customDomains.enabled = false;
+});
 
 async function setupStore(name = 'Domain Co') {
   const auth = await registerAndActivate();
@@ -22,7 +30,7 @@ async function setupStore(name = 'Domain Co') {
   return { auth, workspace, wid: workspace.id, H };
 }
 
-const addDomain = (wid, H, hostname = 'ahmedstore.com') =>
+const addDomain = (wid, H, hostname = 'www.ahmedstore.com') =>
   request(app).post(`/api/v1/workspaces/${wid}/domains`).set(H).send({ hostname });
 
 describe('custom domains', () => {
@@ -30,23 +38,44 @@ describe('custom domains', () => {
     const { wid, H } = await setupStore();
     const res = await addDomain(wid, H);
     expect(res.status).toBe(201);
-    expect(res.body.domain.hostname).toBe('ahmedstore.com');
+    expect(res.body.domain.hostname).toBe('www.ahmedstore.com');
     expect(res.body.domain.status).toBe('pending_verification');
     expect(res.body.record.type).toBe('TXT');
+    expect(res.body.record.name).toBe('_zimos-verify.www.ahmedstore.com');
     expect(res.body.record.value).toMatch(/^zimos-verify=[0-9a-f]{32}$/);
 
-    const row = await db.Domain.findOne({ where: { workspaceId: wid, hostname: 'ahmedstore.com' } });
+    const row = await db.Domain.findOne({ where: { workspaceId: wid, hostname: 'www.ahmedstore.com' } });
     expect(row.status).toBe('pending_verification');
     expect(row.verificationToken.length).toBe(32);
   });
 
-  it('rejects a second store claiming the same hostname', async () => {
+  it('an unverified claim does not block the real owner; the first to verify takes the host', async () => {
     const a = await setupStore('Store A');
-    expect((await addDomain(a.wid, a.H, 'clash.com')).status).toBe(201);
+    const squat = await addDomain(a.wid, a.H, 'www.clash.com');
+    expect(squat.status).toBe(201);
     const b = await setupStore('Store B');
-    const res = await addDomain(b.wid, b.H, 'clash.com');
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('DOMAIN_TAKEN');
+    const owner = await addDomain(b.wid, b.H, 'www.clash.com');
+    expect(owner.status).toBe(201);
+
+    lookupTxt.mockResolvedValueOnce([[owner.body.record.value]]);
+    const ok = await request(app).post(`/api/v1/workspaces/${b.wid}/domains/${owner.body.domain.id}/verify`).set(b.H);
+    expect(ok.status).toBe(200);
+    // Store A's pending row went with it.
+    expect(await db.Domain.findByPk(squat.body.domain.id)).toBeNull();
+
+    const c = await setupStore('Store C');
+    const late = await addDomain(c.wid, c.H, 'www.clash.com');
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('DOMAIN_TAKEN');
+  });
+
+  it('the database refuses a second verified row for one hostname', async () => {
+    const a = await setupStore('Store A');
+    const b = await setupStore('Store B');
+    const one = await addDomain(a.wid, a.H, 'www.twice.com');
+    const two = await addDomain(b.wid, b.H, 'www.twice.com');
+    await db.Domain.update({ status: 'verified' }, { where: { id: one.body.domain.id } });
+    await expect(db.Domain.update({ status: 'verified' }, { where: { id: two.body.domain.id } })).rejects.toThrow();
   });
 
   it('verification succeeds only when the TXT record is actually present', async () => {
@@ -71,6 +100,8 @@ describe('custom domains', () => {
     const ok = await request(app).post(`/api/v1/workspaces/${wid}/domains/${domainId}/verify`).set(H);
     expect(ok.status).toBe(200);
     expect(ok.body.domain.status).toBe('verified');
+    // The TXT is looked up on its own name, never on the host that carries the CNAME.
+    expect(lookupTxt).toHaveBeenLastCalledWith('_zimos-verify.www.ahmedstore.com');
     const row = await db.Domain.findByPk(domainId);
     expect(row.status).toBe('verified');
     expect(row.verifiedAt).not.toBeNull();
@@ -78,12 +109,12 @@ describe('custom domains', () => {
 
   it('a verified custom domain Host header resolves to that workspace store', async () => {
     const { wid, H, workspace } = await setupStore('Verified Store');
-    const add = await addDomain(wid, H, 'myverifiedshop.com');
+    const add = await addDomain(wid, H, 'www.myverifiedshop.com');
     const domainId = add.body.domain.id;
     lookupTxt.mockResolvedValueOnce([[add.body.record.value]]);
     await request(app).post(`/api/v1/workspaces/${wid}/domains/${domainId}/verify`).set(H);
 
-    const res = await request(app).get('/').set('Host', 'myverifiedshop.com');
+    const res = await request(app).get('/').set('Host', 'www.myverifiedshop.com');
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/html/);
     expect(res.text).toContain('Verified Store');
@@ -92,9 +123,9 @@ describe('custom domains', () => {
 
   it('an unverified custom domain Host header shows a "not verified" message, not the store', async () => {
     const { wid, H } = await setupStore('Pending Store');
-    await addDomain(wid, H, 'notyet.com');
+    await addDomain(wid, H, 'www.notyet.com');
 
-    const res = await request(app).get('/').set('Host', 'notyet.com');
+    const res = await request(app).get('/').set('Host', 'www.notyet.com');
     expect(res.status).toBe(409);
     expect(res.text).toMatch(/not verified/i);
     expect(res.text).not.toContain('Domain Widget');
@@ -106,5 +137,225 @@ describe('custom domains', () => {
     expect(health.status).toBe(200);
     const shop = await request(app).get(`/shop/${wid}`).set('Host', 'never-added.com');
     expect(shop.status).toBe(200);
+  });
+});
+
+describe('CUSTOM_DOMAINS_ENABLED off', () => {
+  it('answers every merchant domains route with the 404 of an unknown path', async () => {
+    const { wid, H } = await setupStore('Closed Domains');
+    const fake = '00000000-0000-4000-8000-000000000000';
+    env.customDomains.enabled = false;
+    const base = `/api/v1/workspaces/${wid}/domains`;
+    const attempts = [
+      request(app).post(base).set(H).send({ hostname: 'www.closedshop.com' }),
+      request(app).get(base).set(H),
+      request(app).get(`${base}/overview`).set(H),
+      request(app).post(`${base}/${fake}/verify`).set(H),
+      request(app).patch(`${base}/${fake}`).set(H).send({ isPrimary: true }),
+      request(app).post(`${base}/${fake}/ssl/check`).set(H),
+      request(app).get(`${base}/${fake}/dns-check`).set(H),
+      request(app).delete(`${base}/${fake}`).set(H),
+    ];
+    for (const res of await Promise.all(attempts)) {
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('ROUTE_NOT_FOUND');
+    }
+    // No token: the same answer as any unknown path under the workspace.
+    const unknown = await request(app).get(`/api/v1/workspaces/${wid}/no-such-thing`);
+    const noToken = await request(app).get(base);
+    expect(noToken.status).toBe(unknown.status);
+    expect(noToken.body.error.code).toBe(unknown.body.error.code);
+    expect(await db.Domain.count({ where: { workspaceId: wid } })).toBe(0);
+  });
+
+  it('a domain verified before the switch went off still resolves', async () => {
+    const { wid, H, workspace } = await setupStore('Still Resolves');
+    const add = await addDomain(wid, H, 'www.stillresolves.com');
+    lookupTxt.mockResolvedValueOnce([[add.body.record.value]]);
+    expect((await request(app).post(`/api/v1/workspaces/${wid}/domains/${add.body.domain.id}/verify`).set(H)).status).toBe(200);
+
+    env.customDomains.enabled = false;
+    const res = await request(app).get('/api/v1/store/resolve-host').query({ host: 'www.stillresolves.com' });
+    expect(res.status).toBe(200);
+    expect(res.body.store.workspaceId).toBe(wid);
+    expect(res.body.store.slug).toBe(workspace.slug);
+  });
+});
+
+describe('which hostnames a store can connect', () => {
+  it('refuses a bare apex with APEX_NOT_SUPPORTED and points at www', async () => {
+    const { wid, H } = await setupStore();
+    for (const apex of ['example-shop.com', 'https://Example-Shop.com/', 'mystore.com.eg']) {
+      const res = await addDomain(wid, H, apex);
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('APEX_NOT_SUPPORTED');
+      expect(res.body.error.message).toContain('www.');
+    }
+    expect((await addDomain(wid, H, 'shop.mystore.com.eg')).status).toBe(201);
+  });
+
+  it('refuses our own zones, the host provider, private names and IP addresses', async () => {
+    const { wid, H } = await setupStore();
+    const refused = [
+      'www.zimos.co',
+      'zimos.co',
+      'evil.up.railway.app',
+      'api.railway.internal',
+      'printer.local',
+      'www.localhost',
+      'www.shop.test',
+      'www.shop.invalid',
+      'www.shop.example',
+      `www.${env.platformRootDomain}`,
+    ];
+    for (const host of refused) {
+      const res = await addDomain(wid, H, host);
+      expect([res.status, res.body.error.code, host]).toEqual([400, 'DOMAIN_NOT_ALLOWED', host]);
+    }
+    for (const ip of ['10.0.0.1', '169.254.169.254', '[::1]']) {
+      const res = await addDomain(wid, H, ip);
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+    }
+    expect(await db.Domain.count({ where: { workspaceId: wid } })).toBe(0);
+  });
+
+  it('takes an Arabic (IDN) name and stores the form browsers send', async () => {
+    const { wid, H } = await setupStore();
+    const res = await addDomain(wid, H, 'متجر.مثال.مصر');
+    expect(res.status).toBe(201);
+    expect(res.body.domain.hostname).toMatch(/^xn--[a-z0-9-]+\.xn--[a-z0-9-]+\.xn--[a-z0-9-]+$/);
+  });
+
+  it('one domain per store by default (CUSTOM_DOMAINS_MAX_PER_STORE)', async () => {
+    const { wid, H } = await setupStore();
+    expect(env.customDomains.maxPerStore).toBe(1);
+    expect((await addDomain(wid, H, 'www.first.com')).status).toBe(201);
+    const second = await addDomain(wid, H, 'shop.second.com');
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe('DOMAIN_LIMIT_REACHED');
+    const again = await addDomain(wid, H, 'www.first.com');
+    expect(again.body.error.code).toBe('DOMAIN_ALREADY_ADDED');
+  });
+
+  it('a pending row expires after 7 days: it cannot be verified and no longer counts', async () => {
+    const { wid, H } = await setupStore();
+    const old = await addDomain(wid, H, 'www.stale.com');
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    await db.sequelize.query('UPDATE domains SET created_at = $1 WHERE id = $2', { bind: [eightDaysAgo, old.body.domain.id] });
+
+    lookupTxt.mockResolvedValueOnce([[old.body.record.value]]);
+    const verify = await request(app).post(`/api/v1/workspaces/${wid}/domains/${old.body.domain.id}/verify`).set(H);
+    expect(verify.status).toBe(409);
+    expect(verify.body.error.code).toBe('DOMAIN_VERIFICATION_EXPIRED');
+
+    expect((await addDomain(wid, H, 'www.fresh.com')).status).toBe(201);
+    expect(await db.Domain.findByPk(old.body.domain.id)).toBeNull();
+  });
+});
+
+describe('the records and the DNS check', () => {
+  it('lists a TXT on _zimos-verify.<host> and a CNAME to the fixed target', async () => {
+    const { wid, H } = await setupStore();
+    await addDomain(wid, H, 'shop.records.com');
+    const res = await request(app).get(`/api/v1/workspaces/${wid}/domains/overview`).set(H);
+    expect(res.status).toBe(200);
+    expect(res.body.cnameTarget).toBe(env.customDomains.cnameTarget);
+    const [txt, cname] = res.body.domains[0].records;
+    expect(txt).toMatchObject({ type: 'TXT', name: '_zimos-verify.shop.records.com' });
+    expect(cname).toMatchObject({ type: 'CNAME', name: 'shop.records.com', value: env.customDomains.cnameTarget });
+  });
+
+  it('checks the two records through the public resolver module', async () => {
+    const { wid, H } = await setupStore();
+    const add = await addDomain(wid, H, 'shop.check.com');
+    lookupTxt.mockResolvedValueOnce([[add.body.record.value]]);
+    lookupCname.mockResolvedValueOnce([`${env.customDomains.cnameTarget}.`]);
+    const res = await request(app).get(`/api/v1/workspaces/${wid}/domains/${add.body.domain.id}/dns-check`).set(H);
+    expect(res.status).toBe(200);
+    expect(res.body.dns.txt.found).toBe(true);
+    expect(res.body.dns.cname.found).toBe(true);
+    expect(lookupTxt).toHaveBeenCalledWith('_zimos-verify.shop.check.com');
+    expect(lookupCname).toHaveBeenCalledWith('shop.check.com');
+  });
+});
+
+describe('the certificate provider (Cloudflare, fetch mocked)', () => {
+  const REF = 'aaaaaaaabbbbccccddddeeeeeeeeeeee';
+  const reply = (status, body) => ({ status, json: async () => body });
+  let fetchMock;
+  beforeEach(() => {
+    process.env.CERTIFICATE_PROVIDER = 'cloudflare';
+    env.customDomains.cloudflare.apiToken = 'test-only-cloudflare-token';
+    env.customDomains.cloudflare.zoneId = '0123456789abcdef0123456789abcdef';
+    fetchMock = jest.spyOn(global, 'fetch');
+  });
+  afterEach(() => {
+    fetchMock.mockRestore();
+    delete process.env.CERTIFICATE_PROVIDER;
+    env.customDomains.cloudflare.apiToken = '';
+    env.customDomains.cloudflare.zoneId = '';
+  });
+
+  async function verified(name, hostname) {
+    const s = await setupStore(name);
+    const add = await addDomain(s.wid, s.H, hostname);
+    lookupTxt.mockResolvedValueOnce([[add.body.record.value]]);
+    const res = await request(app).post(`/api/v1/workspaces/${s.wid}/domains/${add.body.domain.id}/verify`).set(s.H);
+    return { ...s, id: add.body.domain.id, res };
+  }
+
+  it('asks Cloudflare for the hostname only once the TXT is verified', async () => {
+    const s = await setupStore();
+    const add = await addDomain(s.wid, s.H, 'www.certshop.com');
+    const early = await request(app).post(`/api/v1/workspaces/${s.wid}/domains/${add.body.domain.id}/ssl/check`).set(s.H);
+    expect(early.status).toBe(409);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce(
+      reply(201, { success: true, result: { id: REF, hostname: 'www.certshop.com', status: 'pending', ssl: { status: 'pending_validation' } } })
+    );
+    lookupTxt.mockResolvedValueOnce([[add.body.record.value]]);
+    const ok = await request(app).post(`/api/v1/workspaces/${s.wid}/domains/${add.body.domain.id}/verify`).set(s.H);
+    expect(ok.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const row = await db.Domain.findByPk(add.body.domain.id);
+    expect(row).toMatchObject({ status: 'verified', sslStatus: 'pending', sslProvider: 'cloudflare', sslProviderRef: REF });
+  });
+
+  it('a Cloudflare failure right after verifying does not undo the verification', async () => {
+    fetchMock.mockResolvedValueOnce(reply(503, null));
+    const v = await verified('Cf Down', 'www.cfdown.com');
+    expect(v.res.status).toBe(200);
+    expect(await db.Domain.findByPk(v.id)).toMatchObject({ status: 'verified', sslStatus: 'none' });
+  });
+
+  it('the merchant button maps an issued certificate to active, and a failure shows its reason', async () => {
+    fetchMock.mockResolvedValueOnce(reply(201, { success: true, result: { id: REF, status: 'pending', ssl: { status: 'pending_validation' } } }));
+    const v = await verified('Cf Ok', 'www.cfok.com');
+    fetchMock.mockResolvedValueOnce(reply(200, { success: true, result: { id: REF, status: 'active', ssl: { status: 'active' } } }));
+    const check = await request(app).post(`/api/v1/workspaces/${v.wid}/domains/${v.id}/ssl/check`).set(v.H);
+    expect(check.status).toBe(200);
+    expect(check.body.domain).toMatchObject({ status: 'active', sslStatus: 'issued' });
+  });
+
+  it('removing a domain: a 404 at Cloudflare is fine; a real failure is kept for the retry job', async () => {
+    fetchMock.mockResolvedValueOnce(reply(201, { success: true, result: { id: REF, status: 'pending', ssl: { status: 'pending_validation' } } }));
+    const v = await verified('Cf Del', 'www.cfdel.com');
+    fetchMock.mockResolvedValueOnce(reply(500, null));
+    const del = await request(app).delete(`/api/v1/workspaces/${v.wid}/domains/${v.id}`).set(v.H);
+    expect(del.status).toBe(200);
+    expect(await db.Domain.findByPk(v.id)).toBeNull();
+    const kept = await db.DomainProviderDeletion.findOne({ where: { providerRef: REF } });
+    expect(kept).toMatchObject({ hostname: 'www.cfdel.com', provider: 'cloudflare', attempts: 1 });
+    expect(kept.lastError).toMatch(/500/);
+
+    await db.DomainProviderDeletion.destroy({ where: {} });
+    const ref2 = 'bbbbbbbbccccddddeeeeffffffffffff';
+    fetchMock.mockResolvedValueOnce(reply(201, { success: true, result: { id: ref2, status: 'pending', ssl: { status: 'pending_validation' } } }));
+    const w = await verified('Cf Gone', 'www.cfgone.com');
+    fetchMock.mockResolvedValueOnce(reply(404, { success: false, errors: [] }));
+    expect((await request(app).delete(`/api/v1/workspaces/${w.wid}/domains/${w.id}`).set(w.H)).status).toBe(200);
+    expect(await db.DomainProviderDeletion.count()).toBe(0);
   });
 });

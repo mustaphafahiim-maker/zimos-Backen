@@ -8,20 +8,23 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { requireLive } = require('../../core/middleware/subscriptionGuard');
 const { requirePlanFeature } = require('../billing/planFeatureGate');
+const { domainAddLimiter, domainVerifyLimiter } = require('../../core/middleware/rateLimiters');
+const { requireCustomDomains } = require('./domainsGate');
 const controller = require('./domainsController');
 const schemas = require('./domainsValidation');
 
 // Mounted at /api/v1/workspaces/:workspaceId/domains — staff, `domain.manage`.
+// Closed (404) unless CUSTOM_DOMAINS_ENABLED (domainsGate.js).
 const router = Router({ mergeParams: true });
-router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.DOMAIN_MANAGE));
+router.use(requireCustomDomains, authenticate, resolveTenant, requirePermission(PERMISSIONS.DOMAIN_MANAGE));
 
 // Connecting a custom domain needs a store out of draft and, while
 // PLAN_FEATURE_ENFORCEMENT is on, custom_domain (billing/planFeatureGate).
 // Listing and removing stay open.
 const customDomain = requirePlanFeature('custom_domain');
-router.post('/', validate(schemas.add), requireLive, customDomain, controller.add);
+router.post('/', domainAddLimiter, validate(schemas.add), requireLive, customDomain, controller.add);
 router.get('/', validate(schemas.list), controller.list);
-router.post('/:domainId/verify', validate(schemas.verify), requireLive, customDomain, controller.verify);
+router.post('/:domainId/verify', domainVerifyLimiter, validate(schemas.verify), requireLive, customDomain, controller.verify);
 router.delete('/:domainId', validate(schemas.remove), controller.remove);
 // The domains screen: full list with DNS records, primary domain, home
 // funnel, certificate state, DNS propagation check (domainSettings.js).

@@ -436,6 +436,10 @@ function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}
 
 const publicPlansLimiter = createIpMinuteLimiter('public-plans', env.rateLimit.publicPlansMinuteMax, { skip });
 const verifyCodeLimiter = createIpMinuteLimiter('verify-code', env.rateLimit.verifyMinuteMax, { skip });
+// Custom domains (modules/domains): each of these asks public DNS, per IP a minute.
+const domainAddLimiter = createIpMinuteLimiter('domain-add', 10, { skip });
+const domainVerifyLimiter = createIpMinuteLimiter('domain-verify', 20, { skip });
+const domainDnsCheckLimiter = createIpMinuteLimiter('domain-dns-check', 30, { skip });
 // A shopper's payment screenshot for a store order (manualPayments): a few tries a minute per IP.
 const MANUAL_PROOFS_PER_MINUTE = 5;
 const manualProofLimiter = createIpMinuteLimiter('manual-payment-proof', MANUAL_PROOFS_PER_MINUTE, { skip });
@@ -591,6 +595,9 @@ module.exports = {
   createUsernameCheckLimiter,
   publicPlansLimiter,
   verifyCodeLimiter,
+  domainAddLimiter,
+  domainVerifyLimiter,
+  domainDnsCheckLimiter,
   createIpMinuteLimiter,
   passwordResetLimiter,
   createPasswordResetLimiter,

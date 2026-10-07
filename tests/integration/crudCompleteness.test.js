@@ -7,6 +7,7 @@
 
 const { app, request, registerAndActivate, createWorkspace, setupWorkspaceWithProduct } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const env = require('../../src/config/env');
 
 const bearer = (token) => ({ Authorization: `Bearer ${token}` });
 
@@ -149,6 +150,13 @@ describe('catalog CRUD', () => {
 });
 
 describe('domains DELETE', () => {
+  // The domains routes are closed unless CUSTOM_DOMAINS_ENABLED (domains/domainsGate.js).
+  beforeAll(() => {
+    env.customDomains.enabled = true;
+  });
+  afterAll(() => {
+    env.customDomains.enabled = false;
+  });
   it('hard-deletes a custom domain (host routing config only)', async () => {
     const auth = await registerAndActivate();
     const workspace = await createWorkspace(auth.accessToken, 'Domain Del Co');
@@ -159,7 +167,7 @@ describe('domains DELETE', () => {
       .type('form')
       .send({ productName: 'Widget', price: '10.00' });
 
-    const add = await request(app).post(`/api/v1/workspaces/${workspace.id}/domains`).set(H).send({ hostname: 'delme.com' });
+    const add = await request(app).post(`/api/v1/workspaces/${workspace.id}/domains`).set(H).send({ hostname: 'www.delme.com' });
     expect(add.status).toBe(201);
     const domainId = add.body.domain.id;
 
