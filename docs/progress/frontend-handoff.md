@@ -3692,3 +3692,49 @@ One server switch: `WALLET_ENABLED` (off unless exactly `true`). Off, nothing be
 - **Console → Plans → edit**: a field «رسوم الطلب (بالقرش)» / "Fee per order (piastres)", shown as EGP; hint «للباقة اللي سعرها الشهري 0 وبالجنيه بس» / "Only for a plan at 0 a month, in EGP"; `PER_ORDER_FEE_NOT_ALLOWED` under the field. The plans list shows «{fee} / طلب» / "{fee} / order" on such a plan.
 - **Console → Store → «الرصيد» / "Balance"** panel (subscriptions.view): the balance, phase, fee, totals and the ledger (GET `/admin/workspaces/:id/wallet`).
 - **Console → Transfer proofs → a top-up**: label «شحن رصيد» / "Balance top-up", «المطلوب: {requestedAmount}» / "Asked: {requestedAmount}", «الرصيد الحالي: {wallet.balance}» / "Balance now: {wallet.balance}", «قبول» / "Approve" with «المبلغ اللي وصل فعلًا» / "Amount that actually arrived" (any amount above 0; it is what gets credited — show «هيتضاف للرصيد {receivedAmount}» / "{receivedAmount} will be added to the balance").
+
+## 336. Manual subscription pricing: paid, free or discounted — UI: pending
+
+No new environment variable or setting. A platform admin activating a store's subscription by hand now says what the period costs the merchant: **paid** (the plan's price, as before and the default), **free** (a gift) or **discounted** (a percent off, or a fixed price per billing period). A free or discounted subscription is never charged at the plan's price: no charge can be written for it, and when its period runs out an hourly job moves it to `past_due` (the usual grace day, then the restriction) instead of renewing. Activate again with `paid` (or extend it) to go on. Amounts are minor units of the plan's currency.
+
+### Endpoints (console)
+- **GET `/admin/workspaces/:workspaceId/subscription`** (subscriptions.view): `subscription` adds
+  ```json
+  {
+    "subscription": {
+      "id": "2f34…", "plan": { "id": "c3bc…", "name": "Starter", "code": "starter" },
+      "status": "active", "storedStatus": "active", "phase": "ok", "billingCycle": "monthly",
+      "currentPeriodStart": "2026-10-07T08:16:28Z", "currentPeriodEnd": "2026-11-07T08:16:28Z", "source": "manual_admin", "draft": false,
+      "pricingKind": "discounted", "discountPercent": 25, "priceOverrideAmount": null,
+      "effectivePrice": 22425, "currency": "EGP", "pricingExpiredAt": null
+    },
+    "limits": { "…": "…" }, "openCharge": null, "history": [ ]
+  }
+  ```
+  `pricingKind`: `paid` · `free` · `discounted`. `effectivePrice`: one billing period as the merchant pays it (0 when free). `discountPercent` (1–99) or `priceOverrideAmount` is set only on a discounted one. `pricingExpiredAt`: when a free or discounted period ran out and the job moved it to `past_due` (`null` otherwise).
+- **POST `/admin/workspaces/:workspaceId/subscription/activate`** (subscriptions.manage) takes three more fields:
+  ```json
+  { "planId": "c3bc…", "duration": { "months": 1 }, "billingCycle": "monthly", "note": "Partner deal",
+    "pricingKind": "discounted", "discountPercent": 25 }
+  ```
+  or `"pricingKind": "discounted", "priceOverrideAmount": 10000` (per billing period, less than the plan's price for that cycle), or `"pricingKind": "free"`. Left out = `paid`. → 201 `{ "change": { … }, "replayed": false, …the GET answer… }` (200 with `replayed: true` for the same Idempotency-Key, as before). Errors, 422 `VALIDATION_ERROR` with the field in `details`: `discountPercent` "Give a percent or a fixed amount, not both" (a discounted one with neither or both); `pricingKind` "A discount needs the discounted pricing" (a percent or an amount with paid or free); `priceOverrideAmount` "The amount must be more than zero and less than the plan price"; a percent outside 1–99 or an unknown `pricingKind` "Invalid body".
+- **change-plan** keeps the pricing (a fixed price above the new plan's price counts as the plan's price); **extend** keeps it and clears `pricingExpiredAt` (a period that had run out runs again at its price); **end** ends the period now (the job then moves a free or discounted one to `past_due`).
+- **GET `/admin/subscriptions`** (subscriptions.view): each row adds `pricingKind`, `discountPercent`, `priceOverrideAmount`, `effectivePrice`, `pricingExpiredAt`; `mrr` is now at the effective price (a free one 0, a free or discounted one whose period ran out 0); the answer adds the same total over paid rows only:
+  ```json
+  { "subscriptions": [ { "workspaceName": "Demo Store", "planName": "Starter", "status": "active", "pricingKind": "free", "effectivePrice": 0, "pricingExpiredAt": null, "mrr": 0, "mrrCurrency": null, "…": "…" } ],
+    "mrr": 0, "mrrCurrency": null, "mrrByCurrency": {}, "paidOnly": { "mrr": 0, "mrrCurrency": null, "mrrByCurrency": {} } }
+  ```
+  The console overview's MRR follows the same rule.
+- **POST `/admin/workspaces/:workspaceId/charges`** (payments.record) → 409 `MANUAL_PRICING` "This subscription is free or discounted by the platform, so it is not charged here." **GET `/admin/workspaces/:workspaceId/charges`** has `nextCharge: null` for such a store.
+- Audit log: the manual actions' before/after carry `pricingKind`, `discountPercent`, `priceOverrideAmount`, and `metadata.pricing { kind, amount, currency }`; a new action `subscription.manual_pricing_expired` (no actor) when the job moves a free or discounted subscription to `past_due`.
+
+### Endpoints (merchant)
+- **GET `/workspaces/:workspaceId/billing`**: `nextCharge` is `null` while the subscription is free or discounted.
+- **POST `/workspaces/:workspaceId/billing/invoices/open`**, **POST `/billing/invoices/next/payment-proofs`** and **POST `/billing/payments`** (Pay, while a gateway is on) → 409 `MANUAL_PRICING` "This subscription is free or discounted by the platform, so it is not charged here." Nothing is written or stored.
+
+### Screens
+- **Console → Store → Subscription → «تفعيل» / "Activate"** dialog: a choice «التسعير» / "Pricing": «مدفوع — سعر الباقة» / "Paid — the plan's price" (default) · «مجاني (هدية)» / "Free (gift)" · «بخصم» / "Discounted". With Discounted, a toggle «نسبة خصم» / "Percent off" (1–99, «٪» / "%") or «سعر ثابت للفترة» / "Fixed price per period" (in the plan's currency, less than the plan's price for the chosen cycle), and a line «التاجر هيدفع {price} كل {شهر|سنة}» / "The merchant pays {price} a {month|year}" worked out from the plan's price. Hint under Free and Discounted: «مفيش فواتير هتتعمل للاشتراك ده، ولما الفترة تخلص هيتحول لمتأخر في الدفع» / "No charges are made for this subscription; when the period ends it becomes past due". Field errors under the field (`details[].field`): «اختار نسبة أو سعر ثابت — واحد بس» / "Choose a percent or a fixed price — one of them"; «النسبة من 1 لـ 99» / "The percent must be 1 to 99"; «السعر لازم يكون أكبر من صفر وأقل من سعر الباقة» / "The price must be above zero and below the plan's price".
+- **Console → Store → Subscription** panel: a badge by the plan — «مدفوع» / "Paid" · «مجاني» / "Free" · «خصم {discountPercent}٪» / "{discountPercent}% off" · «سعر خاص» / "Special price"; «السعر الفعلي: {effectivePrice} {currency}» / "Price paid: {effectivePrice} {currency}". When `pricingExpiredAt`: «انتهت الفترة المجانية/المخفّضة في {pricingExpiredAt} — فعّل الاشتراك أو مدّه» / "The free/discounted period ended on {pricingExpiredAt} — activate or extend it". The «إنشاء فاتورة» / "Create charge" button is off for a free or discounted store with the hint «الاشتراك مجاني أو بخصم من المنصة — مفيش فواتير» / "Free or discounted by the platform — no charges" (`MANUAL_PRICING` shows the same text).
+- **Console → Subscriptions** list: a column «التسعير» / "Pricing" (the badge above) and «السعر الفعلي» / "Price paid"; the MRR header gets a switch «كل الاشتراكات» / "All subscriptions" · «المدفوعة بس» / "Paid only" (`paidOnly`).
+- **Console → Audit log**: `subscription.manual_pricing_expired` «انتهت فترة التسعير اليدوي» / "Manual pricing period ended".
+- **Merchant → Settings → Subscription**: with `nextCharge: null` hide the next-charge line. On `MANUAL_PRICING` from Pay or the pay dialog: «اشتراكك مجاني أو بخصم من زيموس — مفيش حاجة تدفعها هنا. لو الفترة خلصت تواصل مع الدعم» / "Your subscription is free or discounted by Zimos — there's nothing to pay here. If the period has ended, contact support", with «افتح تذكرة دعم» / "Open a support ticket".

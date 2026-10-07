@@ -14,6 +14,7 @@ const entitlements = require('./entitlementsService');
 const onlineBilling = require('./onlineBillingService');
 
 const { availableFeatureKeys, isAvailableFeature } = require('./featureCatalog');
+const { isManuallyPriced } = require('./manualPricing');
 
 const Op = db.Sequelize.Op;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -327,7 +328,9 @@ async function getWorkspaceBilling(workspaceId) {
   const plan = subscription.plan;
 
   let nextCharge = null;
-  if (plan && planPrice(plan, subscription.billingCycle) > 0) {
+  // None for a free or discounted manual subscription, which is never charged
+  // at the plan's price (billing/manualPricing; as the console's charge list).
+  if (plan && !isManuallyPriced(subscription) && planPrice(plan, subscription.billingCycle) > 0) {
     const { referralCodeId, specialTermsId, ...pricing } = await charges.priceCharge(subscription, plan);
     nextCharge = pricing;
   }

@@ -8,6 +8,7 @@ const referralCodes = require('../referrals/referralCodeService');
 const commissions = require('../referrals/commissionService');
 const { planPrice, addBillingPeriod } = require('./planPricing');
 const specialTerms = require('./specialTermsService');
+const manualPricing = require('./manualPricing');
 
 /**
  * Subscription charges: one billing_invoices row per charge, the first and
@@ -156,6 +157,9 @@ async function createCharge(workspaceId, options = {}) {
   return db.sequelize.transaction((transaction) => createChargeInTransaction(workspaceId, options, transaction));
 }
 
+const manualPricingConflict = () =>
+  new ConflictError('This subscription is free or discounted by the platform, so it is not charged here.', 'MANUAL_PRICING');
+
 /** createCharge inside the caller's transaction (a proof that writes its charge). */
 async function createChargeInTransaction(workspaceId, { now = new Date(), req = null, byMerchant = false } = {}, transaction) {
   const subscription = await db.Subscription.findOne({
@@ -170,6 +174,10 @@ async function createChargeInTransaction(workspaceId, { now = new Date(), req = 
     transaction,
   });
   if (pending) return { invoice: pending, created: false };
+  // A free or discounted manual subscription (billing/manualPricing) is never
+  // charged at the plan's price, also after its period ran out: the console
+  // sets it to paid again first.
+  if (manualPricing.isManuallyPriced(subscription)) throw manualPricingConflict();
 
   const { pricing, override, periodStart, periodEnd } = await nextChargeTerms(subscription, transaction, { now, lock: true });
   if (pricing.specialTermsId) await override.increment('chargesUsed', { by: 1, transaction });
@@ -211,6 +219,10 @@ async function quoteCharge(workspaceId, { now = new Date() } = {}) {
   if (!subscription) throw new NotFoundError('Subscription');
   const pending = await db.BillingInvoice.findOne({ where: { subscriptionId: subscription.id, status: 'pending' } });
   if (pending) return { pending };
+  // The same refusal as createCharge (item 336), so /invoices/open shows no
+  // charge at the plan's price and a proof for the next charge is refused
+  // before its screenshot is stored.
+  if (manualPricing.isManuallyPriced(subscription)) throw manualPricingConflict();
   const { pricing, periodStart, periodEnd } = await nextChargeTerms(subscription, null, { now });
   return { quote: { ...pricing, periodStart, periodEnd } };
 }
@@ -648,7 +660,7 @@ async function listCharges(workspaceId) {
   const plan = subscription.plan;
   const hasPending = invoices.some((i) => i.status === 'pending');
   let nextCharge = null;
-  if (plan && !hasPending && planPrice(plan, subscription.billingCycle) > 0) {
+  if (plan && !hasPending && !manualPricing.isManuallyPriced(subscription) && planPrice(plan, subscription.billingCycle) > 0) {
     const { referralCodeId, specialTermsId, ...pricing } = await priceCharge(subscription, plan);
     nextCharge = pricing;
   }
