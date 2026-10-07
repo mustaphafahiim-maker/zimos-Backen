@@ -550,7 +550,9 @@ async function createOrder(
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
         // With the option the shopper picked, when not the standard one.
-        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}) },
+        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}),
+          // Free shipping a VIP tier, a referral or a pickup gave: kept when a line joins later (item 277).
+          ...(payload[Symbol.for('zimos.freeShipping')] ? { freeShippingGranted: true } : {}) },
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,
@@ -727,6 +729,14 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   }
   lines.push({ ...newLine, lineTotalAmount: Number(newLine.lineTotalAmount) });
 
+  // What the order was given when placed still holds (item 277): free shipping from a VIP tier,
+  // a referral or a pickup (every line), or from a bundle tier (that bundle's products).
+  const keptShipping = order.shippingSnapshot || {};
+  const freeProducts = new Set((order.discountsSnapshot || []).filter((d) => d && d.kind === 'bundle' && d.freeShipping).flatMap((d) => [d.productId, ...(d.productIds || [])]).filter(Boolean));
+  for (const line of lines) {
+    if (line.shippingRule && (keptShipping.freeShippingGranted === true || freeProducts.has(line.productId))) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+  }
+
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
   const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
@@ -758,15 +768,22 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     funnelId: order.funnelId || null,
     transaction,
   });
-  const { taxAmount } = await calculateTax(workspaceId, {
+  // The shipping option the shopper picked, at its price for the new order; standard when the store no longer offers it.
+  const option = keptShipping.option && keptShipping.option.key
+    ? await require('../shipping/shippingOptions').choose(workspaceId, keptShipping.option.key, shipping, transaction).catch(() => null)
+    : null;
+  const shippingAmount = option ? option.amount : shipping.amount;
+  let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
-    shippingAmount: shipping.amount,
+    shippingAmount,
     transaction,
   });
-  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction, order.currency);
-  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;
+  // A tax-exempt business customer's order stays exempt (businessCustomers/, items 228, 277).
+  if (order.contactSnapshot && order.contactSnapshot.taxExempt === true) taxAmount = 0;
+  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shippingAmount, transaction, order.currency);
+  const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
 
   const item = await db.OrderItem.create(
     {
@@ -793,7 +810,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       subtotalAmount: subtotal,
       discountAmount,
       discountsSnapshot,
-      shippingAmount: shipping.amount,
+      shippingAmount,
       taxAmount,
       totalAmount,
       paymentAdjustmentAmount: paymentAdjustment.amount,
@@ -802,7 +819,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,
-      shippingSnapshot: shippingSnapshot(shipping),
+      // Merged, not replaced (item 277): the delivery slot, the pickup and the granted free shipping stay.
+      shippingSnapshot: { ...keptShipping, ...shippingSnapshot(shipping), option: option ? option.snapshot : undefined },
     },
     { transaction }
   );

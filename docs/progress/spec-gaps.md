@@ -1903,7 +1903,10 @@ A review of the points, store credit, gift card, quote and bundle code found the
 - [x] 276. Free-gift lines counted as units in quantity-bundle and mix-and-match tiers (a gift unlocking a tier discount). (backend fix; no UI change)
   - The gift line the server adds carries the marker `zimos.freeGift`; the priced line keeps it as `freeGift`. Quantity-bundle and mix-and-match tiers skip those lines, and so does a discount's "contains product" condition (a gift product no longer qualifies the order for a discount limited to it).
   - Checked: a 2-unit 50% tier on product A and a gift rule giving one A → buying 1 A: no tier (before: 500 off); buying 2 A: the tier applies (1000 off). An automatic 10% limited to product G with G as the gift → not applied.
-- [ ] 277. An upsell joined to an open order re-added tax for a tax-exempt business customer and shipping for a free-shipping (VIP / referral) order.
+- [x] 277. An upsell joined to an open order re-added tax for a tax-exempt business customer and shipping for a free-shipping (VIP / referral) order. (backend fix; no UI change)
+  - The re-pricing (`orderService.addLineToOpenOrder`) keeps what the order was given: tax 0 when its contact snapshot says tax-exempt; every line free to ship when the order was placed with granted free shipping (VIP tier, referral, pickup — now recorded as `shippingSnapshot.freeShippingGranted`); a bundle tier's free shipping for that bundle's products.
+  - Found on the way: it also replaced the shipping snapshot, dropping the delivery slot and the shopper's shipping option (express went back to the standard price). The snapshot is now merged, and the picked option is priced again for the new order (standard if the store no longer offers it).
+  - Checked (14% VAT, 300 flat rate, express +500): exempt order 1300 → 2300 with tax 0; free-shipping order (placed with the marker) stays at shipping 0; express order keeps 800 shipping, the option and the slot; a plain order 1440 → 2580 as before.
 
 Not queued: points earned on an order that is returned after they were spent are not clawed back below zero (the balance never goes negative) — the design's stated choice, left to the owner.
 
