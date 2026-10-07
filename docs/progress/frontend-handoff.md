@@ -3150,3 +3150,7 @@ Same endpoints as before (`/workspaces/:ws/tracking-pixels`). `reddit`, `x` and 
 ### Screens
 - Marketing → «عجلة الحظ» / "Spin to win": on/off, title, text, delay, slices (label, prize = pick a discount or «من غير جايزة» / "No prize", weight with the live % next to it), the preview wheel, stats «لفّات / جوايز» / "Spins / prizes".
 - Storefront popup after `delaySeconds`: the wheel with labels and chances, phone + name, a required tick «موافق أستقبل عروض من المتجر» / "I agree to receive offers from the store", «لف العجلة» / "Spin"; the result «مبروك! كود الخصم: ZZSPIN10» with copy, or «حظ أوفر المرة الجاية» / "Better luck next time". Don't show it again once spun (remember locally).
+
+## 259. «Offer» column in the order export — UI: pending
+
+`GET /workspaces/:ws/orders/export/columns` now lists `offerName` («العرض» / "Offer"), an item column (with `rowPer=item`): the offer, bundle, cart offer or free gift the line came from, empty otherwise. Add it to the column picker beside Product / Variant / SKU.
