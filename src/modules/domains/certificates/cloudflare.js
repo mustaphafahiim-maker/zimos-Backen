@@ -18,6 +18,9 @@ const TIMEOUT_MS = 10000;
 // Cloudflare's id for a custom hostname: 32 hex characters (a uuid allowed too).
 const REF = /^[0-9a-f-]{8,64}$/i;
 const DUPLICATE_CODES = new Set([1406]);
+// Listing: Cloudflare's largest page, and a bound on one run (10 000 hostnames).
+const PER_PAGE = 50;
+const MAX_PAGES = 200;
 
 function config() {
   const { apiToken, zoneId } = env.customDomains.cloudflare;
@@ -150,6 +153,28 @@ const cloudflare = {
     const { status, body } = await call('DELETE', `/custom_hostnames/${providerRef}`);
     if (status === 404 || (status >= 200 && status < 300)) return { revoked: true };
     throw new CertificateProviderError(errorText(body) || `Cloudflare answered ${status}`, { retryable: true });
+  },
+
+  // Every custom hostname on the zone, page by page, for the reconciliation
+  // job. A page that fails throws: no partial list is ever answered.
+  async listHostnames() {
+    const out = [];
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const { status, body } = await call('GET', `/custom_hostnames?page=${page}&per_page=${PER_PAGE}`);
+      if (status !== 200 || !body || !body.success || !Array.isArray(body.result)) {
+        throw new CertificateProviderError(errorText(body) || `Cloudflare answered ${status}`, { retryable: true });
+      }
+      for (const r of body.result) {
+        if (r && r.id && r.hostname) {
+          out.push({ providerRef: String(r.id), hostname: String(r.hostname).toLowerCase(), createdAt: r.created_at || null });
+        }
+      }
+      const totalPages = Number(body.result_info && body.result_info.total_pages) || 0;
+      if (body.result.length === 0 || page >= totalPages) return out;
+    }
+    throw new CertificateProviderError(`Cloudflare has more than ${PER_PAGE * MAX_PAGES} custom hostnames; none were listed`, {
+      retryable: false,
+    });
   },
 };
 

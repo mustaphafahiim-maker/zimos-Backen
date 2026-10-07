@@ -14,8 +14,8 @@ const { pendingCutoff } = require('./domainRules');
  * bounded batch, and one domain's failure never stops the others.
  *
  * While CUSTOM_DOMAINS_ENABLED is off, everything but the provider deletion
- * retry does nothing, as before these jobs existed. The certificate jobs need
- * a provider (CERTIFICATE_PROVIDER) too.
+ * retry does nothing, as before these jobs existed. The certificate jobs and
+ * the reconciliation need a provider (CERTIFICATE_PROVIDER) too.
  */
 
 const BATCH = 100;
@@ -99,6 +99,13 @@ async function retryProviderDeletions(now = Date.now()) {
   let failed = 0;
   for (const row of rows) {
     if (row.provider !== provider.code) continue;
+    // A domain row holds this hostname again (asked for anew, the provider
+    // answered with the same one): removing it would take that domain down.
+    if (await db.Domain.count({ where: { sslProviderRef: row.providerRef } })) {
+      logger.warn('domains: queued provider deletion dropped, a domain uses it', { hostname: row.hostname });
+      await row.destroy();
+      continue;
+    }
     try {
       await provider.revoke({ hostname: row.hostname, providerRef: row.providerRef });
       await row.destroy();
@@ -110,6 +117,73 @@ async function retryProviderDeletions(now = Date.now()) {
     }
   }
   return { checked: rows.length, failed };
+}
+
+const RECONCILE_MIN_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Daily: custom hostnames at Cloudflare that no domain row knows (a row that
+ * went before migration 214's trigger, an answer lost before its ref was
+ * saved) are queued for the deletion retry above. Only with
+ * CUSTOM_DOMAINS_ENABLED and CERTIFICATE_PROVIDER=cloudflare. Never touched:
+ * a hostname a domain row knows by ref or by name, whatever its status; one
+ * made in the last hour or with no creation time (its row may not have its
+ * ref yet); one already queued. More than CUSTOM_DOMAINS_RECONCILE_MAX in
+ * one run queues none and warns: that many is likelier a fault than a leak.
+ */
+async function reconcileProviderHostnames(now = Date.now()) {
+  const idle = { listed: 0, orphans: 0, queued: 0, capped: false };
+  if (!enabled() || !certificateProviderConfigured()) return idle;
+  const provider = getCertificateProvider();
+  if (provider.code !== 'cloudflare' || typeof provider.listHostnames !== 'function') return idle;
+
+  const listed = await provider.listHostnames();
+  if (!listed.length) return idle;
+  const known = await db.Domain.findAll({
+    where: {
+      [Op.or]: [{ sslProviderRef: listed.map((h) => h.providerRef) }, { hostname: listed.map((h) => h.hostname) }],
+    },
+    attributes: ['hostname', 'sslProviderRef'],
+  });
+  const knownRefs = new Set(known.map((d) => d.sslProviderRef).filter(Boolean));
+  const knownHosts = new Set(known.map((d) => String(d.hostname).toLowerCase()));
+  const oldEnough = (h) => {
+    const created = Date.parse(h.createdAt || '');
+    return Number.isFinite(created) && now - created >= RECONCILE_MIN_AGE_MS;
+  };
+  const candidates = listed.filter((h) => !knownRefs.has(h.providerRef) && !knownHosts.has(h.hostname) && oldEnough(h));
+  const queuedAlready = candidates.length
+    ? await db.DomainProviderDeletion.findAll({
+        where: { provider: provider.code, providerRef: candidates.map((h) => h.providerRef) },
+        attributes: ['providerRef'],
+      })
+    : [];
+  const queuedRefs = new Set(queuedAlready.map((r) => r.providerRef));
+  const orphans = candidates.filter((h) => !queuedRefs.has(h.providerRef));
+  const result = { listed: listed.length, orphans: orphans.length, queued: 0, capped: false };
+  if (!orphans.length) return result;
+
+  const max = env.customDomains.reconcileMax;
+  if (orphans.length > max) {
+    logger.warn('domains reconcile: more orphan hostnames than CUSTOM_DOMAINS_RECONCILE_MAX; none queued', {
+      orphans: orphans.length,
+      max,
+    });
+    return { ...result, capped: true };
+  }
+  await db.DomainProviderDeletion.bulkCreate(
+    orphans.map((h) => ({
+      workspaceId: null,
+      hostname: h.hostname,
+      provider: provider.code,
+      providerRef: h.providerRef,
+      attempts: 0,
+      nextAttemptAt: new Date(now),
+    })),
+    { ignoreDuplicates: true }
+  );
+  logger.warn('domains reconcile: orphan hostnames queued for deletion', { hostnames: orphans.map((h) => h.hostname) });
+  return { ...result, queued: orphans.length };
 }
 
 /** Hourly: pending rows past their 7 days (never verified, never at the provider). */
@@ -165,6 +239,7 @@ module.exports = {
   pollPendingCertificates,
   checkActiveCertificates,
   retryProviderDeletions,
+  reconcileProviderHostnames,
   removeExpiredPending,
   enforceAccess,
 };

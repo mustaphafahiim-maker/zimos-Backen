@@ -146,8 +146,10 @@ async function deleteDomain(workspaceId, domainId, req) {
   const domain = await db.Domain.findOne({ where: { id: domainId, workspaceId } });
   if (!domain) throw new NotFoundError('Domain');
   const before = domain.toJSON();
-  await require('./domainSettings').revokeCertificate(domain);
+  // The delete queues the provider's hostname in the same transaction
+  // (migration 214); removing it at the provider now clears that row.
   await domain.destroy();
+  await require('./domainSettings').revokeCertificate(domain);
   // It may have been the store's canonical address (primaryHost.js).
   require('./primaryHost').forget(workspaceId);
   require('../storefront/storefrontCache').invalidate(workspaceId);

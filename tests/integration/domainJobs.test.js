@@ -42,7 +42,7 @@ async function store(name = 'Jobs Store') {
 const domain = (s, hostname, fields = {}) =>
   db.Domain.create({ ...s, hostname, verificationToken: 'tok', status: 'verified', verifiedAt: new Date(), ...fields });
 
-it('declares the five schedules', () => {
+it('declares the six schedules', () => {
   const names = require('../../src/modules/domains/jobs').schedules.map((s) => [s.name, s.everyMs]);
   expect(names).toEqual([
     ['domains.poll_certificates', 5 * 60 * 1000],
@@ -50,6 +50,7 @@ it('declares the five schedules', () => {
     ['domains.retry_provider_deletions', 15 * 60 * 1000],
     ['domains.remove_expired_pending', HOUR],
     ['domains.enforce_access', 10 * 60 * 1000],
+    ['domains.reconcile_provider_hostnames', 24 * HOUR],
   ]);
 });
 
