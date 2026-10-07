@@ -3130,3 +3130,23 @@ Same endpoints as before (`/workspaces/:ws/tracking-pixels`). `reddit`, `x` and 
 
 `GET /api/v1/workspaces/:ws/tracking-pixels` → `platforms[].serverMode` and every `pixels[].serverMode`: `"live"` | `"sandbox"` | `null` (no server API, or a Google `AW-` id).
 - Next to the «Conversions API» switch: `sandbox` → a grey chip «تجريبي — مش بيتبعت لسه» / "Sandbox — not sent yet" with help «الأحداث بتتجهّز وتتسجّل بس، لحد ما نفعّل المنصة دي» / "Events are built and logged only, until this platform is switched on"; `live` → nothing (or «شغال» / "Live").
+
+## 258. Spin to win — UI: pending
+
+### Staff: `/api/v1/workspaces/:ws/spin-wheel` (`discounts.manage`)
+- `GET /` → `{ config, preview, stats: { spins, prizes } }` (`preview` = what the shop would show, with chances).
+- `PUT /` the whole config:
+```json
+{ "enabled": true, "title": "جرّب حظك", "text": "لف العجلة وخد خصم على أول طلب", "delaySeconds": 10,
+  "slices": [{ "label": "10%", "discountId": "…", "weight": 30 }, { "label": "20%", "discountId": "…", "weight": 10 },
+             { "label": "حظ أوفر", "discountId": null, "weight": 60 }] }
+```
+  2–12 slices; `label` ≤ 40; `weight` 0–1000 (relative); a prize is a store discount **with a code** (422 otherwise); at least one prize with weight > 0.
+
+### Storefront: `/api/v1/store/:ws/spin-wheel`
+- `GET /` → `{ wheel: null | { title, text, delaySeconds, slices: [{ id, label, prize, chance }] } }` — `chance` in % (one decimal). Show the chances on the wheel or under it («فرص الفوز: ١٠٪ — ٣٠٪ …» / "Chances: …"); ended coupons are already left out.
+- `POST /spin` `{ phone, fullName?, marketingConsent: true, website: "" }` → 201 `{ sliceId, label, prize, couponCode }`. Animate the wheel to `sliceId` **after** the answer. 409 `ALREADY_SPUN` «الرقم ده لف العجلة قبل كده» / "This number has already spun"; 422 without the consent tick; 404 `SPIN_WHEEL_OFF`.
+
+### Screens
+- Marketing → «عجلة الحظ» / "Spin to win": on/off, title, text, delay, slices (label, prize = pick a discount or «من غير جايزة» / "No prize", weight with the live % next to it), the preview wheel, stats «لفّات / جوايز» / "Spins / prizes".
+- Storefront popup after `delaySeconds`: the wheel with labels and chances, phone + name, a required tick «موافق أستقبل عروض من المتجر» / "I agree to receive offers from the store", «لف العجلة» / "Spin"; the result «مبروك! كود الخصم: ZZSPIN10» with copy, or «حظ أوفر المرة الجاية» / "Better luck next time". Don't show it again once spun (remember locally).

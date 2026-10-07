@@ -298,6 +298,8 @@ v1.use('/workspaces/:workspaceId/purchasing', require('./modules/purchasing').ro
 v1.use('/workspaces/:workspaceId/free-gifts', require('./modules/freeGifts').router);
 // Cart offers (spec-gaps item 253).
 v1.use('/workspaces/:workspaceId/cart-offers', require('./modules/cartOffers').router);
+// Spin to win (spec-gaps item 258).
+v1.use('/workspaces/:workspaceId/spin-wheel', require('./modules/spinWheel').staff);
 // Notes and follow-ups on customers (spec-gaps item 209).
 v1.use('/workspaces/:workspaceId/customer-notes', require('./modules/customerNotes').router);
 // Size charts (spec-gaps item 210).
@@ -408,6 +410,7 @@ v1.use('/store/:workspaceId/account/wishlist', require('./modules/shopperAccount
 v1.use('/store/:workspaceId/account/google', require('./modules/shopperAccounts/google').store);
 v1.use('/store/:workspaceId/account/referral', require('./modules/customerReferrals').account);
 v1.use('/store/:workspaceId/referrals', require('./modules/customerReferrals').store);
+v1.use('/store/:workspaceId/spin-wheel', require('./modules/spinWheel').store);
 v1.use('/store/:workspaceId/account/business', require('./modules/businessCustomers').account);
 v1.use('/store/:workspaceId/account/on-account', require('./modules/accountCredit').account);
 v1.use('/store/:workspaceId/account/privacy', require('./modules/privacyRequests').account);
