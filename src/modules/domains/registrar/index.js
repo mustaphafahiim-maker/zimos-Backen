@@ -18,6 +18,12 @@ function registrar() {
   const name = process.env.DOMAIN_REGISTRAR || 'sandbox';
   const make = ADAPTERS[name];
   if (!make) throw new Error(`Unknown DOMAIN_REGISTRAR "${name}"`);
+  // The sandbox registers nothing and says every name is free: never in production (item 305), where a
+  // "bought" domain is connected as verified without the TXT proof.
+  if (name === 'sandbox' && require('../../../config/env').isProduction) {
+    const { AppError } = require('../../../core/errors/AppError');
+    throw new AppError('DOMAIN_PURCHASE_UNAVAILABLE', 'Buying a domain here is not available yet — connect one you own', 503);
+  }
   return { name, ...make() };
 }
 

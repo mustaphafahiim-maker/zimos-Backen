@@ -31,26 +31,43 @@ const limitsOf = (p) => {
   return { min: l.min || null, max: l.max || null, maxPerCustomer: l.maxPerCustomer || null };
 };
 
-async function productsOf(workspaceId, variantIds) {
+async function productsOf(workspaceId, variantIds, transaction = null) {
   const variants = await db.ProductVariant.findAll({
     where: { id: [...new Set(variantIds.filter(Boolean))], workspaceId },
     attributes: ['id', 'productId'],
     include: [{ model: db.Product, as: 'product', attributes: ['id', 'name', 'purchaseLimits'] }],
+    transaction,
   });
   return new Map(variants.map((v) => [v.id, v.product]));
 }
 
-/** Checkout: the order's lines against each product's limits; 422 PURCHASE_LIMIT naming the product. */
-async function assertWithin(workspaceId, lines, contact) {
-  const byVariant = await productsOf(workspaceId, lines.map((l) => l.variantId));
+/**
+ * Units per product of these lines ({ variantId, offerId?, quantity }), counted in pieces (item 313): an
+ * offer line counts offers, so "Pack of 5" × 1 is 5 units (orders/orderUnits.js). Map productId →
+ * { product, quantity } for products with limits.
+ */
+async function unitsByProduct(workspaceId, lines, transaction = null) {
+  const pieces = await require('../orders/orderUnits').physicalUnits(lines.filter((l) => l && l.variantId), transaction);
+  const byVariant = await productsOf(workspaceId, pieces.map((u) => u.variantId), transaction);
   const totals = new Map();
-  for (const l of lines) {
-    const p = byVariant.get(l.variantId);
+  for (const u of pieces) {
+    const p = byVariant.get(u.variantId);
     if (!p || !limitsOf(p)) continue;
     const t = totals.get(p.id) || { product: p, quantity: 0 };
-    t.quantity += Number(l.quantity) || 0;
+    t.quantity += Number(u.quantity) || 0;
     totals.set(p.id, t);
   }
+  return totals;
+}
+
+/**
+ * Checkout: the order's lines against each product's limits; 422 PURCHASE_LIMIT naming the product.
+ * Run again inside the order's transaction (orderService.createOrder, item 313), under a lock on the
+ * shopper's phone, so two orders at once can't both pass maxPerCustomer. `excludeOrderId`: an order
+ * whose lines are already in `lines` (an upsell joining it).
+ */
+async function assertWithin(workspaceId, lines, contact, transaction = null, { excludeOrderId = null } = {}) {
+  const totals = await unitsByProduct(workspaceId, lines, transaction);
   if (!totals.size) return;
   const problems = [];
   let customer;
@@ -61,13 +78,17 @@ async function assertWithin(workspaceId, lines, contact) {
     if (l.maxPerCustomer) {
       if (customer === undefined) {
         const phone = normalizePhone(contact && contact.phone);
-        customer = phone ? await db.Customer.findOne({ where: { workspaceId, phoneNormalized: phone }, attributes: ['id'] }) : null;
+        customer = phone ? await db.Customer.findOne({ where: { workspaceId, phoneNormalized: phone }, attributes: ['id'], transaction }) : null;
       }
+      // Earlier orders in pieces too; one cancelled or rejected on the call is no purchase.
       const before = customer
-        ? Number(await db.OrderItem.sum('quantity', {
-          where: { productId: product.id },
-          include: [{ model: db.Order, as: 'order', attributes: [], where: { workspaceId, customerId: customer.id, cancelledAt: null, isTest: false } }],
-        })) || 0
+        ? Number((await db.sequelize.query(
+          `SELECT COALESCE(SUM(oi.quantity * COALESCE((SELECT SUM(ov.quantity) FROM offer_variants ov WHERE ov.offer_id = oi.offer_id), 1)), 0) AS n
+             FROM order_items oi JOIN orders o ON o.id = oi.order_id
+            WHERE oi.product_id = :product AND o.workspace_id = :ws AND o.customer_id = :customer AND o.cancelled_at IS NULL
+              AND o.confirmation_state <> 'rejected' AND o.is_test = false AND (CAST(:exclude AS uuid) IS NULL OR o.id <> CAST(:exclude AS uuid))`,
+          { replacements: { product: product.id, ws: workspaceId, customer: customer.id, exclude: excludeOrderId }, type: db.Sequelize.QueryTypes.SELECT, transaction }
+        ))[0].n) || 0
         : 0;
       if (before + quantity > l.maxPerCustomer) {
         const left = Math.max(0, l.maxPerCustomer - before);
@@ -83,16 +104,14 @@ async function assertWithin(workspaceId, lines, contact) {
   }
 }
 
-/** Cart: the product's units in the cart after a change must not pass its `max`. */
-async function assertCartMax(workspaceId, cartId, variantId, quantityAfter, exceptItemId = null) {
+/** Cart: the product's units (pieces, item 313) in the cart after a change must not pass its `max`. */
+async function assertCartMax(workspaceId, cartId, variantId, quantityAfter, exceptItemId = null, offerId = null) {
   const product = (await productsOf(workspaceId, [variantId])).get(variantId);
   const l = limitsOf(product);
   if (!l || !l.max) return;
-  const others = await db.CartItem.findAll({
-    where: { cartId, ...(exceptItemId ? { id: { [Op.ne]: exceptItemId } } : {}) },
-    include: [{ model: db.ProductVariant, as: 'variant', attributes: ['productId'], required: true, where: { productId: product.id } }],
-  }).catch(() => []);
-  const total = others.reduce((n, i) => n + i.quantity, 0) + quantityAfter;
+  const others = await db.CartItem.findAll({ where: { cartId, ...(exceptItemId ? { id: { [Op.ne]: exceptItemId } } : {}) }, attributes: ['variantId', 'offerId', 'quantity'] }).catch(() => []);
+  const units = await unitsByProduct(workspaceId, [...others, { variantId, offerId, quantity: quantityAfter }]);
+  const total = units.has(product.id) ? units.get(product.id).quantity : quantityAfter;
   if (total > l.max) {
     const err = new ValidationError([{ field: 'quantity', message: `At most ${l.max} of "${product.name}" per order` }], 'Purchase limit');
     err.code = 'PURCHASE_LIMIT';

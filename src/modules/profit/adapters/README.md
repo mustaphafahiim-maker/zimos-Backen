@@ -57,3 +57,26 @@ Orders are matched to a campaign when the `utm_campaign` of the visit equals
 the campaign's **name or id** (case-insensitive). The campaigns report returns
 ready-made URL parameters per platform (`suggestedUrlParameters`) for the
 merchant to paste into the ads manager.
+
+## Ad accounts and campaign controls (item 261)
+
+The merchant connects an adapter with its credentials and then **picks the ad
+accounts** to follow (`/profit/ads/connections`, adAccounts.js). The picked
+ids are in `config.selectedAccountIds`; `fetchDailySpend` must pull those
+accounts only. Three more methods:
+
+```js
+  // Every ad account the credentials reach.
+  async listAdAccounts({ config, secrets }) => [{ accountId, name, platform, currency? }],
+
+  // SPEC §15.4 (P2): pause or resume a campaign; status is 'paused' | 'active'.
+  async setCampaignStatus({ config, secrets, accountId, campaignId, status }) => ({ ok, status?, error? }),
+
+  // The campaign's daily budget, in minor units of the ad account's currency.
+  async setCampaignBudget({ config, secrets, accountId, campaignId, dailyBudgetAmount }) => ({ ok, dailyBudgetAmount?, error? }),
+```
+
+`ok: false` with `error` for a refusal by the platform (the change is not
+recorded); a thrown error means the platform could not be reached. The last
+status and budget set from ZIMOS are kept in `config.campaigns` so the
+campaigns screen can show them; the platform stays the source of truth.

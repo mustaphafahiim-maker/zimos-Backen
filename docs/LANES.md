@@ -43,6 +43,12 @@ code was merged in, and the project owner changed some rules afterwards.
    features, do not rebuild or change billing.
    Owner, 2026-10-06: every Lightfunnels feature except LightSchool is in
    scope too (docs/progress/spec-gaps.md, fourth pass); §21 still holds.
+   Owner, 2026-10-07: "متسالنيش علي حاجه شوف لايت فانل شغال ازاي واعمل زيه" —
+   don't ask, decide and keep building to Lightfunnels' level. Decisions taken
+   under it: migrations 450–499 are used up, so the backend chat's next pass
+   uses **500–549**; item 182 (Mailchimp/Klaviyo) stays as built — it only
+   syncs contacts who gave marketing consent into the merchant's own lists and
+   sends nothing from ZIMOS, so it is not a bulk send (§21 unchanged).
 7. **Backend rules** (SPEC §1): routes under `/api/v1/workspaces/:workspaceId`
    go through `authenticate` → `resolveTenant` → `requirePermission`; the
    workspace only ever comes from `req.tenant.workspaceId`; money is integer

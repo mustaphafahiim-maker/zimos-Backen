@@ -47,18 +47,22 @@ const integrationKey = (code) => `dropship:${code}`;
 const settingsOf = (row) => ({
   autoForward: AUTO_FORWARD.includes(row && row.config && row.config.autoForward) ? row.config.autoForward : 'off',
   applyStatus: Boolean(row && row.config && row.config.applyStatus),
+  // The supplier's own shipping price and minimum order (supplierRules.js, item 263).
+  useSupplierShipping: Boolean(row && row.config && row.config.useSupplierShipping),
+  enforceMinimum: Boolean(row && row.config && row.config.enforceMinimum),
 });
 
 /** The suppliers this store can use now: connected, and their app installed where the app store lists one. */
-async function connectedRows(workspaceId) {
+async function connectedRows(workspaceId, transaction) {
   const codes = providers.list().available.map((p) => p.code);
-  const rows = await db.WorkspaceIntegration.findAll({ where: { workspaceId, provider: codes.map(integrationKey), status: 'connected' } });
+  // On the caller's transaction when it has one (item 281): order creation asks this while holding its connection.
+  const rows = await db.WorkspaceIntegration.findAll({ where: { workspaceId, provider: codes.map(integrationKey), status: 'connected' }, transaction });
   const { BY_KEY } = require('../apps/appCatalogue');
   const gate = require('../apps/appGate');
   const usable = [];
   for (const row of rows) {
     const key = `dropship_${row.provider.split(':')[1]}`;
-    if (!BY_KEY.has(key) || (await gate.isEnabled(workspaceId, key))) usable.push(row);
+    if (!BY_KEY.has(key) || (await gate.isEnabled(workspaceId, key, { transaction }))) usable.push(row);
   }
   return usable;
 }
@@ -249,6 +253,12 @@ async function updateSettings(workspaceId, code, body, req) {
   const config = { ...(row.config || {}) };
   if (body.autoForward !== undefined) config.autoForward = body.autoForward;
   if (body.applyStatus !== undefined) config.applyStatus = Boolean(body.applyStatus);
+  // Each needs its adapter method (providers/README.md): a supplier that can't answer can't be switched on.
+  const provider = providers.get(code);
+  if (body.useSupplierShipping === true && typeof provider.shippingQuote !== 'function') throw new AppError('DROPSHIP_NOT_SUPPORTED', 'This supplier does not give shipping prices', 422);
+  if (body.enforceMinimum === true && typeof provider.minimumOrder !== 'function') throw new AppError('DROPSHIP_NOT_SUPPORTED', 'This supplier has no minimum order to apply', 422);
+  if (body.useSupplierShipping !== undefined) config.useSupplierShipping = Boolean(body.useSupplierShipping);
+  if (body.enforceMinimum !== undefined) config.enforceMinimum = Boolean(body.enforceMinimum);
   await row.update({ config });
   const after = settingsOf(row);
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'dropship.settings_update', entityType: 'WorkspaceIntegration', entityId: row.id, before, after, req });
@@ -286,6 +296,8 @@ router.post(
 const settingsSchema = Joi.object({
   autoForward: Joi.string().valid(...AUTO_FORWARD).optional(),
   applyStatus: Joi.boolean().optional(),
+  useSupplierShipping: Joi.boolean().optional(),
+  enforceMinimum: Joi.boolean().optional(),
 }).min(1);
 
-module.exports = { AUTO_FORWARD, settingsOf, settingsSchema, linesFor, forOrder, checkRef, refreshOrder, follow, autoForward, updateSettings, router };
+module.exports = { AUTO_FORWARD, connectedRows, settingsOf, settingsSchema, linesFor, forOrder, checkRef, refreshOrder, follow, autoForward, updateSettings, router };

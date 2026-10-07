@@ -12,9 +12,20 @@ module.exports = (sequelize, DataTypes) => {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       workspaceId: { type: DataTypes.UUID, allowNull: false, field: 'workspace_id' },
       phoneNormalized: { type: DataTypes.STRING(32), allowNull: false, field: 'phone_normalized' },
+      // A business customer (migration 491, modules/businessCustomers).
+      companyName: { type: DataTypes.STRING(200), allowNull: true, field: 'company_name' },
+      taxId: { type: DataTypes.STRING(40), allowNull: true, field: 'tax_id' },
+      taxExempt: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'tax_exempt' },
+      taxExemptNote: { type: DataTypes.STRING(300), allowNull: true, field: 'tax_exempt_note' },
+      // Pay later on account (migration 492, modules/accountCredit).
+      onAccountEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'on_account_enabled' },
+      creditLimit: { type: DataTypes.BIGINT, allowNull: true, field: 'credit_limit' },
+      paymentTermsDays: { type: DataTypes.INTEGER, allowNull: true, field: 'payment_terms_days' },
       phoneRaw: { type: DataTypes.STRING(32), allowNull: true, field: 'phone_raw' },
       alternatePhone: { type: DataTypes.STRING(32), allowNull: true, field: 'alternate_phone' },
       email: { type: DataTypes.STRING(255), allowNull: true },
+      // Set when the shopper proved the email is theirs (migration 503, item 278); only a verified email signs in.
+      emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
       fullName: { type: DataTypes.STRING(200), allowNull: true, field: 'full_name' },
       // Loyalty points balance and last earn/spend (migration 474, modules/loyalty).
       loyaltyPoints: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'loyalty_points' },

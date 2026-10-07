@@ -74,7 +74,8 @@ async function unsubscribe(workspace, token) {
       await db.MarketingOptOut.create({ workspaceId: workspace.id, email, source: 'email', word: 'unsubscribe' }, { transaction });
     }
     if (phoneNormalized) {
-      await db.Customer.update({ marketingConsent: false }, { where: { workspaceId: workspace.id, phoneNormalized, marketingConsent: true }, transaction });
+      // Per row, so each records contact.updated and Mailchimp / Klaviyo unsubscribe the person too (item 308).
+      await db.Customer.update({ marketingConsent: false }, { where: { workspaceId: workspace.id, phoneNormalized, marketingConsent: true }, transaction, individualHooks: true });
     }
     await recordAudit({
       workspaceId: workspace.id,

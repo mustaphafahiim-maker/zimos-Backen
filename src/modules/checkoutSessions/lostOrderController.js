@@ -70,7 +70,8 @@ const schemas = {
         .optional(),
     }).default({}),
   },
-  exportCsv: { params: Joi.object({ workspaceId: uuid.required() }), body: Joi.object(filters).default({}) },
+  // format: csv (default) or xlsx (item 260).
+  exportCsv: { params: Joi.object({ workspaceId: uuid.required() }), body: Joi.object({ ...filters, format: Joi.string().valid('csv', 'xlsx').default('csv') }).default({}) },
 };
 
 // Phones are masked for roles without customers.reveal_sensitive (lostOrderPhones.js).
@@ -86,8 +87,15 @@ const remove = asyncHandler(async (req, res) => res.json(await service.remove(re
 const exportCsv = asyncHandler(async (req, res) => {
   // JSON rather than a file download: the dashboard builds the file from `csv`.
   const maskPhones = !req.tenant.hasPermission('customers.reveal_sensitive');
-  const { csv, count } = await service.exportCsv(req.tenant.workspaceId, req.body || {}, { maskPhones });
-  res.json({ csv, count, filename: `lost-orders-${new Date().toISOString().slice(0, 10)}.csv` });
+  const { format = 'csv', ...filters } = req.body || {};
+  const { csv, count, table } = await service.exportCsv(req.tenant.workspaceId, filters, { maskPhones });
+  const day = new Date().toISOString().slice(0, 10);
+  if (format === 'xlsx') {
+    // The Excel file, base64 in the JSON like the CSV text (orders/xlsxWriter.js).
+    const xlsx = require('../orders/xlsxWriter').buildXlsx(table, { sheetName: 'Lost orders' });
+    return res.json({ base64: xlsx.toString('base64'), contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', count, filename: `lost-orders-${day}.xlsx` });
+  }
+  return res.json({ csv, count, filename: `lost-orders-${day}.csv` });
 });
 // Public: GET /store/:workspaceId/recover/:token
 const recover = asyncHandler(async (req, res) => res.json(await service.recover(req.tenant.workspaceId, req.params.token)));

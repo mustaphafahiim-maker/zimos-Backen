@@ -2,7 +2,7 @@
 
 const db = require('../../db/models');
 const logger = require('../../core/utils/logger');
-const { NotFoundError, ValidationError } = require('../../core/errors/AppError');
+const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const notify = require('./notify');
 const emailTemplates = require('./emailTemplates');
@@ -240,10 +240,25 @@ async function preview(workspaceId, key, draft = {}, scope = {}) {
 }
 
 /** Sends the template with sample values to one address (the teammate's own by default). */
+const TEST_SENDS_PER_DAY = 50;
+
 async function sendTest(workspaceId, key, { to, subject, body, blocks } = {}, req, scope = {}) {
   assertKey(key);
-  const recipient = to || (await db.User.findByPk(req.user.id, { attributes: ['email'] })).email;
+  const own = (await db.User.findByPk(req.user.id, { attributes: ['email'] })).email;
+  const recipient = to || own;
   if (!recipient) throw new ValidationError([{ field: 'to', message: 'An email address is required' }], 'Invalid body');
+  // A test goes to the team only (item 298): the signed-in user or an active member of this store. Any
+  // address with free text would make the platform's mail a phishing sender.
+  if (String(recipient).toLowerCase() !== String(own || '').toLowerCase()) {
+    const member = await db.Membership.count({
+      where: { workspaceId, status: 'active' },
+      include: [{ model: db.User, as: 'user', attributes: [], where: db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('user.email')), String(recipient).toLowerCase()) }],
+    });
+    if (!member) throw new ValidationError([{ field: 'to', message: 'Test emails go to you or a member of this store\'s team' }], 'Invalid body');
+  }
+  // And at most TEST_SENDS_PER_DAY a day per store.
+  const sentToday = await db.AuditLog.count({ where: { workspaceId, action: 'order_email.test', createdAt: { [db.Sequelize.Op.gt]: new Date(Date.now() - 86400000) } } });
+  if (sentToday >= TEST_SENDS_PER_DAY) throw new AppError('TOO_MANY_TEST_EMAILS', `At most ${TEST_SENDS_PER_DAY} test emails a day`, 429);
   const { current, scopedRow, storeRow } = await templateIn(workspaceId, key, scope);
   const row = scopedRow || storeRow;
   const brand = await brandOf(workspaceId);

@@ -47,7 +47,9 @@ function candidates(query) {
   const parts = q.split('.');
   const label = parts[0].normalize('NFKD').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63);
   if (!LABEL.test(label)) throw new AppError('VALIDATION_ERROR', 'Type a name with letters or digits', 422, [{ field: 'q', message: 'Type a name with letters or digits' }]);
-  const exact = parts.length > 1 ? `${label}.${parts.slice(1).join('.')}` : null;
+  // Only a name that can be registered (item 305): one label on a TLD sold here — never a subdomain of
+  // someone else's domain (shop.example.com), which would be connected as verified without proof.
+  const exact = parts.length === 2 && TLDS.includes(parts[1]) ? `${label}.${parts[1]}` : null;
   return [...new Set([exact, ...TLDS.map((t) => `${label}.${t}`)].filter(Boolean))];
 }
 
@@ -64,7 +66,8 @@ async function list(workspaceId) {
 
 async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice }, req) {
   const host = String(domain).trim().toLowerCase();
-  if (!candidates(host).includes(host)) throw new AppError('VALIDATION_ERROR', 'Enter a full domain like mystore.com', 422, [{ field: 'domain', message: 'Enter a full domain like mystore.com' }]);
+  const hostParts = host.split('.');
+  if (hostParts.length !== 2 || !TLDS.includes(hostParts[1]) || !candidates(host).includes(host)) throw new AppError('VALIDATION_ERROR', `Enter a domain like mystore.com (${TLDS.map((t) => `.${t}`).join(', ')})`, 422, [{ field: 'domain', message: 'Enter a domain like mystore.com' }]);
   const r = registrar();
   const [quote] = await r.search([host]);
   if (!quote || !quote.available || (await db.Domain.count({ where: { hostname: host } }))) throw new ConflictError('This domain is not available', 'DOMAIN_UNAVAILABLE');

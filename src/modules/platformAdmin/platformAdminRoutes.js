@@ -17,6 +17,8 @@ router.use(authenticate);
 
 // Lane 7: queues, app catalogue, suppliers, usage, delivery network, support access.
 router.use(require('./platformExtraRoutes'));
+// Publishing or suspending developers' partner apps (partnerApps/, item 265).
+router.use(require('../partnerApps').admin);
 // Support's view of a store's own data: only while the merchant has let support in.
 router.use(require('./supportViewRoutes'));
 // The couriers' areas map for every store.

@@ -50,30 +50,40 @@ async function build(workspaceId, { orderIds, readyToShip, locationId }) {
   const picked = locationId ? orders.filter((o) => where(o) === locationId) : orders;
   if (!picked.length) throw new AppError('NO_ORDERS_SELECTED', 'None of these orders ships from that location', 422);
 
-  const items = await db.OrderItem.findAll({ where: { orderId: picked.map((o) => o.id) }, attributes: ['orderId', 'productId', 'variantId', 'productNameSnapshot', 'variantOptionsSnapshot', 'skuSnapshot', 'quantity'] });
-  const variants = await db.ProductVariant.findAll({ where: { id: [...new Set(items.map((i) => i.variantId).filter(Boolean))] }, attributes: ['id', 'imageUrl', 'sku'] });
+  const items = await db.OrderItem.findAll({ where: { orderId: picked.map((o) => o.id) }, attributes: ['orderId', 'productId', 'variantId', 'offerId', 'productNameSnapshot', 'variantOptionsSnapshot', 'skuSnapshot', 'quantity'] });
+  // Pieces, not lines (item 289): an offer of "3 pieces" is 3 to pick, a bundle's every variant is picked.
+  const units = await require('./orderUnits').physicalUnits(items);
+  const variants = await db.ProductVariant.findAll({ where: { id: [...new Set(units.map((u) => u.variantId).filter(Boolean))] }, attributes: ['id', 'imageUrl', 'sku', 'productId', 'optionValues'], paranoid: false, include: [{ model: db.Product, as: 'product', attributes: ['name'], paranoid: false }] });
   const vInfo = new Map(variants.map((v) => [v.id, v]));
   const orderOf = new Map(picked.map((o) => [o.id, o]));
 
   const groups = new Map();
-  for (const it of items) {
+  for (const u of units) {
+    const { it } = u;
     const o = orderOf.get(it.orderId);
     const loc = where(o);
     if (!groups.has(loc)) groups.set(loc, new Map());
     const lines = groups.get(loc);
-    const key = it.variantId || `${it.productNameSnapshot}|${JSON.stringify(it.variantOptionsSnapshot || {})}`;
+    const key = u.variantId || `${it.productNameSnapshot}|${JSON.stringify(it.variantOptionsSnapshot || {})}`;
     if (!lines.has(key)) {
-      const v = it.variantId && vInfo.get(it.variantId);
-      lines.set(key, { variantId: it.variantId, productId: it.productId, name: it.productNameSnapshot, options: it.variantOptionsSnapshot || {}, sku: it.skuSnapshot || (v && v.sku) || null, imageUrl: (v && v.imageUrl) || null, quantity: 0, orders: [] });
+      const v = u.variantId && vInfo.get(u.variantId);
+      // A bundle's other variant is named from the catalogue; the line's own from what was sold.
+      lines.set(key, u.own || !v
+        ? { variantId: u.variantId, productId: it.productId, name: it.productNameSnapshot, options: it.variantOptionsSnapshot || {}, sku: it.skuSnapshot || (v && v.sku) || null, imageUrl: (v && v.imageUrl) || null, quantity: 0, orders: [] }
+        : { variantId: u.variantId, productId: v.productId, name: (v.product && v.product.name) || it.productNameSnapshot, options: v.optionValues || {}, sku: v.sku || null, imageUrl: v.imageUrl || null, quantity: 0, orders: [] });
     }
     const line = lines.get(key);
-    line.quantity += it.quantity;
-    line.orders.push({ orderId: o.id, orderNumber: o.orderNumber, quantity: it.quantity });
+    line.quantity += u.quantity;
+    const served = line.orders.find((x) => x.orderId === o.id);
+    if (served) served.quantity += u.quantity;
+    else line.orders.push({ orderId: o.id, orderNumber: o.orderNumber, quantity: u.quantity });
   }
+  // Which lots to take each line from, first expiring first (stockLots/, item 230).
+  for (const [loc, lines] of groups.entries()) for (const line of lines.values()) if (line.variantId) line.lots = await require('../stockLots').suggest(workspaceId, line.variantId, line.quantity, loc);
   const optText = (opts) => Object.values(opts || {}).join(' / ');
   return {
     orderCount: picked.length,
-    unitCount: items.reduce((n, i) => n + i.quantity, 0),
+    unitCount: units.reduce((n, u) => n + u.quantity, 0),
     locations: [...groups.entries()].map(([id, lines]) => ({
       locationId: id,
       name: id ? locName.get(id) || null : null,
@@ -107,6 +117,8 @@ async function pdfOf(list) {
       let y = drawText(doc, [line.name, opts].filter(Boolean).join(' — '), { x: left + 64, y: top, width: width - 64 - 110, size: 10, align: 'left' });
       doc.font('Helvetica').fontSize(9).fillColor('#444').text(line.sku || '', left + width - 105, top, { width: 105, align: 'right', lineBreak: false });
       const orders = line.orders.map((o) => (o.quantity > 1 ? `${o.orderNumber} (${o.quantity})` : o.orderNumber)).join(', ');
+      const lots = (line.lots || []).map((l) => `LOT ${l.lotCode}${l.expiresOn ? ` exp ${l.expiresOn}` : ''}: ${l.take}${l.expired ? ' (EXPIRED)' : ''}`).join('  ·  ');
+      if (lots) { doc.font('Helvetica-Bold').fontSize(8).fillColor('#8a4b00').text(lots, left + 64, y, { width: width - 64 }); y = doc.y; }
       doc.font('Helvetica').fontSize(7).fillColor('#777').text(orders, left + 64, y, { width: width - 64 });
       y = doc.y;
       doc.fillColor('#000');

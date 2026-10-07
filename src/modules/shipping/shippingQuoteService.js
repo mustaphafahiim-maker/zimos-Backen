@@ -33,7 +33,7 @@ async function quote(workspaceId, { country, region, items, funnelId = null, add
   const bundles = await require('../bundles/bundlePricing').applyBundleTiers(workspaceId, lines);
 
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
-  const shipping = await calculateShippingAmount(workspaceId, {
+  const storeShipping = await calculateShippingAmount(workspaceId, {
     country,
     region: region || null,
     // City, area and the picked place, for the store's own place prices (places/placePricing.js).
@@ -46,6 +46,8 @@ async function quote(workspaceId, { country, region, items, funnelId = null, add
     // A funnel's checkout: its shipping group (funnels/funnelShipping.js).
     funnelId,
   });
+  // A dropshipping supplier's own rate, as the order will charge it (dropship/supplierRules.js, item 263).
+  const shipping = await require('../dropship/supplierRules').applyShipping(workspaceId, lines, storeShipping, address || (country ? { country, province: region || null } : null));
 
   return {
     pricingMode: shipping.pricingMode,
@@ -60,6 +62,8 @@ async function quote(workspaceId, { country, region, items, funnelId = null, add
     // automaticDiscount (what a no-code discount will take off) and
     // minimumOrder (the store's minimum and how far these items are from it).
     ...(await require('../discounts/couponExtras').quoteExtras(workspaceId, { subtotal, productIds: lines.map((l) => l.productId) })),
+    // A dropshipping supplier's minimum these items don't reach yet, or null (item 263).
+    supplierMinimum: await require('../dropship/supplierRules').minimumGap(workspaceId, lines),
     weightGrams: shipping.weightGrams,
     weightEstimated: shipping.weightEstimated,
     tier: shipping.tier,
@@ -77,6 +81,8 @@ async function quote(workspaceId, { country, region, items, funnelId = null, add
 
 async function pricesShipping(workspaceId, shipping) {
   if (shipping.rule === RULES.OFFER_OVERRIDE || shipping.rule === RULES.ALL_ITEMS_FREE) return true;
+  // A dropshipping supplier's own rate prices it (dropship/supplierRules.js, item 263).
+  if (shipping.rule === 'supplier_rate') return true;
   if (shipping.extraFeesAmount > 0) return true;
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'] });
   if (settingsPriceShipping(workspace && workspace.settings)) return true;

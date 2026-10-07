@@ -49,10 +49,14 @@ async function getCart(workspaceId, cartId, { shopperToken = null } = {}) {
   let testPrices = await productTests.visitorPrices(workspaceId, (cart.items || []).filter((i) => !i.offerId).map((i) => i.variantId), cart.visitorId);
   // A signed-in wholesale customer's price lists (priceLists/, item 205), as the checkout will pin them.
   if (shopperToken) testPrices = await require('../priceLists').cartPrices(workspaceId, cart, shopperToken, testPrices);
+  // Cart offers ("add X for 20% off", cartOffers/, item 253): the offered line's price, and what to offer.
+  const cartOffers = await require('../cartOffers').forCart(workspaceId, cart, testPrices).catch(() => ({ prices: testPrices, offers: [], locked: [] }));
+  testPrices = cartOffers.prices;
   // Quantity bundles lower the lines they cover, as they will on the order.
   const view = await require('../bundles/bundlePricing').applyToCartTotals(workspaceId, cart, withComputedTotals(cart, testPrices));
   // Free gifts the cart earns, or how far it is from them (freeGifts/, item 208); added by the checkout.
   view.freeGifts = await require('../freeGifts').forCart(workspaceId, view).catch(() => []);
+  view.cartOffers = { offers: cartOffers.offers, locked: cartOffers.locked || [] };
   return view;
 }
 
@@ -133,7 +137,7 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
   const candidates = await db.CartItem.findAll({ where: { cartId, variantId, offerId: offerId || null } });
   const existing = candidates.find((line) => sameCustomizations(line.customizations, snapshot));
   // The product's maximum per order (catalog/purchaseLimits.js, item 198).
-  await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, variantId, (existing ? existing.quantity : 0) + quantity, existing ? existing.id : null);
+  await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, variantId, (existing ? existing.quantity : 0) + quantity, existing ? existing.id : null, offerId || null);
   if (existing) {
     await existing.update({ quantity: existing.quantity + quantity, unitPriceSnapshot: unitPrice });
   } else {
@@ -157,7 +161,7 @@ async function updateItemQuantity(workspaceId, cartId, itemId, quantity) {
   if (quantity <= 0) {
     await item.destroy();
   } else {
-    await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, item.variantId, quantity, item.id);
+    await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, item.variantId, quantity, item.id, item.offerId || null);
     await item.update({ quantity });
   }
   return getCart(workspaceId, cartId);

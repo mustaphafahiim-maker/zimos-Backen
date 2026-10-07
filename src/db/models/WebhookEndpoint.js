@@ -10,6 +10,8 @@ module.exports = (sequelize, DataTypes) => {
       events: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
       signingSecret: { type: DataTypes.STRING(100), allowNull: false, field: 'signing_secret' },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
+      // The public-API key that created it, when an app did (migration 501): revoking the key turns it off.
+      apiKeyId: { type: DataTypes.UUID, allowNull: true, field: 'api_key_id' },
       // { funnelIds, productIds } — only events about these (webhookFilter.js). Null = all.
       // [{ name, value: <sealed> }] sent with every delivery (migration 459, webhooks/customHeaders.js).
       customHeaders: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'custom_headers' },

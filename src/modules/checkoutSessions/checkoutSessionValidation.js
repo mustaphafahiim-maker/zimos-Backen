@@ -12,6 +12,8 @@ const touch = Joi.object({
   source: touchText, medium: touchText, campaign: touchText, content: touchText, term: touchText, adId: touchText,
   fbclid: touchText, ttclid: touchText, gclid: touchText, scCid: touchText, ref: touchText, referrer: touchText,
   landingPage: touchText, at: touchText,
+  // The other platforms' click ids (marketing/adClickIds.js, item 254).
+  twclid: touchText, rdt_cid: touchText, msclkid: touchText, tblci: touchText,
 });
 
 module.exports = {

@@ -71,6 +71,17 @@ module.exports = {
 
   // The provider's order status → a ZIMOS order stage, or null for "no change".
   mapStatus(externalStatus) {},
+
+  // Optional (item 263). The supplier's shipping price for its lines to a
+  // destination; with it the merchant can switch on "use the supplier's
+  // shipping rates". lines: [{ code (variant code), quantity }].
+  // → { amount (minor units), currency }
+  async shippingQuote(credentials, { country, province, city, lines }) {},
+
+  // Optional (item 263). The smallest order the supplier accepts, counted on
+  // its own lines; with it the merchant can switch on "refuse orders below the
+  // supplier's minimum". → { amount (minor units), currency } or null
+  async minimumOrder(credentials) {},
 };
 ```
 

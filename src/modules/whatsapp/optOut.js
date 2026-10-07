@@ -37,7 +37,8 @@ async function handleInbound(workspaceId, msg, phoneNormalized) {
       where: { workspaceId, phoneNormalized },
       defaults: { workspaceId, phoneNormalized, source: 'whatsapp', word },
     });
-    const [updated] = await db.Customer.update({ marketingConsent: false }, { where: { workspaceId, phoneNormalized, marketingConsent: true } });
+    // Per row, so each records contact.updated and Mailchimp / Klaviyo unsubscribe the person too (item 308).
+    const [updated] = await db.Customer.update({ marketingConsent: false }, { where: { workspaceId, phoneNormalized, marketingConsent: true }, individualHooks: true });
     if (created || updated) {
       await recordAudit({ workspaceId, actorUserId: null, action: 'customer.marketing_consent.withdrawn', entityType: 'Customer', entityId: null, metadata: { phoneNormalized, via: 'whatsapp', word } });
     }

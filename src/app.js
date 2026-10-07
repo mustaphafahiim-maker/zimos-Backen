@@ -173,8 +173,16 @@ v1.use('/templates', templateRoutes);
 // reaches this router's `authenticateFlexible`.
 v1.use('/workspaces/:workspaceId/quickstart', quickstartRoutes);
 v1.use('/workspaces', workspaceRoutes);
+// Bulk stock and price update from a sheet (catalog/importExport/bulkUpdate.js, item 243).
+v1.use('/workspaces/:workspaceId/catalog/bulk-update', require('./modules/catalog/importExport/bulkUpdate').router);
 v1.use('/workspaces/:workspaceId/catalog', catalogRoutes);
 v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
+// Merge duplicate customers (customers/customerMerge.js, item 248).
+v1.use('/workspaces/:workspaceId/customer-merge', require('./modules/customers/customerMerge').router);
+// Transfer a store to another owner (storeTransfer, item 252).
+v1.use('/workspaces/:workspaceId/ownership-transfer', require('./modules/storeTransfer').router);
+// Customer timeline (customerTimeline, item 250).
+v1.use('/workspaces/:workspaceId/customers/:customerId/timeline', require('./modules/customerTimeline').router);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
 // Contacts from a CSV / Excel sheet (item 187), ahead of /contacts/:customerId.
 v1.use('/workspaces/:workspaceId/contacts/import', require('./modules/contacts/contactImport').router);
@@ -190,6 +198,8 @@ v1.use('/workspaces/:workspaceId/subscriptions', customerSubscriptionRoutes.staf
 v1.use('/workspaces/:workspaceId/shoppable-images', shoppableImageRoutes.staff);
 v1.use('/workspaces/:workspaceId/courses', courseRoutes.staff);
 v1.use('/workspaces/:workspaceId', dashboardRoutes);
+// Scan to pack (orders/scanToPack.js, item 249).
+v1.use('/workspaces/:workspaceId/orders/:orderId/pack', require('./modules/orders/scanToPack').router);
 v1.use('/workspaces/:workspaceId/orders', orderRoutes);
 v1.use('/workspaces/:workspaceId/exports', require('./modules/orders/exportFileRoutes'));
 v1.use('/workspaces/:workspaceId/account-settings', require('./modules/workspaces/accountSettings').router);
@@ -246,6 +256,11 @@ v1.use('/workspaces/:workspaceId/api-keys', appGate.requireAppForChanges('public
 v1.use('/workspaces/:workspaceId/webhooks', appGate.requireAppForChanges('webhooks'), webhookRoutes);
 // Lane 7: the app store, the app install link and dropshipping providers.
 // Features that are apps take changes only while the store has the app (apps/appGate.js).
+// Partner apps with OAuth (partnerApps/, item 265): developers, the merchant's approval, the token exchange, the app's page.
+v1.use('/partner-apps', require('./modules/partnerApps').developer);
+v1.use('/workspaces/:workspaceId/oauth', require('./modules/partnerApps').merchant);
+v1.use('/workspaces/:workspaceId/apps/partner', require('./modules/partnerApps').embed);
+v1.use('/oauth', require('./modules/partnerApps').oauth);
 v1.use('/workspaces/:workspaceId/apps', require('./modules/apps/appRoutes'));
 // Google Sheets sync: the account, the sheets, "Sync existing" (modules/sheets, SPEC §16.4).
 // Smart collections: the "All products" collection and a manual re-fill (catalog/smartCollections.js).
@@ -282,9 +297,14 @@ v1.use('/workspaces/:workspaceId/price-lists', require('./modules/priceLists').s
 v1.use('/workspaces/:workspaceId/stock-locations', require('./modules/stockLocations').router);
 // Suppliers, purchase orders and stock counts (spec-gaps item 207).
 v1.use('/workspaces/:workspaceId/stock-forecast', require('./modules/stockForecast').router);
+v1.use('/workspaces/:workspaceId/stock-lots', require('./modules/stockLots').router);
 v1.use('/workspaces/:workspaceId/purchasing', require('./modules/purchasing').router);
 // Free gift with purchase (spec-gaps item 208).
 v1.use('/workspaces/:workspaceId/free-gifts', require('./modules/freeGifts').router);
+// Cart offers (spec-gaps item 253).
+v1.use('/workspaces/:workspaceId/cart-offers', require('./modules/cartOffers').router);
+// Spin to win (spec-gaps item 258).
+v1.use('/workspaces/:workspaceId/spin-wheel', require('./modules/spinWheel').staff);
 // Notes and follow-ups on customers (spec-gaps item 209).
 v1.use('/workspaces/:workspaceId/customer-notes', require('./modules/customerNotes').router);
 // Size charts (spec-gaps item 210).
@@ -300,6 +320,17 @@ v1.use('/workspaces/:workspaceId/delivery-slots', require('./modules/deliverySlo
 v1.use('/workspaces/:workspaceId/customer-referrals', require('./modules/customerReferrals').staff);
 v1.use('/workspaces/:workspaceId/bought-together', require('./modules/boughtTogether').staff);
 v1.use('/workspaces/:workspaceId/click-and-collect', require('./modules/clickAndCollect').staff);
+v1.use('/workspaces/:workspaceId/price-schedules', require('./modules/priceSchedules').router);
+v1.use('/workspaces/:workspaceId/customers/:customerId/business', require('./modules/businessCustomers').staff);
+v1.use('/workspaces/:workspaceId/account-credit', require('./modules/accountCredit').staff);
+v1.use('/workspaces/:workspaceId/product-specs', require('./modules/productSpecs').staff);
+v1.use('/workspaces/:workspaceId/redirects', require('./modules/urlRedirects').staff);
+v1.use('/workspaces/:workspaceId/store-locator', require('./modules/storeLocator').staff);
+v1.use('/workspaces/:workspaceId/price-history', require('./modules/priceHistory').staff);
+v1.use('/workspaces/:workspaceId/privacy-requests', require('./modules/privacyRequests').staff);
+v1.use('/workspaces/:workspaceId/post-purchase-survey', require('./modules/postPurchaseSurvey').staff);
+v1.use('/workspaces/:workspaceId/rfm', require('./modules/rfm').router);
+v1.use('/workspaces/:workspaceId/store-reports', require('./modules/storeReports').router);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
@@ -384,6 +415,10 @@ v1.use('/store/:workspaceId/account/wishlist', require('./modules/shopperAccount
 v1.use('/store/:workspaceId/account/google', require('./modules/shopperAccounts/google').store);
 v1.use('/store/:workspaceId/account/referral', require('./modules/customerReferrals').account);
 v1.use('/store/:workspaceId/referrals', require('./modules/customerReferrals').store);
+v1.use('/store/:workspaceId/spin-wheel', require('./modules/spinWheel').store);
+v1.use('/store/:workspaceId/account/business', require('./modules/businessCustomers').account);
+v1.use('/store/:workspaceId/account/on-account', require('./modules/accountCredit').account);
+v1.use('/store/:workspaceId/account/privacy', require('./modules/privacyRequests').account);
 v1.use('/store/:workspaceId/account/vip', require('./modules/vipTiers').account);
 v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').account);
 v1.use('/store/:workspaceId/account/store-credit', require('./modules/storeCredit').account);
@@ -393,6 +428,11 @@ v1.use('/store/:workspaceId/size-chart', require('./modules/sizeCharts').store);
 v1.use('/store/:workspaceId/bundles', require('./modules/bundles/mixAndMatch').store);
 v1.use('/store/:workspaceId/delivery-slots', require('./modules/deliverySlots').store);
 v1.use('/store/:workspaceId/pickup', require('./modules/clickAndCollect').store);
+v1.use('/store/:workspaceId/specs', require('./modules/productSpecs').store);
+v1.use('/store/:workspaceId/redirects', require('./modules/urlRedirects').store);
+v1.use('/store/:workspaceId/branches', require('./modules/storeLocator').store);
+v1.use('/store/:workspaceId/lowest-prices', require('./modules/priceHistory').store);
+v1.use('/store/:workspaceId/survey', require('./modules/postPurchaseSurvey').store);
 v1.use('/store/:workspaceId/quotes', require('./modules/quotes').store);
 v1.use('/store/:workspaceId/orders/:orderId/self-service', require('./modules/shopperAccounts/orderSelfService').store);
 v1.use('/store/:workspaceId/search', require('./modules/searchInsights').store);

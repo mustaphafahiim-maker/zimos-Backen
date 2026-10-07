@@ -51,6 +51,8 @@ const TYPES = Object.freeze({
   // A shopper asked for a quote (quotes/, item 219).
   'quote.request': { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: true } },
   'product.question': { permission: PERMISSIONS.PRODUCTS_MANAGE, defaults: { inApp: true, email: false } },
+  // Stock lots about to expire (stockLots/, item 230).
+  'stock.lot_expiring': { permission: PERMISSIONS.INVENTORY_VIEW, defaults: { inApp: true, email: true } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 

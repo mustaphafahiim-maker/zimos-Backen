@@ -90,8 +90,10 @@ async function assignOrder(event) {
   try {
     const locations = (await locationsOf(workspaceId)).filter((l) => l.isActive);
     if (locations.length < 2) return null;
-    const order = await db.Order.findOne({ where: { id: p.orderId, workspaceId }, attributes: ['id', 'stockLocationId'] });
+    const order = await db.Order.findOne({ where: { id: p.orderId, workspaceId }, attributes: ['id', 'stockLocationId', 'shippingSnapshot'] });
     if (!order || order.stockLocationId) return null;
+    // A click-and-collect order ships from nowhere: it stays at the place the shopper picked, the default too (item 282).
+    if ((order.shippingSnapshot && order.shippingSnapshot.pickup) || (await db.OrderPickup.count({ where: { orderId: order.id } }))) return null;
     const lines = await db.OrderItem.findAll({ where: { orderId: order.id }, attributes: ['variantId', 'quantity'] });
     const need = new Map();
     for (const l of lines) if (l.variantId) need.set(l.variantId, (need.get(l.variantId) || 0) + l.quantity);
@@ -174,6 +176,9 @@ async function remove(workspaceId, id, req) {
     throw new AppError('LOCATION_HAS_STOCK', 'Transfer this location’s stock elsewhere first', 409);
   }
   await db.Order.update({ stockLocationId: null }, { where: { workspaceId, stockLocationId: l.id }, hooks: false });
+  // Its open stock counts close with it (item 288): the database clears their location, and an
+  // applied count without one would set the whole store's numbers from one place's shelf.
+  await db.StockCount.update({ status: 'cancelled' }, { where: { workspaceId, locationId: l.id, status: 'open' } });
   await l.destroy();
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'stock_location.delete', entityType: 'StockLocation', entityId: l.id, before: { name: l.name }, req });
 }

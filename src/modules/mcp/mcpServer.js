@@ -136,6 +136,8 @@ const TOOLS = [
       need(req, { scopes: ['funnels:write'], permission: PERMISSIONS.FUNNELS_MANAGE });
       const name = String(args.name || '').trim().slice(0, 200);
       if (!name) throw new ToolDenied('A name is required');
+      // The creation lock of a suspended or unpaid store, as the REST route has it (item 306).
+      await require('../../core/middleware/subscriptionGuard').assertCreationAllowed(req.tenant.workspaceId);
       const funnel = await require('../funnels/funnelsService').createFunnel(req.tenant.workspaceId, { name }, req);
       const j = typeof funnel.toJSON === 'function' ? funnel.toJSON() : funnel.funnel || funnel;
       return { funnel: { id: j.id, name: j.name, status: j.status, subdomain: j.subdomain || null } };
@@ -184,13 +186,22 @@ async function handle(req, msg) {
   }
 }
 
+const MAX_BATCH = 10;
+
 // Mounted at /api/public/v1/mcp, ahead of the public REST API.
 const router = Router();
 router.post('/', authenticateApiKey, apiKeyLimiter, async (req, res, next) => {
   try {
     const body = req.body;
     if (Array.isArray(body)) {
-      const answers = (await Promise.all(body.map((m) => handle(req, m)))).filter(Boolean);
+      // A batch is a handful of messages run one after the other (item 306): one request under the rate
+      // limit must not become thousands of tool calls at once. (MCP 2025-06-18 has no batches at all.)
+      if (body.length === 0 || body.length > MAX_BATCH) return res.json({ jsonrpc: '2.0', id: null, error: err(-32600, `A batch holds 1 to ${MAX_BATCH} messages`) });
+      const answers = [];
+      for (const m of body) {
+        const a = await handle(req, m);
+        if (a) answers.push(a);
+      }
       return answers.length ? res.json(answers) : res.status(202).end();
     }
     const answer = await handle(req, body);

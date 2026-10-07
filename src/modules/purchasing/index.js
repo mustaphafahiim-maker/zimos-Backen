@@ -41,6 +41,14 @@ async function locationOf(workspaceId, locationId, transaction = null) {
 async function moveStock(workspaceId, variantId, delta, location, movement, transaction) {
   const variant = await require('../inventory/inventoryService').lockVariant(variantId, workspaceId, transaction);
   if (Number(variant.stockOnHand) + delta < 0) throw new AppError('INSUFFICIENT_STOCK', 'Stock would go below zero', 422);
+  // Taking units out of one place: that place's count can't go below zero either (item 284) — the
+  // default's is what the other places don't hold.
+  if (delta < 0) {
+    const { locations, matrix } = await require('../stockLocations').stockMatrix(workspaceId, [variantId], transaction);
+    const place = location && locations.some((l) => l.id === location.id) ? location : locations.find((l) => l.isDefault);
+    const cell = place && matrix.get(variantId) && matrix.get(variantId).get(place.id);
+    if (cell && cell.onHand + delta < 0) throw new AppError('INSUFFICIENT_STOCK', `Only ${Math.max(0, cell.onHand)} on hand at ${place.name}`, 422);
+  }
   await variant.update({ stockOnHand: Number(variant.stockOnHand) + delta, version: variant.version + 1 }, { transaction });
   await db.InventoryMovement.create({ workspaceId, variantId, quantityDelta: delta, ...movement }, { transaction });
   if (location && !location.isDefault) await require('../stockLocations').bumpRow(location.id, variantId, delta, transaction);
@@ -134,7 +142,10 @@ async function receive(workspaceId, id, { lines, updateCost = true }, req) {
     const po = await findPo(workspaceId, id, transaction, true);
     if (!['ordered', 'partially_received'].includes(po.status)) throw new AppError('PO_STATUS', 'Mark the purchase order as ordered first', 409);
     const location = await db.StockLocation.findOne({ where: { id: po.locationId || null, workspaceId }, transaction }).catch(() => null);
-    const byId = new Map(po.lines.map((l) => [l.id, l]));
+    // The lines read again, locked, after the purchase order's lock (item 280): a second receive that
+    // waited on that lock must see what the first one received, not its own earlier snapshot.
+    const fresh = await db.PurchaseOrderLine.findAll({ where: { purchaseOrderId: po.id }, transaction, lock: transaction.LOCK.UPDATE });
+    const byId = new Map(fresh.map((l) => [l.id, l]));
     for (const r of lines) {
       const line = byId.get(r.lineId);
       if (!line) throw new ValidationError([{ field: 'lines', message: 'A line is not on this purchase order' }]);
@@ -298,4 +309,4 @@ router.post('/stock-counts/:countId/cancel', canManage, validate({ params: idP('
   res.json(await countView(await findCount(req.tenant.workspaceId, req.params.countId)));
 }));
 
-module.exports = { router, savePo };
+module.exports = { router, savePo, moveStock };

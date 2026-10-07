@@ -141,3 +141,12 @@ they can be tried in the store preview.
 
 `STRIPE_API_BASE` / `PAYPAL_API_BASE` (ignored in production) point them at a
 mock; `gatewayHttp.request` takes `form` for form-encoded bodies.
+
+### Optional: `inquireRefund(credentials, { refundReference, payment })`
+
+A refund's outcome by the gateway's own refund id (what `refund` returned as `providerRefundReference`):
+`{ status: 'processed' | 'failed' | 'pending', transactionId, failureReason }`, or null when the gateway doesn't
+know it. The pending-refund sweep uses it when present (Stripe, PayPal); otherwise it asks `inquireTransaction`
+with the refund's reference. `refund` also receives `refundId` (our Refund row): use it as the gateway's
+duplicate-request key, so two refunds of the same amount stay two.
+

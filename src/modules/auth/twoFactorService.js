@@ -219,6 +219,8 @@ const invalid = () => new AuthenticationError('That code is not correct or has e
 async function verifyChallenge({ challengeToken, code, rememberDevice }, req, res) {
   const challenge = await db.LoginChallenge.findByPk(challengeToken);
   if (!challenge || challenge.consumedAt || challenge.expiresAt < new Date()) throw invalid();
+  // A WhatsApp sign-in code stands in for the password: never finished here, where backup codes work (whatsappLogin.js).
+  if (challenge.channel === 'wa_login') throw invalid();
   if (challenge.attempts >= MAX_ATTEMPTS) throw new AppError('TOO_MANY_ATTEMPTS', 'Too many wrong codes. Sign in again to get a new one.', 429);
 
   const user = await db.User.findByPk(challenge.userId);

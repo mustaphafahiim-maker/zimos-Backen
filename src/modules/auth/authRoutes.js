@@ -14,6 +14,8 @@ router.use(require('./refreshCookie').attach);
 router.use(require('./newDeviceSignIn').attach);
 // Devices signed in to the account and two-step sign-in (SPEC §17.2).
 router.use(require('./securityRoutes'));
+// Merchant sign-in with a WhatsApp code (whatsappLogin.js, item 262).
+router.use(require('./whatsappLogin').router);
 
 router.post('/register', authLimiter, validate(schemas.register), controller.register);
 // What the sign-up form must ask for right now (plan, terms, a code).

@@ -44,6 +44,11 @@ const attribution = Joi.object({
     gclid: Joi.string().max(200).optional(),
     fbclid: Joi.string().max(200).optional(),
     ttclid: Joi.string().max(200).optional(),
+    // The other platforms' click ids (marketing/adClickIds.js, item 254).
+    twclid: Joi.string().max(200).optional(),
+    rdt_cid: Joi.string().max(200).optional(),
+    msclkid: Joi.string().max(200).optional(),
+    tblci: Joi.string().max(200).optional(),
   }).optional(),
 });
 
@@ -59,6 +64,10 @@ const touch = Joi.object({
   ttclid: touchField,
   gclid: touchField,
   scCid: touchField,
+  twclid: touchField,
+  rdt_cid: touchField,
+  msclkid: touchField,
+  tblci: touchField,
   ref: touchField,
   referrer: touchField,
   landingPage: touchField,

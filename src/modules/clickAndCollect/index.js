@@ -31,6 +31,8 @@ const logger = require('../../core/utils/logger');
  */
 
 const FREE_SHIPPING = Symbol.for('zimos.freeShipping');
+// The chosen place, on the order from the moment it exists (item 282): the assignment job never moves it.
+const PICKUP = Symbol.for('zimos.pickup');
 
 function settingsOf(workspace) {
   const s = (workspace && workspace.settings && workspace.settings.click_and_collect) || {};
@@ -72,6 +74,7 @@ async function prepare(workspace, pickupLocationId, body, orderBody) {
   delete orderBody.shippingAddress;
   delete orderBody.shippingOption;
   orderBody[FREE_SHIPPING] = true;
+  orderBody[PICKUP] = { locationId: location.id, name: location.name, address: location.address, isDefault: location.isDefault };
   return location;
 }
 
@@ -83,6 +86,24 @@ async function assertStock(workspace, location, items) {
   if (!need.size) return;
   const free = await freeAt(workspace.id, location.id, [...need.keys()]);
   const short = [...need.entries()].filter(([id, qty]) => (free.get(id) || 0) < qty).map(([id]) => id);
+  if (short.length) throw new AppError('PICKUP_OUT_OF_STOCK', 'Some items are not available at this place; choose another place or delivery', 409, { variantIds: short });
+}
+
+/**
+ * Inside the order's transaction, once the order row (with its place) exists
+ * and its units are reserved (item 283): the place must not be short. Two
+ * pickups of the same unit queue on the variant's row lock (the reservation),
+ * so the second counts here with the first one's order already in.
+ */
+async function claimStock(workspaceId, place, lines, transaction) {
+  const ids = [...new Set(lines.flatMap((l) => (l.consumedInventory || []).map((c) => c.variantId)).filter(Boolean))];
+  if (!ids.length) return;
+  const { locations, matrix } = await require('../stockLocations').stockMatrix(workspaceId, ids, transaction);
+  if (!locations.some((l) => l.id === place.locationId)) throw refuse('Pickup is not offered at this place; choose another');
+  const short = ids.filter((id) => {
+    const cell = matrix.get(id) && matrix.get(id).get(place.locationId);
+    return !cell || cell.onHand - cell.reserved < 0;
+  });
   if (short.length) throw new AppError('PICKUP_OUT_OF_STOCK', 'Some items are not available at this place; choose another place or delivery', 409, { variantIds: short });
 }
 
@@ -272,4 +293,4 @@ store.get(
   })
 );
 
-module.exports = { staff, store, prepare, assertStock, attach, onOrderCancelled, waybillLines, settingsOf, pickupLocations };
+module.exports = { staff, store, prepare, assertStock, claimStock, attach, onOrderCancelled, waybillLines, settingsOf, pickupLocations };

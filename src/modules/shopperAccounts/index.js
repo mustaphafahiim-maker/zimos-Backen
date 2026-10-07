@@ -42,6 +42,8 @@ const profile = (c) => ({
   fullName: c.fullName || null,
   phone: c.phoneRaw || (c.phoneNormalized ? `+${c.phoneNormalized}` : null),
   email: c.email || null,
+  // Only a verified email signs in by email or Google (item 278).
+  emailVerified: Boolean(c.email && c.emailVerifiedAt),
   marketingConsent: Boolean(c.marketingConsent),
   ordersCount: c.totalOrders || 0,
 });
@@ -53,7 +55,11 @@ async function me(customer) {
 async function updateMe(customer, body) {
   const changes = {};
   if (body.fullName !== undefined) changes.fullName = body.fullName || null;
-  if (body.email !== undefined) changes.email = body.email ? body.email.toLowerCase() : null;
+  if (body.email !== undefined) {
+    changes.email = body.email ? body.email.toLowerCase() : null;
+    // A typed email isn't verified (item 278); the same one keeps its verification.
+    if (changes.email !== (customer.email || null)) changes.emailVerifiedAt = null;
+  }
   if (body.marketingConsent !== undefined) changes.marketingConsent = body.marketingConsent;
   await customer.update(changes);
   return me(customer);
@@ -229,6 +235,13 @@ store.post(
 );
 store.use(enabledOnly, signedIn);
 store.get('/me', validate({ params: storeParams }), asyncHandler(async (req, res) => res.json(await me(req.shopper))));
+// Verify an email (item 278): a code to it, then the code back.
+store.post('/email/code', validate({ params: storeParams, body: Joi.object({ email: email.required(), locale: Joi.string().valid('ar', 'en', 'fr') }) }), asyncHandler(async (req, res) => {
+  res.json(await auth.requestEmailLink(req.publicWorkspace, req.shopper, req.body, { ip: req.ip }));
+}));
+store.post('/email/verify', validate({ params: storeParams, body: Joi.object({ email: email.required(), code: Joi.string().pattern(/^\d{6}$/).required() }) }), asyncHandler(async (req, res) => {
+  res.json(await me(await auth.verifyEmailLink(req.publicWorkspace, req.shopper, req.body)));
+}));
 store.patch(
   '/me',
   validate({ params: storeParams, body: Joi.object({ fullName: Joi.string().trim().max(200).allow('', null), email: email.allow('', null), marketingConsent: Joi.boolean() }).min(1) }),

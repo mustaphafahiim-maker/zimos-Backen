@@ -133,7 +133,10 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
     variantOptions: variant.optionValues,
     sku: variant.sku,
     offerId: null,
-    offerName: null,
+    // The rule a server-added or offer-priced plain line came from (cart offer, free gift; item 256).
+    offerName: line[Symbol.for('zimos.lineLabel')] || null,
+    // A free gift the server added (freeGifts/, item 276): it never counts toward a bundle tier or a discount's products.
+    freeGift: line[Symbol.for('zimos.freeGift')] === true,
     quantity,
     unitPriceAmount,
     unitCostAmount: variant.costAmount,
@@ -269,6 +272,15 @@ async function createOrder(
     // Chosen now so the reservations below can name the order they hold stock
     // for (inventory/orderStock.js releases exactly what they reserved).
     const orderId = crypto.randomUUID();
+    // Each product's purchase limits for every shopper order (item 313) — the store, funnels, the WhatsApp
+    // bot, /shop — counted again here under a lock on the phone, so two orders at once can't both pass the
+    // per-customer limit. Staff orders and quotes (the merchant's own quantities) are not limited; a free
+    // gift the store adds doesn't count.
+    if (!req.user && payload[Symbol.for('zimos.exactPrices')] !== true) {
+      const limitPhone = normalizePhone(contact && contact.phone);
+      if (limitPhone) await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `purchase-limits:${workspaceId}:${limitPhone}` }, transaction });
+      await require('../catalog/purchaseLimits').assertWithin(workspaceId, items.filter((i) => !i[Symbol.for('zimos.freeGift')]), contact, transaction);
+    }
     const customer = await customerService.findOrCreateByPhone(workspaceId, contact, transaction);
 
     // An active platform blocklist entry refuses the order outright, in every
@@ -416,14 +428,20 @@ async function createOrder(
 
     // Quantity bundles (modules/bundles): lowers the totals of the lines they
     // cover, before anything else looks at the subtotal.
-    const bundleSnapshots = await applyBundleTiers(workspaceId, pricedLines, transaction);
+    // A quote's prices are the merchant's exact prices (quotes/, item 275): no bundle tier,
+    // automatic discount or store minimum on top of them.
+    const exactPrices = payload[Symbol.for('zimos.exactPrices')] === true;
+    // A click-and-collect place (clickAndCollect/, items 282–283): { locationId, name, address, isDefault }.
+    const pickupPlace = payload[Symbol.for('zimos.pickup')] || null;
+    const bundleSnapshots = exactPrices ? [] : await applyBundleTiers(workspaceId, pricedLines, transaction);
     // A VIP tier with free shipping (vipTiers/, item 218) sets this on the checkout's payload: every line ships free.
     if (payload[Symbol.for('zimos.freeShipping')]) {
       for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
     }
 
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
-    const productIds = pricedLines.map((l) => l.productId);
+    // A free gift's product doesn't meet a discount's product condition (item 276).
+    const productIds = pricedLines.filter((l) => !l.freeGift).map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
     // `shippingOverride` (a funnel add-on placed as its own order after the
     // order it follows: the shopper pays shipping once) wins over any offer's.
@@ -445,7 +463,7 @@ async function createOrder(
       discountsSnapshot = [{ code: discountCode, type: evaluation.discount.type, amount: discountAmount }];
     }
     const couponExtras = require('../discounts/couponExtras');
-    if (!discountCode) {
+    if (!discountCode && !exactPrices) {
       // No code typed: the store's best automatic discount, when one applies.
       const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
       if (automatic) {
@@ -456,13 +474,15 @@ async function createOrder(
     }
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
-    if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
+    if (!req.user && !shippingOverride && !exactPrices) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
+    // …and so does a dropshipping supplier's own minimum (dropship/supplierRules.js, item 263).
+    if (!req.user && !shippingOverride) await require('../dropship/supplierRules').assertMinimums(workspaceId, pricedLines, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 
     // Always priced, even without an address (amount 0 then): the weight
     // and tier are stored on the order either way.
-    const shipping = await calculateShippingAmount(workspaceId, {
+    const storeShipping = await calculateShippingAmount(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
       address: shippingAddress || null,
@@ -474,11 +494,15 @@ async function createOrder(
       funnelId: payload.funnelId || null,
       transaction,
     });
+    // An order that is all one dropshipping supplier's, with its rates on: its price (dropship/supplierRules.js, item 263).
+    const shipping = await require('../dropship/supplierRules').applyShipping(workspaceId, pricedLines, storeShipping, shippingAddress, transaction);
     // The shopper's choice among the store's shipping options (shipping/shippingOptions.js).
     const chosenShipping = await require('../shipping/shippingOptions').choose(workspaceId, payload.shippingOption, shipping, transaction);
     const shippingAmount = chosenShipping ? chosenShipping.amount : shipping.amount;
 
-    const { taxAmount } = await calculateTax(workspaceId, {
+    // A tax-exempt business customer pays no added tax (businessCustomers/, item 228).
+    const taxExempt = require('../businessCustomers').exemptFor(customer, payload, req);
+    let { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
       lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
@@ -486,15 +510,20 @@ async function createOrder(
       transaction,
     });
 
+    if (taxExempt) taxAmount = 0;
+
     // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
     const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction, pricedLines[0].currency);
     const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
+    // Pay later on account: only an approved signed-in business customer, within their limit (accountCredit/, item 229).
+    const onAccount = await require('../accountCredit').checkOrder(customer, paymentMethod, totalAmount, payload, req, transaction);
 
     // (after the row exists, below) a moderate order may get the AI text check — risk/aiOrderCheck.
     const order = await db.Order.create(
       {
         id: orderId,
         workspaceId,
+        ...(onAccount ? { paymentDueAt: onAccount.paymentDueAt } : {}),
         websiteId: websiteId || null,
         funnelId: funnelId || null,
         customerId: customer.id,
@@ -509,7 +538,7 @@ async function createOrder(
         paymentAdjustmentAmount: paymentAdjustment.amount,
         paymentAdjustmentLabel: paymentAdjustment.label,
         ...(await fxService.baseFieldsFor(workspaceId, { currency: pricedLines[0].currency, totalAmount }, transaction)),
-        contactSnapshot: contact,
+        contactSnapshot: require('../businessCustomers').withBusiness(contact, customer, taxExempt),
         shippingAddressSnapshot: shippingAddress || null,
         discountsSnapshot,
         notes: notes || null,
@@ -532,7 +561,12 @@ async function createOrder(
         weightTierSnapshot: shipping.tier,
         weightEstimated: shipping.weightEstimated,
         // With the option the shopper picked, when not the standard one.
-        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}) },
+        shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}),
+          // Free shipping a VIP tier, a referral or a pickup gave: kept when a line joins later (item 277).
+          ...(payload[Symbol.for('zimos.freeShipping')] ? { freeShippingGranted: true } : {}),
+          // Set with the order, so the assignment job leaves a pickup where the shopper picked it (item 282).
+          ...(pickupPlace ? { pickup: { locationId: pickupPlace.locationId, name: pickupPlace.name, address: pickupPlace.address } } : {}) },
+        ...(pickupPlace && !pickupPlace.isDefault ? { stockLocationId: pickupPlace.locationId } : {}),
         ...(awaitingPayment
           ? {
               paymentExpiresAt: awaitingPayment.expiresAt,
@@ -547,6 +581,8 @@ async function createOrder(
       { transaction }
     );
     if (risk) await aiOrderCheck.queueFor(workspaceId, order.id, risk.level, transaction);
+    // A pickup takes its units from that place's shelf, counted again now that the order holds them (item 283).
+    if (pickupPlace) await require('../clickAndCollect').claimStock(workspaceId, pickupPlace, pricedLines, transaction);
 
     // Sequential, not Promise.all — see note in workspaceService: one
     // transaction = one pooled connection, so concurrent queries on it are unsafe.
@@ -668,6 +704,11 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   };
 
   const existing = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction });
+  // An upsell the shopper takes counts toward the product's purchase limits with the order's own lines (item 313).
+  if (isUpsell) {
+    const lines = [...existing.map((i) => ({ variantId: i.variantId, offerId: i.offerId, quantity: i.quantity })), lineInput];
+    await require('../catalog/purchaseLimits').assertWithin(workspaceId, lines, order.contactSnapshot || {}, transaction, { excludeOrderId: order.id });
+  }
   const newLine = await priceLine(workspaceId, lineInput, transaction);
   for (const consumed of newLine.consumedInventory) {
     await inventoryService.reserve(
@@ -709,6 +750,14 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   }
   lines.push({ ...newLine, lineTotalAmount: Number(newLine.lineTotalAmount) });
 
+  // What the order was given when placed still holds (item 277): free shipping from a VIP tier,
+  // a referral or a pickup (every line), or from a bundle tier (that bundle's products).
+  const keptShipping = order.shippingSnapshot || {};
+  const freeProducts = new Set((order.discountsSnapshot || []).filter((d) => d && d.kind === 'bundle' && d.freeShipping).flatMap((d) => [d.productId, ...(d.productIds || [])]).filter(Boolean));
+  for (const line of lines) {
+    if (line.shippingRule && (keptShipping.freeShippingGranted === true || freeProducts.has(line.productId))) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+  }
+
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
   const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
@@ -740,15 +789,22 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     funnelId: order.funnelId || null,
     transaction,
   });
-  const { taxAmount } = await calculateTax(workspaceId, {
+  // The shipping option the shopper picked, at its price for the new order; standard when the store no longer offers it.
+  const option = keptShipping.option && keptShipping.option.key
+    ? await require('../shipping/shippingOptions').choose(workspaceId, keptShipping.option.key, shipping, transaction).catch(() => null)
+    : null;
+  const shippingAmount = option ? option.amount : shipping.amount;
+  let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
-    shippingAmount: shipping.amount,
+    shippingAmount,
     transaction,
   });
-  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shipping.amount, transaction, order.currency);
-  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount + paymentAdjustment.amount;
+  // A tax-exempt business customer's order stays exempt (businessCustomers/, items 228, 277).
+  if (order.contactSnapshot && order.contactSnapshot.taxExempt === true) taxAmount = 0;
+  const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, order.paymentMethod, subtotal - discountAmount + shippingAmount, transaction, order.currency);
+  const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
 
   const item = await db.OrderItem.create(
     {
@@ -775,7 +831,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       subtotalAmount: subtotal,
       discountAmount,
       discountsSnapshot,
-      shippingAmount: shipping.amount,
+      shippingAmount,
       taxAmount,
       totalAmount,
       paymentAdjustmentAmount: paymentAdjustment.amount,
@@ -784,7 +840,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,
-      shippingSnapshot: shippingSnapshot(shipping),
+      // Merged, not replaced (item 277): the delivery slot, the pickup and the granted free shipping stay.
+      shippingSnapshot: { ...keptShipping, ...shippingSnapshot(shipping), option: option ? option.snapshot : undefined },
     },
     { transaction }
   );

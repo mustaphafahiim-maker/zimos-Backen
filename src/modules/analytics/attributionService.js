@@ -54,7 +54,10 @@ async function spendByKey(workspaceId, { start, end, tz, groupBy }) {
 }
 
 // Ad platforms are recorded as "meta" but arrive in utm_source as facebook/instagram/fb/ig.
-const PLATFORM_OF_SOURCE = { facebook: 'meta', fb: 'meta', instagram: 'meta', ig: 'meta', meta: 'meta', tiktok: 'tiktok', snapchat: 'snapchat', google: 'google' };
+const PLATFORM_OF_SOURCE = { facebook: 'meta', fb: 'meta', instagram: 'meta', ig: 'meta', meta: 'meta', tiktok: 'tiktok', snapchat: 'snapchat', google: 'google',
+  // The other ad platforms (item 254): their usual utm_source spellings.
+  pinterest: 'pinterest', twitter: 'x', x: 'x', 't.co': 'x', taboola: 'taboola', outbrain: 'outbrain', kwai: 'kwai', reddit: 'reddit',
+  bing: 'microsoft', microsoft: 'microsoft', msads: 'microsoft', 'microsoft ads': 'microsoft' };
 
 async function getAttribution(workspaceId, query = {}) {
   const { start, end } = resolveWindow({ from: query.from, to: query.to });

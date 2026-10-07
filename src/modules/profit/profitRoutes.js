@@ -139,6 +139,9 @@ router.delete(
   asyncHandler(async (req, res) => res.json(await adSpend.remove(req.tenant.workspaceId, req.params.entryId, req)))
 );
 
+// --- ad accounts and campaign controls (adAccounts.js, item 261) ---
+router.use('/ads', require('./adAccounts').router);
+
 // --- campaigns and the sync ---
 router.get(
   '/campaigns',

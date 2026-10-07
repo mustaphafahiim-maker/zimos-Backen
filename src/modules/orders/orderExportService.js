@@ -203,6 +203,8 @@ const COLUMNS = [
   { key: 'quantity', en: 'Quantity', ar: 'الكمية', item: true, value: (o, i) => (i ? i.quantity : '') },
   { key: 'unitPrice', en: 'Unit price', ar: 'سعر القطعة', item: true, value: (o, i) => (i ? money(i.unitPriceAmount) : '') },
   { key: 'lineTotal', en: 'Line total', ar: 'إجمالي السطر', item: true, value: (o, i) => (i ? money(i.lineTotalAmount) : '') },
+  // The offer, bundle, cart offer or free gift a line came from (item 259).
+  { key: 'offerName', en: 'Offer', ar: 'العرض', item: true, value: (o, i) => (i ? i.offerNameSnapshot || '' : '') },
 ];
 
 const COLUMN_KEYS = COLUMNS.map((c) => c.key);

@@ -58,6 +58,8 @@ async function relay(workspaceId, body, { clientIp, userAgent } = {}) {
     // A store that asks first sends nothing for a shopper who did not accept (cookieConsent.js).
     if (!(await require('./cookieConsent').relayAllowed(workspaceId, body, clientIp))) return 0;
     const browser = body.pixel || {};
+    const lastTouch = body.touches && body.touches.last;
+    const firstTouch = body.touches && body.touches.first;
     for (const e of events) {
       const meta = e.metadata && typeof e.metadata === 'object' ? e.metadata : {};
       await queue.add(
@@ -83,6 +85,8 @@ async function relay(workspaceId, body, { clientIp, userAgent } = {}) {
             ttp: str(browser.ttp, 200),
             ttclid: str(browser.ttclid, 500),
             scCid: str(browser.scCid, 500),
+            // Item 255: X / Reddit / Microsoft click ids, from the visit's touch (item 254).
+            ...Object.fromEntries(['twclid', 'rdt_cid', 'msclkid'].map((k) => [k, str(browser[k] || (lastTouch && lastTouch[k]) || (firstTouch && firstTouch[k]), 500)])),
           },
         },
         { workspaceId, dedupeKey: `bev:${workspaceId}:${e.eventId}` }
@@ -98,7 +102,9 @@ async function relay(workspaceId, body, { clientIp, userAgent } = {}) {
 async function sendTo(target, event, { isTest = false } = {}) {
   const { pixel } = target;
   try {
-    await browserEvents.send(target, event);
+    // null: the platform takes no such event (e.g. X without an event id or click id) — nothing was sent.
+    const sent = await browserEvents.send(target, event);
+    if (sent === null) return { ok: true, skipped: true };
     await trackingPixelService.recordSendResult(pixel, { ok: true });
     await pixelEventLog.record({ pixel, eventName: event.name, eventId: event.eventId, ok: true, isTest });
     return { ok: true };
@@ -157,7 +163,8 @@ async function sendTest(workspaceId, trackingPixelId, req) {
     req,
     after: { ok: result.ok },
   });
-  return { ok: result.ok, error: result.error || null, eventId: event.eventId, usedTestCode: Boolean(pixel.platform === 'meta' && pixel.testEventCode) };
+  // skipped: the platform has no page-view conversion to test with (X); its token is checked by the first real conversion.
+  return { ok: result.ok, skipped: Boolean(result.skipped), error: result.error || null, eventId: event.eventId, usedTestCode: Boolean(pixel.platform === 'meta' && pixel.testEventCode) };
 }
 
 module.exports = { JOB, RELAYED, relay, process, sendTest };

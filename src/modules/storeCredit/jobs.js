@@ -6,5 +6,5 @@ const svc = () => require('./storeCreditService');
 svc().install();
 
 module.exports = {
-  consumers: [{ name: 'store_credit_cancelled', queue: 'default', events: ['order.cancelled'], handle: (event) => svc().onOrderCancelled(event) }],
+  consumers: [{ name: 'store_credit_cancelled', queue: 'default', events: ['order.cancelled', 'order.rejected'], handle: (event) => svc().onOrderCancelled(event) }],
 };

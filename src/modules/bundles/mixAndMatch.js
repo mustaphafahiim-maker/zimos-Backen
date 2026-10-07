@@ -47,4 +47,45 @@ store.get(
   })
 );
 
+// The box's price for the shopper's current picks (frontend request, 2026-10-07):
+// the same tier pricing the cart and checkout use, so the page shows the price the order will have.
+store.post(
+  '/:bundleId/quote',
+  resolvePublicWorkspace,
+  validate({
+    params: Joi.object({ workspaceId: Joi.string().required(), bundleId: Joi.string().uuid().required() }),
+    body: Joi.object({ picks: Joi.array().items(Joi.object({ variantId: Joi.string().uuid().required(), quantity: Joi.number().integer().min(1).max(100).required() })).max(100).required() }),
+  }),
+  asyncHandler(async (req, res) => {
+    const ws = req.publicWorkspace.id;
+    const bundle = await db.Bundle.findOne({ where: { id: req.params.bundleId, workspaceId: ws, isActive: true, mixAndMatch: true }, include: [{ model: db.BundleTier, as: 'tiers' }] });
+    if (!bundle) throw new NotFoundError('Bundle');
+    const ids = req.body.picks.map((p) => p.variantId);
+    const variants = new Map((await db.ProductVariant.findAll({ where: { id: ids, workspaceId: ws, status: 'active' }, include: [{ model: db.Product, as: 'product', attributes: ['id', 'bundleId', 'pageSettings', 'status'] }] })).map((v) => [v.id, v]));
+    const units = [];
+    const ignored = [];
+    let currency = null;
+    for (const p of req.body.picks) {
+      const v = variants.get(p.variantId);
+      if (!v || !v.product || v.product.bundleId !== bundle.id || v.product.status !== 'active') { ignored.push(p.variantId); continue; }
+      currency = currency || v.currency;
+      const price = Number(effectiveVariantPrice(v, v.product).priceAmount);
+      for (let i = 0; i < p.quantity; i += 1) units.push(price);
+    }
+    const priced = require('./bundlePricing').priceUnits(bundle.tiers, units);
+    const next = [...bundle.tiers].filter((t) => t.quantity > units.length).sort((a, b) => a.quantity - b.quantity)[0] || null;
+    res.json({
+      units: units.length,
+      currency,
+      full: String(priced.full),
+      discount: String(priced.discount),
+      total: String(priced.total),
+      freeShipping: priced.freeShipping,
+      tiers: priced.tiers,
+      nextTier: next ? { id: next.id, title: next.title, quantity: next.quantity, missingUnits: next.quantity - units.length } : null,
+      ignored,
+    });
+  })
+);
+
 module.exports = { store };

@@ -182,13 +182,18 @@ async function onContactEvent(event) {
   if (rows.length === 0) return null;
   const customer = await db.Customer.findOne({ where: { id: payload.customerId, workspaceId } });
   if (!customer) return null;
+  // An erased contact: its former address leaves every list (item 308).
+  const erasedEmail = event.type === 'contact.erased' && payload.formerEmail ? String(payload.formerEmail) : null;
   for (const row of rows) {
     const code = row.provider.slice(KEY_PREFIX.length);
     const provider = providers.get(code);
     if (!provider || (gated(code) && !(await appGate.isEnabled(workspaceId, code)))) continue;
     const credentials = JSON.parse(secretBox.open(row.secretsSealed));
     try {
-      if (eligible(customer) && inSources(customer, row.config.sources || SOURCES)) {
+      if (erasedEmail) {
+        if (!provider.unsubscribe) continue;
+        await provider.unsubscribe(credentials, row.config.listId, erasedEmail);
+      } else if (eligible(customer) && inSources(customer, row.config.sources || SOURCES)) {
         await provider.upsertContacts(credentials, row.config.listId, [contactOf(customer, row.config)]);
       } else if (event.type === 'contact.updated' && customer.email && (!customer.marketingConsent || customer.isBlacklisted) && provider.unsubscribe) {
         await provider.unsubscribe(credentials, row.config.listId, customer.email);

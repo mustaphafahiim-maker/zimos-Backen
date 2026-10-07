@@ -76,7 +76,8 @@ async function addGifts(workspace, items) {
     if (gifts.some((g) => g.variantId === rule.giftVariantId)) continue;
     const v = gv.get(rule.giftVariantId);
     if (!inStock(v, rule.quantity || 1)) continue;
-    out.push({ variantId: rule.giftVariantId, quantity: rule.quantity || 1, [PINNED]: 0 });
+    // Labelled with the rule's name, so the order line and the cart offers report (item 256) say where it came from.
+    out.push({ variantId: rule.giftVariantId, quantity: rule.quantity || 1, [PINNED]: 0, [Symbol.for('zimos.lineLabel')]: String(rule.name).slice(0, 120), [Symbol.for('zimos.freeGift')]: true });
     gifts.push({ ruleId: rule.id, name: rule.name, variantId: rule.giftVariantId, quantity: rule.quantity || 1 });
   }
   return { items: out, gifts };
@@ -90,9 +91,12 @@ async function forCart(workspaceId, cartView) {
   const variants = new Map((await db.ProductVariant.findAll({ where: { id: (cartView.items || []).map((i) => i.variantId).filter(Boolean) }, attributes: ['id', 'productId'] })).map((v) => [v.id, v]));
   const lines = (cartView.items || []).map((i) => ({ productId: variants.get(i.variantId) ? variants.get(i.variantId).productId : null, quantity: 1, unitPrice: Number(i.lineTotal) }));
   const gv = await giftVariants(workspaceId, rules);
+  // The products a rule needs, so the cart can say "add X" (frontend request, 2026-10-07).
+  const neededIds = [...new Set(rules.flatMap((r) => r.productIds || []))];
+  const needed = new Map(neededIds.length ? (await db.Product.findAll({ where: { id: neededIds, workspaceId, status: 'active' }, attributes: ['id', 'name', 'slug'] })).map((p) => [p.id, { id: p.id, name: p.name, slug: p.slug }]) : []);
   return evaluate(rules, lines).map(({ rule, holds, missing, needsProduct }) => {
     const v = gv.get(rule.giftVariantId);
-    return { ruleId: rule.id, name: rule.name, gift: v ? { variantId: v.id, productName: v.product && v.product.name, optionValues: v.optionValues, quantity: rule.quantity || 1 } : null, eligible: holds && inStock(v, rule.quantity || 1), outOfStock: !inStock(v, rule.quantity || 1), missingAmount: missing > 0 ? String(missing) : '0', needsProduct };
+    return { ruleId: rule.id, name: rule.name, gift: v ? { variantId: v.id, productName: v.product && v.product.name, optionValues: v.optionValues, quantity: rule.quantity || 1 } : null, eligible: holds && inStock(v, rule.quantity || 1), outOfStock: !inStock(v, rule.quantity || 1), missingAmount: missing > 0 ? String(missing) : '0', needsProduct, neededProducts: needsProduct ? (rule.productIds || []).map((id) => needed.get(id)).filter(Boolean) : [] };
   }).filter((g) => g.gift);
 }
 

@@ -37,20 +37,28 @@ function send({ url, body, headers, timeoutMs }) {
     }
 
     const client = target.protocol === 'https:' ? https : http;
-    const req = client.request(
-      target,
-      {
-        method: 'POST',
-        headers: { ...headers, 'Content-Length': Buffer.byteLength(body) },
-        lookup: guardedLookup,
-        timeout: timeoutMs,
-      },
-      (res) => {
-        res.resume();
-        res.on('end', () => finish({ status: res.statusCode }));
-        res.on('error', () => finish({ status: res.statusCode }));
-      }
-    );
+    let req;
+    // A header Node refuses (a stored value with a character HTTP can't carry) throws here, not on
+    // 'error': it is a failed attempt like any other (item 304), never a rejection that stops the batch.
+    try {
+      req = client.request(
+        target,
+        {
+          method: 'POST',
+          headers: { ...headers, 'Content-Length': Buffer.byteLength(body) },
+          lookup: guardedLookup,
+          timeout: timeoutMs,
+        },
+        (res) => {
+          res.resume();
+          res.on('end', () => finish({ status: res.statusCode }));
+          res.on('error', () => finish({ status: res.statusCode }));
+        }
+      );
+    } catch (err) {
+      finish({ status: null, error: err.message });
+      return;
+    }
 
     // `timeout` above is the socket going idle; this is the whole exchange.
     deadline = setTimeout(() => req.destroy(new Error(`No response within ${timeoutMs} ms`)), timeoutMs);

@@ -212,7 +212,7 @@ function assertConfirmedOrPaid(order) {
   if (order.paymentMethod === 'cod' && order.confirmationState !== 'confirmed') {
     throw new AppError('ORDER_NOT_CONFIRMED', 'Confirm this cash-on-delivery order before booking a courier', 409);
   }
-  if (order.paymentMethod !== 'cod' && order.financialState !== 'paid') {
+  if (order.paymentMethod !== 'cod' && order.paymentMethod !== 'on_account' && order.financialState !== 'paid') {
     throw new AppError('ORDER_NOT_PAID', 'This prepaid order must be paid before booking a courier', 409);
   }
   // Paid with a gateway's test keys: no money moved, so nothing ships.

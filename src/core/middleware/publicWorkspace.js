@@ -67,7 +67,7 @@ const resolvePublicWorkspace = asyncHandler(async (req, res, next) => {
   // same "unavailable" answer — modules/risk/visitorGate.
   await require('../../modules/risk/visitorGate').refuseBlockedVisitor(req, workspace);
   // A store locked with a password or "coming soon" serves only its gate (modules/storeGate, item 197).
-  require('../../modules/storeGate').enforce(req, workspace);
+  await require('../../modules/storeGate').enforce(req, workspace);
 
   req.publicWorkspace = workspace;
   // The store's country for the rest of the request: local phone numbers are read in it (core/utils/storeCountry.js).

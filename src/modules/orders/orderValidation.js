@@ -184,7 +184,8 @@ module.exports = {
   // POST /import-tracking — the CSV file's text (trackingImport.js).
   importTracking: {
     params: Joi.object({ workspaceId: uuid.required() }),
-    body: Joi.object({ csv: Joi.string().min(1).max(1500000).required() }),
+    // A CSV as text, or an Excel file as base64 (item 260).
+    body: Joi.object({ csv: Joi.string().min(1).max(1500000), xlsx: Joi.string().base64().min(1).max(2000000) }).xor('csv', 'xlsx'),
   },
   // POST /documents/waybills and /documents/manifest — PDFs (orderDocuments.js).
   waybillsPdf: {

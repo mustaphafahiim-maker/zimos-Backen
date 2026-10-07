@@ -88,6 +88,8 @@ async function alert(user, req) {
 const FINISHES = [
   { path: /\/login$/, alert: true },
   { path: /\/two-factor\/verify$/, alert: true },
+  // The WhatsApp-code sign-in (whatsappLogin.js, item 269).
+  { path: /\/login\/whatsapp\/verify$/, alert: true },
   // Sign-up and its email confirmation: the browser where the account was made.
   { path: /\/(register|verify\/confirm|verify-email)$/, alert: false },
 ];

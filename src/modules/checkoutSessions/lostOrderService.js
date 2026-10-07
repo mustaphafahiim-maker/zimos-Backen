@@ -94,7 +94,7 @@ function trafficSourceOf(attribution) {
   } catch {
     referrerHost = null;
   }
-  const clickSource = touch.fbclid ? 'facebook' : touch.ttclid ? 'tiktok' : touch.gclid ? 'google' : touch.scCid ? 'snapchat' : null;
+  const clickSource = touch.fbclid ? 'facebook' : touch.ttclid ? 'tiktok' : touch.gclid ? 'google' : touch.scCid ? 'snapchat' : require('../marketing/adClickIds').platformOfClick(touch);
   return {
     source: touch.source || clickSource || referrerHost || null,
     medium: touch.medium || (clickSource ? 'paid' : null),
@@ -491,11 +491,12 @@ async function exportCsv(workspaceId, filters = {}, opts = {}) {
     { bind, type: QueryTypes.SELECT }
   );
   const header = ['Date', 'Status', 'Reason', 'Name', 'Phone', 'Email', 'City', 'Address', 'Products', 'Total', 'Currency', 'Recovery', 'Review', 'Source', 'Order', 'Traffic source', 'Campaign'];
-  const lines = [header.join(',')];
+  // The same table feeds the CSV and the Excel file (item 260).
+  const table = [header];
   for (const row of rows) {
     const s = serialize(row);
     const address = s.shippingAddress || {};
-    lines.push(
+    table.push(
       [
         new Date(s.lastActivityAt).toISOString(),
         s.status,
@@ -514,12 +515,11 @@ async function exportCsv(workspaceId, filters = {}, opts = {}) {
         s.convertedOrder ? s.convertedOrder.orderNumber : '',
         s.trafficSource ? s.trafficSource.source : '',
         s.trafficSource ? s.trafficSource.campaign : '',
-      ]
-        .map(csvCell)
-        .join(',')
+      ].map((v) => (v === null || v === undefined ? '' : v))
     );
   }
-  return { csv: `﻿${lines.join('\r\n')}\r\n`, count: rows.length };
+  const lines = table.map((r) => r.map(csvCell).join(','));
+  return { csv: `﻿${lines.join('\r\n')}\r\n`, count: rows.length, table };
 }
 
 // ------------------------------------------------------------- storefront --

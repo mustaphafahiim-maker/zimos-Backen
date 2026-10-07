@@ -67,7 +67,9 @@ const checkout = asyncHandler(async (req, res) => {
   // A manual transfer (the whole order, or a COD order's deposit) is checked
   // here, before any cart work; it is not an online (gateway) payment.
   const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
-  const isOnline = orderBody.paymentMethod !== 'cod' && orderBody.paymentMethod !== 'bank_transfer';
+  const isOnline = !['cod', 'bank_transfer', 'on_account'].includes(orderBody.paymentMethod);
+  // Pay later on account (accountCredit/, item 229): the signed-in shopper is who the store approved.
+  if (orderBody.paymentMethod === 'on_account') await require('../accountCredit').markCheckout(workspaceId, req.headers['x-shopper-token'], orderBody);
   if (orderBody.paymentMethod === 'cod') paymentRules.assertAllowedInFunnel(workspace, { funnelId: orderBody.funnelId, methodId: 'cod' });
   // A gift card lowers what the courier collects (COD, item 189) or what the gateway charges (online, item 201).
   if (giftCardCode) {
@@ -168,6 +170,10 @@ const checkout = asyncHandler(async (req, res) => {
     const inviteShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
     ({ items, referral } = await require('../customerReferrals').applyAtCheckout(workspace, items, referralCode, orderBody, inviteShopper));
   }
+  // A signed-in tax-exempt business customer pays no added tax (businessCustomers/, item 228).
+  await require('../businessCustomers').markCheckout(workspaceId, req.headers['x-shopper-token'], orderBody);
+  // Cart offers: an offered line at the price the cart showed (cartOffers/, item 253). Funnels keep their own offers.
+  if (!orderBody.funnelId) ({ items } = await require('../cartOffers').applyAtCheckout(workspace, items));
   // Free gifts the order earns, added by the server at no charge (freeGifts/, item 208). Funnels keep their own offers.
   if (!orderBody.funnelId) ({ items } = await require('../freeGifts').addGifts(workspace, items));
   // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (giftOptions, item 214).
@@ -175,6 +181,13 @@ const checkout = asyncHandler(async (req, res) => {
   if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
   // The delivery day and time slot: a place is held now and given to the order once it exists (deliverySlots/, item 221).
   const slotBooking = await require('../deliverySlots').hold(workspace, deliverySlot);
+  // A checkout that fails after this gives the place back at once (item 285): the shopper's retry isn't
+  // blocked by their own hold. A hold that became the order's (order_id set) stays.
+  if (slotBooking) {
+    res.on('finish', () => {
+      if (res.statusCode >= 400) require('../../db/models').DeliverySlotBooking.destroy({ where: { id: slotBooking.id, orderId: null } }).catch(() => {});
+    });
+  }
   await require('../clickAndCollect').assertStock(workspace, pickupLocation, items);
 
   // The gateway takes the order's currency, or the order is not created (payments/methodCurrency.js).
@@ -227,7 +240,7 @@ const checkout = asyncHandler(async (req, res) => {
     const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
     const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
     if ((giftCard && giftCard.applied) || (points && points.applied) || (credit && credit.applied)) await order.reload();
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}) });
+    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}), trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -270,6 +283,8 @@ const checkout = asyncHandler(async (req, res) => {
       const { coversOrder, ...card } = giftCard || {};
       return res.status(201).json({
         order: { ...paidOrder.toJSON(), items: orderItems },
+        // The signed tracking token: the thank-you page's proof for the tracking page, self-service and the survey (postPurchaseSurvey, item 236).
+        trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order),
         ...(giftCard ? { giftCard: { ...card, held: false } } : {}),
         ...(credit ? { storeCredit: { ...credit, held: false } } : {}),
         ...(points ? { loyalty: { ...points, held: false } } : {}),
@@ -294,6 +309,7 @@ const checkout = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     order: { ...order.toJSON(), items: orderItems },
+    trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order),
     ...(pickup ? { pickup } : {}),
     payment: {
       id: attempt.id,

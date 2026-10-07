@@ -11,6 +11,11 @@ const { getAdapter, MANUAL } = require('../shipping/carriers');
 
 const money = (minor, currency) => `${(Number(minor) / 100).toFixed(2)} ${currency || ''}`.trim();
 
+// Emoji and their joiners/variation selectors: the PDF fonts cannot draw them.
+const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\uFE0F\u200D\u20E3]/gu;
+const stripEmoji = (s) => (typeof s === 'string' ? s.replace(EMOJI, '').replace(/[ \t]{2,}/g, ' ').replace(/\s+(["')\]])$/, '$1').trim() : s);
+const noEmoji = (lines) => lines.map((l) => (typeof l === 'string' ? stripEmoji(l) : l && typeof l === 'object' ? Object.fromEntries(Object.entries(l).map(([k, v]) => [k, stripEmoji(v)])) : l));
+
 // One line of QR text: user input may carry newlines.
 const oneLine = (v) => String(v == null ? '' : v).replace(/\s*[\r\n]+\s*/g, ' ').trim();
 
@@ -132,8 +137,8 @@ async function computeWaybillModel(workspaceId, orderId) {
     amountToCollect: isCod ? String(codAmountFor(order)) : null,
     shipTo: order.contactSnapshot || {},
     address: order.shippingAddressSnapshot || {},
-    // The shopper's custom-field answers (waybill/customData.js).
-    customData: [...require('../clickAndCollect').waybillLines(order), ...require('../deliverySlots').waybillLines(order), ...require('../giftOptions').waybillLines(order), ...(await require('./customData').customDataLines(order.id))],
+    // The shopper's custom-field answers (waybill/customData.js). Emoji are dropped: the PDF fonts have no glyphs for them.
+    customData: noEmoji([...require('../clickAndCollect').waybillLines(order), ...require('../deliverySlots').waybillLines(order), ...require('../giftOptions').waybillLines(order), ...(await require('./customData').customDataLines(order.id))]),
   };
   model.qrPayload = buildQrPayload(model);
   return model;
@@ -266,7 +271,8 @@ async function renderWaybillPdf(model) {
     y += 56;
   } else {
     doc.fontSize(10).font('Helvetica-Bold').fillColor('#1a7f37')
-      .text(`PREPAID — ${order.paymentMethod.toUpperCase()}`, left, y, { lineBreak: false });
+      // An on-account order is paid later by invoice (accountCredit/, item 229): nothing to collect, but not paid either.
+      .text(order.paymentMethod === 'on_account' ? 'ON ACCOUNT — DO NOT COLLECT' : `PREPAID — ${order.paymentMethod.toUpperCase()}`, left, y, { lineBreak: false });
     doc.fillColor('#000');
     y += 16;
   }

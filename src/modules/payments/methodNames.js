@@ -12,10 +12,13 @@
  *   paypal         PayPal (approve on PayPal, captured on the way back;
  *                  gateways/paypal.js), shown as an express button
  *   bank_transfer  a manual transfer with a receipt (checkout/manualCheckout.js)
+ *   on_account     an approved business customer pays later, within their
+ *                  terms (accountCredit/, item 229); ships like cash on
+ *                  delivery but nothing is collected at the door
  */
 
 const ONLINE_METHODS = Object.freeze(['card', 'wallet', 'valu', 'kiosk', 'paypal']);
-const ORDER_METHODS = Object.freeze(['cod', ...ONLINE_METHODS, 'bank_transfer']);
+const ORDER_METHODS = Object.freeze(['cod', ...ONLINE_METHODS, 'bank_transfer', 'on_account']);
 
 const isOnline = (method) => ONLINE_METHODS.includes(method);
 

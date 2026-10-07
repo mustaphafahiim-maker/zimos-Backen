@@ -176,7 +176,8 @@ async function processRefund(workspaceId, orderId, { amount, reason, paymentId }
       if (paymentId) {
         throw new AppError('REFUND_PAYMENT_INVALID', 'That payment is not a captured gateway payment on this order', 422);
       }
-      const offline = captured.find((p) => p.status === 'captured') || null;
+      // Never a points / credit / gift-card payment (item 273): those are refunded only when named, capped at what is left on them.
+      const offline = captured.find((p) => p.status === 'captured' && !STORE_TENDERS.includes(p.providerCode)) || null;
       return { refund: await refundOffline(workspaceId, order, offline, { amount, reason }, req, transaction) };
     }
 
@@ -224,7 +225,7 @@ async function processRefund(workspaceId, orderId, { amount, reason, paymentId }
 
   let result;
   try {
-    result = await gatewayRuntime.refund(workspaceId, plan.payment, amount);
+    result = await gatewayRuntime.refund(workspaceId, plan.payment, amount, { refundId: plan.refund.id });
   } catch (err) {
     require('../notifications/integrationAlerts').gateway(workspaceId, plan.payment.providerCode, err);
     if (err instanceof GatewayRejectedError || err instanceof GatewayAuthError) {

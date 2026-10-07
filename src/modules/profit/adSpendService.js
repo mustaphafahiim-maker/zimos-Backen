@@ -17,7 +17,7 @@ const adIds = require('./adIdMatching');
  * the store's currency.
  */
 
-const PLATFORMS = ['meta', 'tiktok', 'snapchat', 'google', 'other'];
+const PLATFORMS = ['meta', 'tiktok', 'snapchat', 'google', 'pinterest', 'x', 'taboola', 'outbrain', 'kwai', 'reddit', 'microsoft', 'other'];
 const MAX_IMPORT_ROWS = 5000;
 const num = (v) => (v === null || v === undefined ? null : Number(v));
 const campaignKey = (name) => String(name).trim().toLowerCase();
