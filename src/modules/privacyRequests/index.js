@@ -69,6 +69,11 @@ async function openOrders(customerId) {
 async function erase(customer, { force = false, req, transaction }) {
   if (!force && (await openOrders(customer.id))) throw new AppError('CUSTOMER_HAS_OPEN_ORDERS', 'This customer has orders still on their way; erase after they are delivered, or force it', 409);
   const id = customer.id;
+  // Read before they are wiped: what the customer was known by, to find copies kept elsewhere (item 286).
+  const { normalizePhone } = require('../../core/utils/phone');
+  // As stored (normalized) and as typed: forms and quotes keep the number the way it was typed.
+  const phones = [...new Set([customer.phoneNormalized, customer.phoneRaw, customer.alternatePhone, normalizePhone(customer.phoneRaw || ''), normalizePhone(customer.alternatePhone || '')].filter((p) => p && !String(p).startsWith('x')).map(String))];
+  const email = customer.email ? String(customer.email).trim().toLowerCase() : null;
   await customer.update({
     fullName: ERASED_NAME, email: null, phoneRaw: null, alternatePhone: null,
     phoneNormalized: `x${id.replace(/-/g, '').slice(0, 24)}`,
@@ -77,11 +82,28 @@ async function erase(customer, { force = false, req, transaction }) {
   }, { transaction, hooks: false });
   const keepPlace = `jsonb_strip_nulls(jsonb_build_object('country', shipping_address_snapshot->'country', 'province', shipping_address_snapshot->'province', 'city', shipping_address_snapshot->'city'))`;
   await db.sequelize.query(
-    `UPDATE orders SET contact_snapshot = jsonb_build_object('fullName', :name), shipping_address_snapshot = CASE WHEN shipping_address_snapshot IS NULL THEN NULL ELSE ${keepPlace} END WHERE customer_id = :c`,
+    `UPDATE orders SET contact_snapshot = jsonb_build_object('fullName', :name), shipping_address_snapshot = CASE WHEN shipping_address_snapshot IS NULL THEN NULL ELSE ${keepPlace} END,
+       billing_address_snapshot = CASE WHEN billing_address_snapshot IS NULL THEN NULL ELSE ${keepPlace.replace(/shipping_address_snapshot/g, 'billing_address_snapshot')} END WHERE customer_id = :c`,
     { replacements: { c: id, name: ERASED_NAME }, transaction }
   );
   await db.sequelize.query('DELETE FROM customer_addresses WHERE customer_id = :c', { replacements: { c: id }, transaction });
   await db.sequelize.query('DELETE FROM shopper_login_codes WHERE customer_id = :c', { replacements: { c: id }, transaction });
+  // Copies kept by phone or email rather than by customer (item 286). '' never matches a real value.
+  const r = { c: id, ws: customer.workspaceId, phones: phones.length ? phones : [''], email: email || '', name: ERASED_NAME };
+  const q = (sql) => db.sequelize.query(sql, { replacements: r, transaction });
+  // Sign-in codes asked for before the account existed (or for an unknown number) carry only the target.
+  await q('DELETE FROM shopper_login_codes WHERE workspace_id = :ws AND (target IN (:phones) OR target = :email)');
+  // Checkout verification codes: short-lived, kept by phone only.
+  await q('DELETE FROM otp_codes WHERE phone IN (:phones)');
+  // Abandoned and converted checkouts: the cart stays for the store's figures, the person goes.
+  await q("UPDATE checkout_sessions SET contact_fields = '{}'::jsonb, phone_normalized = NULL, checkout_payload = NULL, ip_address = NULL WHERE workspace_id = :ws AND (phone_normalized IN (:phones) OR converted_order_id IN (SELECT id FROM orders WHERE customer_id = :c))");
+  await q('DELETE FROM form_submissions WHERE workspace_id = :ws AND (customer_id = :c OR phone IN (:phones) OR lower(email) = :email)');
+  await q("UPDATE quote_requests SET contact = jsonb_build_object('fullName', :name::text) WHERE workspace_id = :ws AND (customer_id = :c OR contact->>'phone' IN (:phones) OR lower(contact->>'email') = :email)");
+  await q('UPDATE product_questions SET asker_name = NULL, asker_email = NULL WHERE workspace_id = :ws AND lower(asker_email) = :email');
+  await q('UPDATE shipment_batch_items SET carrier_address = NULL WHERE order_id IN (SELECT id FROM orders WHERE customer_id = :c)');
+  // WhatsApp inbox: the thread stays (the team's replies are the store's), without the person or their words.
+  await q("UPDATE whatsapp_messages SET body = NULL WHERE conversation_id IN (SELECT id FROM whatsapp_conversations WHERE workspace_id = :ws AND (customer_id = :c OR phone_normalized IN (:phones)))");
+  await q("UPDATE whatsapp_conversations SET customer_name = NULL, last_message_preview = NULL, phone_normalized = 'x' || left(replace(id::text, '-', ''), 24) WHERE workspace_id = :ws AND (customer_id = :c OR phone_normalized IN (:phones))");
   await db.sequelize.query('DELETE FROM payment_methods_saved WHERE customer_id = :c', { replacements: { c: id }, transaction });
   await db.sequelize.query('DELETE FROM wishlist_items WHERE customer_id = :c', { replacements: { c: id }, transaction });
   await db.sequelize.query('UPDATE reviews SET author_name = NULL WHERE customer_id = :c', { replacements: { c: id }, transaction });

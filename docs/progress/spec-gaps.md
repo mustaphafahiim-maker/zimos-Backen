@@ -1941,7 +1941,11 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
 - [x] 285. A failed checkout left its delivery-slot hold, blocking the shopper's own retry for 10 minutes. (backend fix; no UI change)
   - When the checkout answers 400 or more, a hold not yet attached to an order is deleted (on the response's finish, so every failure path is covered). An attached one stays: it belongs to the order.
   - Checked: a slot with room for 1, a checkout refused for stock (409 INSUFFICIENT_STOCK) → 0 holds left; the retry → 201.
-- [ ] 286. Erasing a customer left the billing address on orders and the phone/email in sign-in codes.
+- [x] 286. Erasing a customer left the billing address on orders and the phone/email in sign-in codes. (backend fix; no UI change)
+  - The order's billing address is cut to country / province / city like the shipping address. Sign-in codes are deleted by target too (codes asked before the account existed, or for an unknown number, carry only the phone or email).
+  - A scan of every table holding a phone, email, name or address found more copies kept by phone or email instead of by customer; erase now also covers them: checkout verification codes (deleted), abandoned / converted checkout sessions (contact, payload, phone and IP cleared; the cart stays for the figures), contact-form submissions (deleted), quote requests (contact cut to the "deleted customer" name), product questions (asker name and email cleared), carrier batch addresses (cleared), and the WhatsApp inbox (name, preview and message texts cleared, the number replaced; the thread stays). Phones are matched as stored and as typed.
+  - Kept on purpose: marketing opt-outs (the do-not-contact list must outlive the erase) and the cross-store fraud network's phone hashes.
+  - Checked: a customer with an order (shipping + billing), sign-in and checkout codes, an abandoned checkout, a form message, a quote, a product question and a WhatsApp thread → after erase, none of them holds the name, phone, email, street or messages.
 - [ ] 287. A shopper's address change kept the old area, place and notes when the new address left them out.
 - [ ] 288. Smaller: a stock count whose location was deleted applied to the whole store; one malformed line in a URL-redirect import (or lookup) answered 500 half-way.
 - [ ] 289. Offer and bundle lines counted as one piece in the pick list and in lot consumption (an offer of "3 pieces" picked and taken from lots as 1, a bundle's other variants not at all) — the same expansion scan to pack got in item 271.
