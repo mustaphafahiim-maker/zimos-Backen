@@ -2932,3 +2932,18 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screen
 - Reports → «المبيعات حسب المقاس واللون» / "Sales by size and colour": one card per option (Size, Colour…) with a bar per value and its share («M — 83%»), a filter by option, and «تنزيل CSV». Help text: «استخدمها وانت بتطلب من المورّد: كام من كل مقاس» / "Use it when ordering from your supplier: how many of each size".
+
+## 247. Returns by reason and return rate — UI: pending
+
+### `GET /api/v1/workspaces/:ws/store-reports/returns?from=&to=&format=json|csv` (`analytics.view`)
+```json
+{ "currency": "EGP",
+  "totals": { "requests": 3, "units": 7, "returnRate": 37.5, "refunds": 1, "refunded": "10000" },
+  "reasons": [{ "reason": "damaged", "requests": 2, "rejected": 1, "completed": 1, "units": 5 }],
+  "products": [{ "productId": "…", "name": "ZZ Ret Shoe", "delivered": 8, "returned": 3, "returnRate": 37.5, "reasons": ["damaged", "wrong_item"] }] }
+```
+- `reasons`: return requests opened in the window, by reason code (`damaged`, `defective`, `wrong_item`, `not_as_described`, `no_longer_wanted`, `arrived_late`, `other`). `completed` = received or refunded.
+- `products`: for orders placed in the window, units delivered vs units in return requests that weren't rejected → `returnRate` %. `refunded` = refunds processed in the window. CSV = the products table.
+
+### Screen
+- Reports → «المرتجعات» / "Returns": cards «نسبة المرتجع» / "Return rate", «طلبات الإرجاع» / "Return requests", «فلوس اترجعت» / "Refunded"; a bar per reason with Arabic labels («تالف» damaged, «عيب صناعة» defective, «منتج غلط» wrong item, «مش زي الوصف» not as described, «مبقاش عايزه» no longer wanted, «اتأخر» arrived late, «سبب تاني» other); the products table sorted by returned units with the rate highlighted when high; «تنزيل CSV».

@@ -1762,4 +1762,6 @@ breakdowns. No migration needed for any item below.
 - [x] 246. Sales by variant option: units and revenue per option value (e.g. size M, colour black) across products, for buying decisions; CSV. (backend done, UI in frontend-handoff.md)
   - storeReports /sales-by-option: jsonb_each_text over order_items.variant_options_snapshot (live orders), grouped by lower(trim(name/value)); share per option; option filter.
   - Verified: M (3 + 2 from " m " on another product) merged to 5 = 83.3%, L 1, Color and Colour kept apart, size filter case-insensitive. Note: a product created with one variant through POST /catalog/products did not keep the variant's optionValues in the test — worth a look in the catalog lane.
-- [ ] 247. Returns by reason: return requests per reason and per product, the return rate per product (returned units / delivered units), and refunds given; CSV.
+- [x] 247. Returns by reason: return requests per reason and per product, the return rate per product (returned units / delivered units), and refunds given; CSV. (backend done, UI in frontend-handoff.md)
+  - storeReports /returns: reason code = split_part(reason, ':', 1) (returns store "code: detail"); units from the items JSON; per-product rate for orders placed in the window (delivered or returned stage) vs non-rejected return units; processed refunds in the window.
+  - Verified: 3 orders (8 units delivered), returns damaged ×1 refunded, wrong_item ×2 requested, damaged ×4 rejected → rate 37.5%, reasons with rejected/completed counts, refund 100.

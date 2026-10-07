@@ -337,4 +337,57 @@ router.get('/sales-by-option', requirePermission(PERMISSIONS.ANALYTICS_VIEW), va
   return res.json({ from: c.from, to: c.to, currency: c.currency, options: [...groups.values()].map((g) => ({ ...g, values: g.values.map((v) => ({ ...v, share: g.units ? Math.round((v.units / g.units) * 1000) / 10 : 0 })) })) });
 }));
 
+// ------------------------------------------------ 247. returns by reason --
+
+/*
+ * Return requests opened in the window, by reason (the code before the
+ * colon in returns.reason) and status, with the units asked back; per
+ * product, the return rate for orders placed in the window: units in return
+ * requests that were not rejected / units delivered. Refunds processed in
+ * the window are summed. CSV is the per-product table.
+ */
+router.get('/returns', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({ params: Joi.object(ws), query: Joi.object(range) }), asyncHandler(async (req, res) => {
+  const c = await contextOf(req);
+  const p = { ws: c.ws, from: c.from, to: c.to };
+  const reasons = await run(
+    `SELECT split_part(r.reason, ':', 1) AS reason, COUNT(*)::int AS requests,
+            COUNT(*) FILTER (WHERE r.status = 'rejected')::int AS rejected,
+            COUNT(*) FILTER (WHERE r.status IN ('received', 'refunded'))::int AS completed,
+            COALESCE(SUM((SELECT SUM((it->>'quantity')::int) FROM jsonb_array_elements(r.items) it)), 0)::int AS units
+       FROM return_requests r
+      WHERE r.workspace_id = :ws AND r.created_at >= :from AND r.created_at < :to
+      GROUP BY 1 ORDER BY requests DESC`, p);
+  const products = await run(
+    `WITH o AS (SELECT o.id, ${STAGE_SQL} AS stage FROM ${ORDERS_WITH_STAGE_FROM}
+                WHERE o.workspace_id = :ws AND o.is_test = false AND o.created_at >= :from AND o.created_at < :to),
+          sold AS (SELECT oi.product_id, MIN(oi.product_name_snapshot) AS name, SUM(oi.quantity)::int AS delivered
+                     FROM order_items oi JOIN o ON o.id = oi.order_id WHERE o.stage IN ('delivered', 'returned') GROUP BY 1),
+          back AS (SELECT oi.product_id, SUM((it->>'quantity')::int)::int AS returned,
+                          string_agg(DISTINCT split_part(r.reason, ':', 1), ',') AS reasons
+                     FROM return_requests r JOIN o ON o.id = r.order_id
+                     CROSS JOIN LATERAL jsonb_array_elements(r.items) it
+                     JOIN order_items oi ON oi.id = (it->>'orderItemId')::uuid
+                    WHERE r.status <> 'rejected' GROUP BY 1)
+     SELECT COALESCE(sold.product_id, back.product_id) AS "productId", COALESCE(sold.name, p.name) AS name,
+            COALESCE(sold.delivered, 0) AS delivered, COALESCE(back.returned, 0) AS returned, back.reasons
+       FROM sold FULL JOIN back ON back.product_id = sold.product_id
+       LEFT JOIN products p ON p.id = back.product_id
+      WHERE COALESCE(back.returned, 0) > 0 OR COALESCE(sold.delivered, 0) > 0
+      ORDER BY returned DESC, delivered DESC LIMIT 500`, p);
+  const [ref] = await run(
+    `SELECT COUNT(*)::int AS refunds, COALESCE(SUM(f.amount), 0)::bigint AS amount
+       FROM refunds f JOIN orders o ON o.id = f.order_id
+      WHERE o.workspace_id = :ws AND f.status = 'processed' AND f.created_at >= :from AND f.created_at < :to`, p);
+  const rows = products.map((r) => ({ ...r, returnRate: r.delivered ? Math.round((r.returned / r.delivered) * 1000) / 10 : null, reasons: r.reasons ? r.reasons.split(',') : [] }));
+  if (req.query.format === 'csv') return sendCsv(res, 'returns-by-product', ['name', 'delivered', 'returned', 'returnRate', 'reasons'], rows.map((r) => ({ ...r, reasons: r.reasons.join(' ') })));
+  const delivered = rows.reduce((n, r) => n + r.delivered, 0);
+  const returned = rows.reduce((n, r) => n + r.returned, 0);
+  return res.json({
+    from: c.from, to: c.to, currency: c.currency,
+    totals: { requests: reasons.reduce((n, r) => n + r.requests, 0), units: reasons.reduce((n, r) => n + r.units, 0), returnRate: delivered ? Math.round((returned / delivered) * 1000) / 10 : null, refunds: ref.refunds, refunded: String(ref.amount) },
+    reasons,
+    products: rows,
+  });
+}));
+
 module.exports = { router, contextOf, sendCsv, run, ws, range };
