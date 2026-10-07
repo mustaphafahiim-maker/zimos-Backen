@@ -260,10 +260,11 @@ async function checkDns(workspaceId, domainId) {
 }
 
 /**
- * Tells the provider a removed domain's hostname is no longer wanted. The
- * domain row goes either way, so this never throws: a failure is kept as a
- * DomainProviderDeletion row the domains job retries (jobs.js), so the
- * hostname is not left behind at the provider.
+ * Tells the provider a removed domain's hostname is no longer wanted, once
+ * the row is gone. Deleting the row already queued it as a
+ * DomainProviderDeletion (migration 214's trigger); done here, that row goes
+ * too. This never throws: a failure leaves the row for the domains job to
+ * retry (jobs.js), so the hostname is not left behind at the provider.
  */
 async function revokeCertificate(domain) {
   if (!domain || !domain.sslProviderRef) return;
@@ -271,16 +272,21 @@ async function revokeCertificate(domain) {
     await getCertificateProvider().revoke({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
   } catch (err) {
     await rememberDeletion(domain, err);
+    return;
   }
+  await db.DomainProviderDeletion.destroy({ where: { provider: providerOf(domain), providerRef: domain.sslProviderRef } });
 }
 
 const RETRY_AFTER_MS = 5 * 60 * 1000;
+
+// The provider a queued deletion is kept under; the same as migration 214's trigger.
+const providerOf = (domain) => String(domain.sslProvider || '').trim() || 'cloudflare';
 
 async function rememberDeletion(domain, err) {
   const fields = {
     workspaceId: domain.workspaceId,
     hostname: domain.hostname,
-    provider: domain.sslProvider || String(process.env.CERTIFICATE_PROVIDER || 'unknown').trim().toLowerCase(),
+    provider: providerOf(domain),
     providerRef: domain.sslProviderRef,
   };
   const lastError = String((err && err.message) || 'unknown error').slice(0, 500);

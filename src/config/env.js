@@ -611,6 +611,10 @@ const env = {
       .toLowerCase()
       .replace(/\.$/, ''),
     maxPerStore: positiveInt('CUSTOM_DOMAINS_MAX_PER_STORE', 1),
+    // The most orphan hostnames (at Cloudflare, with no domain row) one daily
+    // reconciliation run queues for deletion; more than that queues none and
+    // logs a warning (modules/domains/domainJobs.js).
+    reconcileMax: positiveInt('CUSTOM_DOMAINS_RECONCILE_MAX', 20),
     resolvers: csvList(process.env.DOMAIN_VERIFY_RESOLVERS, '1.1.1.1,8.8.8.8'),
     // Cloudflare for SaaS custom hostnames (domains/certificates/cloudflare.js,
     // CERTIFICATE_PROVIDER=cloudflare). The token needs Zone > SSL and

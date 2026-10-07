@@ -30,6 +30,9 @@ verification does not ask for a certificate.
 - `revoke` deletes the custom hostname; 404 counts as done. Any other failure
   is thrown: the domains service keeps it as a `domain_provider_deletions` row
   and the domains job retries it.
+- `listHostnames` (Cloudflare only, not part of the contract) lists every
+  custom hostname on the zone, 50 a page, up to 200 pages, for the daily
+  reconciliation (`domains.reconcile_provider_hostnames`).
 
 ## The contract
 
@@ -85,3 +88,7 @@ previous `ssl_status`.
 2. Every later `POST /domains/:id/ssl/check` → `getStatus` → `ssl_status` updated; on
    `issued` the domain's `status` becomes `active`.
 3. Deleting the domain → `revoke`; a failure is retried by the domains job.
+   Any delete of a domain row with a `ssl_provider_ref` (the API, a store's or
+   account's CASCADE, raw SQL) queues the hostname in
+   `domain_provider_deletions` in the same transaction (migration 214's
+   trigger); the API's own `revoke` clears that row once it succeeds.
