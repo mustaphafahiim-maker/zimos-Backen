@@ -89,6 +89,12 @@ const settingsBody = Joi.object({
     }),
   // 'manual' or a courier code, checked against the store's couriers by the service.
   defaultCarrierCode: Joi.string().max(50).allow(null),
+  // The only governorates the store delivers to; [] or null = everywhere (deliveryAreas.js).
+  servedGovernorates: Joi.array()
+    .items(Joi.string().valid(...GOVERNORATE_CODES))
+    .unique()
+    .max(GOVERNORATE_CODES.length)
+    .allow(null),
 }).min(1);
 
 const pricingModeBody = Joi.object({

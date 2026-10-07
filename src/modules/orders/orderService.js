@@ -452,6 +452,8 @@ async function createOrder(
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
     if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
+    // The governorates the store delivers to, when it limits them (shipping/deliveryAreas.js).
+    if (!req.user && !shippingOverride) await require('../shipping/deliveryAreas').assertAreaServed(workspaceId, shippingAddress, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
 

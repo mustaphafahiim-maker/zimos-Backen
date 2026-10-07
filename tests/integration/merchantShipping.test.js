@@ -279,6 +279,8 @@ describe('GET/PATCH /shipping/settings', () => {
       freeShippingThresholdAmount: null,
       governorateRates: {},
       defaultCarrierCode: null,
+      // Self delivery's served governorates (deliveryAreas.js): none = everywhere.
+      servedGovernorates: [],
     });
     expect(empty.body.governorates).toHaveLength(27);
 
