@@ -181,8 +181,8 @@ async function toOrderItems(workspaceId, cartId) {
   };
 }
 
-async function markConverted(cartId, orderId) {
-  await db.Cart.update({ status: 'converted' }, { where: { id: cartId } });
+async function markConverted(workspaceId, cartId, orderId) {
+  await db.Cart.update({ status: 'converted' }, { where: { id: cartId, workspaceId } });
 }
 
 module.exports = { getOrCreateCart, getCart, addItem, updateItemQuantity, removeItem, toOrderItems, markConverted };

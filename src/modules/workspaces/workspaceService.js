@@ -25,6 +25,7 @@ const publicPlans = require('../billing/publicPlansService');
 const { isVerified } = require('../auth/signupPolicy');
 const env = require('../../config/env');
 const { assertBumpOfferUsable } = require('../checkout/orderBump');
+const { checkLogoUrl } = require('./workspaceLogo');
 
 async function sendInviteEmail(workspace, email, role) {
   await notify.email({
@@ -301,7 +302,10 @@ async function updateWorkspace({ workspaceId, patch }, req) {
     }
     next.slug = slug;
   }
-  if (patch.logoUrl !== undefined) next.logoUrl = patch.logoUrl || null;
+  if (patch.logoUrl !== undefined) {
+    checkLogoUrl(patch.logoUrl);
+    next.logoUrl = patch.logoUrl || null;
+  }
   if (patch.tagline !== undefined) next.tagline = patch.tagline || null;
   if (patch.themeSettings !== undefined) {
     const blob = patch.themeSettings || {};

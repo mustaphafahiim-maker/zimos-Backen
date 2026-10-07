@@ -10,6 +10,7 @@ const orderService = require('../orders/orderService');
 const { afterOrderCompleted } = require('../orders/orderCompletion');
 const storefrontService = require('../storefront/storefrontService');
 const { recordAudit } = require('../audit/auditService');
+const { checkLogoUrl } = require('../workspaces/workspaceLogo');
 const { formatMoney, parsePriceToMinor, parseBullets, storeHomeTree } = require('./quickstartAdapter');
 
 /**
@@ -104,7 +105,10 @@ async function updateBranding(workspaceId, patch, req) {
   };
   const next = {};
   if (patch.name !== undefined) next.name = patch.name;
-  if (patch.logoUrl !== undefined) next.logoUrl = patch.logoUrl || null;
+  if (patch.logoUrl !== undefined) {
+    checkLogoUrl(patch.logoUrl);
+    next.logoUrl = patch.logoUrl || null;
+  }
   if (patch.tagline !== undefined) next.tagline = patch.tagline || null;
   if (patch.themeSettings !== undefined) {
     const blob = patch.themeSettings || {};

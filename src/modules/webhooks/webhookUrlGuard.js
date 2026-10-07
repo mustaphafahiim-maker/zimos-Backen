@@ -78,9 +78,11 @@ const INTERNAL_HOSTNAME = /(^|\.)(localhost|local|internal|intranet|lan|home|cor
 /**
  * Checks a URL a merchant is saving. Throws a ValidationError on `field`
  * naming the problem; returns the URL normalised by the WHATWG parser.
+ * `allowHttp` also takes plain http:// (a logo is only read, never sent
+ * anything); private addresses are refused either way.
  */
-function checkUrl(value, field = 'url') {
-  const invalid = (message) => new ValidationError([{ field, message }], 'Invalid webhook URL');
+function checkUrl(value, field = 'url', { allowHttp = false, label = 'webhook URL' } = {}) {
+  const invalid = (message) => new ValidationError([{ field, message }], `Invalid ${label}`);
   let url;
   try {
     url = new URL(value);
@@ -88,7 +90,7 @@ function checkUrl(value, field = 'url') {
     throw invalid('Must be a full URL, like https://example.com/zimos/webhooks');
   }
   const allowPrivate = env.webhooks.allowPrivateUrls;
-  if (url.protocol !== 'https:' && !(allowPrivate && url.protocol === 'http:')) {
+  if (url.protocol !== 'https:' && !((allowPrivate || allowHttp) && url.protocol === 'http:')) {
     throw invalid('Must start with https://');
   }
   if (url.username || url.password) throw invalid('Must not contain a username or password');
