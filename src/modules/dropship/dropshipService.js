@@ -144,16 +144,19 @@ async function pushOrder(workspaceId, code, orderId, req, { via = 'manual' } = {
   const full = require('../publicApi/publicOrderSerializer').serializeOrder(await require('../orders/orderService').getOrder(workspaceId, orderId));
   // A mixed order sends this supplier only its own lines.
   const order = await require('./dropshipOrders').linesFor(workspaceId, code, full);
-  const result = await call(() => provider.pushOrder(credentials, order));
-  const [ref, created] = await db.DropshipOrderRef.findOrCreate({
-    where: { workspaceId, orderId, provider: code },
-    defaults: { workspaceId, orderId, provider: code, externalOrderId: result.externalOrderId, externalStatus: result.externalStatus || null, forwardedBy: via },
+  const answer = (ref) => ({ orderId, provider: code, externalOrderId: ref.externalOrderId, externalStatus: ref.externalStatus, suggestedStage: provider.mapStatus(ref.externalStatus) });
+  // One remote order per order and supplier (item 307): a double click, or a manual push racing the
+  // automatic one, waits on this lock and then finds the first one's reference — the supplier is asked
+  // once. (Their own duplicate check only looks at their newest orders.)
+  return db.sequelize.transaction(async (transaction) => {
+    await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `dropship-push:${workspaceId}:${orderId}:${code}` }, transaction });
+    const existing = await db.DropshipOrderRef.findOne({ where: { workspaceId, orderId, provider: code }, transaction });
+    if (existing) return answer(existing);
+    const result = await call(() => provider.pushOrder(credentials, order));
+    const ref = await db.DropshipOrderRef.create({ workspaceId, orderId, provider: code, externalOrderId: result.externalOrderId, externalStatus: result.externalStatus || null, forwardedBy: via }, { transaction });
+    await recordAudit({ workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'dropship.push_order', entityType: 'Order', entityId: orderId, after: { provider: code, externalOrderId: ref.externalOrderId }, metadata: { via }, req, transaction });
+    return answer(ref);
   });
-  if (!created) await ref.update({ externalOrderId: result.externalOrderId, externalStatus: result.externalStatus || ref.externalStatus });
-  if (created) {
-    await recordAudit({ workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'dropship.push_order', entityType: 'Order', entityId: orderId, after: { provider: code, externalOrderId: ref.externalOrderId }, metadata: { via }, req });
-  }
-  return { orderId, provider: code, externalOrderId: ref.externalOrderId, externalStatus: ref.externalStatus, suggestedStage: provider.mapStatus(ref.externalStatus) };
 }
 
 /** Sets each imported variant's stock to what the provider has now. */
