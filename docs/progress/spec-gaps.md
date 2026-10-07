@@ -2115,3 +2115,25 @@ A multi-agent review of the 27 commits of items 290–316, each finding checked 
   - A merge that changes none of them records no event, so a plain merge doesn't resend the contact.
   - Verified: merging a consenting duplicate whose number had opted out turned the kept customer's consent off and recorded one `contact.updated` for it; a merge of two plain records recorded none.
 
+
+## Twenty-fifth pass (2026-10-07) — the domain registrar (owner's request)
+
+The owner asked which registrar to use (Hostinger or Namecheap, "or the best") and whether a referral code would
+earn something instead of selling domains at cost. Research (search extracts and the registrars' own GitHub docs;
+the registrar sites were blocked from here, so numbers are to be confirmed at sign-up):
+- Hostinger: its terms forbid reselling, and its referral programme pays nothing on domains — not usable.
+- Namecheap: allows reselling through its API, but API prices are retail and .com renews at about $18.5, so a margin
+  disappears at the first renewal.
+- Dynadot (decision): free reseller account, registration and renewal at about the same price, API3 + sandbox,
+  each merchant can be the registrant of their own domain. Namecheap is the fallback adapter.
+- Referral codes pay about $2–3 once and send the merchant away from the dashboard; the margin on our own sale pays
+  every year. Decision: sell at the registrar's cost plus a configured margin.
+- .eg / .com.eg: no API registrar sells them; the merchant buys from an Egyptian registrar and connects it.
+
+- [x] 325. Selling price with the platform's margin: the merchant sees and confirms the registrar's cost converted to the platform's selling currency, plus a configured margin, rounded up; the purchase keeps both price and cost. (backend done, UI in frontend-handoff.md)
+  - `registrar/pricing.js`: `DOMAIN_SELL_CURRENCY` (unset = the registrar's currency), `DOMAIN_MARGIN_PERCENT` (0–300, default 0), `DOMAIN_PRICE_STEP` (minor units to round up to, default 1). No price in code. Conversion uses the platform's daily rate (fxService); no rate → no price.
+  - Search, purchase, renew quote and renew all use the selling price; the 409 `DOMAIN_PRICE_CHANGED` compares selling prices. With a real registrar a name without a price cannot be bought: 503 `DOMAIN_PRICE_UNAVAILABLE`.
+  - Migration 504 adds `cost_amount` / `cost_currency` to `domain_purchases`. Renewals by hand (`domain.renew`) and the automatic ones (new `domain.auto_renew_done` entry) record price and cost in the audit, so billing (Ziad's, unchanged) can invoice them.
+  - Verified with sandbox prices ($10.88 .com, rate 48, margin 40 %, step 500): search showed 735 EGP. The cost sent as `acceptPrice` → 409 with 735 EGP. The purchase stored 73500 EGP / 1088 USD. A 2-year renew quote came to 1465 EGP, with the renew audit holding both. The automatic renewal's audit held 735 EGP / $10.88.
+- [ ] 326. Dynadot registrar adapter (`DOMAIN_REGISTRAR=dynadot`): search with prices, register with the merchant as registrant, DNS, renew, renewal quote; calls sent one at a time (its API bans parallel calls); premium names not sold; the registrant contact asked in the buy dialog.
+- [ ] 327. Namecheap registrar adapter (`DOMAIN_REGISTRAR=namecheap`) as the fallback: same contract over its XML API (whitelisted IPv4, full host list on every DNS write).

@@ -3344,3 +3344,13 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 ## 322. Checkout autosave — funnel on every save — UI: pending (storefront, with 302)
 
 - Send `funnelId` (funnel checkouts) or `websiteId` (store pages) on **every** `POST /store/:ws/checkout-sessions` save, not only the first: a save without them now clears them, so a visitor who moves from a funnel to the store's checkout is counted where they are.
+
+## 325. Domain selling price with the platform's margin — UI: pending
+
+No new endpoint; what changes in the existing ones (`/api/v1/workspaces/:ws/domains/*`, `domain.manage`):
+- `GET /search`, `GET /purchases/:id/renew-quote`, and `price` on `GET /purchases` are now the **selling price**. That means the registrar's cost in the platform's selling currency (e.g. EGP) plus the platform's margin, rounded. Same shape `{ amount, currency }`, minor units. The registrar's cost is never sent to the dashboard.
+- `POST /purchases` and `POST /purchases/:id/renew` keep confirming with `acceptPrice` = the price shown. A new error:
+  - **503 `DOMAIN_PRICE_UNAVAILABLE`**: the price can't be worked out right now (no quote, or no exchange rate yet).
+  - «سعر الدومين مش متاح دلوقتي — جرّب كمان شوية» / "This domain's price isn't available right now — try again in a bit".
+- Search results can come back with `price: null` while `available: true` (a TLD the registrar didn't price). Show «السعر مش متاح» / "Price not available" and disable «اشتري».
+- Screens: Store settings → Domains → «اشتري دومين» (search list, buy dialog) and «جدّد» (renew dialog). Format prices in the returned currency (EGP for Egypt), e.g. «735 ج.م في السنة» / "EGP 735 / year".
