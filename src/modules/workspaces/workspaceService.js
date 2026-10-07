@@ -450,11 +450,12 @@ async function inviteMember({ workspaceId, email: givenEmail, roleId }, req) {
   assertCanGrant(role.permissions, req);
 
   // Every invite waits for the person to accept it, whether or not they
-  // already have an account (spec-gaps item 358): nobody is put on a team,
-  // or offered as a store's new owner, without saying yes. The answer is the
-  // same either way, so it does not tell the inviter whether the email has
-  // an account. The invitee accepts with an account whose confirmed email is
-  // this one (workspaces/myInvites, /me/invites), including one made later.
+  // already have an account (spec-gaps item 358): nobody is put on a team
+  // without saying yes (handing a member the store is item 379). The
+  // answer is the same either way, so it does not tell the inviter whether
+  // the email has an account. The invitee accepts with an account whose
+  // confirmed email is this one (workspaces/myInvites, /me/invites),
+  // including one made later.
   const email = String(givenEmail).trim().toLowerCase();
   const lowerEmail = (column) => db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col(column)), email);
   const user = await db.User.findOne({ where: lowerEmail('email'), attributes: ['id'] });

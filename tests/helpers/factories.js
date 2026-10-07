@@ -87,6 +87,7 @@ async function addMemberWithRole(ownerToken, workspaceId, roleKey, fullName = 'T
   if (res.status !== 201) {
     throw new Error(`addMemberWithRole failed: ${res.status} ${JSON.stringify(res.body)}`);
   }
+  await request(app).post(`/api/v1/me/invites/${res.body.membership.id}/accept`).set('Authorization', `Bearer ${member.accessToken}`).expect(200);
   return member;
 }
 

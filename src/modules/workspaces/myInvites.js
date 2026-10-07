@@ -66,14 +66,16 @@ async function accept(user, membershipId, req) {
   if (!user.emailVerifiedAt) {
     throw new AppError('EMAIL_NOT_CONFIRMED', 'Confirm your email address first, then accept the invite', 409);
   }
-  return db.sequelize.transaction(async (transaction) => {
+  // Already on that team: the invite is deleted and committed, then 409
+  // (throwing inside the transaction would roll the delete back).
+  const result = await db.sequelize.transaction(async (transaction) => {
     const invite = await findMine(user, membershipId, transaction);
     const workspace = await db.Workspace.findByPk(invite.workspaceId, { attributes: ['id', 'name', 'slug', 'status'], transaction });
     if (!workspace || workspace.status === 'closed') throw new NotFoundError('Invite');
     const existing = await db.Membership.findOne({ where: { workspaceId: invite.workspaceId, userId: user.id }, transaction });
     if (existing) {
       await invite.destroy({ transaction });
-      throw new ConflictError('You are already on this team', 'ALREADY_MEMBER');
+      return null;
     }
     const email = invite.invitedEmail;
     await invite.update({ userId: user.id, status: 'active', invitedEmail: null }, { transaction });
@@ -94,6 +96,8 @@ async function accept(user, membershipId, req) {
       role: role ? { id: role.id, key: role.key, name: role.name } : null,
     };
   });
+  if (!result) throw new ConflictError('You are already on this team', 'ALREADY_MEMBER');
+  return result;
 }
 
 async function decline(user, membershipId, req) {
