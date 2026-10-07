@@ -2744,3 +2744,15 @@ Body for create / edit / preview:
 - Settings → Website → «فروعنا» / "Our branches": on/off; per location: show on site, phone, WhatsApp, opening hours (ar/en), note, and the map pin (lat/lng, or pick on a map).
 - Storefront page `/branches` «فروعنا» / "Our stores": list/cards with address, hours, «اتصل» / "Call", «واتساب» / "WhatsApp", «الاتجاهات» / "Directions"; a button «أقرب فرع ليا» / "Nearest to me" asks the browser for location and sorts by distance («على بعد 3.2 كم» / "3.2 km away"); a badge «استلام من الفرع» / "Pickup available" when `pickup`.
 - Footer link to the page when enabled.
+
+## 234. Price history and the honest "lowest in 30 days" — UI: pending
+
+### Dashboard — `GET /api/v1/workspaces/:ws/price-history/variants/:variantId?days=180` (`products.view`)
+→ `{ current: { priceAmount, compareAtAmount, currency }, lowest30Days, changes: [{ priceAmount, compareAtAmount, changedAt }] }` (oldest first; every price / compare-at change, from any path: editor, bulk edit, scheduled sales).
+
+### Storefront — `GET /api/v1/store/:ws/lowest-prices?variantIds=a,b` (≤ 50)
+→ `{ days: 30, prices: { "<variantId>": "9000" } }` — the lowest price the variant really had in the last 30 days (including the price in force when the window opened, and today's). Bad ids → 422.
+
+### Screens
+- Product editor → variant → «تاريخ السعر» / "Price history": a step line chart (price and compare-at) and the list of changes with dates.
+- Storefront product page / cards, only when a variant is on sale (compare-at above price): a small line «أقل سعر في آخر 30 يوم: 90 ج» / "Lowest price in the last 30 days: EGP 90". If that lowest is below today's price, show it as is — don't hide it.

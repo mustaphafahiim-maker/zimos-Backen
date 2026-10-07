@@ -1703,7 +1703,10 @@ review requests sent to many customers at once. Migrations 495–499 are the las
 - [x] 233. Store locator: the store's branches (from stock locations) with address, phone, opening hours, map coordinates and a "get directions" link, as a public list and a nearest-branch answer for given coordinates. (backend done, UI in frontend-handoff.md)
   - storeLocator/index.js; settings.store_locator keyed by stock location (no migration): visible, phone, WhatsApp, hours, note, coordinates. Public list nearest-first by haversine distance; directions link from coordinates or address; pickup flag from click and collect.
   - Verified: off 404, lat without lng refused, hidden location left out, distances from Alexandria (3.2 km vs 178.7 km), nearest.
-- [ ] 234. Price history: every variant price change recorded, the lowest price of the last 30 days shown honestly next to a sale price, and the history in the dashboard.
+- [x] 234. Price history: every variant price change recorded, the lowest price of the last 30 days shown honestly next to a sale price, and the history in the dashboard. (backend done, UI in frontend-handoff.md)
+  - priceHistory/index.js; migration 496 variant_price_history, seeded with today's prices. ProductVariant afterCreate/afterUpdate hooks record a row when price or compare-at really changes (inside the caller's transaction).
+  - Lowest in 30 days = min(today, every price set in the window, the price in force when the window opened). Public batch endpoint for sale badges; dashboard history per variant.
+  - Verified: create/patch/no-op patch/sale rows, lowest 9000, older 8000 in force at window start → 8000, superseded by 11000 before the window → 9000, bad ids 422.
 - [ ] 235. Customer privacy requests: a signed-in shopper downloads their data or asks to delete their account; the team sees the requests and completes an erase that removes personal details but keeps order and accounting records.
 - [ ] 236. Post-purchase survey: one or two questions on the thank-you page ("How did you hear about us?", a 0–10 score), answers kept on the order, and a report.
 - [ ] 237. RFM customer scores: recency, frequency and money scores 1–5 per customer from delivered orders, the usual labels (champions, loyal, at risk, lost…), counts per label, and a filter in the customer list.

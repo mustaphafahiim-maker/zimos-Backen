@@ -307,6 +307,7 @@ v1.use('/workspaces/:workspaceId/account-credit', require('./modules/accountCred
 v1.use('/workspaces/:workspaceId/product-specs', require('./modules/productSpecs').staff);
 v1.use('/workspaces/:workspaceId/redirects', require('./modules/urlRedirects').staff);
 v1.use('/workspaces/:workspaceId/store-locator', require('./modules/storeLocator').staff);
+v1.use('/workspaces/:workspaceId/price-history', require('./modules/priceHistory').staff);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
@@ -405,6 +406,7 @@ v1.use('/store/:workspaceId/pickup', require('./modules/clickAndCollect').store)
 v1.use('/store/:workspaceId/specs', require('./modules/productSpecs').store);
 v1.use('/store/:workspaceId/redirects', require('./modules/urlRedirects').store);
 v1.use('/store/:workspaceId/branches', require('./modules/storeLocator').store);
+v1.use('/store/:workspaceId/lowest-prices', require('./modules/priceHistory').store);
 v1.use('/store/:workspaceId/quotes', require('./modules/quotes').store);
 v1.use('/store/:workspaceId/orders/:orderId/self-service', require('./modules/shopperAccounts/orderSelfService').store);
 v1.use('/store/:workspaceId/search', require('./modules/searchInsights').store);
