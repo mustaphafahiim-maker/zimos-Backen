@@ -132,6 +132,9 @@ const checkout = asyncHandler(async (req, res) => {
       400
     );
   }
+  // A funnel's checkout prices the funnel's way (shipping, coupons, payment methods): the
+  // funnel must be a published one of this store that sells these lines (funnels/funnelCheckout.js, item 355).
+  await require('../funnels/funnelCheckout').assertSells(workspaceId, orderBody.funnelId, items);
 
   // The ticked order bump becomes one more line of this order, built by the
   // server from the configured offer (422 when it is not that offer).

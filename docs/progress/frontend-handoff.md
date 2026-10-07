@@ -4177,3 +4177,19 @@ A parcel that came back undelivered (order stage `returned`, an RTO: the COD cus
 - Success toast: «رجعت المنتجات للمخزون» / "Items are back in stock"; then show «اترجعت للمخزون في {date}» / "Restocked on {date}" from `restockedAt`.
 - `reason: was_delivered`: «الشحنة اتسلمت قبل ما ترجع، افتح مرتجع ورجّعه للمخزون من هناك» / "This parcel was delivered before it came back. Open a return and restock it from there", with a link to the returns section.
 - Booking a restocked order again with `INSUFFICIENT_STOCK`: «المنتجات دي اتباعت بعد ما رجعت للمخزون. زوّد المخزون الأول وبعدين احجز الشحنة» / "These items were sold after they went back in stock. Add stock first, then book the shipment".
+
+## 355. A funnel checkout must name a published funnel that sells its items — UI: pending
+
+The storefront checkout, shipping quote and coupon preview took any `funnelId`, so a shopper could name another funnel to get its shipping group, free-shipping threshold and funnel-only coupons. Now the funnel must be a published funnel of this store, and the shopper's lines must be products its published pages sell. Nothing changes for a checkout without `funnelId`, and the request bodies are unchanged.
+
+### Endpoints (storefront, public)
+- **POST `/api/v1/store/:workspaceId/checkout`**, **POST `/api/v1/store/:workspaceId/shipping-quote`**, **POST `/api/v1/store/:workspaceId/coupon-preview`**: when the body carries `funnelId`:
+  - 422 `FUNNEL_NOT_AVAILABLE` "This funnel is not published in this store", `details: [{ "field": "funnelId", "message": "Not a published funnel of this store" }]`: an unknown id, another store's funnel, or a draft.
+  - 410 `FUNNEL_PAUSED` "This funnel is not currently available", `details: [{ "field": "funnelId", "message": "This funnel is paused" }]`: the merchant paused the funnel (the same code the funnel runtime already gives).
+  - 422 `FUNNEL_ITEM_NOT_OFFERED` "This funnel does not sell one or more of these items", `details: [{ "field": "items[0]", "message": "This funnel does not sell this item" }]`: the index is the shopper's own line (`item` = 0, then `extraItems`, or the cart's lines in order).
+- What a funnel sells: each published page's product, every product, variant or offer an element on its pages names (also on running split-test pages), and each step's offer and order bump. A page that shows the catalogue (a product list, a collection band, a gallery, a shoppable image, or a product element with no product on a page with none) sells any of the store's products. Order bumps, product bumps, gift wrap and free gifts the server adds are not checked.
+
+### Screens
+- Funnel checkout and its order form: on `FUNNEL_NOT_AVAILABLE` or `FUNNEL_PAUSED`, replace the form with «العرض ده مش متاح دلوقتي» / "This offer is not available right now" and keep the shopper's details in the form state.
+- On `FUNNEL_ITEM_NOT_OFFERED`: «المنتج ده مش من العرض ده. ارجع لصفحة العرض واطلب من هناك» / "This product is not part of this offer. Go back to the offer page and order from there", with a link to the funnel's first page.
+- Dashboard → funnel editor: no change. A product element left empty on a page with no product still makes the funnel sell the whole catalogue, so the existing "page sells nothing yet" warning stays as is.
