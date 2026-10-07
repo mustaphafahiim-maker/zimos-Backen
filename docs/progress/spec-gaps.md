@@ -1910,7 +1910,9 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
   - Verifying: signed in (by phone), the shopper asks for a code at an email and sends it back (POST /account/email/code, /account/email/verify; codes kept apart from sign-in codes, channel email_link, same limits), or signs in with Google while signed in (that Google email becomes the verified one). Customer merge carries the verification with the email.
   - Existing emails start unverified: shoppers who signed in by email before verify once (or sign in by phone). Accepted, pre-launch.
   - Checked the reported attack: the attacker's checkout put their email on the victim's contact; their Google sign-in is refused (404) and the email-code request sends nothing. The owner verifies an email and then signs in with Google; a link code can't be used to sign in.
-- [ ] 279. Google sign-in tokens for the shared platform client could be replayed on another store: bind the token to the store (a per-store nonce).
+- [x] 279. Google sign-in tokens for the shared platform client could be replayed on another store: bind the token to the store (a per-store nonce). (backend done, UI in frontend-handoff.md)
+  - GET /store/:ws/account/google hands out a nonce ("<unix seconds>.<HMAC(store|time)>", 10 minutes, nothing stored); the storefront passes it to Google's button, Google signs it into the ID token, and signing in refuses a token without this store's fresh nonce (401 GOOGLE_TOKEN_INVALID). Required for every store, own client id or not.
+  - Checked (sandbox tokens carry the nonce as a 4th part): no nonce 401, this store's 200, another store's 401, old/forged 401.
 - [ ] 280. Receiving a purchase order twice at once (double click) added the stock twice and lost one update of the received count.
 - [ ] 281. Delivery-slot hold queried outside its own transaction: ten checkouts at once could exhaust the database connection pool.
 - [ ] 282. A pickup at the default location was moved to another warehouse by the order-assignment job.

@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const { Router } = require('express');
 const Joi = require('joi');
 const asyncHandler = require('express-async-handler');
@@ -29,6 +30,30 @@ function settingsOf(workspace) {
   return { enabled: Boolean(s.enabled) && Boolean(clientId || adapter().name === 'sandbox'), ownClientId: s.clientId || null, clientId };
 }
 
+/*
+ * The store's sign-in nonce (item 279): GET …/account/google hands one to the
+ * button, Google puts it in the ID token, and signing in checks it — so a token
+ * minted on one store (all stores without their own client id share the
+ * platform's) can't be replayed on another. "<unix seconds>.<HMAC(store|time)>",
+ * good for 10 minutes; nothing is stored.
+ */
+const NONCE_TTL_S = 10 * 60;
+const nonceKey = () => crypto.createHmac('sha256', env.jwt.accessSecret).update('zimos:shopper-google-nonce').digest();
+const nonceSig = (workspaceId, ts) => crypto.createHmac('sha256', nonceKey()).update(`${workspaceId}|${ts}`).digest('hex');
+function issueNonce(workspaceId, now = Date.now()) {
+  const ts = Math.floor(now / 1000);
+  return `${ts}.${nonceSig(workspaceId, ts)}`;
+}
+function nonceValid(workspaceId, nonce, now = Date.now()) {
+  const m = /^(\d{9,12})\.([0-9a-f]{64})$/.exec(String(nonce || ''));
+  if (!m) return false;
+  const age = Math.floor(now / 1000) - Number(m[1]);
+  if (age < 0 || age > NONCE_TTL_S) return false;
+  const want = Buffer.from(nonceSig(workspaceId, m[1]), 'hex');
+  const got = Buffer.from(m[2], 'hex');
+  return want.length === got.length && crypto.timingSafeEqual(want, got);
+}
+
 async function signIn(workspace, idToken, req) {
   const accounts = require('..').settingsOf(workspace);
   const s = settingsOf(workspace);
@@ -40,6 +65,8 @@ async function signIn(workspace, idToken, req) {
     logger.info(`[shopper-google] refused: ${err.message}`);
     throw new AppError('GOOGLE_TOKEN_INVALID', 'Google sign-in did not work — try again', 401);
   }
+  // Minted for this store's button (item 279).
+  if (!nonceValid(workspace.id, who.nonce)) throw new AppError('GOOGLE_TOKEN_INVALID', 'Google sign-in did not work — try again', 401);
   if (!who.email || !who.emailVerified) throw new AppError('GOOGLE_EMAIL_UNVERIFIED', 'Your Google account has no verified email', 422);
   const auth0 = require('../shopperAuth');
   // Already signed in (by phone): Google proves the email, which becomes this shopper's verified email (item 278).
@@ -63,7 +90,10 @@ const store = Router({ mergeParams: true });
 const sp = Joi.object({ workspaceId: Joi.string().required() });
 store.get('/', resolvePublicWorkspace, validate({ params: sp }), (req, res) => {
   const s = settingsOf(req.publicWorkspace);
-  res.json({ enabled: s.enabled && require('..').settingsOf(req.publicWorkspace).enabled, clientId: s.enabled ? s.clientId : null });
+  const on = s.enabled && require('..').settingsOf(req.publicWorkspace).enabled;
+  res.set('Cache-Control', 'no-store');
+  // nonce: pass it to Google's button (initialize({ nonce })); valid 10 minutes (item 279).
+  res.json({ enabled: on, clientId: s.enabled ? s.clientId : null, nonce: on ? issueNonce(req.publicWorkspace.id) : null });
 });
 store.post('/', trackingLimiter, resolvePublicWorkspace, validate({ params: sp, body: Joi.object({ idToken: Joi.string().min(10).max(5000).required() }) }), asyncHandler(async (req, res) => res.json(await signIn(req.publicWorkspace, req.body.idToken, req))));
 

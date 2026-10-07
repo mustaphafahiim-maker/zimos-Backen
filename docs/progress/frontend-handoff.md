@@ -3266,3 +3266,8 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 - `POST /store/:ws/account/email/code` `{ email, locale }` (signed in) → `{ sent, target, expiresInSeconds, resendAfterSeconds }`; `POST /store/:ws/account/email/verify` `{ email, code }` → the account (`emailVerified: true`). 422 `INVALID_CODE` / `CODE_EXPIRED`, 429 `TOO_MANY_ATTEMPTS` / `TOO_MANY_CODES`.
 - `POST /store/:ws/account/google` with the `x-shopper-token` header (signed in) links Google: `{ token, linked: true, customer }`. Without it, a Google email that isn't verified on an account answers 404 `ACCOUNT_NOT_FOUND`: «ادخل برقم موبايلك الأول، وبعدين ضيف جوجل من حسابك» / "Sign in with your phone first, then add Google from your account".
 - Screens: Account → profile: next to the email «مش متأكد» / "Not verified" + «أكّد الإيميل» / "Verify email" (code sent to it, 6-digit input) and «اربط حساب جوجل» / "Link Google"; «متأكد ✓» / "Verified" once done. Changing the email shows it unverified again.
+
+## 279. Google sign-in nonce — UI: pending (storefront)
+
+- `GET /store/:ws/account/google` now also returns `nonce`. Pass it to Google Identity Services: `google.accounts.id.initialize({ client_id, nonce, callback })`, and fetch a fresh config (nonce) each time the sign-in button is shown — it lasts 10 minutes. A token without this store's fresh nonce is refused (401 `GOOGLE_TOKEN_INVALID`: «جرّب تاني» / "Try again" → refetch the config).
+- Sandbox tokens (dev only): `sandbox:<email>:<subject>:<nonce>`.
