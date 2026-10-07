@@ -187,6 +187,14 @@ async function revokeKey(workspaceId, keyId, req) {
         before: { name: key.name, keyPrefix: key.keyPrefix },
         transaction,
       });
+      // The webhooks this key subscribed stop with it (item 266): an uninstalled app gets no more of the store's data.
+      const [stopped] = await db.WebhookEndpoint.update(
+        { isActive: false, disabledAt: new Date(), disabledReason: 'api_key_revoked' },
+        { where: { workspaceId, apiKeyId: key.id, isActive: true }, transaction }
+      );
+      if (stopped) {
+        await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'webhook_endpoint.disable', entityType: 'ApiKey', entityId: key.id, after: { reason: 'api_key_revoked', endpoints: stopped }, req, transaction });
+      }
     }
     return serializeKey(await withCreator(key));
   });

@@ -65,9 +65,19 @@ async function apiKeyAllowed(key) {
   return (await isEnabled(key.workspaceId, 'public_api')) || externalHolds({ workspaceId: key.workspaceId, apiKeyId: key.id });
 }
 
-/** Whether a webhook endpoint may be sent to: the Webhooks app is on, or it belongs to an installed outside app. */
+/**
+ * Whether a webhook endpoint may be sent to. One an app subscribed with its
+ * key (item 266) goes only while that key is live. Otherwise: the Webhooks
+ * app is on, or it belongs to an installed outside app (registered at its
+ * install, or subscribed with the key it holds).
+ */
 async function endpointAllowed(endpoint) {
+  if (endpoint.apiKeyId) {
+    const key = await db.ApiKey.findByPk(endpoint.apiKeyId, { attributes: ['id', 'revokedAt'] });
+    if (!key || key.revokedAt) return false;
+  }
   if (await isEnabled(endpoint.workspaceId, 'webhooks')) return true;
+  if (endpoint.apiKeyId && (await externalHolds({ workspaceId: endpoint.workspaceId, apiKeyId: endpoint.apiKeyId }))) return true;
   return externalHolds({ workspaceId: endpoint.workspaceId, webhookEndpointIds: { [Op.contains]: [endpoint.id] } });
 }
 

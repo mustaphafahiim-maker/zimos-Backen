@@ -3237,3 +3237,8 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 - `/oauth/authorize`: store picker (stores where I have apps.manage), the app card, «التطبيق ده عايز:» / "This app wants to:" with each scope in words, «سماح» / «رفض» (Allow / Deny), a note for development apps «تطبيق تحت التطوير» / "App in development".
 - Apps → an installed partner app with a page: «افتح» / "Open" → full-width frame.
 - Platform admin → «تطبيقات الشركاء» / "Partner apps": list by status, publish / suspend.
+
+## 266. App webhooks stop with the app — UI: pending
+
+- Webhook endpoints (`GET /workspaces/:ws/webhooks`) gain `createdByApp: true` for ones an app created through the public API. When that app is uninstalled (or its key revoked) they turn off with `disabledReason: "api_key_revoked"`; switching one back on answers 409 `WEBHOOK_APP_REMOVED`.
+- Screen: Webhooks list — a chip «من تطبيق» / "From an app" on those; for `api_key_revoked` show «اتقفل لأن التطبيق اتشال» / "Off because the app was removed" and hide the «تشغيل» / "Turn on" switch.

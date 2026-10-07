@@ -1853,3 +1853,9 @@ An audit of every SPEC section against the code (more than 250 named capabilitie
   - Access tokens are public-API keys (api_keys) with the approved scopes, acting as the approving person (never beyond their role), held by a workspace_apps install (kind external), so the public-API gate, the Apps page and the existing uninstall all work unchanged. Long-lived until uninstall or revoke — no refresh tokens (like Shopify's offline tokens); approving again replaces the token.
   - Codes: 10 minutes, one use (atomic claim), bound to the app and the exact redirect URI. Redirects must be registered https (http only for localhost). Development apps install only on their developer's stores; the platform publishes or suspends (suspending removes installs).
   - Embedded page: a signed address (store, user, timestamp) the app verifies; the frame itself is the dashboard's. App charges stay out (§17.4).
+
+## Eighteenth pass (2026-10-07) — after the partner apps
+
+- [x] 266. Webhooks an app subscribed through the public API stop when the app is removed: before, uninstalling an app (or revoking its key) left the endpoints it had created sending the store's order data to it. (backend done, UI in frontend-handoff.md)
+  - Migration 501: webhook_endpoints.api_key_id — set when the public API creates the endpoint. Revoking a key (uninstall, the app's revoke, a merchant revoking a key) turns its endpoints off (disabledReason api_key_revoked, audited); the dispatcher's gate refuses an endpoint whose key is gone, and the merchant can't switch it back on (409 WEBHOOK_APP_REMOVED). Endpoints made before this change have no key and are unchanged.
+  - An installed app's own endpoints now send even with the store's Webhooks app off, like the ones registered at an install-link install.

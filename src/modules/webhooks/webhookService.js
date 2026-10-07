@@ -35,6 +35,8 @@ function serializeEndpoint(endpoint) {
     // Set when the endpoint was switched off after three days of failures.
     disabledAt: endpoint.disabledAt || null,
     disabledReason: endpoint.disabledReason || null,
+    // Created by an app through the public API (item 266): it stops with the app.
+    createdByApp: Boolean(endpoint.apiKeyId),
     secretHint: secretHint(endpoint.signingSecret),
     createdAt: endpoint.createdAt,
     updatedAt: endpoint.updatedAt,
@@ -95,7 +97,9 @@ async function createEndpoint(workspaceId, { url, events, isActive = true, filte
     }
     const signingSecret = generateSecret();
     const endpoint = await db.WebhookEndpoint.create(
-      { workspaceId, url: cleanUrl, events: normaliseEvents(events), signingSecret, isActive, filter: normaliseFilter(filter), customHeaders: require('./customHeaders').normalise(customHeaders) },
+      { workspaceId, url: cleanUrl, events: normaliseEvents(events), signingSecret, isActive, filter: normaliseFilter(filter), customHeaders: require('./customHeaders').normalise(customHeaders),
+        // Created through the public API: tied to that key (item 266).
+        apiKeyId: req && req.apiKey ? req.apiKey.id : null },
       { transaction }
     );
     await recordAudit({
@@ -120,6 +124,11 @@ async function updateEndpoint(workspaceId, endpointId, changes, req) {
     if (changes.url !== undefined) next.url = checkUrl(changes.url);
     if (changes.events !== undefined) next.events = normaliseEvents(changes.events);
     if (changes.isActive !== undefined) next.isActive = changes.isActive;
+    // An app's endpoint can't be turned back on once its key is gone (item 266).
+    if (changes.isActive === true && endpoint.apiKeyId) {
+      const key = await db.ApiKey.findByPk(endpoint.apiKeyId, { attributes: ['revokedAt'], transaction });
+      if (!key || key.revokedAt) throw new AppError('WEBHOOK_APP_REMOVED', 'The app that created this endpoint was removed; it cannot be turned back on', 409);
+    }
     if (changes.filter !== undefined) next.filter = normaliseFilter(changes.filter);
     // The whole list; { name, keep: true } keeps a stored value (customHeaders.js).
     if (changes.customHeaders !== undefined) next.customHeaders = require('./customHeaders').normalise(changes.customHeaders, endpoint.customHeaders);
