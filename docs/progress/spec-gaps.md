@@ -1729,7 +1729,9 @@ owner's call and is noted in LANES when given).
 - [x] 238. Tax report: tax collected per month and per rate/governorate for delivered and paid orders, refunds taken off, tax-exempt orders counted apart, with CSV. (backend done, UI in frontend-handoff.md)
   - storeReports/index.js (new home for items 238–242, mounted at /store-reports, JSON or CSV). Orders delivered or paid, by month (store tz) × governorate; refunds take their share of tax; exempt orders apart; fx-converted. Per-rate split is not possible (orders keep one tax amount), so the place stands in for it.
   - Verified: delivered taxed order with half refunded (3500 → net 1750), exempt order apart, pending order left out, CSV.
-- [ ] 239. Inventory valuation: on-hand units × unit cost per variant and per stock location, the total, and the variants without a cost; CSV.
+- [x] 239. Inventory valuation: on-hand units × unit cost per variant and per stock location, the total, and the variants without a cost; CSV. (backend done, UI in frontend-handoff.md)
+  - storeReports /inventory-value. On hand × cost (on hand is still on the shelf: a sale leaves it when committed); reserved and free shown; per location through stockLocations.stockMatrix; variants without cost listed apart and out of the totals.
+  - Verified: 10 units at 40 = 400 (free 320), no-cost variants listed, transfer 4 to a second location → 240/160 split, location filter, CSV.
 - [ ] 240. Slow-moving and dead stock: variants with stock but no sale in 30/60/90 days, units and value tied up, last sale date; CSV.
 - [ ] 241. Discount code performance: per code — uses, orders, revenue, discount given, average order, new vs returning customers, and cancellations; for a date range.
 - [ ] 242. Orders by weekday and hour: a 7×24 heatmap of orders and revenue in the store's time zone, for planning confirmation calls and stock.

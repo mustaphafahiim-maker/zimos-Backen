@@ -87,4 +87,55 @@ router.get('/tax', requirePermission(PERMISSIONS.FINANCIAL_REPORTS_VIEW), valida
   return res.json({ from: c.from, to: c.to, timezone: c.tz, currency: c.currency, totals: { orders: out.reduce((n, r) => n + r.orders, 0), taxable: sum('taxable'), tax: sum('tax'), taxRefunded: sum('taxRefunded'), netTax: sum('netTax'), exemptOrders: out.reduce((n, r) => n + r.exemptOrders, 0), exemptSales: sum('exemptSales') }, rows: out });
 }));
 
+// ------------------------------------------------- 239. inventory value --
+
+/*
+ * What the stock on hand is worth at cost: per variant, on-hand units
+ * (still on the shelf: a sale leaves on hand when it is committed) × the
+ * variant's cost; the part already promised to open orders (reserved) and
+ * the free part are shown too. With stock locations (item 206), each
+ * location's units and value. Variants without a cost are listed apart and
+ * left out of the total. Only stock-tracked, not archived products.
+ */
+router.get('/inventory-value', requirePermission(PERMISSIONS.FINANCIAL_REPORTS_VIEW), validate({ params: Joi.object(ws), query: Joi.object({ format: range.format, locationId: Joi.string().uuid() }) }), asyncHandler(async (req, res) => {
+  const c = await contextOf(req);
+  const rows = await run(
+    `SELECT v.id AS "variantId", p.id AS "productId", p.name AS "productName", v.sku, v.option_values AS options,
+            v.stock_on_hand AS "onHand", v.reserved_stock AS reserved, v.cost_amount AS "unitCost"
+       FROM product_variants v JOIN products p ON p.id = v.product_id
+      WHERE v.workspace_id = :ws AND p.track_inventory = true AND p.status <> 'archived' AND v.stock_on_hand > 0
+      ORDER BY p.name, v.sku`,
+    { ws: c.ws }
+  );
+  let byLocation = null;
+  const locations = await db.StockLocation.findAll({ where: { workspaceId: c.ws }, attributes: ['id', 'name', 'isDefault'] });
+  if (locations.length && rows.length) {
+    const { matrix } = await require('../stockLocations').stockMatrix(c.ws, rows.map((r) => r.variantId));
+    byLocation = new Map(locations.map((l) => [l.id, { locationId: l.id, name: l.name, units: 0, value: 0 }]));
+    for (const r of rows) {
+      const cells = matrix.get(r.variantId);
+      if (!cells) continue;
+      r.locations = locations.map((l) => ({ locationId: l.id, units: (cells.get(l.id) || {}).onHand || 0 })).filter((x) => x.units);
+      if (r.unitCost != null) for (const x of r.locations) { const b = byLocation.get(x.locationId); b.units += x.units; b.value += x.units * Number(r.unitCost); }
+    }
+  }
+  let list = rows.map((r) => ({
+    variantId: r.variantId, productId: r.productId, productName: r.productName, sku: r.sku, options: r.options,
+    onHand: r.onHand, reserved: r.reserved, free: Math.max(0, r.onHand - r.reserved),
+    unitCost: r.unitCost == null ? null : String(r.unitCost),
+    value: r.unitCost == null ? null : String(r.onHand * Number(r.unitCost)),
+    ...(r.locations ? { locations: r.locations } : {}),
+  }));
+  if (req.query.locationId) list = list.filter((r) => (r.locations || []).some((x) => x.locationId === req.query.locationId)).map((r) => { const u = r.locations.find((x) => x.locationId === req.query.locationId).units; return { ...r, onHand: u, value: r.unitCost == null ? null : String(u * Number(r.unitCost)) }; });
+  if (req.query.format === 'csv') return sendCsv(res, 'inventory-value', ['productName', 'sku', 'onHand', 'reserved', 'free', 'unitCost', 'value'], list.map((r) => ({ ...r, productName: [r.productName, Object.values(r.options || {}).join(' / ')].filter(Boolean).join(' — ') })));
+  const costed = list.filter((r) => r.value != null);
+  return res.json({
+    currency: c.currency,
+    totals: { variants: list.length, units: list.reduce((n, r) => n + r.onHand, 0), value: String(costed.reduce((n, r) => n + Number(r.value), 0)), freeValue: String(costed.reduce((n, r) => n + r.free * Number(r.unitCost), 0)), withoutCost: list.length - costed.length },
+    locations: byLocation ? [...byLocation.values()].map((b) => ({ ...b, value: String(b.value) })) : null,
+    variants: list,
+    withoutCost: list.filter((r) => r.value == null).map((r) => ({ variantId: r.variantId, productName: r.productName, sku: r.sku, onHand: r.onHand })),
+  });
+}));
+
 module.exports = { router, contextOf, sendCsv, run, ws, range };

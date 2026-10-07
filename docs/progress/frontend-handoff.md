@@ -2831,3 +2831,18 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screen
 - Reports → «تقرير الضريبة» / "Tax report": date range, totals cards («الضريبة المحصّلة» / "Tax collected", «المرتجع» / "Refunded", «الصافي» / "Net", «مبيعات معفاة» / "Exempt sales"), table by month × governorate, «تنزيل CSV» / "Download CSV".
+
+## 239. Inventory valuation — UI: pending
+
+### `GET /api/v1/workspaces/:ws/store-reports/inventory-value?locationId=&format=json|csv` (`financial_reports.view`)
+```json
+{ "currency": "EGP",
+  "totals": { "variants": 3, "units": 63, "value": "40000", "freeValue": "32000", "withoutCost": 2 },
+  "locations": [{ "locationId": "…", "name": "Main", "units": 6, "value": "24000" }] | null,
+  "variants": [{ "variantId": "…", "productName": "ZZ Val A", "sku": "ZZ-VA", "options": {}, "onHand": 10, "reserved": 2, "free": 8, "unitCost": "4000", "value": "40000", "locations": [{ "locationId": "…", "units": 6 }] }],
+  "withoutCost": [{ "variantId": "…", "productName": "ZZ Val B", "sku": "ZZ-VB", "onHand": 3 }] }
+```
+- On-hand units × the variant's cost (minor units). `reserved` = promised to open orders (still on the shelf), `free` = on hand − reserved; `freeValue` values the free part. Variants without a cost are listed in `withoutCost` and left out of the totals. `locations` only when the store has stock locations; `locationId` narrows to one location. Stock-tracked, non-archived products with stock.
+
+### Screen
+- Reports → «قيمة المخزون» / "Inventory value": cards «قيمة المخزون بالتكلفة» / "Stock value at cost", «منها محجوز لطلبات» / "Of which reserved", «قطع» / "Units"; per-location table when there are locations; variants table; a warning box «N منتج من غير سعر تكلفة — مش داخلين في الحساب» / "N products have no cost — not counted" linking to the products; «تنزيل CSV».
