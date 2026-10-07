@@ -16,6 +16,8 @@ const { resolveOrderBumpItem } = require('./orderBump');
 const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
 const productTests = require('../catalog/productTests');
 const logger = require('../../core/utils/logger');
+// The order without its risk, network and internal fields (item 361).
+const { shopperOrder } = require('./shopperOrder');
 
 /** Credits the order to the shopper's variant in its products' A/B tests; never fails the checkout. */
 async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
@@ -249,7 +251,7 @@ const checkout = asyncHandler(async (req, res) => {
     if ((giftCard && giftCard.applied) || (points && points.applied) || (credit && credit.applied)) await order.reload();
     // The InstaPay / wallet details to pay to, and the token the proof is sent with (shown once, as an online payment's).
     const storeManualPayment = storeManual ? { manualPayment: await require('../manualPayments/manualPaymentService').getForShopper(workspaceId, order.id, storeManual.token.token), paymentToken: storeManual.token.token } : {};
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...storeManualPayment, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}), trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order) });
+    return res.status(201).json({ order: shopperOrder(order, orderItems), ...storeManualPayment, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}), trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -291,7 +293,7 @@ const checkout = asyncHandler(async (req, res) => {
       const paidOrder = await require('../../db/models').Order.findByPk(order.id);
       const { coversOrder, ...card } = giftCard || {};
       return res.status(201).json({
-        order: { ...paidOrder.toJSON(), items: orderItems },
+        order: shopperOrder(paidOrder, orderItems),
         // The signed tracking token: the thank-you page's proof for the tracking page, self-service and the survey (postPurchaseSurvey, item 236).
         trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order),
         ...(giftCard ? { giftCard: { ...card, held: false } } : {}),
@@ -317,7 +319,7 @@ const checkout = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({
-    order: { ...order.toJSON(), items: orderItems },
+    order: shopperOrder(order, orderItems),
     trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order),
     ...(pickup ? { pickup } : {}),
     payment: {
