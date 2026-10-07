@@ -78,6 +78,8 @@ module.exports = {
       useStoreCredit: Joi.boolean().optional(),
       // The shopper's cookie choice, kept on the order for purchase events (marketing/cookieConsent.js).
       trackingConsent: Joi.boolean().optional(),
+      // The marketing-consent and terms boxes the store shows (checkout/checkoutConsent.js, item 374).
+      ...require('./checkoutConsent').bodyKeys(Joi),
       // The shipping option the shopper picked (shipping/shippingOptions.js); absent = standard.
       shippingOption: Joi.string().max(40).optional(),
       funnelId: uuid.optional(),

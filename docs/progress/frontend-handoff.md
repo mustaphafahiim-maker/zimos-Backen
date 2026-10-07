@@ -4376,3 +4376,29 @@ Deleting a funnel, a website or a page (one at a time, or funnels through the bu
 - For a page with `websiteInTrash`, disable Restore with the hint «ارجع الموقع الأول» / "Restore its website first".
 - Error texts: `PAGE_PATH_IN_TRASH` «فيه صفحة في سلة المحذوفات على الرابط ده. ارجعها أو امسحها نهائيًا الأول» / "A page in the trash uses this path. Restore it or delete it for good first"; `WEBSITE_HAS_DOMAINS` «ده الموقع الوحيد والدومينات مربوطة بيه. شيل الدومينات الأول» / "This is the store's only website and its domains point at it. Remove the domains first".
 - No settings.
+
+## 374. Checkout marketing-consent and terms checkboxes — UI: pending
+
+The checkout can now show two boxes, each switched on by the merchant: "Email me news and offers" (unticked by default) and "I agree to the terms" (must be ticked to order). A buyer who ticks the marketing box becomes a marketing contact (so the Klaviyo/Mailchimp sync takes them), unless they unsubscribed earlier. What the buyer agreed to is kept on the order. Both are off until the merchant turns them on, so nothing changes for existing stores.
+
+### Settings (dashboard → Settings → Checkout, `website.edit`, as the rest of the checkout form)
+- **PATCH `/api/v1/workspaces/:workspaceId`**, inside `settings.checkout_settings` (sub-keys merge; `null` restores the default):
+  `{ "settings": { "checkout_settings": { "marketing_checkbox": "on", "marketing_checkbox_label": { "ar": "ابعتلي العروض والجديد على الإيميل", "en": "Email me news and offers" }, "terms_checkbox": "required", "terms_checkbox_label": { "ar": "أوافق على الشروط والأحكام وسياسة الخصوصية", "en": "I agree to the terms of service and privacy policy" } } } }`
+  - `marketing_checkbox`: `"off"` (default) | `"on"`. `terms_checkbox`: `"off"` (default) | `"required"`. Labels ≤ 300 characters each; empty = the storefront's built-in wording. Another value: 422 `VALIDATION_ERROR` on `settings.checkout_settings.terms_checkbox`.
+- Toggles: «خانة الموافقة على الرسائل التسويقية» / "Marketing consent checkbox", hint «العميل يختار بنفسه؛ الخانة مش متعلّمة مسبقًا. اللي يوافق يتضاف لقائمة التسويق إلا لو كان لغى اشتراكه قبل كده» / "The buyer ticks it themselves; it is never pre-ticked. Buyers who tick it join your marketing list, unless they unsubscribed before". «خانة الموافقة على الشروط (إجبارية)» / "Terms checkbox (required)", hint «الطلب مش هيتم من غير الموافقة. بنربط سياسة الشروط والخصوصية اللي كاتبها في الإعدادات» / "Orders can't be placed without it. We link the terms and privacy policies you've written in Settings → Policies".
+- When `terms_checkbox` is on and the store has no terms of service written (`store.checkout.consent.terms.policies` empty), show a warning: «لسه ما كتبتش الشروط والأحكام — اكتبها من الإعدادات ← السياسات» / "You haven't written your terms of service yet — add them in Settings → Policies".
+
+### Storefront (public)
+- **GET `/api/v1/store/:workspaceId`** → `store.checkout.consent`:
+  `{ "marketing": { "enabled": true, "label": { "ar": "", "en": "" } }, "terms": { "enabled": true, "required": true, "label": { "ar": "أوافق على الشروط", "en": "I agree to the terms" }, "policies": ["terms_of_service", "privacy_policy"] } }`
+  - Show each box only when `enabled`. Never pre-tick the marketing box. In the terms label, link each of `policies` to GET `/api/v1/store/:workspaceId/policies/:key` (opened in a sheet or a new tab).
+  - Built-in wording when a label is empty: «ابعتلي العروض والجديد على الإيميل والواتساب» / "Send me news and offers"; «أوافق على الشروط والأحكام وسياسة الخصوصية» / "I agree to the terms of service and privacy policy".
+- **POST `/api/v1/store/:workspaceId/checkout`**: new booleans `acceptsMarketing` and `acceptsTerms` (send the boxes' state when shown).
+  - Terms required and not `true`: 422 `{ "error": { "code": "VALIDATION_ERROR", "message": "Invalid body", "details": [ { "field": "acceptsTerms", "message": "\"acceptsTerms\" must be [true]" } ] } }` (with any other form problems). Show under the box: «لازم توافق على الشروط علشان تكمل الطلب» / "Please accept the terms to place your order". The storefront should also keep the order button disabled until it is ticked.
+  - A box the store doesn't show is ignored if sent.
+
+### Dashboard order page (`orders.view`)
+- **GET `/api/v1/workspaces/:workspaceId/orders/:orderId`** → `order.consents` (null when the store showed neither box):
+  `{ "marketing": { "accepted": true, "applied": true, "at": "2026-10-07T13:21:18.571Z", "label": { "ar": "", "en": "" } }, "terms": { "accepted": true, "at": "2026-10-07T13:21:18.571Z", "label": { "ar": "أوافق على الشروط", "en": "I agree to the terms" }, "policies": ["terms_of_service"], "version": "111e1d44a7208ab6" } }`
+  - `marketing.applied: false` with `reason: "opted_out"`: the buyer ticked it but had unsubscribed earlier, so they were not added.
+- In the customer card: «وافق على الرسائل التسويقية وقت الطلب» / "Agreed to marketing at checkout"; with `opted_out`: «وافق وقت الطلب، بس كان لاغي اشتراكه قبل كده فما اتضافش» / "Ticked marketing at checkout, but had unsubscribed earlier, so wasn't added". Terms: «وافق على الشروط (نسخة 111e1d44) في 7 أكتوبر 2026 1:21 م» / "Accepted the terms (version 111e1d44) on 7 Oct 2026, 1:21 PM".

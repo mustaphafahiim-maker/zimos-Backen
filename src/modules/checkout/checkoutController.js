@@ -48,7 +48,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, manualPaymentMethodId, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, pickupLocationId, trackingConsent, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, manualPaymentMethodId, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, pickupLocationId, trackingConsent, acceptsMarketing, acceptsTerms, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -234,6 +234,8 @@ const checkout = asyncHandler(async (req, res) => {
     await saveCheckoutAnswers(order, workspace, formFields);
     await require('./checkoutExtras').apply(order, extras);
     await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
+    // The marketing-consent and terms boxes (checkoutConsent.js, item 374).
+    await require('./checkoutConsent').recordOnOrder(order, workspace, { acceptsMarketing, acceptsTerms });
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
     await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
@@ -271,6 +273,8 @@ const checkout = asyncHandler(async (req, res) => {
   await saveCheckoutAnswers(order, workspace, formFields);
   await require('./checkoutExtras').apply(order, extras);
   await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
+  // The marketing-consent and terms boxes (checkoutConsent.js, item 374).
+  await require('./checkoutConsent').recordOnOrder(order, workspace, { acceptsMarketing, acceptsTerms });
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
   await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
