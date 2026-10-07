@@ -274,6 +274,12 @@ async function renewOne(subscriptionId) {
     order = created.order || created;
     await db.Order.update({ linkedFromOrderId: first.id }, { where: { id: order.id } });
   } catch (err) {
+    // The store's prepaid Zimos balance can't pay the order fee (billing/walletService):
+    // the merchant's balance, not the customer's card. Tried again tomorrow, no failure counted, no message.
+    if (err.code === 'WALLET_BALANCE_TOO_LOW') {
+      await sub.update({ nextRenewalAt: new Date(Date.now() + 24 * 3600 * 1000), lastFailureReason: 'Waiting for the store to top up its Zimos balance' });
+      return 'deferred';
+    }
     return failRenewal(sub, `The renewal order could not be created: ${err.message}`);
   }
 

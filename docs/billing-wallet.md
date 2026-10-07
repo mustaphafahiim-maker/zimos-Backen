@@ -35,6 +35,11 @@ into our order code as listed under "The fee".
 - **Every new order pays it once:** the storefront and funnel checkouts,
   staff orders, the public API, the WhatsApp bot, quotes, a recovered lost
   order, a subscription renewal.
+- **A subscription renewal the balance can't pay** is the merchant's balance,
+  not the customer's card: `subscriptionService.renewOne` leaves the
+  subscription as it is (no failed attempt, no `subscription.renewal_failed`
+  message to the customer, no cancellation), notes "Waiting for the store to
+  top up its Zimos balance" and tries again a day later.
 - **Add-ons:** an add-on placed as its own order pays none (Q14): the funnel
   offer accepted after its window, the funnel follow-on order, the thank-you
   upsell after an online payment (`createOrder(…, { chargeFee: false })`). A
