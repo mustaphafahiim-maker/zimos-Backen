@@ -4178,6 +4178,8 @@ A parcel that came back undelivered (order stage `returned`, an RTO: the COD cus
   - 409 `SHIPMENT_ALREADY_EXISTS` — the order has been booked again.
   - 409 `ORDER_ALREADY_RESTOCKED` — nothing is held any more (restocked already).
 - **POST `/orders/:orderId/shipments`** (unchanged body), and the courier booking: for an order restocked this way, the units are reserved again before anything is booked. When they have been sold since: 409 `INSUFFICIENT_STOCK` "Insufficient stock for variant …: requested 3, available 0", and nothing is booked.
+- **PATCH `/orders/:orderId/shipments/:shipmentId`** (unchanged body): setting a `returned` or `cancelled` shipment to any other status sends the order again, so the same applies: a restocked order takes its units back first, or gets 409 `INSUFFICIENT_STOCK` and the shipment stays as it was.
+- **POST `/orders/:orderId/returns`**: also accepts an order that was delivered without a shipment (a click-and-collect order picked up) and then moved to `returned`; restock-return answers `was_delivered` for it.
 
 ### Screens (dashboard → Orders → order page)
 - When the stage is `returned`, call the GET and, if `canRestock`, show a card «الشحنة رجعت؟ رجّع المنتجات للمخزون» / "Parcel back? Put the items back in stock", listing the units (product, options, SKU, quantity) and a button «رجّع للمخزون» / "Back in stock". Confirm: «هترجع الكميات دي للمخزون المتاح للبيع. متأكد إن الشحنة وصلتك؟» / "These units go back to the stock available to sell. Is the parcel with you?".

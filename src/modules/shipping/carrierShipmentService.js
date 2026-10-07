@@ -382,8 +382,10 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       assertReadyToShip(order);
       // The whole order, or the units in data.items when it goes as several parcels (item 375).
       const plan = await partial.planShipment(order, data, transaction);
-      // A returned parcel that was restocked: its units are taken again before the courier is called (item 354).
-      await require('../orders/returnedStock').retakeForReship(workspaceId, order.id, req && req.user ? req.user.id : null, transaction);
+      // A returned parcel that was restocked (item 354): its units must still be there before the
+      // courier is called. Read without locking; they are taken once the courier answers, below.
+      const returnedStock = require('../orders/returnedStock');
+      await returnedStock.assertReshipStock(workspaceId, order.id, transaction);
 
       const address = typed || (await resolveDropOff(adapter, index, workspaceId, order.shippingAddressSnapshot, data.carrierAddress, { transaction }));
 
@@ -413,6 +415,10 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
           webhookUrl: webhookUrlForShipment(account),
         })
       );
+
+      // Taken now, so the variant rows are not locked through the courier call. Sold out
+      // meanwhile: 409 INSUFFICIENT_STOCK, and the catch below cancels the booking.
+      await returnedStock.retakeForReship(workspaceId, order.id, req && req.user ? req.user.id : null, transaction);
 
       const shipment = await insertShipment(
         {

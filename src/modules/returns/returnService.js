@@ -28,7 +28,11 @@ async function orderIsDelivered(orderId, transaction) {
     where: { orderId, [Op.or]: [{ status: 'delivered' }, { deliveredAt: { [Op.ne]: null } }] },
     transaction,
   });
-  return { order, delivered: deliveredShipment > 0 };
+  if (deliveredShipment > 0) return { order, delivered: true };
+  // Delivered with no shipment (a click-and-collect order picked up), then moved to returned:
+  // the same rule orders/returnedStock.js refuses its restock by.
+  const everDelivered = await db.OrderStatusHistory.count({ where: { orderId, toStatus: 'delivered' }, transaction });
+  return { order, delivered: everDelivered > 0 };
 }
 
 async function createReturn(workspaceId, orderId, { reasonCode, reasonDetail, items, resolution = 'refund' }, req) {

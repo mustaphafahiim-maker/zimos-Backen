@@ -1520,6 +1520,16 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
     if (!extra.cancelMode && carrierShipmentService.TERMINAL_STATUSES.includes(data.status) && shipment.nextPollAt) {
       extra.nextPollAt = null;
     }
+    // A returned or cancelled shipment set going again is the order sent again: if its
+    // returned parcel was restocked, the units are taken back first, as for a new shipment (item 354).
+    if (
+      data.status &&
+      carrierShipmentService.FINISHED_STATUSES.includes(shipment.status) &&
+      !carrierShipmentService.FINISHED_STATUSES.includes(data.status)
+    ) {
+      await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id'], transaction, lock: transaction.LOCK.UPDATE });
+      await require('./returnedStock').retakeForReship(workspaceId, orderId, req.user ? req.user.id : null, transaction);
+    }
     // The stamps, fulfillment state and audit row live in shipmentLifecycle,
     // shared with the carrier status updates.
     return transitionShipment(

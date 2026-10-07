@@ -8,7 +8,7 @@ const db = require('../../db/models');
 const validate = require('../../core/middleware/validate');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
-const { AppError, NotFoundError } = require('../../core/errors/AppError');
+const { AppError, NotFoundError, InsufficientStockError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const orderStock = require('../inventory/orderStock');
 
@@ -31,7 +31,7 @@ const orderStock = require('../inventory/orderStock');
  *
  * If the order is then sent again (a new shipment booked, by hand, through a
  * courier or by a stage move), `retakeForReship` reserves the units again
- * ('order_reshipped') before the booking, and refuses it with 409
+ * ('order_reshipped') with the booking, and refuses it with 409
  * INSUFFICIENT_STOCK when they have been sold since.
  */
 
@@ -146,18 +146,44 @@ async function restock(workspaceId, orderId, req) {
   });
 }
 
-/**
- * A new shipment for an order whose returned parcel was restocked: takes the
- * units again. Callers hold the order row FOR UPDATE and call this before
- * booking anything (a courier included).
- */
-async function retakeForReship(workspaceId, orderId, actorUserId, transaction) {
+async function wasRestocked(workspaceId, orderId, transaction) {
   const restocked = await db.InventoryMovement.count({
     where: { workspaceId, referenceId: String(orderId), referenceType: 'order_returned', reservedDelta: { [Op.lt]: 0 } },
     transaction,
   });
-  if (restocked === 0) return;
+  return restocked > 0;
+}
+
+/**
+ * A new shipment for an order whose returned parcel was restocked: takes the
+ * units again. Callers hold the order row FOR UPDATE and call this before
+ * writing the shipment; a courier booking checks with assertReshipStock
+ * before the courier call and calls this once the courier answers. Setting a
+ * returned or cancelled shipment going again counts as a new one.
+ */
+async function retakeForReship(workspaceId, orderId, actorUserId, transaction) {
+  if (!(await wasRestocked(workspaceId, orderId, transaction))) return;
   await orderStock.reserveOrderStock({ workspaceId, orderId, referenceType: 'order_reshipped', actorUserId }, transaction);
+}
+
+/**
+ * The same 409 INSUFFICIENT_STOCK as retakeForReship, read without locking
+ * the variants: a courier booking checks with this before calling the
+ * courier and takes the units once it answers, so no variant row stays
+ * locked through the HTTP call.
+ */
+async function assertReshipStock(workspaceId, orderId, transaction) {
+  if (!(await wasRestocked(workspaceId, orderId, transaction))) return;
+  for (const [variantId, quantity] of await orderStock.dueToReserve(workspaceId, orderId, transaction)) {
+    const variant = await db.ProductVariant.findOne({
+      where: { id: variantId, workspaceId },
+      attributes: ['id', 'productId', 'stockOnHand', 'reservedStock', 'allowOverselling'],
+      transaction,
+    });
+    const available = variant.stockOnHand - variant.reservedStock;
+    if (variant.allowOverselling || available >= quantity || (await require('../preorders').allowsPreorder(variant, quantity, transaction))) continue;
+    throw new InsufficientStockError(`Insufficient stock for variant ${variantId}: requested ${quantity}, available ${available}`);
+  }
 }
 
 const params = Joi.object({ workspaceId: Joi.string().uuid().required(), orderId: Joi.string().uuid().required() });
@@ -176,4 +202,4 @@ router.post(
   asyncHandler(async (req, res) => res.json(await restock(req.tenant.workspaceId, req.params.orderId, req)))
 );
 
-module.exports = { router, preview, restock, retakeForReship };
+module.exports = { router, preview, restock, retakeForReship, assertReshipStock };
