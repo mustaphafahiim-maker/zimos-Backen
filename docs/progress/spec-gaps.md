@@ -1956,3 +1956,15 @@ A review of stock locations, purchasing, lots, shopper self-service, delivery sl
 - [x] 289. Offer and bundle lines counted as one piece in the pick list and in lot consumption (an offer of "3 pieces" picked and taken from lots as 1, a bundle's other variants not at all) — the same expansion scan to pack got in item 271. (backend fix; no UI change)
   - Scan to pack's expansion moved to `orders/orderUnits.js` (`physicalUnits`) and is used by all three: the pick list sums pieces per variant (a bundle's other variants named from the catalogue, each order listed once per variant with its pieces), `unitCount` counts pieces, and a shipped order takes its pieces from the lots.
   - Checked: an order of a "3 pieces" offer and one of a red + blue bundle × 2 → pick list red 5 (3 + 2), blue 2, 7 pieces; lots red 10 → 5, blue 10 → 8; scan to pack unchanged (3/3, 2/2 + 2/2).
+
+## Twenty-second pass (2026-10-07) — review of the reports, bulk update, packing slips and customer merge (items 238–248)
+
+A review of the store reports (src/modules/storeReports) found these; each was checked against the code before being queued. Most severe first.
+
+- [x] 290. Tax on shipping was added once per order line: a 3-line order with a rate that applies to shipping paid the shipping tax three times (taxService.calculateTax). (backend fix; no UI change)
+  - Lines are taxed as before; shipping is taxed once, at the store-wide rate for the destination, or, with no store-wide rate, the first line's rate that covers shipping. Not when that rate includes tax in the prices. Every caller (order, upsell join, item edit, WhatsApp bot order) goes through it.
+  - Checked (14%, shipping 300): 3 lines of 1000 → 462 (before: 546); 1 line → 182; a rate not on shipping → 420.
+- [ ] 291. Store reports converted foreign-currency orders with the per-unit rate on minor-unit amounts (tax, discount, collection and option reports, and the analytics reports' fx): a KWD order on an EGP store counted 10× (JPY 100× too little). The returns report's refunds were not converted and counted test orders. Use currencies/baseAmounts.
+- [ ] 292. Reports counted an offer line as one piece (a "3 pieces" offer as 1 unit of its variant; a bundle's other variants never sold) in sales by collection, by option and slow stock; slow stock also ran one platform-wide scan of order_items per variant (no variant index, not limited to the store) and, with the discount report's new/returning split, treated orders rejected on the call as sales.
+- [ ] 293. Smaller report fixes: the heatmap's confirmation rate left rejected orders out (1 confirmed + 9 rejected showed 100%); CSV cells starting with = + - @ were not neutralised (formula injection); date-only ranges were read as UTC while months and hours are in store time; inventory value for one location kept the store-wide reserved/free; the tax report dropped a prepaid order once partly refunded before delivery; the returns totals came from the 500-row product list.
+

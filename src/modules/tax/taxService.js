@@ -36,17 +36,22 @@ async function calculateTax(workspaceId, { country, region, lines, shippingAmoun
   let taxAmount = 0;
   let pricesIncludeTax = false;
 
+  const lineRates = [];
   for (const line of lines) {
     const rate = matchRate(line.productId);
     if (!rate) continue;
+    lineRates.push(rate);
     if (rate.pricesIncludeTax) {
       pricesIncludeTax = true;
       continue; // Tax already included in lineTotal; not added on top.
     }
     taxAmount += applyBasisPoints(line.lineTotal, rate.rateBasisPoints);
-    if (rate.appliesToShipping && shippingAmount) {
-      taxAmount += applyBasisPoints(shippingAmount, rate.rateBasisPoints);
-    }
+  }
+  // Shipping is charged once, so it is taxed once (item 290 — it was taxed once per line): at the
+  // store-wide rate for the destination, or, with none, the first line's rate that covers shipping.
+  if (shippingAmount && lineRates.length) {
+    const shippingRate = rates.find((r) => !r.productId && matchesRegion(r, country, region)) || lineRates.find((r) => r.appliesToShipping);
+    if (shippingRate && shippingRate.appliesToShipping && !shippingRate.pricesIncludeTax) taxAmount += applyBasisPoints(shippingAmount, shippingRate.rateBasisPoints);
   }
 
   return { taxAmount, pricesIncludeTax };
