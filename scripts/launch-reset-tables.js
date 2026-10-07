@@ -113,6 +113,7 @@ const TABLES = {
   subscription_manual_changes: wipe('store subscriptions'),
   subscription_terms: wipe('store subscriptions'),
   subscriptions: wipe(STORE),
+  suggestions: wipe("merchants' suggestions to the platform (migration 219)"),
   support_ticket_messages: wipe('support tickets'),
   support_tickets: wipe('support tickets'),
   tax_rates: wipe(STORE),

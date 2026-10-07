@@ -31,6 +31,8 @@ const TYPES = [
   'support_ticket',
   'referral_signup',
   'user_suspended',
+  // A merchant sent a suggestion (migration 219, modules/suggestions).
+  'suggestion',
 ];
 
 const PAGE_MAX = 50;
@@ -89,6 +91,14 @@ const FROM_AUDIT = {
   'payment_proof.submit': (e) => ({ type: 'payment_proof_submitted', title: 'Payment proof sent', workspaceId: ws(e), link: `/payment-proofs/${e.entityId}` }),
   'support_ticket.create': (e) => ({ type: 'support_ticket', title: 'New support ticket', workspaceId: ws(e), link: `/tickets/${e.entityId}` }),
   'subscription.referral_code_attach': (e) => ({ type: 'referral_signup', title: 'Store joined with a referral code', workspaceId: ws(e), link: `/workspaces/${ws(e)}` }),
+  'suggestion.create': (e) => ({
+    type: 'suggestion',
+    title: 'New suggestion',
+    workspaceId: ws(e),
+    link: `/suggestions?id=${e.entityId}`,
+    body: e.after && e.after.title,
+    data: { category: e.after && e.after.category },
+  }),
   'user.suspend': (e) => ({ type: 'user_suspended', title: 'Account suspended', subjectUserId: e.entityId, link: `/users/${e.entityId}`, body: e.metadata && e.metadata.reason }),
 };
 

@@ -224,6 +224,8 @@ v1.use('/workspaces/:workspaceId/couriers', require('./modules/couriers/couriers
 v1.use('/workspaces/:workspaceId/delivery-zones', require('./modules/shipping/deliveryZoneRoutes'));
 // A product's menu options (option groups and choices).
 v1.use('/workspaces/:workspaceId/product-options/:productId', require('./modules/catalog/menuOptionsRoutes'));
+// A store's suggestions to the platform (Help → Suggest a feature).
+v1.use('/workspaces/:workspaceId/suggestions', require('./modules/suggestions/suggestionRoutes'));
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
