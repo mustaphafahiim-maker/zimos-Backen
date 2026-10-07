@@ -3282,3 +3282,9 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - `POST /store/:ws/orders/:orderId/self-service/address` `{ token?, address: { country?, province, city, area?, addressLine, placeId?, postalCode?, notes? } }`: the new address replaces the old one field by field — anything left out is cleared. Prefill the form with the current address (`order.shippingAddress`) so a shopper who changes only the street keeps their area and notes; send every field.
 - New optional fields: `postalCode` (≤ 20) «الرمز البريدي» / "Postal code", `notes` (≤ 500) «ملاحظات للمندوب» / "Notes for the courier".
+
+## 294. Packing slips — pieces, skipped orders — UI: pending (small)
+
+- `POST /workspaces/:ws/orders/documents/packing-slips?as=base64` now answers `{ filename, contentType, base64, printed, skipped: [orderId] }` (the PDF form has the header `X-Skipped-Orders: <count>`). Cancelled orders get no slip. When `skipped` is not empty, show «اتشال {n} طلب ملغي» / "{n} cancelled order(s) left out".
+- Only cancelled orders selected → 422 `NO_ORDERS_SELECTED` (`details.skipped`): «الطلبات دي ملغية» / "These orders are cancelled".
+- The slip's price column is now «المبلغ» / "Amount" (the line's total); offer lines show their pieces and a bundle's contents. Nothing to change in the UI besides the wording if the preview labels the columns.

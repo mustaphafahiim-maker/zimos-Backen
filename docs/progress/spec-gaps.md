@@ -1975,7 +1975,11 @@ A review of the store reports (src/modules/storeReports) found these; each was c
 
 The review of the bulk update, packing slips and customer merge (items 243, 244, 248) found these; each was checked against the code before being queued.
 
-- [ ] 294. Packing slips printed an offer line as its offer count ("3 pieces" × 1 → "× 1") without the bundle's other variants or the offer name; a long order ran off the page (27 lines on A5 → 4 pages, invisible names); cancelled orders got slips.
+- [x] 294. Packing slips printed an offer line as its offer count ("3 pieces" × 1 → "× 1") without the bundle's other variants or the offer name; a long order ran off the page (27 lines on A5 → 4 pages, invisible names); cancelled orders got slips. (backend fix; UI note in frontend-handoff.md)
+  - Lines come from orders/orderUnits.js: an offer line shows its name and its pieces ("3 pieces" → × 3), a bundle's other variants are listed under it with their own quantity and SKU. The price column is now the line's amount (an offer is priced as a whole), hidden as before for gift orders that asked.
+  - A slip that doesn't fit goes on to another page with "<order> (continued)" and the column headers; the gift message and the note move to a new page when there is no room.
+  - Cancelled orders are skipped and returned in `skipped` (and the `X-Skipped-Orders` header); a selection of only cancelled orders answers 422 NO_ORDERS_SELECTED.
+  - Checked (A5): "3 pieces" × 1 → × 3; a red + blue bundle × 2 → red × 2 with "+ Blue × 2" under it; a 60-line order → 3 pages, every line and the total readable; a cancelled order skipped.
 - [ ] 295. Bulk stock update: a ±n row became an absolute target taken when apply started, so a sale or restock during the apply was undone and two applies at once doubled the change; no idempotency on apply; a sheet could take the default location below zero or stock below what is reserved, with no warning in the preview.
 - [ ] 296. Customer merge: the kept customer's loyalty activity date was not carried (the duplicate's fresh points expired at the next run); tax exemption, pay-on-account terms and the blacklist flag of the duplicate were dropped; marketing consent became "yes" if either had it, even when the other had unsubscribed.
 - [ ] 297. Bulk update sheets: comma decimals ("249,50" from a semicolon CSV) read 100× too high; the product export's `compare_at_price` column was silently ignored (unknown columns not reported); a malformed .xlsx answered 500.
