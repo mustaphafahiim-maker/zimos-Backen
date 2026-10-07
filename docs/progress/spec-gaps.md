@@ -2110,5 +2110,8 @@ A multi-agent review of the 27 commits of items 290–316, each finding checked 
 - [x] 323. Bulk update (item 297): a number cell of an .xlsx computed by a formula (249.4999999…) is refused for having too many decimals; number cells should be rounded, typed text still checked. (backend fix; no UI change)
   - The xlsx reader marks which cells were stored as numbers (a non-enumerable set on each row and record, so other callers see the same plain rows); the bulk update rounds a number cell to the currency's digits and keeps the strict check for amounts typed as text (and for CSV).
   - Checked: an .xlsx with price 249.49999999999997 as a number → 24950; the same price typed as the text "1.299" → refused as before.
-- [ ] 324. Customer merge (older): when the merge changes consent, email or the blacklist, Mailchimp / Klaviyo are not told (no contact.updated).
+- [x] 324. Customer merge (older): when the merge changes consent, email or the blacklist, Mailchimp / Klaviyo are not told (no contact.updated). (backend done, no UI change)
+  - The merge still saves the kept customer with `hooks: false`. It now takes a snapshot of what webhooks and the email-marketing sync read (name, email, tags, consent, blacklist) before the save. When any of these differ afterwards, it records `contact.updated` itself, in the merge's transaction.
+  - A merge that changes none of them records no event, so a plain merge doesn't resend the contact.
+  - Verified: merging a consenting duplicate whose number had opted out turned the kept customer's consent off and recorded one `contact.updated` for it; a merge of two plain records recorded none.
 

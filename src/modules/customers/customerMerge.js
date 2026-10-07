@@ -91,6 +91,9 @@ async function merge(workspaceId, keepId, duplicateId, req) {
     const optedOut = await db.MarketingOptOut.count({ where: { workspaceId, [db.Sequelize.Op.or]: [...(contacts.phones.length ? [{ phoneNormalized: contacts.phones }] : []), ...(contacts.emails.length ? [{ email: contacts.emails }] : [])] }, transaction }) > 0;
     // Pay-on-account terms: the kept customer's when it has them, else the duplicate's.
     const terms = keep.onAccountEnabled || !dup.onAccountEnabled ? keep : dup;
+    // What webhooks and the Mailchimp / Klaviyo sync read: a change records contact.updated below (item 324).
+    const synced = () => JSON.stringify(['fullName', 'email', 'tags', 'marketingConsent', 'isBlacklisted'].map((f) => keep.get(f)));
+    const syncedBefore = synced();
     await keep.update({
       fullName: keep.fullName || dup.fullName,
       email: keep.email || dup.email,
@@ -117,6 +120,8 @@ async function merge(workspaceId, keepId, duplicateId, req) {
       storeCreditAmount: Number(keep.storeCreditAmount) + credit,
       accountVersion: (keep.accountVersion || 1) + 1,
     }, { transaction, hooks: false });
+    // hooks: false skips modelEvents, so the sync event is recorded here, in the merge's transaction.
+    if (synced() !== syncedBefore) await require('../../core/outbox/outbox').record(transaction, 'contact.updated', { workspaceId, customerId: keep.id });
     const note = `Merged from ${dup.fullName || ''} ${dup.phoneRaw || dup.phoneNormalized}`.trim().slice(0, 200);
     if (points) await db.LoyaltyTransaction.create({ workspaceId, customerId: keep.id, kind: 'merge', points, balanceAfter: keep.loyaltyPoints, note }, { transaction });
     if (credit) await db.StoreCreditTransaction.create({ workspaceId, customerId: keep.id, kind: 'merge', amount: credit, balanceAfter: keep.storeCreditAmount, currency: (await db.Workspace.findByPk(workspaceId, { attributes: ['defaultCurrency'], transaction })).defaultCurrency || 'EGP', note }, { transaction });
