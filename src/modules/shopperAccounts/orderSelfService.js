@@ -96,12 +96,23 @@ async function changeAddress(workspace, order, address, req) {
   address = await require('../places/placePricing').alignAddress(workspace.id, address);
   await require('../shipping/shippingPlaces').assertDeliverable(workspace, address);
   await require('../places/placePricing').assertDeliverable(workspace.id, address);
-  const before = order.shippingAddressSnapshot;
-  // A field the new address leaves out is gone, not kept from the old one (item 287): an old area,
-  // place or note doesn't ride along with a new city. The country stays unless given.
-  const next = Object.fromEntries(Object.entries(before || {}).filter(([k]) => !ADDRESS_FIELDS.includes(k)));
-  for (const k of ['country', ...ADDRESS_FIELDS]) if (address[k] !== undefined && address[k] !== null && address[k] !== '') next[k] = address[k];
-  await order.update({ shippingAddressSnapshot: next });
+  // Checked again on the locked row (item 352 review): a courier booking locks the order row and
+  // reads the address, so one that committed meanwhile is seen here and one that starts waits.
+  const { before, next } = await db.sequelize.transaction(async (transaction) => {
+    const locked = await db.Order.findOne({ where: { id: order.id, workspaceId: workspace.id }, transaction, lock: transaction.LOCK.UPDATE });
+    if (!locked) throw new NotFoundError('Order');
+    const shipments = await db.Shipment.findAll({ where: { orderId: order.id }, transaction });
+    if (!allowed(workspace, { ...locked.get({ plain: true }), shipments }).canChangeAddress) {
+      throw new AppError('ADDRESS_CHANGE_NOT_ALLOWED', 'The address can no longer be changed here — contact the store', 409);
+    }
+    const prev = locked.shippingAddressSnapshot;
+    // A field the new address leaves out is gone, not kept from the old one (item 287): an old area,
+    // place or note doesn't ride along with a new city. The country stays unless given.
+    const out = Object.fromEntries(Object.entries(prev || {}).filter(([k]) => !ADDRESS_FIELDS.includes(k)));
+    for (const k of ['country', ...ADDRESS_FIELDS]) if (address[k] !== undefined && address[k] !== null && address[k] !== '') out[k] = address[k];
+    await locked.update({ shippingAddressSnapshot: out }, { transaction });
+    return { before: prev, next: out };
+  });
   await recordAudit({ workspaceId: workspace.id, actorUserId: null, action: 'order.address_changed_by_customer', entityType: 'Order', entityId: order.id, before: { address: before }, after: { address: next }, req });
   await require('../notifications/merchantNotificationService').create(workspace.id, {
     type: 'order.new', title: `العميل غيّر عنوان الطلب ${order.orderNumber}`, link: `/orders/${order.id}`,
