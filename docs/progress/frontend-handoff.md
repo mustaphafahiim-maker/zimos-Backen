@@ -2947,3 +2947,14 @@ New report family: `/api/v1/workspaces/:ws/store-reports/*` — every report ans
 
 ### Screen
 - Reports → «المرتجعات» / "Returns": cards «نسبة المرتجع» / "Return rate", «طلبات الإرجاع» / "Return requests", «فلوس اترجعت» / "Refunded"; a bar per reason with Arabic labels («تالف» damaged, «عيب صناعة» defective, «منتج غلط» wrong item, «مش زي الوصف» not as described, «مبقاش عايزه» no longer wanted, «اتأخر» arrived late, «سبب تاني» other); the products table sorted by returned units with the rate highlighted when high; «تنزيل CSV».
+
+## 248. Merge duplicate customers — UI: pending
+
+### `/api/v1/workspaces/:ws/customer-merge` (`customers.manage`)
+- `GET /candidates/:customerId` → `{ candidates: [{ id, fullName, phone, email, totalOrders, createdAt, reasons: ["email" | "phone" | "name"] }] }` — possible duplicates: same email, same last 9 phone digits, or same name (up to 20).
+- `POST /` `{ keepId, duplicateId }` → `{ customer: { id, fullName, phone, alternatePhone, email }, moved: { "orders.customer_id": 2, … }, pointsAdded, creditAdded }`.
+  - Everything of the duplicate moves to the kept customer (orders, addresses, notes, follow-ups, reviews, wishlist, referrals, quotes, ledgers, …); the duplicate's copy is dropped where the kept one already has the same review / wishlist item / course / referral code. Points and store credit are added with a `merge` ledger line. Gaps on the kept customer are filled (name, email, company, tax ID); the duplicate's phone becomes the alternate phone if empty; tags and saved addresses joined; consent and blacklist kept if either had them. The duplicate is deleted (can't be undone); the kept customer's sign-ins restart.
+  - Errors: 422 same customer; 404; 409 `CUSTOMER_PAYMENT_IN_PROGRESS` «في دفع أونلاين شغال لأحدهم — جرّب بعد ما يخلص» / "One of them has an online payment in progress — try again when it's done".
+
+### Screens
+- Customer page → «عملاء ممكن يكونوا نفس الشخص» / "Possible duplicates" (from `/candidates`, with the reason chips «نفس الإيميل» / «نفس الرقم» / «نفس الاسم»), and «دمج» / "Merge": a side-by-side of both customers, a choice of which to keep, a confirmation «هننقل كل طلبات وبيانات العميل التاني للعميل ده ونمسحه — مينفعش يترجع» / "All of the other customer's orders and data move here and it is deleted — this can't be undone", then the result (what moved).

@@ -177,6 +177,8 @@ v1.use('/workspaces', workspaceRoutes);
 v1.use('/workspaces/:workspaceId/catalog/bulk-update', require('./modules/catalog/importExport/bulkUpdate').router);
 v1.use('/workspaces/:workspaceId/catalog', catalogRoutes);
 v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
+// Merge duplicate customers (customers/customerMerge.js, item 248).
+v1.use('/workspaces/:workspaceId/customer-merge', require('./modules/customers/customerMerge').router);
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
 // Contacts from a CSV / Excel sheet (item 187), ahead of /contacts/:customerId.
 v1.use('/workspaces/:workspaceId/contacts/import', require('./modules/contacts/contactImport').router);
