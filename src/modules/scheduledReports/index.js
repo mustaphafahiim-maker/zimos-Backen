@@ -158,10 +158,17 @@ async function runDue(now = new Date()) {
           { replacements: { id, kind, key }, type: QueryTypes.SELECT }
         );
         if (!claimed.length) continue;
-        const members = (await eligibleMembers(id)).filter((m) => s.recipientUserIds.includes(m.userId));
-        const report = await build(workspace, kind, now);
-        const sent = await sendTo(workspace, report, members);
-        await db.sequelize.query('UPDATE report_deliveries SET sent_count = :sent WHERE workspace_id = :id AND kind = :kind AND period_key = :key', { replacements: { id, kind, key, sent } });
+        try {
+          const members = (await eligibleMembers(id)).filter((m) => s.recipientUserIds.includes(m.userId));
+          const report = await build(workspace, kind, now);
+          const sent = await sendTo(workspace, report, members);
+          await db.sequelize.query('UPDATE report_deliveries SET sent_count = :sent WHERE workspace_id = :id AND kind = :kind AND period_key = :key', { replacements: { id, kind, key, sent } });
+        } catch (err) {
+          // A report that could not be built or sent gives its claim back (item 301): the next run tries
+          // again within the period, instead of the period being skipped.
+          await db.sequelize.query('DELETE FROM report_deliveries WHERE workspace_id = :id AND kind = :kind AND period_key = :key', { replacements: { id, kind, key } }).catch(() => {});
+          throw err;
+        }
       }
     } catch (err) {
       logger.error(`[scheduledReports] ${id}: ${err.message}`);

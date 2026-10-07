@@ -212,7 +212,8 @@ merchant.get(
   asyncHandler(async (req, res) => res.json(await browse(req.query)))
 );
 merchant.get('/templates/:id', validate({ params: Joi.object({ ...ws, id: uuid.required() }) }), asyncHandler(async (req, res) => res.json(await detail(req.params.id))));
-merchant.post('/templates/:id/use', validate({ params: Joi.object({ ...ws, id: uuid.required() }), body: Joi.object({ name: Joi.string().trim().min(1).max(200) }) }), asyncHandler(async (req, res) => res.status(201).json(await use(wid(req), req.params.id, req.body, req))));
+// A new funnel: the creation lock of a suspended or unpaid store applies, as on every other way to make one (item 301).
+merchant.post('/templates/:id/use', validate({ params: Joi.object({ ...ws, id: uuid.required() }), body: Joi.object({ name: Joi.string().trim().min(1).max(200) }) }), require('../../core/middleware/subscriptionGuard').requireCreationAllowed, asyncHandler(async (req, res) => res.status(201).json(await use(wid(req), req.params.id, req.body, req))));
 merchant.get('/submissions', validate({ params: Joi.object(ws) }), asyncHandler(async (req, res) => res.json(await listOwn(wid(req)))));
 merchant.post(
   '/submissions',
