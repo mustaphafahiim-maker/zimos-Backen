@@ -3340,3 +3340,7 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 ## 320. Refund form — send an Idempotency-Key — UI: pending (small)
 
 - `POST /workspaces/:ws/orders/:orderId/refunds`: generate one `Idempotency-Key` (uuid) when the refund dialog opens and send it with the request (and with a retry of that same request). A double click then makes one refund. A new dialog gets a new key. 409 `IDEMPOTENCY_KEY_IN_PROGRESS`: «الاسترجاع بيتنفذ — استنى ثواني» / "The refund is being processed — wait a few seconds".
+
+## 322. Checkout autosave — funnel on every save — UI: pending (storefront, with 302)
+
+- Send `funnelId` (funnel checkouts) or `websiteId` (store pages) on **every** `POST /store/:ws/checkout-sessions` save, not only the first: a save without them now clears them, so a visitor who moves from a funnel to the store's checkout is counted where they are.

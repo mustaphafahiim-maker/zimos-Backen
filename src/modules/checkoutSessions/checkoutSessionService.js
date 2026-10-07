@@ -107,9 +107,10 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
        -- The latest address the shopper saved from (SPEC §6.1: IP and country on the lost order).
        ip_address = COALESCE(EXCLUDED.ip_address, checkout_sessions.ip_address),
        ip_country = CASE WHEN EXCLUDED.ip_address IS NULL THEN checkout_sessions.ip_country ELSE EXCLUDED.ip_country END,
-       -- How the shopper came (first / last touch) and the funnel / website it is on: what this save sent
-       -- wins, what it left out is kept (item 302).
-       attribution = COALESCE(checkout_sessions.attribution, '{}'::jsonb) || EXCLUDED.attribution,
+       -- How the shopper came (first / last touch): what this save sent wins, a touch it left out is kept.
+       -- The funnel / website describe this save's checkout only (item 322): a visitor who moved from a
+       -- funnel to the store's own checkout is no longer counted under that funnel.
+       attribution = (COALESCE(checkout_sessions.attribution, '{}'::jsonb) - 'funnelId' - 'websiteId') || EXCLUDED.attribution,
        last_activity_at = now(),
        updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`,
