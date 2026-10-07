@@ -2026,7 +2026,10 @@ Three reviews of the features built in passes four to six (integrations, storefr
   - The sandbox registrar is refused in production (503 DOMAIN_PURCHASE_UNAVAILABLE on search and buy), like the dropship and email-marketing sandboxes; a real registrar adapter replaces it there.
   - Only a registrable name is searched or bought: one label on a TLD sold here (.com .net .store .shop .online .co). "shop.someone.com" is searched as "shop" on those TLDs and refused as a purchase.
   - Checked: production simulated → 503; buying shop.victim.com → 422; "mystore" / "www.mystore.store" → the label on each TLD.
-- [ ] 306. MCP server: a JSON-RPC batch ran any number of calls at once under one rate-limit hit (a 2 MB body ≈ 20k page checks), and create_draft_funnel skipped the creation lock.
+- [x] 306. MCP server: a JSON-RPC batch ran any number of calls at once under one rate-limit hit (a 2 MB body ≈ 20k page checks), and create_draft_funnel skipped the creation lock. (backend fix; no UI change)
+  - A JSON-RPC batch holds 1 to 10 messages (else one -32600 answer) and they run one after the other, not all at once.
+  - `create_draft_funnel` checks the creation lock first (subscriptionGuard.assertCreationAllowed, the middleware's check made callable): a suspended store gets STORE_SUSPENDED, an unpaid one SUBSCRIPTION_REQUIRED, as the tool's error text.
+  - Checked with a store API key: a batch of 50 pings → refused; 3 → three answers; create_draft_funnel → created; with a suspension simulated → STORE_SUSPENDED.
 - [ ] 307. Sending an order to Shopify / WooCommerce took no local claim: a double click or a manual push racing the automatic one made two remote orders (the remote duplicate check only looks at the newest 50 / 250 orders).
 - [ ] 308. Unsubscribes never reached Mailchimp / Klaviyo: the email unsubscribe link, a WhatsApp STOP and an erase changed the customer without the contact.updated event the sync listens to.
 - [ ] 309. Merchant-supplied store addresses (Shopify / WooCommerce forwarding, and an IP-literal address in the Shopify link importer) were fetched without the URL guard and without a size cap on the answer.

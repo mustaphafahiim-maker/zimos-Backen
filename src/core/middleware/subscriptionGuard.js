@@ -21,8 +21,9 @@ const { subscriptionRequiredError } = require('../../modules/billing/goLiveServi
  * a subscription left trialing/active — with no grace day — and on websites,
  * publishing and quickstart branding as well.
  */
-const requireCreationAllowed = asyncHandler(async (req, res, next) => {
-  const access = await accessFor(req.tenant.workspaceId);
+/** The same check for callers that aren't a route (the MCP tools, item 306): throws, or returns. */
+async function assertCreationAllowed(workspaceId) {
+  const access = await accessFor(workspaceId);
   if (access.reasons.includes('suspended')) {
     throw new AppError(
       'STORE_SUSPENDED',
@@ -39,6 +40,10 @@ const requireCreationAllowed = asyncHandler(async (req, res, next) => {
       { reasons: access.reasons, periodEnd: access.billing.periodEnd }
     );
   }
+}
+
+const requireCreationAllowed = asyncHandler(async (req, res, next) => {
+  await assertCreationAllowed(req.tenant.workspaceId);
   next();
 });
 
@@ -58,4 +63,4 @@ const requireLive = asyncHandler(async (req, res, next) => {
   next();
 });
 
-module.exports = { requireCreationAllowed, requireLive };
+module.exports = { requireCreationAllowed, requireLive, assertCreationAllowed };
