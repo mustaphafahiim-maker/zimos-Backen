@@ -22,8 +22,10 @@ module.exports = (sequelize, DataTypes) => {
       showInHeader: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'show_in_header' },
       showInFooter: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'show_in_footer' },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'is_active' },
+      // The trash (modules/trash): paranoid, so a deleted row is skipped by every lookup until restored or purged.
+      deletedBy: { type: DataTypes.UUID, allowNull: true, field: 'deleted_by' },
     },
-    { tableName: 'website_pages', indexes: [{ unique: true, fields: ['website_id', 'path'] }] }
+    { tableName: 'website_pages', paranoid: true, indexes: [{ unique: true, fields: ['website_id', 'path'] }] }
   );
   WebsitePage.associate = (models) => {
     WebsitePage.belongsTo(models.Website, { foreignKey: 'websiteId', as: 'website' });

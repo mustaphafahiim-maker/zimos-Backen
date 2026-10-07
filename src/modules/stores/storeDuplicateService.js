@@ -42,7 +42,7 @@ async function uniqueSubdomain(base, transaction) {
   root = root.slice(0, 55);
   let candidate = root;
   let n = 1;
-  while (await db.Website.findOne({ where: { subdomain: candidate }, attributes: ['id'], transaction })) {
+  while (await db.Website.findOne({ where: { subdomain: candidate }, attributes: ['id'], transaction, paranoid: false })) {
     candidate = `${root}-${++n}`;
   }
   return candidate;

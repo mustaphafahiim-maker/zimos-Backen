@@ -262,6 +262,7 @@ async function deleteTemplate(id, req = null) {
       const inUse = await db.Website.count({
         where: { sourceTemplateVersionId: versions.map((v) => v.id) },
         transaction,
+        paranoid: false, // a site in the trash can still be restored
       });
       if (inUse > 0) {
         throw new ConflictError(

@@ -35,7 +35,7 @@ const TOPICS = Object.freeze({
   // Item 178 (webhooks/modelEvents.js).
   'funnel.created': 'A funnel was created.',
   'funnel.updated': 'A funnel was edited (its settings, steps map, status or name).',
-  'funnel.deleted': 'A funnel was deleted (its id and name are in the payload).',
+  'funnel.deleted': 'A funnel was deleted: moved to the trash, where it can still be restored (its id and name are in the payload).',
   'payment.paid': 'A payment was received for an order (online, a transfer that was accepted, or cash collected).',
   'contact.updated': "A contact's details, tags or marketing consent were changed.",
   // Item 372 (returns/): the return, with its order.

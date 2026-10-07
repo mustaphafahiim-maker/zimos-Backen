@@ -15,6 +15,8 @@ module.exports = (sequelize, DataTypes) => {
       workspaceId: { type: DataTypes.UUID, allowNull: false, field: 'workspace_id' },
       websiteId: { type: DataTypes.UUID, allowNull: true, field: 'website_id' },
       funnelId: { type: DataTypes.UUID, allowNull: true, field: 'funnel_id' },
+      // The funnel's name, kept when that funnel is purged from the trash (modules/trash).
+      funnelName: { type: DataTypes.STRING(200), allowNull: true, field: 'funnel_name' },
       customerId: { type: DataTypes.UUID, allowNull: false, field: 'customer_id' },
       orderNumber: { type: DataTypes.STRING(40), allowNull: false, field: 'order_number' },
 

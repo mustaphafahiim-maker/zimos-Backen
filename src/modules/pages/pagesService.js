@@ -65,10 +65,16 @@ async function ensureUniqueSubdomain(base) {
   let candidate = root;
   let n = 1;
   // subdomain is globally unique, so this is not workspace-scoped.
-  while (await db.Website.findOne({ where: { subdomain: candidate }, attributes: ['id'] })) {
+  while (await db.Website.findOne({ where: { subdomain: candidate }, attributes: ['id'], paranoid: false })) {
     candidate = `${root}-${++n}`;
   }
   return candidate;
+}
+
+/** 409 for a path another page holds; a page in the trash still holds its path (modules/trash). */
+function pathTaken(clash, path, message) {
+  if (!clash.deletedAt) return new ConflictError(message, 'PAGE_PATH_TAKEN');
+  return new ConflictError(`A page in the trash uses "${path}": restore it, or delete it for good, first`, 'PAGE_PATH_IN_TRASH');
 }
 
 // --- internal loaders -----------------------------------------------------
@@ -222,8 +228,8 @@ async function updateWebsite(workspaceId, websiteId, data, req) {
 async function deleteWebsite(workspaceId, websiteId, req) {
   const website = await loadWebsite(workspaceId, websiteId);
   const before = website.toJSON();
-  // pages / revisions / redirects cascade via FK.
-  await website.destroy();
+  // To the trash (modules/trash): pages, revisions, redirects and domains stay until it is purged.
+  const trashed = await require('../trash/trashService').moveToTrash(website, req);
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -231,9 +237,10 @@ async function deleteWebsite(workspaceId, websiteId, req) {
     entityType: 'Website',
     entityId: websiteId,
     before,
+    metadata: { trashed: true },
     req,
   });
-  return { deleted: true };
+  return { deleted: true, ...trashed };
 }
 
 // --- pages ------------------------------------------------------------------
@@ -245,8 +252,8 @@ async function createPage(workspaceId, websiteId, data, req) {
   const draftData = data.draftData !== undefined ? data.draftData : EMPTY_TREE;
   validatePageTree(draftData, { label: `page "${path}"` });
 
-  const clash = await db.WebsitePage.findOne({ where: { websiteId, path }, attributes: ['id'] });
-  if (clash) throw new ConflictError(`A page already exists at "${path}"`, 'PAGE_PATH_TAKEN');
+  const clash = await db.WebsitePage.findOne({ where: { websiteId, path }, attributes: ['id', 'deletedAt'], paranoid: false });
+  if (clash) throw pathTaken(clash, path, `A page already exists at "${path}"`);
 
   const page = await db.WebsitePage.create({
     workspaceId,
@@ -318,10 +325,11 @@ async function updatePage(workspaceId, websiteId, pageId, data, req) {
         assertPathNotReserved(newPath);
         const clash = await db.WebsitePage.findOne({
           where: { websiteId, path: newPath, id: { [Op.ne]: pageId } },
-          attributes: ['id'],
+          attributes: ['id', 'deletedAt'],
           transaction: t,
+          paranoid: false,
         });
-        if (clash) throw new ConflictError(`Another page already uses the path "${newPath}"`, 'PAGE_PATH_TAKEN');
+        if (clash) throw pathTaken(clash, newPath, `Another page already uses the path "${newPath}"`);
 
         // The new path must resolve to THIS page — drop any redirect sending it elsewhere.
         await db.WebsitePageRedirect.destroy({ where: { websiteId, fromPath: newPath }, transaction: t });
@@ -370,10 +378,10 @@ async function updatePage(workspaceId, websiteId, pageId, data, req) {
 async function deletePage(workspaceId, websiteId, pageId, req) {
   const page = await loadPage(workspaceId, websiteId, pageId);
   const before = page.toJSON();
-  // Redirects that target this page have page_id set to NULL by the FK; they
-  // still resolve by to_path string. The live snapshot is untouched until the
-  // next publish, so a deleted-but-still-published page keeps serving until then.
-  await page.destroy();
+  // To the trash (modules/trash); it keeps its path and redirects until purged.
+  // The live snapshot is untouched until the next publish, so a
+  // deleted-but-still-published page keeps serving until then.
+  const trashed = await require('../trash/trashService').moveToTrash(page, req);
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -381,10 +389,10 @@ async function deletePage(workspaceId, websiteId, pageId, req) {
     entityType: 'WebsitePage',
     entityId: pageId,
     before,
-    metadata: before.publishedData != null ? { wasLive: true, republishToRemoveFromLive: true } : undefined,
+    metadata: { trashed: true, ...(before.publishedData != null ? { wasLive: true, republishToRemoveFromLive: true } : {}) },
     req,
   });
-  return { deleted: true, wasLive: before.publishedData != null };
+  return { deleted: true, wasLive: before.publishedData != null, ...trashed };
 }
 
 // --- publish / revisions / rollback --------------------------------------

@@ -13,8 +13,10 @@ module.exports = (sequelize, DataTypes) => {
       globalStyles: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'global_styles' },
       seo: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
       publishedRevisionId: { type: DataTypes.UUID, allowNull: true, field: 'published_revision_id' },
+      // The trash (modules/trash): paranoid, so a deleted row is skipped by every lookup until restored or purged.
+      deletedBy: { type: DataTypes.UUID, allowNull: true, field: 'deleted_by' },
     },
-    { tableName: 'websites', indexes: [{ fields: ['workspace_id'] }, { unique: true, fields: ['subdomain'] }] }
+    { tableName: 'websites', paranoid: true, indexes: [{ fields: ['workspace_id'] }, { unique: true, fields: ['subdomain'] }] }
   );
   Website.associate = (models) => {
     Website.belongsTo(models.Workspace, { foreignKey: 'workspaceId', as: 'workspace' });

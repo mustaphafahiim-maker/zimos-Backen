@@ -73,7 +73,7 @@ async function build(topic, event) {
 
   // A deleted funnel is gone: the event carries what is left of it.
   if (topic === 'funnel.deleted') {
-    return { subject: { funnelId: payload.funnelId }, data: { funnel: { id: payload.funnelId, name: payload.name || null, subdomain: payload.subdomain || null, deleted: true } } };
+    return { subject: { funnelId: payload.funnelId }, data: { funnel: { id: payload.funnelId, name: payload.name || null, subdomain: payload.subdomain || null, deleted: true, trashed: payload.trashed === true } } };
   }
 
   if (aggregate === 'funnel') {

@@ -230,6 +230,8 @@ v1.use('/workspaces/:workspaceId/shipping', shippingRoutes);
 v1.use('/workspaces/:workspaceId/tax-rates', taxRoutes);
 v1.use('/workspaces/:workspaceId/websites', pagesRoutes);
 v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
+// Deleted funnels, websites and pages: list, restore, delete for good (trash/trashService.js).
+v1.use('/workspaces/:workspaceId/trash', require('./modules/trash/trashRoutes'));
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 // Code customizations: the merchant's own HTML/CSS/JS slots (website.publish).
 v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').router);

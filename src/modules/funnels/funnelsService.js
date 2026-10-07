@@ -54,7 +54,7 @@ async function ensureUniqueSubdomain(base) {
   let candidate = root;
   let n = 1;
   // subdomain is globally unique, so this is not workspace-scoped.
-  while (await db.Funnel.findOne({ where: { subdomain: candidate }, attributes: ['id'] })) {
+  while (await db.Funnel.findOne({ where: { subdomain: candidate }, attributes: ['id'], paranoid: false })) {
     candidate = `${root}-${++n}`;
   }
   return candidate;
@@ -178,7 +178,8 @@ async function updateFunnel(workspaceId, funnelId, data, req) {
   if (data.name !== undefined) patch.name = data.name;
   // A new link: the old one stops answering (SPEC §9.7). Links are unique across stores.
   if (data.subdomain !== undefined && data.subdomain !== funnel.subdomain) {
-    const taken = await db.Funnel.findOne({ where: { subdomain: data.subdomain }, attributes: ['id'] });
+    // A trashed funnel keeps its link until it is purged (modules/trash).
+    const taken = await db.Funnel.findOne({ where: { subdomain: data.subdomain }, attributes: ['id'], paranoid: false });
     if (taken) throw new AppError('FUNNEL_SUBDOMAIN_TAKEN', 'This link is already used by another funnel', 409, [{ field: 'subdomain', message: 'This link is taken' }]);
     patch.subdomain = data.subdomain;
   }
@@ -296,8 +297,8 @@ async function duplicateFunnel(workspaceId, funnelId, data, req) {
 async function deleteFunnel(workspaceId, funnelId, req) {
   const funnel = await loadFunnel(workspaceId, funnelId);
   const before = funnel.toJSON();
-  // steps / edges / revisions / sessions cascade via FK.
-  await funnel.destroy();
+  // To the trash (modules/trash): steps, edges, revisions and sessions stay until it is purged.
+  const trashed = await require('../trash/trashService').moveToTrash(funnel, req);
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -305,9 +306,10 @@ async function deleteFunnel(workspaceId, funnelId, req) {
     entityType: 'Funnel',
     entityId: funnelId,
     before,
+    metadata: { trashed: true },
     req,
   });
-  return { deleted: true };
+  return { deleted: true, ...trashed };
 }
 
 // --- steps ------------------------------------------------------------
