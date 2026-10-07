@@ -552,6 +552,8 @@ async function correctOutcome(workspaceId, taskId, { outcome, reason, notes, ack
       await releaseOrderStock(workspaceId, order.id, 'order_rejected', req.user.id, transaction);
       await db.Customer.increment('totalRejectedOrders', { by: 1, where: { id: order.customerId }, transaction });
     } else {
+      // A rejection whose points / credit / gift card already went back can't be confirmed again (item 274).
+      await require('../payments/tenderReturns').assertNoneReturned(order.id, transaction);
       await reserveOrderStock(workspaceId, order.id, 'order_reconfirmed', req.user.id, transaction);
       await db.Customer.update(
         { totalRejectedOrders: db.sequelize.literal('GREATEST(total_rejected_orders - 1, 0)') },

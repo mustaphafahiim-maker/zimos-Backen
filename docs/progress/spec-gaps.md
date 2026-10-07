@@ -1882,3 +1882,37 @@ A review of everything built today (items 249–267) found defects in it; each w
 - [x] 272. Two public paths that can be made expensive: the dropship supplier answer cache grows without bound from shopper-typed cities; the Google feed with "require checklist" rebuilt the catalogue on every request — bound and cache both. (backend fix; no UI change)
   - The supplier answer cache keeps at most 2000 entries, oldest out first (its keys hold the shopper's city). The public Google feed reads the checklist verdict from a per-store cache with the feed's 10-minute life (dropped when the feed settings are saved), instead of rebuilding the catalogue on every request.
   - Re-checked: the per-channel feeds (item 264) and the supplier rates/minimum (item 263) answer as before.
+
+## Twentieth pass (2026-10-07) — review of the money features (items 189, 203–231)
+
+A review of the points, store credit, gift card, quote and bundle code found these; each was checked against the code. Gift cards (older) share the root cause of 273–274 and are fixed with them.
+
+- [x] 273. Refunds and store tenders: a refund without a named payment on a COD order landed on the points/credit/gift-card payment and was credited back in full (on top of the cash); cancelling after a refund-to-credit returned the tender again; partial points refunds rounded up each time. (backend fix; no UI change)
+  - A refund that names no payment on an order with no gateway payment is recorded against the cash (no payment), never a points / credit / gift-card payment; those are refunded only when named, capped at what is left on them (as before).
+  - The cancel handlers (store credit, points, gift cards) never return more than the order has left to refund (amountPaid − amountRefunded), so a refund-to-credit already made counts. Points given back over several partial refunds never exceed the points that payment spent.
+  - Checked: a COD order with 100 in credit refunded 900 → no credit added; refund-to-credit 300 then cancel → 300 credited once.
+- [x] 274. Cancel, reject, reopen: a COD order rejected on the confirmation call never returned the points/credit/gift card it spent; a reopened (or re-confirmed) order kept the returned tender while the courier collected only the rest. (backend done, UI in frontend-handoff.md)
+  - The three handlers act only on an order that is cancelled or rejected (a reopen that beat the job keeps the tender) and now also answer order.rejected, so a COD rejection on the call gives the points / credit / gift card back.
+  - Reopening an order, or correcting a rejection to confirmed, is refused (409 ORDER_TENDER_RETURNED) once its tender went back: the courier would otherwise collect only the rest. payments/tenderReturns.js.
+  - Checked: rejected order → credit back; live order → nothing; cancelled with credit back → reopen 409.
+- [ ] 275. Quotes: accepting twice (double click, retry) made two orders; the quote's "exact prices" got the store's automatic discount and bundle tiers on top; two quote requests at once could clash on the number.
+- [ ] 276. Free-gift lines counted as units in quantity-bundle and mix-and-match tiers (a gift unlocking a tier discount).
+- [ ] 277. An upsell joined to an open order re-added tax for a tax-exempt business customer and shipping for a free-shipping (VIP / referral) order.
+
+Not queued: points earned on an order that is returned after they were spent are not clawed back below zero (the balance never goes negative) — the design's stated choice, left to the owner.
+
+## Twenty-first pass (2026-10-07) — review of the stock and shopper features (items 213–237)
+
+A review of stock locations, purchasing, lots, shopper self-service, delivery slots, click and collect, Google sign-in and privacy requests found these; each was checked against the code before being queued. Most severe first.
+
+- [ ] 278. Shopper account takeover: a checkout with someone else's phone and the attacker's email wrote that email onto the victim's contact; Google (and email-code) sign-in then logged into the victim's account. Only verified emails may sign a shopper in.
+- [ ] 279. Google sign-in tokens for the shared platform client could be replayed on another store: bind the token to the store (a per-store nonce).
+- [ ] 280. Receiving a purchase order twice at once (double click) added the stock twice and lost one update of the received count.
+- [ ] 281. Delivery-slot hold queried outside its own transaction: ten checkouts at once could exhaust the database connection pool.
+- [ ] 282. A pickup at the default location was moved to another warehouse by the order-assignment job.
+- [ ] 283. Two click-and-collect orders at once could both take a location's last unit.
+- [ ] 284. Stock lots ignored the location: FEFO picked and consumed lots of other locations; a write-off could take a location's count below zero.
+- [ ] 285. A failed checkout left its delivery-slot hold, blocking the shopper's own retry for 10 minutes.
+- [ ] 286. Erasing a customer left the billing address on orders and the phone/email in sign-in codes.
+- [ ] 287. A shopper's address change kept the old area, place and notes when the new address left them out.
+- [ ] 288. Smaller: a stock count whose location was deleted applied to the whole store; one malformed line in a URL-redirect import (or lookup) answered 500 half-way.

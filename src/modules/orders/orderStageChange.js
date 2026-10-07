@@ -95,6 +95,8 @@ async function reopen(workspaceId, orderId, { reason }, req) {
     if (!order.cancelledAt && order.confirmationState !== 'rejected') {
       throw new AppError('ORDER_NOT_CANCELLED', 'This order is not cancelled', 409);
     }
+    // Its points / credit / gift card already went back to the shopper (item 274).
+    await require('../payments/tenderReturns').assertNoneReturned(order.id, transaction);
     const before = {
       cancelledAt: order.cancelledAt,
       cancellationReason: order.cancellationReason,

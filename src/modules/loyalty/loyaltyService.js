@@ -151,7 +151,10 @@ async function onRefundProcessed(refund, options = {}) {
   if (await db.LoyaltyTransaction.count({ where: { note }, transaction })) return;
   const spent = await db.LoyaltyTransaction.findOne({ where: { paymentId: payment.id, kind: 'redeem' }, transaction });
   if (!spent || !Number(spent.amount)) return;
-  const points = Math.round((Number(refund.amount) * -Number(spent.points)) / Number(spent.amount));
+  // Each refund's share, rounded, but never past the points this payment spent across all its refunds (item 273).
+  const back = Number(await db.LoyaltyTransaction.sum('points', { where: { paymentId: payment.id, kind: 'refund' }, transaction })) || 0;
+  const points = Math.min(Math.round((Number(refund.amount) * -Number(spent.points)) / Number(spent.amount)), -Number(spent.points) - back);
+  if (points <= 0) return;
   const run = (t) => move(spent.customerId, points, 'refund', { orderId: refund.orderId, paymentId: payment.id, amount: Number(refund.amount), currency: payment.currency, note }, t);
   if (transaction) await run(transaction);
   else await db.sequelize.transaction(run);
@@ -172,15 +175,19 @@ async function onOrderCancelled(event) {
   if (!workspaceId || !p.orderId) return null;
   await db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({ where: { id: p.orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
-    if (!order) return;
+    // Only a cancelled or rejected order gives its tender back (item 274): a reopen that beat this job keeps it.
+    if (!order || (!order.cancelledAt && order.confirmationState !== 'rejected')) return;
     await require('./loyaltyHolds').release(order.id, transaction, 'order cancelled');
     await reverseEarned(order.id, transaction, 'order cancelled');
     const payments = await db.Payment.findAll({ where: { workspaceId, orderId: order.id, providerCode: 'loyalty', status: 'captured' }, transaction });
     let refundedNow = 0;
+    // Never more than the order still has to refund (item 273): a refund-to-credit already made counts.
+    let room = Math.max(0, Number(order.amountPaid) - Number(order.amountRefunded));
     for (const payment of payments) {
       const refunded = await db.Refund.sum('amount', { where: { paymentId: payment.id, status: ['processed', 'pending'] }, transaction });
-      const left = Number(payment.amount) - Number(refunded || 0);
+      const left = Math.min(Number(payment.amount) - Number(refunded || 0), room);
       if (left <= 0) continue;
+      room -= left;
       await db.Refund.create({ workspaceId, orderId: order.id, paymentId: payment.id, amount: left, reason: 'Order cancelled: points returned', status: 'processed', processedAt: new Date(), source: 'merchant' }, { transaction });
       refundedNow += left;
     }

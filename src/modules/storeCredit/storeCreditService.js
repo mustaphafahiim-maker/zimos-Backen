@@ -146,14 +146,18 @@ async function onOrderCancelled(event) {
   if (!workspaceId || !p.orderId) return null;
   await db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({ where: { id: p.orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
-    if (!order) return;
+    // Only a cancelled or rejected order gives its tender back (item 274): a reopen that beat this job keeps it.
+    if (!order || (!order.cancelledAt && order.confirmationState !== 'rejected')) return;
     await require('./storeCreditHolds').release(order.id, transaction, 'order cancelled');
     const payments = await db.Payment.findAll({ where: { workspaceId, orderId: order.id, providerCode: 'store_credit', status: 'captured' }, transaction });
     let refundedNow = 0;
+    // Never more than the order still has to refund (item 273): a refund-to-credit already made counts.
+    let room = Math.max(0, Number(order.amountPaid) - Number(order.amountRefunded));
     for (const payment of payments) {
       const refunded = await db.Refund.sum('amount', { where: { paymentId: payment.id, status: ['processed', 'pending'] }, transaction });
-      const left = Number(payment.amount) - Number(refunded || 0);
+      const left = Math.min(Number(payment.amount) - Number(refunded || 0), room);
       if (left <= 0) continue;
+      room -= left;
       await db.Refund.create({ workspaceId, orderId: order.id, paymentId: payment.id, amount: left, reason: 'Order cancelled: store credit returned', status: 'processed', processedAt: new Date(), source: 'merchant' }, { transaction });
       refundedNow += left;
     }

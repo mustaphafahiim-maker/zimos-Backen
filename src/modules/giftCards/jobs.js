@@ -10,6 +10,6 @@ const svc = () => require('./giftCardService');
 module.exports = {
   consumers: [
     { name: 'gift_cards_issue', queue: 'default', events: ['order.paid', 'order.delivered'], handle: (event) => svc().issueForOrder(event) },
-    { name: 'gift_cards_cancel', queue: 'default', events: ['order.cancelled'], handle: (event) => svc().refundCancelledOrder(event) },
+    { name: 'gift_cards_cancel', queue: 'default', events: ['order.cancelled', 'order.rejected'], handle: (event) => svc().refundCancelledOrder(event) },
   ],
 };

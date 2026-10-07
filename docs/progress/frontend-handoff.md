@@ -3253,3 +3253,9 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - `POST /auth/login/whatsapp/request` now always answers 200 `{ challengeToken, channel: "phone", sentTo }` — no 429/503 any more (the limit and a failed delivery answer the same way, nothing sent). Wording: «بعتنا كود على واتساب أو رسالة لـ {sentTo}» / "We sent a code by WhatsApp or SMS to {sentTo}".
 - `POST /auth/login/whatsapp/verify` can now also answer `{ twoFactorRequired, challengeToken, channel: "email" }` for a browser new to the account (the same new-device email code as the password sign-in) → finish with `POST /auth/two-factor/verify`. A new-sign-in alert email goes out as for a password sign-in.
+
+## 273–274. Points, credit and gift cards on refunds, cancels and rejections — UI: pending
+
+- Changing an order's status back from cancelled / rejected (`PATCH /orders/:id/status`) or correcting a rejection to confirmed can now answer 409 `ORDER_TENDER_RETURNED` when the points, store credit or gift card it used were already given back: «النقاط / الرصيد / كارت الهدية رجعوا للعميل لما الطلب اتلغى — اعمل طلب جديد» / "The points, store credit or gift card went back to the customer when this was cancelled — place a new order".
+- A COD order rejected on the confirmation call now gives its points / credit / gift card back (it shows as refunds on the order).
+- A refund that doesn't pick a payment on a COD order is a cash refund; to give points / credit / a gift card back, pick that payment in the refund form.
