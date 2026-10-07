@@ -193,7 +193,9 @@ async function verifyEmail(rawToken) {
     if (!user) {
       throw new AppError('INVALID_VERIFICATION_TOKEN', 'Verification token is invalid or expired', 400);
     }
-    await user.update({ status: 'active', emailVerifiedAt: new Date() }, { transaction: t });
+    // A suspended account's link confirms the address but never lifts the
+    // suspension (item 337): only the console's unsuspend does.
+    await user.update({ status: user.status === 'suspended' ? 'suspended' : 'active', emailVerifiedAt: new Date() }, { transaction: t });
     await record.update({ usedAt: new Date() }, { transaction: t });
     return user.toSafeJSON();
   });
@@ -265,6 +267,9 @@ async function login({ identifier, email, password, locale }, req) {
   if (!passwordOk) {
     throw new AuthenticationError(identifier ? 'Invalid sign-in details' : 'Invalid email or password', 'INVALID_CREDENTIALS');
   }
+  // Deleted from the console (item 337): its password is gone, so this is a
+  // second lock only.
+  if (user.deletedAt) throw new AuthenticationError('This account was deleted', 'ACCOUNT_DELETED');
   if (user.status === 'suspended') {
     throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
   }
@@ -310,12 +315,15 @@ async function completeLogin(user, req) {
 
 /**
  * What a Google sign-in answers an account that may not sign in: the same as
- * a password sign-in (login), ACCOUNT_SUSPENDED for a suspended account.
+ * a password sign-in (login): ACCOUNT_DELETED for an account deleted from the
+ * console (item 337; its Google id is kept so this answer, not a new account,
+ * meets that Google account), ACCOUNT_SUSPENDED for a suspended one.
  * users.status is an ENUM of active, pending_verification and suspended;
  * anything else would be refused as not active, as authenticate and refresh
  * refuse it.
  */
 function assertMaySignIn(user) {
+  if (user.deletedAt) throw new AuthenticationError('This account was deleted', 'ACCOUNT_DELETED');
   if (user.status === 'active' || user.status === 'pending_verification') return;
   if (user.status === 'suspended') throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
   throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');
@@ -680,7 +688,8 @@ async function sendVerificationCode(user, { channel = 'email', locale }, req) {
 async function markConfirmed(user, channel, { signIn = false } = {}, req) {
   const now = new Date();
   await user.update({
-    status: 'active',
+    // Never lifts a console suspension (item 337).
+    status: user.status === 'suspended' ? 'suspended' : 'active',
     ...(signIn ? { lastLoginAt: now } : {}),
     ...(channel === 'sms' ? { phoneVerifiedAt: now, phone: normalizePhone(user.phone) || user.phone } : { emailVerifiedAt: now }),
   });

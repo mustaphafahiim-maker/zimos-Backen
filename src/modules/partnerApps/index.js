@@ -264,6 +264,8 @@ async function exchange({ code, client_id: clientId, client_secret: clientSecret
   if (claimed !== 1) throw new AppError('invalid_grant', 'The code was already used', 400);
 
   const user = await db.User.findByPk(row.userId);
+  // The token would act as this person: one suspended or deleted since approving (item 337) gets none.
+  if (!user || user.status !== 'active' || user.deletedAt) throw new AppError('invalid_grant', 'The person who approved can no longer sign in', 400);
   const member = user && (await db.Membership.count({ where: { workspaceId: row.workspaceId, userId: user.id, status: 'active' } }));
   if (!member) throw new AppError('invalid_grant', 'The person who approved is no longer on the store', 400);
   const req = { user: { id: user.id }, headers: {}, ip: null };

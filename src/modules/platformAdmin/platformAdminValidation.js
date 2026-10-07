@@ -272,9 +272,30 @@ module.exports = {
       q: Joi.string().trim().max(200).allow('').default(''),
       page: Joi.number().integer().min(1).max(10000).default(1),
       limit: Joi.number().integer().min(1).max(50).default(25),
+      // Deleted accounts are hidden from the list unless asked for (item 337).
+      includeDeleted: Joi.boolean().default(false),
     }),
   },
   userParams: { params: Joi.object({ userId: uuid.required() }) },
+  // Suspend, unsuspend and delete an account (item 337). The console asks
+  // before each of these; the API wants the same yes.
+  suspendUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({ reason: Joi.string().trim().min(2).max(500).required(), confirm: Joi.boolean().valid(true).required() }),
+  },
+  unsuspendUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({ reason: Joi.string().trim().max(500).allow('', null).optional(), confirm: Joi.boolean().valid(true).required() }),
+  },
+  deleteUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({
+      reason: Joi.string().trim().max(500).allow('', null).optional(),
+      // Required (as 'suspend') when the account owns stores.
+      stores: Joi.string().valid('suspend').optional(),
+      confirm: Joi.boolean().valid(true).required(),
+    }),
+  },
 
   createPlan: { body: planBody },
   updatePlan: { params: Joi.object({ planId: uuid.required() }), body: planBody },

@@ -3738,3 +3738,50 @@ No new environment variable or setting. A platform admin activating a store's su
 - **Console → Subscriptions** list: a column «التسعير» / "Pricing" (the badge above) and «السعر الفعلي» / "Price paid"; the MRR header gets a switch «كل الاشتراكات» / "All subscriptions" · «المدفوعة بس» / "Paid only" (`paidOnly`).
 - **Console → Audit log**: `subscription.manual_pricing_expired` «انتهت فترة التسعير اليدوي» / "Manual pricing period ended".
 - **Merchant → Settings → Subscription**: with `nextCharge: null` hide the next-charge line. On `MANUAL_PRICING` from Pay or the pay dialog: «اشتراكك مجاني أو بخصم من زيموس — مفيش حاجة تدفعها هنا. لو الفترة خلصت تواصل مع الدعم» / "Your subscription is free or discounted by Zimos — there's nothing to pay here. If the period has ended, contact support", with «افتح تذكرة دعم» / "Open a support ticket".
+
+## 337. Suspend, unsuspend and delete an account from the console; deleted accounts hidden from the user list — UI: pending
+
+No new environment variable or setting. A platform admin with `workspaces.manage` (the store suspension's permission) can suspend a person's account (they can't sign in until it is lifted), lift the suspension, or delete the account. Deleting is soft: the row stays so its stores, orders and audit rows keep working, but the email, phone, name, username and picture are wiped, the password removed and every way back in closed. An account that owns stores is deleted only together with suspending those stores. Every call needs `confirm: true` (the console asks first) and is in the audit log. Nobody can do this to their own account, only a creator can do it to a creator's account, and the last creator can't be suspended or deleted.
+
+### Endpoints (console)
+- **POST `/admin/users/:userId/suspend`** (workspaces.manage)
+  ```json
+  { "reason": "Fraud report from a carrier", "confirm": true }
+  ```
+  `reason` 2–500 characters, required. → 200
+  ```json
+  { "user": { "id": "4dee…", "status": "suspended", "suspendedAt": "2026-10-07T08:35:36Z", "suspendedReason": "Fraud report from a carrier", "deletedAt": null } }
+  ```
+  Every session of the account ends at once (it is signed out everywhere); its API keys and the partner apps it approved stop working until it is unsuspended.
+- **POST `/admin/users/:userId/unsuspend`** (workspaces.manage)
+  ```json
+  { "reason": "Checked with the carrier", "confirm": true }
+  ```
+  `reason` optional (up to 500). → 200 `{ "user": { "id": "…", "status": "active", "suspendedAt": null, "suspendedReason": null, "deletedAt": null } }`. `status` is `pending_verification` instead when the account had not confirmed its email when it was suspended and still hasn't.
+- **POST `/admin/users/:userId/delete`** (workspaces.manage)
+  ```json
+  { "reason": "Asked to be deleted", "stores": "suspend", "confirm": true }
+  ```
+  `reason` optional (up to 500); `stores: "suspend"` is required when the account owns any store, and suspends every active one it owns. → 200
+  ```json
+  { "user": { "id": "58ed…", "status": "suspended", "suspendedAt": "2026-10-07T08:35:38Z", "suspendedReason": "Asked to be deleted", "deletedAt": "2026-10-07T08:35:38Z", "suspendedStores": ["3ba3…"] } }
+  ```
+- Errors (all three): 422 `VALIDATION_ERROR` (no `confirm: true`, a reason too short or long, `stores` not `"suspend"`); 404 `NOT_FOUND` (no such account); 409 `CANNOT_ACT_ON_SELF` "You cannot do this to your own account."; 403 `CREATOR_REQUIRED` "Only a creator can act on a creator's account."; 409 `LAST_CREATOR` "This is the last creator."; 409 `USER_ALREADY_SUSPENDED` (suspend); 409 `USER_NOT_SUSPENDED` (unsuspend); 409 `USER_DELETED` "This account was deleted." (any of the three on a deleted account); 409 `OWNS_STORES` with `details: [{ "field": "stores", "message": "Owns 2 store(s)" }]` (delete without `stores`); 403 without `workspaces.manage`.
+- **GET `/admin/users?q=&page=&limit=&includeDeleted=`** (workspaces.view): deleted accounts are left out of `users` and `total` unless `includeDeleted=true`. Each row adds `"deleted": false|true`. `includeDeleted` other than true/false → 422.
+- **GET `/admin/users/:userId`** (workspaces.view): still opens a deleted account; `user` adds `"suspendedAt"`, `"suspendedReason"`, `"deletedAt"` (and `deleted`), beside `twoFactor` as before.
+- Audit log (console): `user.suspend` (metadata `reason`, `sessionsRevoked`, `challengesClosed`), `user.unsuspend` (`reason`, `suspensionReason`), `user.delete` (`reason`, `suspendedStores`, and the counts of what was closed), and `workspace.suspend` with `metadata.ownerDeleted` for each store a deletion suspended.
+
+### Endpoints (sign-in; dashboard and console login screens)
+- **POST `/auth/login`** and the Google sign-in (`/auth/google/callback`): 401 `ACCOUNT_SUSPENDED` "This account has been suspended" (as before) and, new, 401 `ACCOUNT_DELETED` "This account was deleted" (Google, for a deleted account's Google login; a password sign-in to a deleted account is `INVALID_CREDENTIALS`, since its address and password are gone).
+- A signed-in person whose account is suspended or deleted gets 401 `SESSION_ENDED` on the next call (then `ACCOUNT_INACTIVE`); refresh gives 401. Send them to the sign-in page.
+- Partner apps: **POST `/oauth/token`** → 400 `invalid_grant` "The person who approved can no longer sign in" when the approver was suspended or deleted after approving.
+
+### Screens
+- **Console → Users → a user**: a status badge «نشط» / "Active" · «في انتظار التأكيد» / "Pending confirmation" · «موقوف» / "Suspended" · «محذوف» / "Deleted". When suspended: «موقوف من {suspendedAt}: {suspendedReason}» / "Suspended since {suspendedAt}: {suspendedReason}". When deleted: «الحساب ده اتمسح في {deletedAt} — البيانات الشخصية اتشالت» / "This account was deleted on {deletedAt} — its personal details were removed", and no action buttons. Buttons (only with `workspaces.manage`, hidden on your own account): «إيقاف الحساب» / "Suspend account", «إلغاء الإيقاف» / "Lift suspension" (when suspended), «حذف الحساب» / "Delete account" (red).
+- **Suspend dialog**: title «إيقاف الحساب؟» / "Suspend this account?"; text «الشخص ده مش هيقدر يسجل دخول، وهيتعمله تسجيل خروج من كل الأجهزة، ومفاتيح الـAPI والتطبيقات اللي وافق عليها هتقف لحد ما تلغي الإيقاف. متاجره مش هتتوقف.» / "This person won't be able to sign in and is signed out everywhere; their API keys and the apps they approved stop until you lift the suspension. Their stores keep running."; a required field «السبب» / "Reason" (2–500); buttons «إيقاف» / "Suspend" and «إلغاء» / "Cancel".
+- **Lift suspension dialog**: «إلغاء إيقاف الحساب؟» / "Lift the suspension?", optional «ملاحظة» / "Note", «إلغاء الإيقاف» / "Lift suspension".
+- **Delete dialog**: title «حذف الحساب نهائيًا؟» / "Delete this account for good?"; text «الإيميل والموبايل والاسم واسم المستخدم والصورة هيتمسحوا، والحساب مش هيقدر يدخل تاني. الطلبات والسجلات بتفضل. مفيش رجوع.» / "Email, phone, name, username and picture are wiped and the account can never sign in again. Orders and records stay. This can't be undone."; optional «السبب» / "Reason". When the user owns stores (from its `workspaces` with `role: "owner"`), list them and a required checkbox «إيقاف متاجره ({n})» / "Suspend their stores ({n})" that sends `stores: "suspend"`; the button stays off until it is ticked. Buttons «احذف الحساب» / "Delete account" (red) and «إلغاء» / "Cancel". After it: «تم حذف الحساب وإيقاف {n} متجر» / "Account deleted and {n} store(s) suspended".
+- Error texts: `CANNOT_ACT_ON_SELF` «مينفعش تعمل كده على حسابك» / "You can't do this to your own account"; `CREATOR_REQUIRED` «الحساب ده Creator — محتاج Creator يعمل كده» / "This is a creator's account — only a creator can do this"; `LAST_CREATOR` «ده آخر Creator» / "This is the last creator"; `USER_ALREADY_SUSPENDED` «الحساب موقوف بالفعل» / "Already suspended"; `USER_NOT_SUSPENDED` «الحساب مش موقوف» / "Not suspended"; `USER_DELETED` «الحساب ده اتمسح» / "This account was deleted"; `OWNS_STORES` «الحساب ده بيملك متاجر — اختار إيقافها الأول» / "This account owns stores — choose to suspend them first".
+- **Console → Users** list: deleted accounts are hidden; a toggle «إظهار الحسابات المحذوفة» / "Show deleted accounts" sends `includeDeleted=true`, and deleted rows show the «محذوف» / "Deleted" badge, greyed. Suspended rows show «موقوف» / "Suspended".
+- **Console → Audit log**: `user.suspend` «إيقاف حساب» / "Account suspended", `user.unsuspend` «إلغاء إيقاف حساب» / "Suspension lifted", `user.delete` «حذف حساب» / "Account deleted".
+- **Dashboard and console sign-in**: `ACCOUNT_SUSPENDED` «الحساب ده موقوف. تواصل مع الدعم» / "This account is suspended. Contact support"; `ACCOUNT_DELETED` «الحساب ده اتمسح» / "This account was deleted".

@@ -32,7 +32,7 @@ const authenticateFlexible = asyncHandler(async (req, res, next) => {
   }
 
   const user = await db.User.findByPk(payload.sub);
-  if (!user || user.status !== 'active') {
+  if (!user || user.status !== 'active' || user.deletedAt) {
     throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');
   }
 

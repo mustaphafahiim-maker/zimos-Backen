@@ -151,6 +151,11 @@ router.post('/payment-gateways/:code/health-check', can(P.PROVIDERS_VIEW), valid
 // Agents never held it and still see only their own referrals (/my/*).
 router.get('/users', can(P.WORKSPACES_VIEW), validate(schemas.searchUsers), controller.searchUsers);
 router.get('/users/:userId', can(P.WORKSPACES_VIEW), validate(schemas.userParams), controller.getUser);
+// Suspend, unsuspend and soft-delete an account (userModerationService, item 337):
+// the store suspension's permission, a confirmation on every call, audited.
+router.post('/users/:userId/suspend', can(P.WORKSPACES_MANAGE), validate(schemas.suspendUser), controller.suspendUser);
+router.post('/users/:userId/unsuspend', can(P.WORKSPACES_MANAGE), validate(schemas.unsuspendUser), controller.unsuspendUser);
+router.post('/users/:userId/delete', can(P.WORKSPACES_MANAGE), validate(schemas.deleteUser), controller.deleteUser);
 // Turning off a person's two-step sign-in when they lost every way through it (support.manage).
 router.use(require('../auth/twoFactorRecovery').adminRouter);
 

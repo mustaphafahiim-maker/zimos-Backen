@@ -47,8 +47,10 @@ const authenticateApiKey = asyncHandler(async (req, res, next) => {
   const appGate = require('../apps/appGate');
   if (!(await appGate.apiKeyAllowed(key))) throw appGate.notInstalled('public_api');
 
+  // A key (or a partner app's token) acts as its creator: a suspended or deleted
+  // creator (item 337) stops it.
   const user = await db.User.findByPk(key.createdByUserId);
-  if (!user || user.status !== 'active') throw INVALID();
+  if (!user || user.status !== 'active' || user.deletedAt) throw INVALID();
 
   const membership = await db.Membership.findOne({
     where: { workspaceId: key.workspaceId, userId: user.id, status: 'active' },
