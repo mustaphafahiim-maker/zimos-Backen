@@ -102,7 +102,7 @@ async function verifyCredentials(creds) {
   return { mode: modeFromCredentials(creds) };
 }
 
-async function createPayment(creds, { attempt, order, returnUrl, expiresInSeconds, storeName, locale }) {
+async function createPayment(creds, { attempt, order, returnUrl, expiresInSeconds, storeName, locale, saveCard = false }) {
   const contact = order.contactSnapshot || {};
   // Stripe sessions live 30 minutes to 24 hours.
   const expiresAt = Math.floor(Date.now() / 1000) + Math.min(Math.max(Math.ceil(expiresInSeconds || 0), 1800), 86400);
@@ -123,6 +123,12 @@ async function createPayment(creds, { attempt, order, returnUrl, expiresInSecond
     locale: ['en', 'fr'].includes(locale) ? locale : 'auto',
   };
   if (contact.email) form.customer_email = String(contact.email);
+  // The shopper agreed to keep the card (item 380): Stripe makes a Customer and attaches the card to it
+  // for charges without the shopper (tokenize, chargeSaved below).
+  if (saveCard) {
+    form.customer_creation = 'always';
+    form['payment_intent_data[setup_future_usage]'] = 'off_session';
+  }
   const session = await call(creds, 'POST', '/v1/checkout/sessions', { form, idempotencyKey: `zimos-attempt-${attempt.id}`, what: 'the payment' });
   if (!session.id || !session.url) throw new GatewayError('Stripe did not return a payment page');
   return { providerOrderId: session.id, providerReference: session.payment_intent || session.id, redirectUrl: session.url };
@@ -323,6 +329,127 @@ async function refetchTransaction(creds, payload) {
 // The way back from Checkout carries nothing signed: the return asks Stripe (inquire).
 const parseRedirect = () => null;
 
+// --- Saved cards (../savedMethods/README.md, item 380) -------------------------
+//
+// A saved card is a Customer (cus_…) and a PaymentMethod (pm_…) attached to it; the token is "cus_…|pm_…".
+// - Saved with a payment: the Checkout Session is created with customer_creation=always and
+//   payment_intent_data[setup_future_usage]=off_session when the shopper agreed (createPayment's saveCard).
+// - Saved without one: a Checkout Session in setup mode for a new Customer (createCardSetup).
+// - Charged: POST /v1/payment_intents with confirm=true and off_session=true, keyed by Idempotency-Key, so a
+//   repeat returns Stripe's first answer (paid or declined) instead of charging again.
+// - authentication_required (the bank wants 3-D Secure) is "needs the shopper", never a silent failure.
+
+const tokenFor = (customer, paymentMethod) => `${idOf(customer)}|${idOf(paymentMethod)}`;
+function parseToken(token) {
+  const [customer, paymentMethod] = String(token || '').split('|');
+  return /^cus_/.test(customer || '') && /^(pm|card|src)_/.test(paymentMethod || '') ? { customer, paymentMethod } : null;
+}
+
+/** brand, last4 and the end of the expiry month, from a PaymentMethod object. */
+function cardOf(pm) {
+  const card = pm && typeof pm === 'object' ? pm.card : null;
+  if (!card) return { brand: 'Card', last4: null, expiresAt: null };
+  const expiresAt = card.exp_year && card.exp_month ? new Date(Date.UTC(Number(card.exp_year), Number(card.exp_month), 1) - 1) : null;
+  return { brand: card.brand ? card.brand.charAt(0).toUpperCase() + card.brand.slice(1) : 'Card', last4: card.last4 || null, expiresAt };
+}
+
+/** The saved card behind a paid payment, or null when the shopper did not agree to keep it. */
+async function tokenize(creds, { payment }) {
+  let intentId = /^pi_/.test(String(payment.providerTransactionId || '')) ? payment.providerTransactionId : null;
+  if (!intentId && payment.providerOrderId) {
+    const session = await call(creds, 'GET', `/v1/checkout/sessions/${encodeURIComponent(payment.providerOrderId)}`, { what: 'the payment' });
+    intentId = idOf(session.payment_intent);
+  }
+  if (!intentId) return null;
+  const intent = await call(creds, 'GET', `/v1/payment_intents/${encodeURIComponent(intentId)}?expand[]=payment_method`, { what: 'the payment' });
+  if (intent.status !== 'succeeded' || intent.setup_future_usage !== 'off_session' || !intent.customer || !intent.payment_method) return null;
+  return { token: tokenFor(intent.customer, intent.payment_method), ...cardOf(intent.payment_method) };
+}
+
+/** Charges a saved card without the shopper. */
+async function chargeSaved(creds, { token, amount, currency, reference, idempotencyKey }) {
+  const saved = parseToken(token);
+  if (!saved) return { status: 'failed', failureReason: 'This saved card is not a Stripe card' };
+  let res;
+  try {
+    res = await request({
+      method: 'POST',
+      url: `${base()}/v1/payment_intents`,
+      headers: { ...auth(creds), 'idempotency-key': `zimos-saved-${idempotencyKey || reference}` },
+      form: {
+        amount: String(amount),
+        currency: String(currency).toLowerCase(),
+        customer: saved.customer,
+        payment_method: saved.paymentMethod,
+        off_session: 'true',
+        confirm: 'true',
+        'metadata[orderId]': String(reference),
+      },
+      timeoutMs: WRITE_TIMEOUT_MS,
+    });
+  } catch (err) {
+    throw new GatewayError(`Stripe could not be reached (${err.message})`);
+  }
+  const error = res.json && res.json.error;
+  if (res.status === 402 && error) {
+    const reason = sanitizeGatewayMessage(error.message || 'The card was declined', [creds.secretKey, creds.webhookSecret]);
+    const failureCode = error.decline_code || error.code || null;
+    // The bank wants the shopper (3-D Secure): nothing was taken; the payment needs them on a payment page.
+    if (error.code === 'authentication_required' || failureCode === 'authentication_required') return { status: 'needs_shopper', failureReason: reason, failureCode: 'authentication_required' };
+    return { status: 'failed', failureReason: reason, failureCode, transactionId: error.payment_intent ? idOf(error.payment_intent) : undefined };
+  }
+  if (!res.ok) fail(res, creds, 'the saved card charge');
+  const intent = res.json || {};
+  if (intent.status === 'succeeded') return { status: 'paid', transactionId: intent.id };
+  if (intent.status === 'requires_action') return { status: 'needs_shopper', failureReason: 'The card issuer wants the shopper to confirm this payment', failureCode: 'authentication_required', transactionId: intent.id };
+  if (intent.status === 'requires_payment_method' || intent.status === 'canceled') return { status: 'failed', failureReason: 'The card was declined', transactionId: intent.id };
+  // processing / requires_capture: not a definite answer yet.
+  throw new GatewayError(`Stripe has not finished this payment (${intent.status || 'unknown'})`);
+}
+
+/** A Checkout page in setup mode: the customer gives a card, nothing is charged. */
+async function createCardSetup(creds, { workspaceId, reference, returnUrl }) {
+  const customer = await call(creds, 'POST', '/v1/customers', {
+    form: { 'metadata[workspaceId]': String(workspaceId), 'metadata[reference]': String(reference) },
+    idempotencyKey: `zimos-setup-customer-${reference}`,
+    what: 'the card page',
+  });
+  if (!customer.id) throw new GatewayError('Stripe did not create the customer');
+  const back = `${returnUrl}${String(returnUrl).includes('?') ? '&' : '?'}session_id={CHECKOUT_SESSION_ID}`;
+  const session = await call(creds, 'POST', '/v1/checkout/sessions', {
+    form: {
+      mode: 'setup',
+      customer: customer.id,
+      'payment_method_types[0]': 'card',
+      success_url: back,
+      cancel_url: returnUrl,
+      client_reference_id: String(reference),
+      'metadata[reference]': String(reference),
+    },
+    idempotencyKey: `zimos-setup-${reference}`,
+    what: 'the card page',
+  });
+  if (!session.url) throw new GatewayError('Stripe did not return a card page');
+  return { redirectUrl: session.url };
+}
+
+/** The card the customer gave on the setup page, asked of Stripe (the query only names the session). */
+async function completeCardSetup(creds, { reference, query }) {
+  const sessionId = Array.isArray(query && query.session_id) ? query.session_id[0] : query && query.session_id;
+  if (!/^cs_[A-Za-z0-9_]+$/.test(String(sessionId || ''))) return null;
+  let session;
+  try {
+    session = await call(creds, 'GET', `/v1/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=setup_intent.payment_method`, { what: 'the card page' });
+  } catch (err) {
+    if (err instanceof GatewayRejectedError) return null;
+    throw err;
+  }
+  const setup = session.setup_intent;
+  if (session.client_reference_id !== String(reference) || session.mode !== 'setup' || session.status !== 'complete') return null;
+  if (!setup || typeof setup !== 'object' || setup.status !== 'succeeded' || !setup.payment_method || !session.customer) return null;
+  return { token: tokenFor(session.customer, setup.payment_method), ...cardOf(setup.payment_method) };
+}
+
 module.exports = {
   code,
   name,
@@ -349,4 +476,9 @@ module.exports = {
   parseWebhook,
   parseRedirect,
   signatureValid,
+  supportsTokenization: true,
+  tokenize,
+  chargeSaved,
+  createCardSetup,
+  completeCardSetup,
 };

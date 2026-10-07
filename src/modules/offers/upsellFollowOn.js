@@ -46,7 +46,7 @@ async function createFollowOn(workspaceId, original, line, transaction) {
       items: [line],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
-      paymentMethod: card ? 'card' : 'cod',
+      paymentMethod: card ? require('../payments/savedMethods/consentedSave').methodOf(card) : 'cod',
     },
     { user: null, headers: {}, ip: null },
     // The buyer's own add-on to the order they just paid: the original went

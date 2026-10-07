@@ -39,25 +39,28 @@ const credentialsSchema = Joi.object({
   clientSecret: Joi.string().trim().min(10).max(200).required(),
   environment: Joi.string().valid('live', 'sandbox'),
 });
-const settingsSchema = Joi.object({});
+// vault: the app has PayPal's Vault feature on, so a buyer's PayPal can be kept for later charges (item 380).
+const settingsSchema = Joi.object({ vault: Joi.boolean().default(false) });
 
 const credentialFields = [
   { key: 'clientId', secret: false, label: bi('Client ID', 'Client ID'), placeholder: 'AbC…' },
   { key: 'clientSecret', secret: true, label: bi('Secret', 'Secret'), placeholder: 'EFg…' },
 ];
-const settingFields = [];
+const settingFields = [{ key: 'vault', method: 'paypal', type: 'boolean', label: bi('Keep the buyer\'s PayPal for one-click offers (needs Vault on in your PayPal app)', 'احفظ حساب PayPal للمشتري للعروض بضغطة واحدة (لازم تفعّل Vault في تطبيق PayPal)') }];
 const setupSteps = {
   en: [
     'In developer.paypal.com open Apps & Credentials, pick Sandbox (to try) or Live (to sell), and create an app.',
     'Copy its Client ID and Secret here. We detect whether they are sandbox or live keys.',
     'PayPal shows as an express button at checkout for orders in USD, EUR, GBP, CAD or AUD.',
     'Recommended: in the same app, under Webhooks, add the webhook URL below for Payment capture refunded and the Customer dispute events, so refunds made in PayPal and disputes reach ZIMOS.',
+    'Optional — one-click offers: turn on Vault in the app\'s features, then tick "Keep the buyer\'s PayPal" here.',
   ],
   ar: [
     'من developer.paypal.com افتح Apps & Credentials، اختار Sandbox (للتجربة) أو Live (للبيع)، واعمل App.',
     'انسخ الـ Client ID والـ Secret هنا. إحنا بنعرف لوحدنا إذا كانوا مفاتيح تجربة ولا حقيقية.',
     'PayPal بيظهر كزرار دفع سريع في الطلبات بالدولار أو اليورو أو الجنيه الإسترليني أو الدولار الكندي أو الأسترالي.',
     'مهم: في نفس الـ App، من Webhooks، ضيف رابط الـ Webhook اللي تحت لأحداث Payment capture refunded وأحداث Customer dispute، عشان الاسترجاعات اللي بتتعمل من PayPal والنزاعات توصل لـ ZIMOS.',
+    'اختياري — العروض بضغطة واحدة: فعّل Vault من مميزات الـ App، وبعدها علّم على "احفظ حساب PayPal للمشتري" هنا.',
   ],
 };
 const helpLinks = [{ label: bi('PayPal apps & credentials', 'تطبيقات ومفاتيح PayPal'), url: 'https://developer.paypal.com/dashboard/applications' }];
@@ -138,7 +141,7 @@ async function verifyCredentials(creds) {
   throw new GatewayAuthError(name);
 }
 
-async function createPayment(creds, { attempt, order, returnUrl, storeName, locale }) {
+async function createPayment(creds, { attempt, order, returnUrl, storeName, locale, settings = {}, saveCard = false }) {
   const created = await call(creds, 'POST', '/v2/checkout/orders', {
     requestId: `zimos-attempt-${attempt.id}`,
     what: 'the payment',
@@ -163,6 +166,8 @@ async function createPayment(creds, { attempt, order, returnUrl, storeName, loca
             shipping_preference: 'NO_SHIPPING',
             locale: locale === 'fr' ? 'fr-FR' : locale === 'ar' ? 'ar-EG' : 'en-US',
           },
+          // The buyer agreed to keep it and the app has Vault (item 380): PayPal saves it once the payment succeeds.
+          ...(saveCard && savedCardsReady(settings) ? { attributes: { vault: { store_in_vault: 'ON_SUCCESS', usage_type: 'MERCHANT', customer_type: 'CONSUMER' } } } : {}),
         },
       },
     },
@@ -363,9 +368,84 @@ async function parseWebhook({ body }, creds) {
 }
 const parseRedirect = () => null;
 
+// --- Saved PayPal (../savedMethods/README.md, item 380) ------------------------
+//
+// PayPal's Vault (Orders v2, "save PayPal with purchase"): the first order is created with
+// payment_source.paypal.attributes.vault { store_in_vault: ON_SUCCESS, usage_type: MERCHANT }; once captured,
+// the order shows payment_source.paypal.attributes.vault { id, status: VAULTED, customer { id } }. The vault id
+// is the token. A later order with payment_source.paypal.vault_id is paid without the buyer (intent CAPTURE),
+// keyed by PayPal-Request-Id. PAYER_ACTION_REQUIRED (PayPal wants the buyer back) is "needs the shopper".
+// A vault left APPROVED (not yet VAULTED) is not saved: its id only comes on a webhook whose body cannot be
+// tied to the order safely. No card setup without a payment: PayPal is not a card for subscriptions here.
+
+const savedCardsReady = (settings = {}) => Boolean(settings && settings.vault === true);
+
+/** The vaulted PayPal behind a captured order, or null. */
+async function tokenize(creds, { payment, settings = {} }) {
+  if (!savedCardsReady(settings) || !payment.providerOrderId) return null;
+  const o = await call(creds, 'GET', `/v2/checkout/orders/${encodeURIComponent(payment.providerOrderId)}`, { what: 'the payment' });
+  const paypal = (o.payment_source && o.payment_source.paypal) || {};
+  const vault = (paypal.attributes && paypal.attributes.vault) || {};
+  if (o.status !== 'COMPLETED' || vault.status !== 'VAULTED' || !vault.id) return null;
+  return { token: String(vault.id), brand: 'PayPal', last4: null, expiresAt: null };
+}
+
+/** An order paid with a vaulted PayPal → the contract's answer. */
+function savedAnswer(o) {
+  if (o.status === 'PAYER_ACTION_REQUIRED') return { status: 'needs_shopper', failureReason: 'PayPal wants the buyer to approve this payment', failureCode: 'PAYER_ACTION_REQUIRED', transactionId: o.id };
+  const t = fromOrder(o);
+  if (t.status === 'paid') return { status: 'paid', transactionId: t.transactionId };
+  if (t.status === 'failed') return { status: 'failed', transactionId: t.transactionId, failureReason: t.failureReason };
+  return null;
+}
+
+const NEEDS_BUYER = ['PAYER_ACTION_REQUIRED'];
+
+/** Pays with a vaulted PayPal: a new order with vault_id, captured at once. */
+async function chargeSaved(creds, { token: vaultId, amount, currency, reference, idempotencyKey }) {
+  const key = `zimos-saved-${idempotencyKey || reference}`;
+  const res = await send({
+    method: 'POST',
+    url: `${base(creds.environment)}/v2/checkout/orders`,
+    headers: { authorization: `Bearer ${await token(creds)}`, 'paypal-request-id': key, prefer: 'return=representation' },
+    body: {
+      intent: 'CAPTURE',
+      purchase_units: [{ reference_id: String(reference), custom_id: String(reference), amount: { currency_code: currency, value: decimal(amount) } }],
+      payment_source: { paypal: { vault_id: String(vaultId) } },
+    },
+    timeoutMs: WRITE_TIMEOUT_MS,
+  });
+  if (res.status === 401 || res.status === 403) throw new GatewayAuthError(name);
+  if (res.status === 400 || res.status === 404 || res.status === 422) {
+    const detail = (res.json && res.json.details && res.json.details[0]) || {};
+    const reason = sanitizeGatewayMessage(detail.description || detail.issue || (res.json && res.json.message) || 'PayPal refused the payment', secrets(creds));
+    if (NEEDS_BUYER.includes(detail.issue)) return { status: 'needs_shopper', failureReason: reason, failureCode: detail.issue };
+    return { status: 'failed', failureReason: reason, failureCode: detail.issue || null };
+  }
+  if (!res.ok) throw new GatewayError(`PayPal did not answer the payment (${res.status})`);
+  let o = res.json || {};
+  // Not captured with the create (some accounts): capture it now, keyed the same way.
+  if (o.status === 'APPROVED' || o.status === 'CREATED') {
+    try {
+      o = await call(creds, 'POST', `/v2/checkout/orders/${encodeURIComponent(o.id)}/capture`, { requestId: `${key}-capture`, what: 'the capture', body: {} });
+    } catch (err) {
+      if (err instanceof GatewayRejectedError) return { status: 'failed', transactionId: o.id, failureReason: err.message };
+      throw err;
+    }
+  }
+  const answer = savedAnswer(o);
+  if (!answer) throw new GatewayError('PayPal has not finished this payment yet');
+  return answer;
+}
+
 module.exports = {
   code,
   name,
+  supportsTokenization: true,
+  savedMethod: 'paypal',
+  savedCardsReady,
+  tokenize,
+  chargeSaved,
   methods: METHODS,
   currencies: CURRENCIES,
   credentialFields,

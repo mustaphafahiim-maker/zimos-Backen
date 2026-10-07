@@ -87,7 +87,13 @@ async function saveFromPayment(workspaceId, paymentId, req) {
   if (existing) return present(existing);
 
   const ctx = await gatewayRuntime.contextFor(workspaceId, payment.providerCode);
-  const tokenized = await adapter.tokenize(ctx.credentials, { payment, customerId: order.customerId, settings: ctx.settings });
+  // An account not set up to charge saved cards (Paymob without a MOTO integration, PayPal without Vault).
+  if (typeof adapter.savedCardsReady === 'function' && !adapter.savedCardsReady(ctx.settings)) {
+    throw new AppError('TOKENIZATION_NOT_SUPPORTED', 'This payment gateway account is not set up to charge saved cards', 422);
+  }
+  // A token the gateway already sent on its own callback (Paymob TOKEN, ./heldCardTokens.js), else ask it.
+  const held = await require('./heldCardTokens').forPayment(payment);
+  const tokenized = held || (await adapter.tokenize(ctx.credentials, { payment, customerId: order.customerId, settings: ctx.settings }));
   if (!tokenized || !tokenized.token) throw new AppError('TOKENIZATION_FAILED', 'The gateway did not return a saved card', 424);
   const row = await db.PaymentMethodSaved.create({
     workspaceId,
@@ -99,6 +105,7 @@ async function saveFromPayment(workspaceId, paymentId, req) {
     expiresAt: tokenized.expiresAt || null,
     sourcePaymentId: payment.id,
   });
+  if (held) await require('./heldCardTokens').release(held.heldId);
   await recordAudit({
     workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'saved_payment_method.create', entityType: 'PaymentMethodSaved', entityId: row.id,
     after: { customerId: row.customerId, provider: row.providerCode, last4: row.last4 }, req,
@@ -139,12 +146,20 @@ async function chargeOrder(workspaceId, savedId, orderId, req) {
     amount,
     currency: order.currency,
     reference: order.id,
+    // One charge of this order to this card for this amount: a repeat (a timeout, a second click) is the
+    // same charge on the gateway's side, never a second one (item 380).
+    idempotencyKey: `${order.id}-${saved.id}-${amount}`,
+    contact: order.contactSnapshot || {},
     settings: ctx.settings,
   }).catch((err) => {
     // Rejected keys or no answer is the store's connection, not the shopper's card.
     require('../../notifications/integrationAlerts').gateway(workspaceId, saved.providerCode, err);
     throw err;
   });
+  // 3-D Secure or another check only the shopper can pass: not a decline, but nothing to charge without them.
+  if (result && result.status === 'needs_shopper') {
+    throw new AppError('SAVED_METHOD_NEEDS_SHOPPER', result.failureReason || 'The card issuer wants the shopper to confirm this payment', 422);
+  }
   if (!result || result.status !== 'paid') {
     throw new AppError('SAVED_METHOD_DECLINED', (result && result.failureReason) || 'The saved card was declined', 422);
   }
@@ -158,14 +173,14 @@ async function chargeOrder(workspaceId, savedId, orderId, req) {
         workspaceId,
         orderId,
         providerCode: saved.providerCode,
-        method: 'card',
+        method: adapter.savedMethod || 'card',
         mode: ctx.mode,
         status: 'captured',
         amount,
         currency: order.currency,
         providerTransactionId: result.transactionId || null,
         providerReference: result.transactionId || null,
-        maskedDisplay: `${saved.brand || 'Card'} •••• ${saved.last4 || '····'}`,
+        maskedDisplay: saved.last4 || !saved.brand ? `${saved.brand || 'Card'} •••• ${saved.last4 || '····'}` : saved.brand,
         paidAt: now,
       },
       { transaction }

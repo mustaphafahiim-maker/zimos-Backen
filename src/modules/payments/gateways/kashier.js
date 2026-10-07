@@ -820,9 +820,16 @@ function parseRedirect(query, creds) {
   };
 }
 
+// Saved cards (item 380): not offered. Kashier documents card tokens (POST /v3/cards/tokens, card.save on a
+// POST /v3/orders payment, then a PAY with card.cardToken), but only on its Direct API, where the merchant's
+// own page collects the card number — this adapter uses Kashier's hosted Payment Sessions, which hand back
+// no token. The string a token PAY is signed with (Kashier-Hash, with customerReference appended) and the
+// answer for a 3-D Secure card could not be read from Kashier's documentation from here; until they are,
+// one-click offers and renewals fall back to the payment page for Kashier stores. See ./README.md.
 module.exports = {
   code,
   name,
+  supportsTokenization: false,
   methods: METHODS,
   currencies: CURRENCIES,
   credentialFields,

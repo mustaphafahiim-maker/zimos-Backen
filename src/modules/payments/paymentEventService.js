@@ -175,8 +175,11 @@ async function acceptWebhook(code, token, req) {
   const account = await accounts.findByWebhookToken(code, token);
   if (!account) throw new NotFoundError('Webhook');
 
+  const callback = { query: req.query || {}, body: req.body, headers: req.headers || {}, rawBody: req.rawBody };
+  // A saved-card token the gateway sends on its own (Paymob TOKEN, item 380): held sealed, never an event row.
+  const card = typeof adapter.parseCardToken === 'function' ? adapter.parseCardToken(callback, account.credentials) : null;
   // Awaited: an adapter may confirm the event with the gateway first (PayPal, item 377).
-  const parsed = await adapter.parseWebhook({ query: req.query || {}, body: req.body, headers: req.headers || {}, rawBody: req.rawBody }, account.credentials);
+  const parsed = card || (await adapter.parseWebhook(callback, account.credentials));
   if (!parsed) return { statusCode: 200, body: { received: true, ignored: true } };
   if (!parsed.valid) {
     // Never log the received or expected signature.
@@ -187,6 +190,10 @@ async function acceptWebhook(code, token, req) {
   }
 
   await db.PaymentGatewayAccount.update({ lastWebhookAt: new Date() }, { where: { id: account.id } });
+  if (card) {
+    const held = await require('./savedMethods/heldCardTokens').hold(account, card);
+    return { statusCode: 200, body: { received: true, outcome: held.outcome } };
+  }
   const result = await ingest(account, parsed, 'webhook');
   const statusCode = result.outcome === 'duplicate' && adapter.webhookDuplicateStatus ? adapter.webhookDuplicateStatus : 200;
   return { statusCode, body: { received: true, outcome: result.outcome } };

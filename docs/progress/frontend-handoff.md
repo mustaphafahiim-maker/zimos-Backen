@@ -4549,3 +4549,11 @@ The transfer (handoff 252) is now an **offer** the new owner accepts.
 ### Screens
 - **Store settings → «نقل ملكية المتجر» / "Transfer ownership":** after confirming, show «بعتنا عرض لـ {name} — المتجر هيتنقل لما يوافق» / "Offer sent to {name} — the store moves when they accept". Show the pending offer with its end date and «إلغاء العرض» / "Withdraw offer".
 - **For the person (dashboard home or the store switcher, from `GET /me/ownership-offers`):** a banner «{from} عايز ينقل لك ملكية {store}» / "{from} wants to give you {store}", with «موافق» / "Accept" and «رفض» / "Decline". Before accepting, add a note «المتجر هيتحسب من عدد متاجر باقتك» / "The store will count toward your plan's stores".
+
+## 380. One-click upsells and renewals on Stripe, Paymob and PayPal — UI: pending
+
+Saved cards now work on the real gateways (not only the sandbox). What the screens see:
+- **Payments → connect form** (built from `GET /payments/gateways`, no new endpoint): Paymob has a new optional integer setting `motoIntegrationId` («رقم تكامل الكروت المحفوظة (MOTO) — اختياري» / "Saved cards (MOTO) integration ID — optional") with **no `method`** — show it under the method integration IDs, not as a checkout method. PayPal has a new boolean setting `vault` (method `paypal`), off by default; PayPal's `methodsFromAccount` is now `false` because it has a setting field. Both have one more setup step in `setupSteps`.
+- **New error code** `SAVED_METHOD_NEEDS_SHOPPER` (422) from `POST /saved-payment-methods/:savedId/charge`: «البنك عايز العميل يأكد الدفع بنفسه — ابعتله رابط الدفع» / "The card's bank wants the customer to confirm this payment — send them the payment link". Not a decline: don't say the card was declined.
+- **Storefront upsell / funnel offer answer:** `payment: { status: 'declined', code }` can now carry `code: 'SAVED_METHOD_NEEDS_SHOPPER'` besides `SAVED_METHOD_DECLINED`; same fallback as today (the offer order stays unpaid). Message: «محتاجين تأكيد من البنك — الطلب الإضافي ما اتدفعش» / "Your bank needs you to confirm — the extra order was not charged".
+- **Saved methods list:** a saved PayPal shows `brand: 'PayPal'`, `last4: null`, `expiresAt: null` — show «PayPal» without "•••• ····". A charge to it is an order with payment method `paypal`.

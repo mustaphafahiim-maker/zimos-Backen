@@ -951,7 +951,7 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
       items: [await require('../offers/offerVariantChoice').offerLineFor(offer, variantId, transaction)],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
-      paymentMethod: card ? 'card' : 'cod',
+      paymentMethod: card ? require('../payments/savedMethods/consentedSave').methodOf(card) : 'cod',
       funnelId,
     },
     { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? clientIp(req) : null },

@@ -252,6 +252,8 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
       expiresInSeconds: Math.max(60, (new Date(expiresAt).getTime() - Date.now()) / 1000),
       storeName: workspace ? workspace.name : null,
       locale: workspace ? workspace.defaultLocale : null,
+      // Keep the card for later charges (savedMethods/README.md, item 380).
+      saveCard: await require('./savedMethods/consentedSave').wantsSave(order),
     });
     await attempt.update({
       providerOrderId: result.providerOrderId,

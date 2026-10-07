@@ -95,8 +95,9 @@ module.exports = {
 
 Optional, not called by the core yet (SPEC §11.1 / §11.6): `describe()`,
 `validateCredentials(config)`. Saved cards — `supportsTokenization`, `tokenize`,
-`chargeSaved` — are specified in `../savedMethods/README.md` and implemented
-by the sandbox.
+`chargeSaved`, and optionally `createCardSetup` / `completeCardSetup`,
+`savedCardsReady`, `savedMethod`, `parseCardToken` — are specified in
+`../savedMethods/README.md`; see "Saved cards on the real gateways" below.
 
 ## The `sandbox` adapter
 
@@ -178,3 +179,25 @@ duplicate-request key, so two refunds of the same amount stay two.
   unprocessed and the sweep calls `refetchTransaction(creds, payload)` for it.
 - Sandbox: the `sandbox` gateway does not report disputes; try them with Stripe test keys
   (card 4000 0000 0000 0259) and a webhook endpoint, or PayPal's sandbox dispute simulator.
+
+### Saved cards on the real gateways (item 380)
+
+One-click upsells and subscription renewals charge a saved card through `chargeSaved`
+(`../savedMethods/README.md` has the contract and the go-live checklist):
+
+- **Stripe** — the card is kept when the shopper agreed (`createPayment` gets `saveCard`: Checkout with
+  `customer_creation=always` + `setup_future_usage=off_session`); the token is `cus_…|pm_…`; charged with an
+  off-session confirmed PaymentIntent and `Idempotency-Key`; `authentication_required` is `needs_shopper`.
+  Card setup without a payment: Checkout in `setup` mode.
+- **Paymob** — the token comes on the TOKEN callback to the same webhook URL (`parseCardToken`, HMAC-SHA512 over
+  card_subtype, created_at, email, id, masked_pan, merchant_id, order_id, token) and is held sealed until saved;
+  charged on the MOTO integration (new optional setting `motoIntegrationId`; without it nothing is saved and
+  subscription products are refused at checkout). No idempotency header: the intention's `special_reference`
+  is the key and a repeat asks `transaction_inquiry` first. A pending 3-D Secure answer is `needs_shopper`.
+- **PayPal** — Vault (new setting `vault`, off by default: the app must have Vault on, or PayPal would refuse
+  the payment). The vault id is the token; charged with `vault_id` and `PayPal-Request-Id`;
+  `PAYER_ACTION_REQUIRED` is `needs_shopper`. A charge is an order payment method `paypal`.
+- **Kashier** — `supportsTokenization: false`: its card tokens belong to the Direct API (our page would collect
+  the card), and the signed string for a token payment could not be grounded in its documentation.
+
+Check against stand-ins: `STRIPE_API_BASE`, `PAYPAL_API_BASE` and `PAYMOB_BASE_URL` (outside production).
