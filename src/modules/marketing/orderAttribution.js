@@ -89,12 +89,17 @@ async function capture(workspaceId, body) {
     const sessionStats = await sessionStatsFor(workspaceId, body.visitorId);
     if (!attribution && !sessionStats) return 0;
 
-    const [updated] = await db.Order.update(
-      { attribution, sessionStats },
-      // Once only, and never for an order of another store.
-      { where: { workspaceId, id: orderIds, attribution: null, sessionStats: null }, silent: true }
+    // Once only, and never for an order of another store. Merged into what the order already holds:
+    // the checkout keeps the shopper's cookie answer there (cookieConsent.recordOnOrder), which must
+    // not stop the touches from being captured (item 311).
+    const [, meta] = await db.sequelize.query(
+      `UPDATE orders SET attribution = COALESCE(attribution, '{}'::jsonb) || CAST(:attribution AS jsonb),
+              session_stats = CAST(:sessionStats AS jsonb)
+        WHERE workspace_id = :workspaceId AND id IN (:orderIds) AND session_stats IS NULL
+          AND NOT (jsonb_exists(COALESCE(attribution, '{}'::jsonb), 'first') OR jsonb_exists(COALESCE(attribution, '{}'::jsonb), 'last'))`,
+      { replacements: { workspaceId, orderIds, attribution: JSON.stringify(attribution || {}), sessionStats: sessionStats ? JSON.stringify(sessionStats) : null } }
     );
-    return updated;
+    return typeof meta === 'number' ? meta : (meta && meta.rowCount) || 0;
   } catch (err) {
     logger.error(`[orderAttribution] could not attribute orders of ${workspaceId}: ${err.message}`);
     return 0;

@@ -75,7 +75,10 @@ function orderAllowed(workspace, order) {
 async function recordOnOrder(order, trackingConsent) {
   if (typeof trackingConsent !== 'boolean') return;
   try {
-    await order.update({ attribution: { ...(order.attribution || {}), consent: { marketing: trackingConsent, at: new Date().toISOString() } } });
+    // Merged in SQL (item 311): the attribution capture may have filled the touches meanwhile.
+    const consent = { marketing: trackingConsent, at: new Date().toISOString() };
+    await db.sequelize.query("UPDATE orders SET attribution = COALESCE(attribution, '{}'::jsonb) || jsonb_build_object('consent', CAST(:consent AS jsonb)) WHERE id = :id", { replacements: { id: order.id, consent: JSON.stringify(consent) } });
+    order.attribution = { ...(order.attribution || {}), consent };
   } catch {
     /* the order stands without it */
   }
