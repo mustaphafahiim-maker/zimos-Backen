@@ -37,6 +37,8 @@ const CATEGORIES = ['ecommerce', 'lead_generation', 'webinar', 'digital_product'
 const STATUSES = ['pending', 'approved', 'rejected', 'withdrawn'];
 const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 
+const seoToShare = (seo) => Object.fromEntries(Object.entries(seo || {}).filter(([k, v]) => ['title', 'description', 'ogImage'].includes(k) && typeof v === 'string').map(([k, v]) => [k, v.slice(0, 1000)]));
+
 async function snapshotOf(workspaceId, funnelId) {
   const funnel = await db.Funnel.findOne({ where: { id: funnelId, workspaceId } });
   if (!funnel) throw new NotFoundError('Funnel');
@@ -47,7 +49,9 @@ async function snapshotOf(workspaceId, funnelId) {
   ]);
   if (!steps.length) throw new AppError('VALIDATION_ERROR', 'The funnel has no pages yet', 422, [{ field: 'funnelId', message: 'Build the funnel\'s pages first' }]);
   const snapshot = {
-    steps: steps.map((s) => ({ key: s.key, stepType: s.stepType, name: s.name, builderData: withoutProducts(s.builderData), seo: s.seo || {} })),
+    // SEO: the title, description and share image only (item 303) — a canonical address or anything else
+    // would point adopters' pages at the author's site.
+    steps: steps.map((s) => ({ key: s.key, stepType: s.stepType, name: s.name, builderData: withoutProducts(s.builderData), seo: seoToShare(s.seo) })),
     edges: edges.map((e) => ({ fromStepKey: e.fromStepKey, toStepKey: e.toStepKey, condition: e.condition || null, priority: e.priority })),
   };
   if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > MAX_SNAPSHOT_BYTES) throw new AppError('VALIDATION_ERROR', 'The funnel is too large to share', 422);
@@ -152,7 +156,7 @@ async function use(workspaceId, id, { name }, req) {
     await entitlements.recordFunnelCreation(workspaceId, fid, 'duplicate', { transaction });
     const funnel = await scoped(db.Funnel, workspaceId).create({ id: fid, name: (name || t.name).slice(0, 200), subdomain: null, status: 'draft', publishedRevisionId: null }, { transaction });
     for (const s of t.snapshot.steps) {
-      await db.FunnelStep.create({ workspaceId, funnelId: funnel.id, key: s.key, stepType: s.stepType, name: s.name, builderData: s.builderData, offerId: null, bumpOfferId: null, seo: s.seo || {} }, { transaction });
+      await db.FunnelStep.create({ workspaceId, funnelId: funnel.id, key: s.key, stepType: s.stepType, name: s.name, builderData: s.builderData, offerId: null, bumpOfferId: null, seo: seoToShare(s.seo) }, { transaction });
     }
     for (const e of t.snapshot.edges || []) {
       await db.FunnelEdge.create({ workspaceId, funnelId: funnel.id, fromStepKey: e.fromStepKey, toStepKey: e.toStepKey, condition: e.condition, priority: e.priority }, { transaction });
@@ -174,7 +178,7 @@ async function adminList({ status = 'pending', page = 1, limit = 50 }) {
 async function adminGet(id) {
   const t = await db.MarketplaceTemplate.findByPk(id);
   if (!t) throw new NotFoundError('Template');
-  return { template: { ...ownView(t), workspaceId: t.workspaceId, steps: outline(t), pages: t.snapshot.steps.map((s) => ({ key: s.key, name: s.name, builderData: s.builderData })), edges: t.snapshot.edges } };
+  return { template: { ...ownView(t), workspaceId: t.workspaceId, steps: outline(t), pages: t.snapshot.steps.map((s) => ({ key: s.key, name: s.name, builderData: s.builderData, seo: s.seo || {} })), edges: t.snapshot.edges } };
 }
 
 async function review(id, { action, note }, req) {

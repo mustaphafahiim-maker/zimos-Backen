@@ -26,7 +26,6 @@ const { validateGraph } = require('./funnelGraph');
 
 const SHARE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
 const MAX_DRAFT_BYTES = 500 * 1024;
-const PRODUCT_PROP_TYPES = new Set(['product_card', 'product_3d', 'price', 'reviews_list', 'cod_form', 'repeater']);
 
 async function loadFunnel(workspaceId, funnelId, transaction) {
   const funnel = await db.Funnel.findOne({ where: { id: funnelId, workspaceId }, transaction });
@@ -88,22 +87,27 @@ async function unshareFunnel(workspaceId, funnelId, req) {
  * removed: product ids in product elements and the page's own product. The
  * copy then follows the importing store's products (empty = its newest).
  */
+// The author's catalogue, wherever it sits in a page: any element type, any depth (item 303).
+const ID_KEYS = new Set(['productId', 'variantId', 'offerId', 'bundleId', 'collectionId']);
+const ID_LIST_KEYS = new Set(['productIds', 'variantIds', 'offerIds', 'bundleIds', 'collectionIds']);
+
 function withoutProducts(tree) {
   if (!tree || typeof tree !== 'object') return tree;
   const copy = JSON.parse(JSON.stringify(tree));
   delete copy.productId;
-  for (const section of copy.sections || []) {
-    for (const row of (section && section.rows) || []) {
-      for (const column of (row && row.columns) || []) {
-        for (const el of (column && column.elements) || []) {
-          if (el && el.props && PRODUCT_PROP_TYPES.has(el.type)) {
-            if ('productId' in el.props) el.props.productId = '';
-            if ('collectionId' in el.props) el.props.collectionId = '';
-          }
-        }
-      }
+  const walk = (node, depth) => {
+    if (!node || typeof node !== 'object' || depth > 40) return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
     }
-  }
+    for (const key of Object.keys(node)) {
+      if (ID_KEYS.has(key) && typeof node[key] === 'string') node[key] = '';
+      else if (ID_LIST_KEYS.has(key) && Array.isArray(node[key])) node[key] = [];
+      else walk(node[key], depth + 1);
+    }
+  };
+  walk(copy, 0);
   return copy;
 }
 

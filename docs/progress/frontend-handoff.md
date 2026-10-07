@@ -3328,3 +3328,7 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 ## 302. Checkout autosave — funnel and website — UI: pending (storefront)
 
 - `POST /store/:ws/checkout-sessions` now accepts `funnelId` and `websiteId` (uuid, optional) beside `source`. Send `funnelId` from funnel checkouts and `websiteId` from the store's website pages. With them, a lost checkout gets that funnel's / website's own cart-recovery email, and the dashboard and Live View filters count it. No visible change.
+
+## 303. GTM container — the store's own Google tags — UI: pending (small)
+
+- `GET /workspaces/:ws/tracking-pixels/gtm/container` no longer includes the store's own Google pixels (they already run on the storefront; a copy in GTM counts twice). Ask for a GA4 / Google Ads id only when it is not set up as a Zimos pixel. The response header `X-Zimos-Skipped-Ids` lists ids left out ("none" otherwise): show «{ids} شغالين من زيموس مباشرة — مش هنحطهم في الملف عشان ميتحسبوش مرتين» / "{ids} already run from Zimos — left out of the file so nothing counts twice".
