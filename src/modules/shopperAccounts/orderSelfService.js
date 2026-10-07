@@ -89,6 +89,8 @@ const ADDRESS_FIELDS = ['province', 'city', 'area', 'addressLine', 'placeId', 'p
 async function changeAddress(workspace, order, address, req) {
   const a = allowed(workspace, order);
   if (!a.canChangeAddress) throw new AppError('ADDRESS_CHANGE_NOT_ALLOWED', 'The address can no longer be changed here — contact the store', 409);
+  // The picked place names the new address too (item 314).
+  address = await require('../places/placePricing').alignAddress(workspace.id, address);
   await require('../shipping/shippingPlaces').assertDeliverable(workspace, address);
   await require('../places/placePricing').assertDeliverable(workspace.id, address);
   const before = order.shippingAddressSnapshot;

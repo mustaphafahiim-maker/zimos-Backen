@@ -254,6 +254,10 @@ async function createOrder(
     source = null,
   } = {}
 ) {
+  // A picked place names the address it prices (places/placePricing.alignAddress, item 314).
+  if (payload && payload.shippingAddress && payload.shippingAddress.placeId) {
+    payload = { ...payload, shippingAddress: await require('../places/placePricing').alignAddress(workspaceId, payload.shippingAddress, outerTransaction) };
+  }
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
 
   if (!items || items.length === 0) {
