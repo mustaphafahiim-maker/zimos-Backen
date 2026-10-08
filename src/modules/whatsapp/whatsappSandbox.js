@@ -73,9 +73,26 @@ function listTemplates() {
   return out;
 }
 
+/**
+ * A template submitted from ZIMOS (templateSubmission.js): accepted for review
+ * (PENDING) with a fake id. A sync on the sandbox number then answers the fixed
+ * list above — the ready-made Arabic templates approved, cart_reminder_last
+ * still pending — which is how the sandbox "approves" a submission.
+ */
+async function createTemplate({ name, language }) {
+  assertAllowed();
+  return { id: `sbx_${crypto.createHash('sha1').update(`${name}:${language}`).digest('hex').slice(0, 12)}`, status: 'PENDING', category: null };
+}
+
+async function findTemplates(businessAccountId, token, name) {
+  return listTemplates().filter((t) => t.name === name);
+}
+
 module.exports = {
   SANDBOX_ID,
   listTemplates,
+  createTemplate,
+  findTemplates,
   isSandbox,
   verifyPhoneNumber,
   sendText: async (phoneNumberId, token, to) => send(to),

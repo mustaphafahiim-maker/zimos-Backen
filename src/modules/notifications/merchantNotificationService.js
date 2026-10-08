@@ -62,6 +62,8 @@ const TYPES = Object.freeze({
   'payment.disputed': { permission: PERMISSIONS.REFUNDS_MANAGE, defaults: { inApp: true, email: true } },
   // An order's email bounced or was marked as spam, or its SMS was not delivered (deliveryStatus/, item 386).
   'message.undelivered': { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
+  // A WhatsApp template submitted from ZIMOS was rejected, or approved and its automation switched on (whatsapp/templateSubmission.js, item 391).
+  'whatsapp.template': { permission: PERMISSIONS.AUTOMATIONS_MANAGE, defaults: { inApp: true, email: true } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 

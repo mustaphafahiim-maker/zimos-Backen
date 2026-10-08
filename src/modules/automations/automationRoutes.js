@@ -125,6 +125,8 @@ const update = asyncHandler(async (req, res) => {
   if (!rule) throw new NotFoundError('AutomationRule');
   const before = view(rule);
   await rule.update(req.body);
+  // Switched on or off by hand: an approval of its WhatsApp templates no longer switches it (whatsapp/templateSubmission.js).
+  if (req.body.isActive !== undefined) await require('../whatsapp/templateSubmission').forgetActivation(req.tenant.workspaceId, rule.id);
   await recordAudit({ workspaceId: req.tenant.workspaceId, actorUserId: req.user.id, action: 'automation.update', entityType: 'AutomationRule', entityId: rule.id, before, after: view(rule), req });
   res.json({ rule: view(rule) });
 });
@@ -186,6 +188,8 @@ const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.AUTOMATIONS_MANAGE));
 router.get('/', validate({ params: Joi.object(ws) }), list);
 router.get('/templates', validate({ params: Joi.object(ws) }), listTemplates);
+// "Create on WhatsApp": submit a ready-made automation's templates to Meta (whatsapp/templateSubmission.js).
+router.use(require('../whatsapp/templateSubmission').router);
 router.post(
   '/templates/:key/enable',
   validate({ params: Joi.object({ ...ws, key: Joi.string().max(60).required() }), body: Joi.object({

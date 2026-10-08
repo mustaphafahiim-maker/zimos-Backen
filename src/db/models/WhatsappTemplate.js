@@ -17,6 +17,12 @@ module.exports = (sequelize, DataTypes) => {
       paramsCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'params_count' },
       components: { type: DataTypes.JSONB, allowNull: true },
       syncedAt: { type: DataTypes.DATE, allowNull: false, field: 'synced_at' },
+      // Submitted from ZIMOS for a ready-made automation's rule (migration 527, whatsapp/templateSubmission.js).
+      automationRuleId: { type: DataTypes.UUID, allowNull: true, field: 'automation_rule_id' },
+      activateRule: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'activate_rule' },
+      submittedAt: { type: DataTypes.DATE, allowNull: true, field: 'submitted_at' },
+      submittedBy: { type: DataTypes.UUID, allowNull: true, field: 'submitted_by' },
+      rejectionNotifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'rejection_notified_at' },
     },
     { tableName: 'whatsapp_templates' }
   );

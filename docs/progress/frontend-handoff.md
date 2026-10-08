@@ -4935,3 +4935,38 @@ Every change to a variant's stock, newest first: restocks, adjustments, order re
 - Event words: placed «إنشاء» / "placed", upsell «عرض إضافي» / "upsell", edited «تعديل» / "edited", reconfirmed «إعادة تأكيد» / "reconfirmed", reopened «إعادة فتح» / "reopened", rejected «رفض» / "rejected", cancelled «إلغاء» / "cancelled", payment_expired «انتهاء مهلة الدفع» / "payment expired", customer_blocked «حظر العميل» / "customer blocked", returned «مرتجع» / "returned", reshipped «إعادة شحن» / "reshipped".
 - By: user name; `customer` «العميل» / "Customer"; `system` «النظام» / "System"; removed user «مستخدم محذوف» / "Deleted user".
 - Empty: «مفيش حركة مخزون في الفترة دي» / "No stock movements in this period". "Load more" with `nextCursor`.
+
+## 391. Create the ready-made WhatsApp templates on WhatsApp from ZIMOS — UI: pending
+
+On each ready-made automation that sends WhatsApp (Automations → ready-made), a «إنشاء على واتساب» / "Create on WhatsApp" button: ZIMOS submits the automation's message templates to the store's own WhatsApp Business account (Arabic, plus English when the store offers English), keeps the automation off while Meta reviews them, and switches it on by itself once they are approved. Permission `automations.manage`. Needs WhatsApp connected with the Business Account ID (or the `sandbox` number).
+
+### API — `/api/v1/workspaces/:ws/automations/templates/:key/whatsapp`
+- `POST` body (all optional): `{ "activateWhenApproved": true, "locale": "ar|en", "couponCode": "…", "languages": ["ar","en"] }` — `locale` / `couponCode` only matter when the call creates the rule (as `…/enable` takes them); `languages` overrides the default extra languages (`[]` = only each step's own language). 201 when something was submitted or the rule was created, 200 when nothing new (a second click).
+- `GET` — the same shape without `outcome` / `ruleCreated`; `status` is `null` before any submit (and `incomplete` when only some templates exist in the account).
+```json
+{
+  "templateKey": "order_confirmation",
+  "status": "pending",
+  "rule": { "id": "…", "name": "تأكيد الطلب عبر واتساب", "isActive": false, "templateKey": "order_confirmation", "activateWhenApproved": true },
+  "ruleCreated": true,
+  "templates": [
+    { "id": "…", "name": "order_confirmation", "language": "ar", "category": "UTILITY", "status": "PENDING", "rejectedReason": null, "bodyText": "مرحبًا {{1}}، …", "submittedAt": "…", "outcome": "submitted" },
+    { "id": "…", "name": "order_confirmation", "language": "en", "category": "UTILITY", "status": "PENDING", "rejectedReason": null, "bodyText": "Hi {{1}}, …", "submittedAt": "…", "outcome": "submitted" }
+  ]
+}
+```
+- `status` (over the templates the rule's steps send, in the step's language): `pending` | `approved` | `rejected`. Each template's own `status` is Meta's (`PENDING`, `APPROVED`, `REJECTED`, `PAUSED`, `DISABLED`, …) with `rejectedReason` (e.g. `INVALID_FORMAT`).
+- `outcome`: `submitted` (sent to Meta now), `existing` (the store already had it — nothing sent), `reused` (Meta said the name was taken, so the existing template in the account was linked; its text may be the merchant's own).
+- Errors: 422 `WHATSAPP_NOT_CONNECTED`, 422 `WHATSAPP_NO_BUSINESS_ACCOUNT`, 429 `WHATSAPP_RATE_LIMITED`, 422 `WHATSAPP_TEMPLATE_REJECTED` (Meta refused the content; `message` is Meta's words), 409 `WHATSAPP_TEMPLATE_NAME_TAKEN` (the name is being deleted in Meta), 422 `WHATSAPP_AUTH_FAILED`, 403 `APP_NOT_INSTALLED` (WhatsApp app off), 404 unknown key. Nothing is kept after an error.
+- The rule's `PATCH isActive` by hand cancels the automatic switch-on (`activateWhenApproved` becomes false).
+
+### Screens
+- **Ready-made automation card** with a WhatsApp step: button «إنشاء على واتساب» / "Create on WhatsApp"; a checkbox under it, on by default: «شغّل الأتمتة تلقائيًا بعد موافقة واتساب» / "Turn the automation on when WhatsApp approves" (`activateWhenApproved`). Show the template texts (`whatsappTemplates` from `GET /automations/templates`) before the click.
+- After the click / on load (`GET …/whatsapp`), a status badge:
+  - `pending` «قيد المراجعة من واتساب» / "In review by WhatsApp" — note «الأتمتة متوقفة حتى الموافقة» / "The automation is off until it is approved"; with `rule.activateWhenApproved`: «ستعمل تلقائيًا بعد الموافقة» / "It will turn on by itself once approved".
+  - `approved` «تمت الموافقة» / "Approved" — the rule's on/off switch as usual.
+  - `rejected` «مرفوض» / "Rejected" — «سبب Meta: {rejectedReason}» / "Meta's reason: {rejectedReason}" per template, and «عدّل القالب في WhatsApp Manager ثم اضغط مزامنة القوالب» / "Edit the template in WhatsApp Manager, then press Sync templates" (`POST /whatsapp/templates/sync`).
+  - `null` — just the button.
+- A table of `templates`: name, language («العربية» / "Arabic", «الإنجليزية» / "English"), status badge (PENDING «قيد المراجعة» / "In review", APPROVED «مقبول» / "Approved", REJECTED «مرفوض» / "Rejected", PAUSED «موقوف مؤقتًا» / "Paused", DISABLED «معطّل» / "Disabled"), and for `reused` the note «قالب موجود بالفعل في حسابك — النص قد يختلف» / "Already in your account — its text may differ".
+- Errors: 429 «واتساب تحد من الطلبات الآن، حاول بعد قليل» / "WhatsApp is limiting requests, try again shortly"; 422 `WHATSAPP_TEMPLATE_REJECTED` shows Meta's message; `WHATSAPP_NO_BUSINESS_ACCOUNT` links to the WhatsApp settings.
+- Bell type `whatsapp.template` (`data.event`): `rejected` (`name`, `language`, `reason`, `ruleId`) and `activated` (`ruleId`, `templateKey`); link `/automations`. Title/body arrive in the teammate's language; in notification preferences call it «قوالب واتساب» / "WhatsApp templates" (on in the bell and by email by default).
