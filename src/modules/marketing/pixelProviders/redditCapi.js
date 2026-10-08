@@ -23,7 +23,12 @@ const logger = require('../../../core/utils/logger');
  */
 const PROVIDER = 'reddit';
 const base = () => process.env.REDDIT_API_BASE || 'https://ads-api.reddit.com/api/v2.0';
-const mode = () => (process.env.REDDIT_CAPI_MODE === 'live' ? 'live' : 'sandbox');
+// Live in production unless set to sandbox; sandbox elsewhere unless set to live (go-live: no silent sandbox).
+const mode = () => {
+  const set = String(process.env.REDDIT_CAPI_MODE || '').trim();
+  if (set === 'live' || set === 'sandbox') return set;
+  return process.env.NODE_ENV === 'production' ? 'live' : 'sandbox';
+};
 const sha256 = (v) => crypto.createHash('sha256').update(String(v).trim().toLowerCase()).digest('hex');
 
 async function call(accountId, token, body) {

@@ -22,7 +22,12 @@ const logger = require('../../../core/utils/logger');
  */
 const PROVIDER = 'microsoft';
 const base = () => process.env.MICROSOFT_CAPI_BASE || 'https://capi.uet.microsoft.com/v1';
-const mode = () => (process.env.MICROSOFT_CAPI_MODE === 'live' ? 'live' : 'sandbox');
+// Live in production unless set to sandbox; sandbox elsewhere unless set to live (go-live: no silent sandbox).
+const mode = () => {
+  const set = String(process.env.MICROSOFT_CAPI_MODE || '').trim();
+  if (set === 'live' || set === 'sandbox') return set;
+  return process.env.NODE_ENV === 'production' ? 'live' : 'sandbox';
+};
 const sha256 = (v) => crypto.createHash('sha256').update(String(v).trim().toLowerCase()).digest('hex');
 
 async function call(tagId, token, body) {

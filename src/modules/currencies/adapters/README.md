@@ -4,10 +4,13 @@ ZIMOS keeps exchange rates in `fx_rates` (`base`, `quote`, `rate` numeric(18,8),
 `fetched_at`): 1 unit of `base` = `rate` units of `quote`. The table is filled
 once a day by the `fx.refresh` job (`../fxJob.js`) through a **rates adapter**.
 
-Only the `sandbox` adapter exists: a fixed table of placeholder numbers with no
-network, **not market rates**. Which real provider to use is an open decision
-(SPEC §11.5) and belongs to the integrations team; this file is what they
-implement against.
+Two adapters exist:
+- `exchangerateapi` (`exchangeRateApiAdapter.js`), the real one: ExchangeRate-API, daily market rates.
+  With `EXCHANGERATE_API_KEY` it uses the keyed v6 endpoint. Without a key it uses the open endpoint
+  (open.er-api.com), which is free and asks for attribution where rates are shown. It is the
+  default in production.
+- `sandbox`: a fixed table of placeholder numbers with no network, **not market rates**. It is the
+  default outside production and refused in production (the job then keeps the rates it has).
 
 ## The interface
 
@@ -25,7 +28,7 @@ module.exports = {
 ```
 
 Register it in `adapters/index.js` and select it with `FX_RATES_PROVIDER=<code>`
-(default `sandbox`). The provider's API key is platform configuration (an
+(default: `exchangerateapi` in production, `sandbox` elsewhere). The provider's API key is platform configuration (an
 environment variable), not a merchant secret.
 
 ## How rates are used
