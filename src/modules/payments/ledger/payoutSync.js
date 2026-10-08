@@ -204,6 +204,12 @@ async function syncAccount(accountRow) {
   return result;
 }
 
+// An account whose sync keeps failing (keys revoked, PayPal's Transaction search off) waits longer each time,
+// 1 h doubling to a day, and is logged once per streak instead of every hour (item 403). Kept in memory:
+// a restart simply tries again. payoutsSyncedAt is untouched, so no payout window is skipped.
+const failing = new Map();
+const FAIL_BASE_MS = 60 * 60 * 1000;
+
 /** The job: every connected account that has payouts and was not synced for a day. */
 async function syncDue({ limit = 20 } = {}) {
   const codes = codesWithPayouts();
@@ -220,11 +226,19 @@ async function syncDue({ limit = 20 } = {}) {
   });
   let synced = 0;
   for (const account of due) {
+    const streak = failing.get(account.id);
+    if (streak && streak.nextAt > Date.now()) continue;
     try {
       await module.exports.syncAccount(account);
       synced += 1;
+      failing.delete(account.id);
     } catch (err) {
-      logger.warn('[payments] payout sync failed', { workspaceId: account.workspaceId, gateway: account.providerCode, reason: err.message });
+      const count = streak ? streak.count + 1 : 1;
+      failing.set(account.id, { count, nextAt: Date.now() + Math.min(FAIL_BASE_MS * 2 ** (count - 1), DAY_MS) });
+      if (count === 1 || (streak && streak.reason !== err.message)) {
+        logger.warn('[payments] payout sync failed', { workspaceId: account.workspaceId, gateway: account.providerCode, reason: err.message });
+      }
+      failing.get(account.id).reason = err.message;
     }
   }
   return { accounts: due.length, synced };
