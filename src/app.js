@@ -9,7 +9,7 @@ const env = require('./config/env');
 const requestId = require('./core/middleware/requestId');
 const { resolveClientIp, clientIp } = require('./core/middleware/clientIp');
 const { corsPolicy } = require('./core/middleware/cors');
-const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter } = require('./core/middleware/rateLimiters');
+const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter, deliveryWebhookLimiter } = require('./core/middleware/rateLimiters');
 const { errorHandler, notFoundHandler } = require('./core/middleware/errorHandler');
 const { hostResolver } = require('./core/middleware/hostResolver');
 const logger = require('./core/utils/logger');
@@ -138,6 +138,8 @@ app.use(`/api/${env.apiVersion}/store`, storefrontLimiter);
 // webhook token, not per IP (see rateLimiters.js).
 app.use(`/api/${env.apiVersion}/webhooks/carriers`, carrierWebhookLimiter);
 app.use(`/api/${env.apiVersion}/webhooks/payments`, paymentWebhookLimiter);
+// Email and SMS delivery status from Brevo / Twilio (item 386): per provider.
+app.use([`/api/${env.apiVersion}/webhooks/email`, `/api/${env.apiVersion}/webhooks/sms`], deliveryWebhookLimiter);
 app.use(generalLimiter);
 
 // --- Health / readiness -----------------------------------------------
@@ -196,6 +198,8 @@ v1.use('/workspaces/:workspaceId/ownership-transfer', require('./modules/storeTr
 v1.use('/me/ownership-offers', require('./modules/storeTransfer').me);
 // Customer timeline (customerTimeline, item 250).
 v1.use('/workspaces/:workspaceId/customers/:customerId/timeline', require('./modules/customerTimeline').router);
+// The store's email suppression list: addresses that bounced or complained (item 386).
+v1.use('/workspaces/:workspaceId/email-suppressions', require('./modules/notifications/deliveryStatus/suppressionRoutes'));
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
 // Contacts from a CSV / Excel sheet (item 187), ahead of /contacts/:customerId.
 v1.use('/workspaces/:workspaceId/contacts/import', require('./modules/contacts/contactImport').router);
@@ -394,6 +398,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
+// Email and SMS delivery status — public; Brevo's secret token / Twilio's signature prove the sender (item 386).
+v1.use('/webhooks', require('./modules/notifications/deliveryStatus/webhookRoutes').router);
 // The sandbox gateway's hosted payment page — only where that gateway is registered.
 if (require('./modules/payments/gateways').isGateway('sandbox')) v1.use('/sandbox-pay', require('./modules/payments/sandboxPayRoutes'));
 // The sandbox courier's "advance the parcel" endpoint — only where that courier is registered.

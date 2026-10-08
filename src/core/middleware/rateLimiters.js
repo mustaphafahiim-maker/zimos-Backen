@@ -49,7 +49,7 @@ const generalLimiter = rateLimit({
   // The public storefront API is limited per shopper by storefrontLimiter,
   // which marks the requests it handled. Counting them again here, by IP,
   // would put every shopper behind our storefront server back in one bucket.
-  skip: (req) => skip() || req.rateLimitScope === 'storefront' || req.rateLimitScope === 'carrier_webhook' || req.rateLimitScope === 'payment_webhook',
+  skip: (req) => skip() || req.rateLimitScope === 'storefront' || req.rateLimitScope === 'carrier_webhook' || req.rateLimitScope === 'payment_webhook' || req.rateLimitScope === 'delivery_webhook',
   keyGenerator: userOrIpKey,
   handler,
 });
@@ -598,8 +598,27 @@ const paymentWebhookLimiter = [
   }),
 ];
 
+// Delivery status webhooks (notifications/deliveryStatus, item 386): every event comes from
+// Brevo's or Twilio's servers, so limited per provider (the path), not per IP.
+const deliveryWebhookLimiter = [
+  (req, res, next) => {
+    req.rateLimitScope = 'delivery_webhook';
+    next();
+  },
+  rateLimit({
+    windowMs: env.rateLimit.windowMs,
+    limit: env.notifications.statusWebhookRateLimitMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip,
+    keyGenerator: (req) => `delivery-webhook:${String(req.path || '').slice(0, 40)}`,
+    handler,
+  }),
+];
+
 module.exports = {
   generalLimiter,
+  deliveryWebhookLimiter,
   carrierWebhookLimiter,
   paymentWebhookLimiter,
   paymentWebhookKey,

@@ -389,6 +389,8 @@ const env = {
       apiKey: process.env.BREVO_API_KEY || '',
       fromAddress: process.env.EMAIL_FROM_ADDRESS || '',
       fromName: process.env.EMAIL_FROM_NAME || 'Zimos',
+      // The secret Brevo's status webhook carries (Bearer token, basic-auth password or ?token=), item 386.
+      webhookToken: (process.env.BREVO_WEBHOOK_TOKEN || '').trim(),
     },
     // Twilio SMS (only used when SMS_PROVIDER=twilio).
     twilio: {
@@ -396,6 +398,12 @@ const env = {
       authToken: process.env.TWILIO_AUTH_TOKEN || '',
       fromNumber: process.env.TWILIO_FROM_NUMBER || '',
     },
+    // Delivery status (notifications/deliveryStatus, item 386): this API's public origin, for the
+    // statusCallback put on each Twilio SMS (none when unset); the console provider's simulated statuses
+    // (never in production); the per-provider rate limit on the status webhooks.
+    webhookBaseUrl: (process.env.NOTIFICATIONS_WEBHOOK_BASE_URL || '').trim().replace(/\/+$/, ''),
+    simulateStatus: process.env.NODE_ENV !== 'production' && process.env.NOTIFICATION_STATUS_SIMULATION === 'true',
+    statusWebhookRateLimitMax: parseInt(process.env.DELIVERY_WEBHOOK_RATE_LIMIT_MAX || '3000', 10),
   },
 
   // Uploaded-image storage. `local` (default) writes to public/uploads and is

@@ -32,7 +32,7 @@ const SOURCES = {
   orders: `SELECT workspace_id, COUNT(*)::int AS value FROM orders
             WHERE created_at >= :from AND created_at < :to AND COALESCE(is_test, false) = false GROUP BY workspace_id`,
   messages: `SELECT workspace_id, COUNT(*)::int AS value FROM notification_logs
-              WHERE workspace_id IS NOT NULL AND status = 'sent' AND created_at >= :from AND created_at < :to GROUP BY workspace_id`,
+              WHERE workspace_id IS NOT NULL AND status NOT IN ('failed', 'suppressed') AND created_at >= :from AND created_at < :to GROUP BY workspace_id`,
   ai_requests: `SELECT workspace_id, COUNT(*)::int AS value FROM ai_usage
                  WHERE created_at >= :from AND created_at < :to GROUP BY workspace_id`,
   storage_bytes: `SELECT workspace_id, COALESCE(SUM(size_bytes), 0)::bigint AS value

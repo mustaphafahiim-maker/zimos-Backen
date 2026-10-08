@@ -4729,3 +4729,61 @@ A domain bought in the dashboard now has its own DNS records screen, so the merc
   - Empty state (only locked rows): «مفيش سجلات خاصة بيك لسه — ضيف MX للإيميل أو TXT للتحقق» / "No records of your own yet — add MX for email or TXT for verification".
 - **Transfer out dialog** (owner only): a warning «لما تاخد الكود، الدومين بيتفتح للنقل والتجديد التلقائي بيتقفل. المتجر هيفضل شغال على الدومين طول ما سجلات DNS زي ما هي» / "Taking the code unlocks the domain and turns auto-renew off. The store keeps working on the domain as long as its DNS records stay the same". Then a password field «كلمة السر» / "Password" and the button «إظهار كود النقل» / "Show transfer code".
   - The result shows the code in a box with «نسخ» / "Copy", the note «احتفظ بالكود — إحنا مش بنحتفظ بنسخة منه» / "Keep this code — we don't keep a copy", and `note` underneath. Closing the dialog clears the code from memory.
+
+## 386. Delivery status for customer emails and SMS — UI: pending
+
+The dashboard can now show whether a customer email or SMS actually arrived. Brevo and Twilio report back: an email was delivered, bounced or marked as spam, or an SMS was not delivered. Addresses that bounced or complained go on the store's **email suppression list**. No email goes to them until the merchant lifts them, except account and security codes.
+
+### Endpoints
+- **GET `/api/v1/workspaces/:ws/email-suppressions`** — **`customers.view`**. Query: `email` (one address, any case), `reason` (`hard_bounce` | `complaint`), `limit` (1–100, default 50), `cursor`.
+```json
+{
+  "suppressions": [
+    { "id": "6f1c…", "email": "mona@example.com", "reason": "hard_bounce", "source": "brevo", "detail": "hard_bounce: 550 5.1.1 user unknown", "notificationLogId": "d7f0…", "createdAt": "2026-10-08T00:44:49.543Z" },
+    { "id": "9a22…", "email": "ali@example.com", "reason": "complaint", "source": "brevo", "detail": "spam", "notificationLogId": "8999…", "createdAt": "2026-10-08T00:44:49.600Z" }
+  ],
+  "next": null
+}
+```
+- **DELETE `/api/v1/workspaces/:ws/email-suppressions/:id`** — **`customers.manage`**. Lifts it; emails go to the address again. 404 when it is not there.
+```json
+{ "lifted": true, "suppression": { "id": "6f1c…", "email": "mona@example.com", "reason": "hard_bounce", "…": "…" } }
+```
+- **GET `/orders/:id/timeline`** — `message` events now carry `status`, which can be `sent`, `failed`, `delivered`, `bounced`, `complained`, `undelivered` or `suppressed`. They also carry `statusAt` and `statusReason`. There is also a new event type, `message_status`, at the time the provider reported it:
+```json
+{ "id": "message_status:d7f0…", "type": "message_status", "at": "2026-10-08T00:44:49.540Z", "actor": { "type": "system", "name": null },
+  "data": { "channel": "email", "status": "bounced", "reason": "hard_bounce: 550 5.1.1 user unknown", "subject": "تم استلام طلبك #1001", "messageId": "d7f0…" } }
+```
+- **GET `/customers/:id/timeline`** — new kind **`message_undelivered`** (also usable in `kinds=`):
+```json
+{ "kind": "message_undelivered", "at": "2026-10-08T00:44:49.540Z", "id": "d7f0…", "orderId": "adbf…", "orderNumber": "#1001",
+  "data": { "channel": "email", "status": "bounced", "reason": "hard_bounce: 550 …", "subject": "تم استلام طلبك #1001", "template": "order_email" } }
+```
+- **Bell**: new type `message.undelivered` (needs orders.view, in-app on, email off). Its `data` is `{ orderId, orderNumber, channel, status, notificationLogId }` and its link is `/orders/:id`. Add the type to the notification preferences list and to `notificationText.ts`.
+- Status webhooks (`/webhooks/email/brevo`, `/webhooks/sms/twilio`) are for the providers only; there's no UI for them.
+
+### Screens
+- **Order page → timeline**:
+  - Each message row gets a small status chip: «اتبعت» / "Sent", «وصل» / "Delivered", «مرتدّ» / "Bounced", «اتعلّم كمزعج» / "Marked as spam", «لم يصل» / "Not delivered", «لم يُرسل — العنوان موقوف» / "Not sent — address suppressed", «فشل الإرسال» / "Failed".
+  - `message_status` events are shown in red:
+    - «بريد الطلب ارتدّ — العنوان غير صالح» / "Email bounced — the address doesn't work"
+    - «رسالة SMS لم تصل» / "SMS not delivered"
+    - «العميل علّم البريد كرسالة مزعجة» / "The customer marked the email as spam"
+  - `reason` goes in a tooltip.
+- **Customer page → timeline**: the same red line for `message_undelivered`, with the order number as a link.
+- **Customer page → header**: when `GET /email-suppressions?email=<customer email>` returns a row, show a banner:
+  - Bounce: «الإيميلات مش بتتبعت للعنوان ده: ارتدّ» / "Emails to this address are stopped: it bounced"
+  - Complaint: «… العميل علّمها كمزعجة» / "… the customer marked them as spam"
+  - Button: «السماح بالإرسال تاني» / "Allow emails again" (customers.manage).
+  - Confirm: «متأكد؟ لو العنوان لسه غلط، الإيميل هيرتدّ تاني» / "Sure? If the address is still wrong, the email will bounce again".
+- **Customers → Email suppressions** (a tab or a settings page, «عناوين موقوفة» / "Suppressed emails"):
+  - Columns: «الإيميل» / "Email", «السبب» / "Reason" («ارتداد» / "Bounce", «شكوى مزعج» / "Spam complaint"), «التفاصيل» / "Detail", «التاريخ» / "Date".
+  - Filter by reason and search by email, and «تحميل المزيد» / "Load more" from `next`.
+  - Each row has a «رفع الإيقاف» / "Lift" action.
+  - Empty state: «مفيش عناوين موقوفة — كل إيميلاتك بتوصل» / "No suppressed addresses — your emails are getting through".
+  - Help text: «العنوان بيتوقف لما الإيميل يرتدّ نهائيًا أو العميل يعلّمه كمزعج. رموز الدخول والأمان بتتبعت دايمًا» / "An address is stopped when an email hard-bounces or the customer marks it as spam. Sign-in and security codes are always sent".
+- **Bell**:
+  - Bounce: «بريد الطلب {n} لم يصل للعميل» / "Order {n} email bounced"
+  - SMS: «رسالة الطلب {n} لم تصل للعميل» / "Order {n} SMS not delivered"
+  - Complaint: «العميل علّم بريد الطلب {n} كرسالة مزعجة» / "The customer marked the order {n} email as spam"
+- **Automation run detail**: an email step to a suppressed address fails with "Suppressed: hard_bounce" / "Suppressed: complaint". Show it as «العنوان موقوف (ارتداد/شكوى)» / "Address suppressed (bounce/complaint)".

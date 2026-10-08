@@ -60,6 +60,8 @@ const TYPES = Object.freeze({
   'stock.lot_expiring': { permission: PERMISSIONS.INVENTORY_VIEW, defaults: { inApp: true, email: true } },
   // A card payment was disputed, or its dispute moved (payments/disputeService.js, item 377).
   'payment.disputed': { permission: PERMISSIONS.REFUNDS_MANAGE, defaults: { inApp: true, email: true } },
+  // An order's email bounced or was marked as spam, or its SMS was not delivered (deliveryStatus/, item 386).
+  'message.undelivered': { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 
