@@ -21,6 +21,39 @@ Code: `src/modules/billing/walletService.js`. Migration 131.
   (`POST /workspaces/:id/billing/pay-per-order`), with a period of 100 years
   and nothing to pay. A paid subscription changes through support.
 
+## Moving to a monthly or annual plan (migration 222)
+
+A store on the pay-per-order plan moves by itself, with no support:
+`POST /workspaces/:id/billing/plan-move { planId, billingCycle }`
+(`merchantPlansService.requestPlanMove`).
+
+- **One ordinary charge** for the plan on offer and cycle, priced like any
+  charge (referral code, special terms). It carries `target_plan_id` and
+  `target_billing_cycle`, and is paid the usual ways: online, a transfer's
+  proof, or the console's record-payment. There is no paying it from the
+  balance.
+- **The switch happens in `settlePaid`, only when it's paid:** the new plan
+  and cycle, active, one period from the payment (the 100-year period is
+  replaced), no trial. Until then nothing about the subscription changes,
+  and order fees go on.
+- **No trial:** choosing pay per order, and asking for a move, write a
+  `plan_trials` row (`source = 'pay_per_order'`) for the owner.
+- **A debt is refused first:** a balance below zero gets 422
+  `WALLET_DEBT_OUTSTANDING`, with `details.debt`. The balance itself is
+  never touched by a move.
+- **Asked twice:** the same plan and cycle while its charge waits get that
+  charge back (200). Anything else while a charge is pending gets 409
+  `OPEN_CHARGE_EXISTS`.
+- **After the switch:** the plan has no fee, so no order fee is taken. The
+  free orders used stay counted.
+- **A manual payment reversed:** the plan, cycle, status and period from
+  before the payment come back.
+- **Audit:** `subscription.plan_move_request` and
+  `subscription.plan_move_complete`.
+- **Every other store keeps today's rules:** `PLAN_CHANGE_NEEDS_SUPPORT` for
+  a paid subscription, `POST /billing/plan` for a draft or a trial.
+- `GET /billing/plans` has `move` (balance, debt, the pending move), or null.
+
 ## The fee
 
 - **When it's charged:** in `orderService.createOrder`, after `Order.create`,

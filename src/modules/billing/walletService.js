@@ -605,6 +605,15 @@ async function choosePayPerOrder(workspaceId, req) {
     if (open) throw new ConflictError('A charge is open for the current plan. Settle it before changing plan.', 'OPEN_CHARGE_EXISTS');
 
     const before = { planId: subscription.planId, status: subscription.status };
+    // Choosing pay per order uses the account's free trial (none later, on
+    // a move to a monthly plan or on another store).
+    const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'ownerUserId'], transaction });
+    if (workspace && workspace.ownerUserId) {
+      await require('./goLiveService').recordTrial(
+        { userId: workspace.ownerUserId, planId: plan.id, workspaceId, source: 'pay_per_order', startedAt: new Date() },
+        transaction
+      );
+    }
     const now = new Date();
     const end = new Date(now);
     end.setUTCFullYear(end.getUTCFullYear() + FEE_PLAN_YEARS);

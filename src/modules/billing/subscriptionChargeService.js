@@ -209,6 +209,59 @@ async function createChargeInTransaction(workspaceId, { now = new Date(), req = 
 }
 
 /**
+ * A pay-per-order store's move to `plan` on `billingCycle`
+ * (merchantPlansService.requestPlanMove, which holds the subscription row
+ * locked and has checked there is no pending charge): one pending charge,
+ * priced as any charge of that plan and cycle (the referral code, a
+ * special-terms price), carrying the plan it moves to. Nothing about the
+ * subscription changes until it is paid (settlePaid).
+ */
+async function createMoveChargeInTransaction(subscription, plan, billingCycle, { now = new Date(), req = null } = {}, transaction) {
+  if (manualPricing.isManuallyPriced(subscription)) {
+    throw new ConflictError('This subscription is free or discounted by the platform, so it is not charged here.', 'MANUAL_PRICING');
+  }
+  if (planPrice(plan, billingCycle) <= 0) {
+    throw new ConflictError('This plan is free, so there is nothing to charge.', 'PLAN_IS_FREE');
+  }
+  const override = await specialTerms.activePriceOverride(subscription.id, { transaction, lock: true });
+  const pricing = await priceCharge(
+    { id: subscription.id, billingCycle, referralCodeId: subscription.referralCodeId },
+    plan,
+    transaction,
+    { override }
+  );
+  if (pricing.specialTermsId) await override.increment('chargesUsed', { by: 1, transaction });
+  const invoice = await db.BillingInvoice.create(
+    {
+      workspaceId: subscription.workspaceId,
+      subscriptionId: subscription.id,
+      ...pricing,
+      status: 'pending',
+      // Shown as from now; the period really starts when it is paid.
+      periodStart: now,
+      periodEnd: addBillingPeriod(now, billingCycle),
+      targetPlanId: plan.id,
+      targetBillingCycle: billingCycle,
+    },
+    { transaction }
+  );
+  if (req) {
+    await recordAudit({
+      workspaceId: subscription.workspaceId,
+      actorUserId: req.user.id,
+      action: 'billing_invoice.create',
+      entityType: 'BillingInvoice',
+      entityId: invoice.id,
+      after: chargeAuditState(invoice),
+      metadata: { workspaceId: subscription.workspaceId, targetPlanId: plan.id, targetBillingCycle: billingCycle },
+      req,
+      transaction,
+    });
+  }
+  return invoice;
+}
+
+/**
  * What createCharge would do now, writing nothing: the pending invoice if
  * there is one (`{ pending }`), otherwise the next charge as it would be
  * written (`{ quote }`: its price and period). Same errors as createCharge.
@@ -298,20 +351,26 @@ async function settlePaid(
         status: subscription.status,
         currentPeriodStart: subscription.currentPeriodStart,
         currentPeriodEnd: subscription.currentPeriodEnd,
+        // A move's reversal puts the plan back too.
+        ...(invoice.targetPlanId ? { planId: subscription.planId, billingCycle: subscription.billingCycle } : {}),
       },
     },
     { transaction }
   );
-  // A late payment for an earlier period never moves the period backwards.
-  const extendsPeriod = new Date(invoice.periodEnd) > new Date(subscription.currentPeriodEnd);
-  await subscription.update(
-    {
-      status: 'active',
-      graceUntil: null,
-      ...(extendsPeriod ? { currentPeriodStart: invoice.periodStart, currentPeriodEnd: invoice.periodEnd } : {}),
-    },
-    { transaction }
-  );
+  if (invoice.targetPlanId) {
+    await switchPlanForMove(invoice, subscription, transaction);
+  } else {
+    // A late payment for an earlier period never moves the period backwards.
+    const extendsPeriod = new Date(invoice.periodEnd) > new Date(subscription.currentPeriodEnd);
+    await subscription.update(
+      {
+        status: 'active',
+        graceUntil: null,
+        ...(extendsPeriod ? { currentPeriodStart: invoice.periodStart, currentPeriodEnd: invoice.periodEnd } : {}),
+      },
+      { transaction }
+    );
+  }
 
   const commission = await commissions.recordForPaidInvoice(invoice, { isFirstPayment: earlierPaid === 0 }, transaction);
   logger.info(
@@ -320,6 +379,44 @@ async function settlePaid(
       (commission ? `, commission row ${commission.id}` : '')
   );
   return { commission, codeLapsed: payable.codeLapsed };
+}
+
+/**
+ * A move's charge was paid: the store is on the new plan from now, for one
+ * period of its cycle (the pay-per-order plan's long period is replaced, not
+ * extended), active, with no trial. The charge's period is set to match.
+ * The prepaid balance is not touched; with no fee on the new plan, no order
+ * fee is taken from here on.
+ */
+async function switchPlanForMove(invoice, subscription, transaction) {
+  const start = new Date();
+  const end = addBillingPeriod(start, invoice.targetBillingCycle);
+  const before = { planId: subscription.planId, billingCycle: subscription.billingCycle, status: subscription.status };
+  await invoice.update({ periodStart: start, periodEnd: end }, { transaction });
+  await subscription.update(
+    {
+      planId: invoice.targetPlanId,
+      billingCycle: invoice.targetBillingCycle,
+      status: 'active',
+      graceUntil: null,
+      trialEndsAt: null,
+      cancelAtPeriodEnd: false,
+      currentPeriodStart: start,
+      currentPeriodEnd: end,
+    },
+    { transaction }
+  );
+  await recordAudit({
+    workspaceId: invoice.workspaceId,
+    actorUserId: invoice.recordedByUserId || null,
+    action: 'subscription.plan_move_complete',
+    entityType: 'Subscription',
+    entityId: subscription.id,
+    before,
+    after: { planId: invoice.targetPlanId, billingCycle: invoice.targetBillingCycle, status: 'active' },
+    metadata: { billingInvoiceId: invoice.id, paymentSource: invoice.paymentSource, currentPeriodEnd: end },
+    transaction,
+  });
 }
 
 /**
@@ -454,12 +551,29 @@ async function reverseManualPayment(invoiceId, { reason }, req) {
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
-    const statusBefore = invoice.subscriptionBeforePayment ? invoice.subscriptionBeforePayment.status : null;
+    const snapshot = invoice.subscriptionBeforePayment;
+    const statusBefore = snapshot ? snapshot.status : null;
     // No snapshot (a charge paid before migration 109): an active subscription
     // is taken to have been made active by this payment, the common case.
     const madeActiveByThisPayment = subscription.status === 'active' && statusBefore !== 'active';
     const subscriptionStatus = { from: subscription.status, to: subscription.status };
-    if (madeActiveByThisPayment) {
+    // A move's payment undone: the store goes back to the plan and period it
+    // had, while it is still on the plan this payment moved it to.
+    const undoMove = Boolean(invoice.targetPlanId && snapshot && snapshot.planId && subscription.planId === invoice.targetPlanId);
+    if (undoMove) {
+      await subscription.update(
+        {
+          planId: snapshot.planId,
+          billingCycle: snapshot.billingCycle,
+          status: snapshot.status,
+          currentPeriodStart: snapshot.currentPeriodStart,
+          currentPeriodEnd: snapshot.currentPeriodEnd,
+        },
+        { transaction }
+      );
+      subscriptionStatus.to = snapshot.status;
+      subscriptionStatus.planRestored = snapshot.planId;
+    } else if (madeActiveByThisPayment && !invoice.targetPlanId) {
       await subscription.update({ status: 'past_due' }, { transaction });
       subscriptionStatus.to = 'past_due';
     }
@@ -592,6 +706,9 @@ function serializeCharge(invoice, payable = null) {
     recordedBy: invoice.recordedBy ? { id: invoice.recordedBy.id, fullName: invoice.recordedBy.fullName } : null,
     // Priced with a special-terms price override.
     specialTermsId: invoice.specialTermsId || null,
+    // A pay-per-order store's move: the plan and cycle it switches to when paid.
+    targetPlanId: invoice.targetPlanId || null,
+    targetBillingCycle: invoice.targetBillingCycle || null,
     commission: invoice.commission
       ? {
           id: invoice.commission.id,
@@ -649,9 +766,16 @@ async function listCharges(workspaceId) {
       ['id', 'ASC'],
     ],
   });
+  // A pay-per-order store's move names the plan it moves to.
+  const targetIds = [...new Set(invoices.map((i) => i.targetPlanId).filter(Boolean))];
+  const targetNames = new Map(
+    targetIds.length ? (await db.Plan.findAll({ where: { id: targetIds }, attributes: ['id', 'name'] })).map((p) => [p.id, p.name]) : []
+  );
   const charges = [];
   for (const invoice of invoices) {
-    charges.push(serializeCharge(invoice, invoice.status === 'paid' ? null : await payableNow(invoice)));
+    const row = serializeCharge(invoice, invoice.status === 'paid' ? null : await payableNow(invoice));
+    if (invoice.targetPlanId) row.targetPlanName = targetNames.get(invoice.targetPlanId) || null;
+    charges.push(row);
   }
 
   const plan = subscription.plan;
@@ -702,6 +826,7 @@ module.exports = {
   payableNow,
   createCharge,
   createChargeInTransaction,
+  createMoveChargeInTransaction,
   quoteCharge,
   settlePaid,
   markChargePaid,
