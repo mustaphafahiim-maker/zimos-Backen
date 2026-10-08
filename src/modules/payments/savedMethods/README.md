@@ -29,7 +29,8 @@ module.exports = {
   // Charges a saved card. `reference` is our order id; `idempotencyKey` is
   // "<order>-<saved method>-<amount>" and is the gateway's duplicate-request key,
   // so a repeat (a timeout, a second click) gets the first answer back instead
-  // of a second charge. A definite answer only: throw GatewayError when the
+  // of a second charge. After a definite 'failed' / 'needs_shopper' the caller
+  // moves it on ("…-1", "…-2"), so a later retry reaches the bank again. A definite answer only: throw GatewayError when the
   // outcome is unknown. 'needs_shopper': the bank wants the shopper (3-D
   // Secure, PayPal's payer action) — nothing was taken.
   async chargeSaved(creds, { token, amount, currency, reference, idempotencyKey, contact, settings })

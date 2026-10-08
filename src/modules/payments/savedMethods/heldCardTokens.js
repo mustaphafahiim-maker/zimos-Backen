@@ -45,6 +45,9 @@ async function hold(account, { providerOrderId, card }) {
   if (existing) await existing.update(values);
   else await db.GatewayCardToken.create(values);
 
+  // Read again after the token is stored: the payment's TRANSACTION callback may have marked it paid
+  // meanwhile, and its own save (consentedSave.afterPaid) may have looked before the token was here.
+  await payment.reload();
   if (PAID.includes(payment.status)) await saveLate(payment);
   return { outcome: 'card_token' };
 }
@@ -69,12 +72,19 @@ async function saveLate(payment) {
     const consented = context.saveCard === true || (await planned(order));
     if (!consented) return;
     const saved = await require('./savedMethodService').saveFromPayment(payment.workspaceId, payment.id, null);
-    // Subscriptions started by this order before the card arrived (subscriptionService.startForOrder).
+    // Subscriptions started by this order before the card arrived (subscriptionService.startForOrder):
+    // waiting without a card, or in a free trial that would otherwise end with no card to charge.
     const waiting = await db.CustomerSubscription.findAll({
-      where: { workspaceId: payment.workspaceId, orderId: order.id, savedPaymentMethodId: null, status: 'past_due', failedAttempts: 0 },
+      where: {
+        workspaceId: payment.workspaceId,
+        orderId: order.id,
+        savedPaymentMethodId: null,
+        [Op.or]: [{ status: 'past_due', failedAttempts: 0 }, { status: 'trialing' }],
+      },
     });
     for (const sub of waiting) {
-      await sub.update({ savedPaymentMethodId: saved.id, status: 'active', nextRenewalAt: sub.currentPeriodEnd, lastFailureReason: null });
+      if (sub.status === 'trialing') await sub.update({ savedPaymentMethodId: saved.id, lastFailureReason: null });
+      else await sub.update({ savedPaymentMethodId: saved.id, status: 'active', nextRenewalAt: sub.currentPeriodEnd, lastFailureReason: null });
     }
   } catch (err) {
     logger.warn('Could not save a card the gateway sent after the payment', { workspaceId: payment.workspaceId, paymentId: payment.id, code: err.code, message: err.message });

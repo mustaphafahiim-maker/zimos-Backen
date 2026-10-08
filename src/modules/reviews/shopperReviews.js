@@ -55,17 +55,22 @@ const notVerified = () =>
 async function deliveredOrder(workspaceId, productId, { orderNumber, phone }) {
   const phoneNormalized = normalizePhone(phone);
   if (!phoneNormalized) throw notVerified();
-  const order = await db.Order.findOne({
-    where: { workspaceId, orderNumber: require('../orders/orderNumbers').matching(orderNumber) },
+  const orderNumbers = require('../orders/orderNumbers');
+  // "1001" and "#1001" may both be orders of a store: the exact spelling first, and only one whose phone matches.
+  const spellings = orderNumbers.candidates(orderNumber);
+  const rows = await db.Order.findAll({
+    where: { workspaceId, orderNumber: orderNumbers.matching(orderNumber) },
     include: [
       { model: db.OrderItem, as: 'items', attributes: ['productId'] },
       { model: db.Shipment, as: 'shipments', attributes: ['status'], required: false },
       { model: db.Customer, as: 'customer', attributes: ['id', 'phoneNormalized'], required: false },
     ],
   });
+  const phonesOf = (o) => [o.customer && o.customer.phoneNormalized, normalizePhone(o.contactSnapshot && o.contactSnapshot.phone)];
+  const order = rows
+    .sort((a, b) => spellings.indexOf(a.orderNumber) - spellings.indexOf(b.orderNumber))
+    .find((o) => phonesOf(o).includes(phoneNormalized));
   if (!order) throw notVerified();
-  const phones = [order.customer && order.customer.phoneNormalized, normalizePhone(order.contactSnapshot && order.contactSnapshot.phone)];
-  if (!phones.includes(phoneNormalized)) throw notVerified();
   if (!(order.items || []).some((i) => i.productId === productId)) throw notVerified();
   const delivered = order.fulfillmentState === 'fulfilled' || (order.shipments || []).some((s) => s.status === 'delivered');
   if (!delivered) throw notVerified();

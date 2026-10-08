@@ -116,7 +116,10 @@ async function apply(workspaceId, orderId, requested, req, transaction, manual =
     return !kept || Number(kept.unitPriceAmount) !== Number(wanted.unitPrice);
   };
   const manualChanged = manual.present && !staffPricing.sameManual(manual.value, oldManual);
-  const pricesTouched = requested.some(priceChanged) || manualChanged;
+  // A custom line left out is removed: its price leaves the order, so that is a price change too.
+  const keptCustomIds = new Set(requested.filter((w) => staffPricing.isCustom(w) && w.orderItemId).map((w) => w.orderItemId));
+  const customRemoved = [...customById.keys()].some((id) => !keptCustomIds.has(id));
+  const pricesTouched = requested.some(priceChanged) || manualChanged || customRemoved;
   if (pricesTouched && !staffPricing.canChangePrices(req)) throw staffPricing.forbidden();
 
   // ---- stock: what the order held, what it will hold

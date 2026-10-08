@@ -50,7 +50,10 @@ const ROWS = `
          CASE r.status WHEN 'processed' THEN 'refunded' ELSE r.status::text END,
          p.status::text, p.id,
          -r.amount, p.currency, r.fee_amount, COALESCE(r.fee_currency, p.fee_currency),
-         CASE WHEN r.status <> 'processed' THEN NULL ELSE COALESCE(r.net_amount, -r.amount - COALESCE(r.fee_amount, 0)) END,
+         -- No net reported: the refund's own amount (and fee) only when the row's currency is the payment's;
+         -- in another settlement currency it stays unknown until the payout fills it.
+         CASE WHEN r.status <> 'processed' THEN NULL WHEN r.net_amount IS NOT NULL THEN r.net_amount
+              WHEN upper(COALESCE(r.fee_currency, p.fee_currency, p.currency)) = upper(p.currency) THEN -r.amount - COALESCE(r.fee_amount, 0) END,
          r.payout_id, r.provider_refund_reference, NULL,
          COALESCE(r.processed_at, r.created_at),
          r.failure_reason, r.source
