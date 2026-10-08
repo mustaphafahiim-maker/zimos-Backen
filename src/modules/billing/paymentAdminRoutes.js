@@ -34,6 +34,20 @@ router.get(
   validate(schemas.adminWorkspaceWallet),
   payments.adminWorkspaceWallet
 );
+// Free orders granted to one store, and a balance corrected by hand: each
+// with a reason, audited, once per requestId.
+router.post(
+  '/workspaces/:workspaceId/wallet/free-orders',
+  ...allow(P.SUBSCRIPTIONS_MANAGE),
+  validate(schemas.adminGrantFreeOrders),
+  payments.adminGrantFreeOrders
+);
+router.post(
+  '/workspaces/:workspaceId/wallet/adjustments',
+  ...allow(P.PAYMENTS_RECORD),
+  validate(schemas.adminAdjustWallet),
+  payments.adminAdjustWallet
+);
 
 router.get('/payment-proofs', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminListProofs), payments.adminListProofs);
 router.get('/payment-proofs/:proofId', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminProofParams), payments.adminGetProof);

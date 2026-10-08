@@ -92,6 +92,16 @@ const adminWorkspaceWallet = asyncHandler(async (req, res) => {
   res.json({ wallet: summary, ledger: entries });
 });
 
+const adminGrantFreeOrders = asyncHandler(async (req, res) => {
+  const result = await wallet.grantFreeOrders(req.params.workspaceId, req.body, req);
+  res.status(result.replayed ? 200 : 201).json(result);
+});
+
+const adminAdjustWallet = asyncHandler(async (req, res) => {
+  const result = await wallet.adjustBalance(req.params.workspaceId, req.body, req);
+  res.status(result.replayed ? 200 : 201).json(result);
+});
+
 const listPaymentProofs = asyncHandler(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json(await proofs.listForWorkspace(req.tenant.workspaceId));
@@ -172,6 +182,8 @@ module.exports = {
   submitTopup,
   choosePayPerOrder,
   adminWorkspaceWallet,
+  adminGrantFreeOrders,
+  adminAdjustWallet,
   adminListPaymentMethods,
   adminUpdatePaymentMethod,
   adminReorderPaymentMethods,

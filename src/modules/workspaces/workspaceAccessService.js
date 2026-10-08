@@ -136,7 +136,9 @@ async function accessFor(workspaceId, { now = new Date(), workspace, subscriptio
   const reasons = [];
   if (suspended) reasons.push('suspended');
   if (billingRestricted) reasons.push('billing');
-  if (wallet && wallet.phase === 'exhausted') reasons.push('balance');
+  // A plan with its own debt limit keeps the store open: only new orders are
+  // refused (422 WALLET_LIMIT_REACHED in walletService.chargeOrderFee).
+  if (wallet && wallet.phase === 'exhausted' && wallet.policy !== 'debt_limit') reasons.push('balance');
 
   return {
     restricted: reasons.length > 0,

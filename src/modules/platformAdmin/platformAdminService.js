@@ -68,6 +68,10 @@ function serializePlan(p) {
     displayOrder: p.displayOrder,
     // The pay-per-order fee, minor units; 0 = none (billing/walletService).
     perOrderFee: Number(p.perOrderFeeAmount || 0),
+    // Free orders before any fee, and the debt limit (minor units; null =
+    // the fixed overdraft and the old refusal). Migration 220.
+    walletFreeOrders: Number(p.walletFreeOrders || 0),
+    walletDebtLimit: p.walletDebtLimitAmount === null || p.walletDebtLimitAmount === undefined ? null : Number(p.walletDebtLimitAmount),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   };
@@ -246,6 +250,8 @@ async function savePlan(input, req) {
   if (input.isPublic !== undefined) fields.isPublic = input.isPublic;
   if (input.displayOrder !== undefined) fields.displayOrder = input.displayOrder;
   if (input.perOrderFee !== undefined) fields.perOrderFeeAmount = input.perOrderFee;
+  if (input.walletFreeOrders !== undefined) fields.walletFreeOrders = input.walletFreeOrders;
+  if (input.walletDebtLimit !== undefined) fields.walletDebtLimitAmount = input.walletDebtLimit;
 
   // A fee per order belongs to a plan with nothing monthly, in EGP — the
   // balance's currency (Q13).

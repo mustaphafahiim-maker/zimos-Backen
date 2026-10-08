@@ -57,6 +57,11 @@ const planBody = Joi.object({
   // a plan with no monthly price, in EGP (platformAdminService.savePlan).
   // Left out: kept as it is.
   perOrderFee: Joi.number().integer().min(0).max(100000).optional(),
+  // Pay per order (migration 220): orders free before any fee, and how far
+  // below zero the balance may go in minor units (null = the fixed overdraft
+  // and the old refusal). Left out: kept as it is.
+  walletFreeOrders: Joi.number().integer().min(0).max(100000).optional(),
+  walletDebtLimit: Joi.number().integer().min(0).max(100000000).allow(null).optional(),
 });
 
 const flagBody = Joi.object({

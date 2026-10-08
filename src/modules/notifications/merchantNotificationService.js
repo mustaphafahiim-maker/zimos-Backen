@@ -43,6 +43,9 @@ const TYPES = Object.freeze({
   announcement: { permission: null, defaults: { inApp: true, email: false } },
   // An automation's "notify the team" step (modules/automations).
   automation: { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
+  // The prepaid balance on a plan with its own debt limit (billing/walletService).
+  'wallet.low': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
+  'wallet.limit_reached': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 
