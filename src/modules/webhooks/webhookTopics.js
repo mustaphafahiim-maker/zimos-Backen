@@ -42,7 +42,7 @@ const TOPICS = Object.freeze({
   'return.requested': 'A return or exchange was asked for, by the shopper or by the team (source and resolution are in the payload).',
   'return.approved': 'A return or exchange was approved (an exchange carries its replacement order id).',
   'return.rejected': 'A return or exchange was rejected.',
-  'return.received': 'A returned parcel came back and its units were restocked.',
+  'return.received': 'A returned parcel came back to the store: the courier handed it back (source courier) or the team restocked it. Units are back in stock only after the restock step, which may come later.',
 });
 
 const DOMAIN_TO_TOPIC = Object.freeze({

@@ -302,9 +302,52 @@ async function submit(workspaceId, key, { locale = 'ar', couponCode = null, acti
       templates: done.map((d) => rowView(d.row, d.outcome)),
     };
   });
+  // A status webhook Meta sent before the commit found no row: read the new templates back once.
+  const refreshed = await refreshSubmitted(workspaceId, account, result.templates).catch((err) => {
+    logger.warn(`[whatsapp] template read-back for ${workspaceId} failed: ${err.message}`);
+    return false;
+  });
   // A template Meta rejected on the spot rings the bell now.
   await reconcile(workspaceId);
+  if (refreshed) {
+    // The answer says where things stand now (a rule may have just switched itself on).
+    const now = await status(workspaceId, key);
+    result.status = now.status;
+    if (now.rule) result.rule = { ...result.rule, isActive: now.rule.isActive, activateWhenApproved: now.rule.activateWhenApproved };
+  }
   return result;
+}
+
+/**
+ * The templates this submit created at Meta, read back after the commit. A
+ * row still at the status stored at submit takes Meta's current one (a
+ * webhook applied since then is newer and is left alone). Best effort;
+ * true when a row changed.
+ */
+async function refreshSubmitted(workspaceId, account, templates) {
+  let changed = false;
+  const submitted = templates.filter((t) => t.outcome === 'submitted');
+  for (const name of new Set(submitted.map((t) => t.name))) {
+    let found;
+    try {
+      found = await account.find(name);
+    } catch (err) {
+      logger.warn(`[whatsapp] could not read back template ${name} for ${workspaceId}: ${err.message}`);
+      continue;
+    }
+    for (const t of submitted.filter((x) => x.name === name)) {
+      const meta = (Array.isArray(found) ? found : []).find((f) => f && String(f.language) === t.language);
+      const metaStatus = meta && meta.status ? String(meta.status).toUpperCase() : null;
+      if (!metaStatus || metaStatus === t.status) continue;
+      const rejectedReason = meta.rejected_reason && meta.rejected_reason !== 'NONE' ? String(meta.rejected_reason).slice(0, 200) : null;
+      const [n] = await db.WhatsappTemplate.update({ status: metaStatus, rejectedReason, syncedAt: new Date() }, { where: { id: t.id, status: t.status } });
+      if (n) {
+        Object.assign(t, { status: metaStatus, rejectedReason });
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 /** Where a ready-made automation's WhatsApp templates stand. */

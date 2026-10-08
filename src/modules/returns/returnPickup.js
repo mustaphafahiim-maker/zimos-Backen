@@ -54,7 +54,11 @@ async function bookPickup(workspaceId, returnId, { carrierCode, waybillNumber, c
   const check = (ret) => {
     if (!ret) throw new NotFoundError('ReturnRequest');
     if (ret.status !== 'approved') throw new AppError('RETURN_NOT_APPROVED', 'A pickup can be booked for an approved return that has not come back yet', 409);
-    if (status.isActive(ret.pickup)) throw new AppError('RETURN_PICKUP_EXISTS', `A pickup is already booked for this return (${ret.pickup.waybillNumber})`, 409);
+    if (status.isActive(ret.pickup)) {
+      // A failed pickup is cancelled first (the courier may still retry it), then booked again.
+      const failed = ret.pickup.status === 'failed' ? '; it failed at the courier: cancel it, then book again' : '';
+      throw new AppError('RETURN_PICKUP_EXISTS', `A pickup is already booked for this return (${ret.pickup.waybillNumber})${failed}`, 409, { pickupStatus: ret.pickup.status || 'requested' });
+    }
   };
 
   if (carrierCode === MANUAL) {
@@ -139,7 +143,11 @@ async function bookPickup(workspaceId, returnId, { carrierCode, waybillNumber, c
  * is asked for the pickup's state: already cancelled there counts as done,
  * anything else is 409 RETURN_PICKUP_CANCEL_FAILED. A courier without a
  * cancel API (or no longer connected) needs acknowledgeManualCancel: the
- * merchant cancelled it in the courier's dashboard.
+ * merchant cancelled it in the courier's dashboard. A pickup the courier
+ * reports failed (cancelled, lost or refused there) is still asked to cancel
+ * (Bosta may retry an exception); if it refuses, the courier's "already
+ * cancelled" error, a settled state (adapter.isCancelSettled) or a fresh read
+ * still showing it failed counts as done, so the return is never stuck.
  *
  * @returns {Promise<'carrier'|'manual'|'manual_ack'>} how it was cancelled
  */
@@ -177,8 +185,12 @@ async function cancelAtCourier(workspaceId, pickup, { acknowledgeManualCancel = 
     if (adapter.capabilities.returnPickupStatus) {
       current = await adapter.getReturnPickup(credentials, pickup.waybillNumber).catch(() => null);
     }
-    if (current && current.status === 'cancelled') {
-      logger.info('Courier refused the pickup cancel but already shows it cancelled', { workspaceId, carrierCode: adapter.code, waybillNumber: pickup.waybillNumber });
+    const settled =
+      adapter.alreadyCancelledPattern.test(err.message || '') ||
+      (current && ['cancelled', 'failed'].includes(current.status)) ||
+      (current && typeof adapter.isCancelSettled === 'function' && adapter.isCancelSettled(current.carrierStatus));
+    if (settled) {
+      logger.info('Courier refused the pickup cancel but it has nothing left to stop', { workspaceId, carrierCode: adapter.code, waybillNumber: pickup.waybillNumber, carrierStatus: current ? current.status : null });
       return 'carrier';
     }
     throw new AppError(

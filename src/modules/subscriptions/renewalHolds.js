@@ -267,7 +267,8 @@ async function lapse(sub, { cause, causeKey, reason, unknown, orderId }) {
       body: `انتهى اشتراك «${sub.productName}» بعد ${LAPSE_DAYS} يومًا من التوقف لأن ${c.ar}. لم يُسحب أي مبلغ من العميل.${order ? ` لم تؤكد البوابة سحب الطلب ${order.orderNumber}: راجعه في لوحة البوابة.` : ''}`,
     },
     data: { event: 'lapsed', subscriptionId: sub.id, productName: sub.productName, orderId: order ? orderId : null },
-    dedupeKey: `subscription.renewal_paused:lapsed:${causeKey}:${day(new Date())}`,
+    // A kept order to check is its own bell: the day's shared one would name only the first.
+    dedupeKey: `subscription.renewal_paused:lapsed:${causeKey}:${day(new Date())}${order ? `:order:${orderId}` : ''}`,
   });
   return 'lapsed';
 }
