@@ -5023,3 +5023,15 @@ A renewal that failed for the store's reason (gateway keys refused or not connec
 
 ### Notifications
 - New bell type `subscription.renewal_paused` (orders.manage; in-app and email on by default) with `data.event` `held` | `will_lapse` | `lapsed`; label in the preferences screen «تجديدات الاشتراكات المتوقفة» / "Subscription renewals on hold". The title/body come localized; the link goes to the page that fixes the cause.
+
+## 395. Sending domain on Brevo — UI: pending (small)
+
+The sending domain (item 173) now runs on Brevo in production; the sandbox is development-only. Same endpoints.
+
+- **GET `…/order-emails/sending-domain`** also answers `available` (boolean). `false` → instead of the form, «الإرسال من الدومين بتاعك مش متاح حاليًا» / "Sending from your own domain isn't available yet". PUT / verify answer 503 `EMAIL_DOMAIN_UNAVAILABLE` (same text) and 502 `EMAIL_DOMAIN_PROVIDER_UNREACHABLE` «خدمة الإيميل مردتش — جرّب بعد دقيقة» / "The email service did not answer — try again in a minute" (keep the form). A 422 on `domain` may now come from Brevo: show its message under the input.
+- New record `purpose` values (show a label in the table; `purpose` may also be `spf`/`dmarc` as before):
+  - `brevo_code` «كود التحقق من Brevo» / "Brevo verification code" (TXT on the domain itself — name = the domain, host "@")
+  - `dkim` may now be two CNAME rows (`brevo1._domainkey`, `brevo2._domainkey`)
+  - `ownership` «إثبات ملكية المتجر» / "Store ownership" (TXT on `_zimos-mail.<domain>`) — required; without it the domain stays pending even when Brevo says it is fine.
+  - On bought domains these appear in the DNS editor as `email_brevo_code` / `email_ownership` (same hint as the other `email_*` rows).
+- `sendingDomain.providerChanged: true` (a domain set up before the switch to Brevo): status reads `pending`, `records` is empty → show «اضغط تحقق علشان تاخد السجلات الجديدة» / "Press Verify to get the new records" with the Verify button; Verify returns the new records.
