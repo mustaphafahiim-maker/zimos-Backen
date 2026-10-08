@@ -5059,3 +5059,11 @@ Return pickups (item 372) now also work with Bosta and Mylerz (not J&T), report 
 - «إلغاء المرتجع» / "Cancel return" on requested/approved returns not restocked, with an optional note; status label «ملغي» / "Cancelled". On `RETURN_PICKUP_MANUAL_CANCEL_REQUIRED` show the message with a checkbox «لغيته بنفسي عند شركة الشحن» / "I cancelled it with the courier myself" and resend.
 - Error texts: `RETURN_PICKUP_COLLECTED` «المندوب استلم الشحنة بالفعل وهي راجعة — اعمل ريستوك لما توصل» / "The courier already has the parcel — restock it when it arrives".
 - Storefront tracking page: under the pickup line, the status in the shopper's words (same labels).
+
+## 397. Profit report: ZIMOS fees include the wallet's per-order fees — UI: pending (small)
+
+GET `/profit/pnl` (unchanged path and permission). `actual.zimosFees` / `projected.zimosFees` now hold, per order, the prepaid wallet's net fee (charged − given back + charged again) for orders the store paid through its balance, else the plan percentages as before. Returned orders can now carry a ZIMOS fee.
+
+### Changed
+- New top-level `zimosPerOrderFee`: `{ amount, currency }` (minor units, wallet currency) when the store pays per order now, else `null`. The projection counts it for open orders that have no wallet charge yet.
+- Next to the ZIMOS fees line, a hint: when `zimosPerOrderFee` is set «رسوم ZIMOS لكل أوردر من رصيدك المدفوع مقدمًا» / "ZIMOS fee per order, from your prepaid balance"; otherwise keep today's percentage hint from `zimosFeeBp`.
