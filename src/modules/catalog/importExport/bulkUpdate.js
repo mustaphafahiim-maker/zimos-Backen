@@ -180,7 +180,7 @@ async function apply(req, res) {
         await db.sequelize.transaction(async (transaction) => {
           const locked = await inventory.lockVariant(c.variantId, workspaceId, transaction);
           const delta = c.stockChange != null ? c.stockChange : c.fields.stock.to - locked.stockOnHand;
-          if (delta) await require('../../purchasing').moveStock(workspaceId, c.variantId, delta, null, { type: 'adjustment', reason: 'Bulk update from a sheet', actorUserId: req.user.id }, transaction);
+          if (delta) await require('../../purchasing').moveStock(workspaceId, c.variantId, delta, null, { type: 'adjustment', reason: 'Bulk update from a sheet', referenceType: 'bulk_update', actorUserId: req.user.id }, transaction);
         });
       }
       const price = {};

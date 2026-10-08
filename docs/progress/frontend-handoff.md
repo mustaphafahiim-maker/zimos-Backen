@@ -4896,3 +4896,41 @@ The merchant chooses what the store's product lists do with products nobody can 
 - **Storefront product cards** (shop, collection, search, suggestions): when `available` is false, a badge «نفدت الكمية» / "Sold out" on the picture and a muted price; the card still opens the product page.
 - **Storefront filter sidebar**: a switch «المتاح بس» / "In stock only" that adds `available=true` (hidden when the store's setting is `hide`, since nothing sold out is shown anyway).
 - **Product page**: when `available` is false, the buy button reads «نفدت الكمية» / "Sold out" and is disabled.
+
+## 389. Stock movement history — UI: pending
+
+Every change to a variant's stock, newest first: restocks, adjustments, order reservations and releases, returns, purchase orders received, stock counts applied, lots, sheet bulk updates and the variant table — with where it came from and who did it. Read-only; `inventory.view`.
+
+### API — `/api/v1/workspaces/:ws/inventory`
+- `GET /:variantId/movements` — one variant; also returns `variantId` and `stock: { stockOnHand, reservedStock, availableStock }` (404 for a variant of another store).
+- `GET /movements` — the whole store; filters `variantId`, `productId`.
+- Both take `type` (one or a comma list of `restock, adjustment, reserve, release, commit, return_restock`), `locationId`, `from` / `to` (a store-calendar day `YYYY-MM-DD` — `to` includes its whole day — or an ISO timestamp), `limit` (1–200, default 50), `cursor`, `format=json|csv|xlsx`, `lang=en|ar` (file headers and words).
+```json
+{
+  "movements": [{
+    "id": "…", "at": "2026-10-08T01:21:36.000Z", "localTime": "2026-10-08 04:21:36",
+    "type": "release", "quantityDelta": 0, "reservedDelta": -2, "availableDelta": 2,
+    "variant": { "id": "…", "productId": "…", "productName": "Linen shirt", "sku": "LS-1", "optionValues": { "Size": "M" } },
+    "location": { "id": "…", "name": "Main shelf" },
+    "reason": null,
+    "source": { "type": "order", "id": "<orderId>", "orderNumber": "#1001", "event": "cancelled" },
+    "actor": { "type": "user", "id": "…", "name": "Demo Owner" }
+  }],
+  "nextCursor": "2026-10-08T01:21:36.123456Z|<id>",
+  "timezone": "Africa/Cairo"
+}
+```
+- `source.type`: `order` (with `orderNumber`, `event`: placed, upsell, edited, reconfirmed, reopened, rejected, cancelled, payment_expired, customer_blocked, returned, reshipped), `purchase_order` (`number`), `stock_count` (`note`), `return` (`orderId`, `orderNumber`), `stock_lot` (`lotCode`), `location_adjustment`, `bulk_update`, `variant_table` (`id` = product), `manual`.
+- `actor.type`: `user` (`name`; null when the user was removed), `customer` (a storefront order), `system` (payment expiry, sweeps).
+- `location` is null when the store has no stock locations. No "quantity after": movements don't store it.
+- `nextCursor` null on the last page; 422 for a bad `cursor`, `type`, or `from` after `to`. Files: `stock-movements-YYYY-MM-DD.csv|xlsx`, at most 10,000 rows.
+
+### Screens
+- **Product page → each variant's stock cell / Inventory**: a «سجل حركة المخزون» / "Stock history" link opening a drawer with `GET /:variantId/movements`. Header shows on hand / reserved / available from `stock`.
+- **Inventory → "Stock movements" tab** («حركة المخزون») with `GET /movements`: filters for product, type, location, date range; «تصدير CSV» / "Export CSV" and «تصدير Excel» / "Export Excel" (pass `lang`).
+- Columns: «التاريخ» / "Date" (`localTime`), «النوع» / "Type", «المنتج» / "Product", «التغيير» / "Change" (`quantityDelta`, green/red; for reserve/release show `reservedDelta` as «محجوز +2» / "Reserved +2"), «المخزن» / "Location", «المصدر» / "Source", «السبب» / "Reason", «بواسطة» / "By".
+- Type labels: restock «إضافة مخزون» / "Restock", adjustment «تعديل» / "Adjustment", reserve «حجز» / "Reserved", release «فك حجز» / "Released", commit «خصم» / "Deducted", return_restock «إرجاع للمخزون» / "Return restock".
+- Source labels (link where there is a page): order «طلب {orderNumber} — {event}» / "Order {orderNumber} — {event}" → order page; purchase order «أمر شراء {number}» / "Purchase order {number}"; stock count «جرد» / "Stock count"; return «مرتجع طلب {orderNumber}» / "Return for order {orderNumber}"; lot «دفعة {lotCode}» / "Lot {lotCode}"; location_adjustment «تعديل مخزن» / "Location adjustment"; bulk_update «تحديث جماعي من ملف» / "Bulk update from a sheet"; variant_table «جدول النسخ» / "Variant table"; manual «يدوي» / "Manual".
+- Event words: placed «إنشاء» / "placed", upsell «عرض إضافي» / "upsell", edited «تعديل» / "edited", reconfirmed «إعادة تأكيد» / "reconfirmed", reopened «إعادة فتح» / "reopened", rejected «رفض» / "rejected", cancelled «إلغاء» / "cancelled", payment_expired «انتهاء مهلة الدفع» / "payment expired", customer_blocked «حظر العميل» / "customer blocked", returned «مرتجع» / "returned", reshipped «إعادة شحن» / "reshipped".
+- By: user name; `customer` «العميل» / "Customer"; `system` «النظام» / "System"; removed user «مستخدم محذوف» / "Deleted user".
+- Empty: «مفيش حركة مخزون في الفترة دي» / "No stock movements in this period". "Load more" with `nextCursor`.

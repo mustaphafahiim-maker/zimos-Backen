@@ -196,11 +196,13 @@ router.post(
       const labelled = Number(await db.StockLot.sum('quantityRemaining', { where: { workspaceId, variantId: variant.id } })) || 0;
       if (labelled + b.quantity > Number(variant.stockOnHand)) throw new ValidationError([{ field: 'quantity', message: `Only ${Math.max(0, Number(variant.stockOnHand) - labelled)} units are on hand without a lot` }]);
     }
+    // The lot id is taken first so its receiving movement names it (item 389).
+    const lotId = require('crypto').randomUUID();
     const lot = await db.sequelize.transaction(async (transaction) => {
       if (b.addToStock) {
-        await require('../purchasing').moveStock(workspaceId, variant.id, b.quantity, location, { type: 'restock', reason: `Lot ${b.lotCode} received`, referenceType: 'stock_lot', referenceId: null, actorUserId: req.user.id }, transaction);
+        await require('../purchasing').moveStock(workspaceId, variant.id, b.quantity, location, { type: 'restock', reason: `Lot ${b.lotCode} received`, referenceType: 'stock_lot', referenceId: lotId, actorUserId: req.user.id }, transaction);
       }
-      return db.StockLot.create({ workspaceId, variantId: variant.id, locationId: location ? location.id : null, lotCode: b.lotCode, expiresOn: b.expiresOn, quantityReceived: b.quantity, quantityRemaining: b.quantity, purchaseOrderId: b.purchaseOrderId || null, note: b.note || null, createdBy: req.user.id }, { transaction });
+      return db.StockLot.create({ id: lotId, workspaceId, variantId: variant.id, locationId: location ? location.id : null, lotCode: b.lotCode, expiresOn: b.expiresOn, quantityReceived: b.quantity, quantityRemaining: b.quantity, purchaseOrderId: b.purchaseOrderId || null, note: b.note || null, createdBy: req.user.id }, { transaction });
     });
     await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'stock_lot.create', entityType: 'StockLot', entityId: lot.id, after: b, req });
     res.status(201).json({ lot: view(await db.StockLot.findByPk(lot.id, { include: withVariant })) });
