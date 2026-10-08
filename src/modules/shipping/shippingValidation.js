@@ -4,6 +4,8 @@ const Joi = require('joi');
 const { GOVERNORATE_CODES } = require('./governorates');
 
 const uuid = Joi.string().uuid();
+// A time of day, 00:00-23:59 (opening hours).
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const country = Joi.string().length(2).uppercase();
 const rateType = Joi.string().valid('flat', 'weight_based', 'quantity_based', 'order_value_based', 'free');
@@ -112,8 +114,20 @@ const settingsBody = Joi.object({
       .items(
         Joi.object({
           closed: Joi.boolean().required(),
-          open: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).required(),
-          close: Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d$/).required(),
+          // One period, as before; optional when `periods` is sent (they mirror its first).
+          open: Joi.string().pattern(HHMM).when('periods', { is: Joi.array().min(1), then: Joi.optional(), otherwise: Joi.required() }),
+          close: Joi.string().pattern(HHMM).when('periods', { is: Joi.array().min(1), then: Joi.optional(), otherwise: Joi.required() }),
+          // Up to 3 periods a day (morning and evening), none overlapping (storeHours.periodsProblem).
+          periods: Joi.array()
+            .items(Joi.object({ open: Joi.string().pattern(HHMM).required(), close: Joi.string().pattern(HHMM).required() }))
+            .min(1)
+            .max(3),
+        }).custom((day, helpers) => {
+          if (!day.periods) return day;
+          const problem = require('./storeHours').periodsProblem(day.periods);
+          if (problem) return helpers.message(problem);
+          // The first period stays in open/close, for anything that reads one period a day.
+          return { ...day, open: day.periods[0].open, close: day.periods[0].close };
         })
       )
       .length(7)
