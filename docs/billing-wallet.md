@@ -123,6 +123,20 @@ The same gateway layer as paying a charge online
   own money.
 - The billing summary's latest online payment counts charges only.
 
+## It never expires
+
+Nothing expires or decays a balance:
+
+- no scheduled job touches the wallet;
+- there's no time limit on a balance;
+- no ledger entry is written for time passing.
+
+The only scheduled change is a fee given back when an unpaid online order
+expires, and that's a fee, not the balance.
+`tests/integration/walletNoExpiry.test.js` checks it. It reads every
+`jobs.js`, and runs the billing sweeps two years on: the balance, its cache
+and its ledger stay the same.
+
 ## The ledger
 
 - **`wallet_ledger_entries` is append-only.** A trigger refuses UPDATE and
