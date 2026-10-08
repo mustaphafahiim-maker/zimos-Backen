@@ -28,7 +28,7 @@ module.exports = {
   list: {
     params: Joi.object({ workspaceId: uuid.required() }),
     query: Joi.object({
-      status: Joi.string().valid('requested', 'approved', 'rejected', 'received', 'refunded').optional(),
+      status: Joi.string().valid('requested', 'approved', 'rejected', 'received', 'refunded', 'cancelled').optional(),
     }),
   },
   moderate: {
@@ -62,5 +62,20 @@ module.exports = {
       }).and('cityId', 'districtId').oxor('path', 'cityId').oxor('names', 'cityId').optional(),
       notes: Joi.string().trim().max(500).allow('', null),
     }),
+  },
+  // Item 396.
+  cancelPickup: {
+    params: Joi.object({ workspaceId: uuid.required(), returnId: uuid.required() }),
+    body: Joi.object({
+      // The courier cannot be asked (no cancel API, or disconnected): the merchant cancelled it there.
+      acknowledgeManualCancel: Joi.boolean().optional(),
+    }).optional(),
+  },
+  cancel: {
+    params: Joi.object({ workspaceId: uuid.required(), returnId: uuid.required() }),
+    body: Joi.object({
+      note: Joi.string().trim().max(500).allow('', null),
+      acknowledgeManualCancel: Joi.boolean().optional(),
+    }).optional(),
   },
 };

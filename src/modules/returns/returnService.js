@@ -159,6 +159,7 @@ async function restockReturn(workspaceId, returnId, req) {
       throw new AppError('RETURN_NOT_APPROVED', 'Only an approved return can be restocked', 409);
     }
     if (ret.restockedAt) throw new AppError('RETURN_ALREADY_RESTOCKED', 'This return has already been restocked', 409);
+    const wasStatus = ret.status;
 
     const orderItems = await db.OrderItem.findAll({ where: { orderId: ret.orderId }, transaction });
     const byId = new Map(orderItems.map((oi) => [oi.id, oi]));
@@ -191,7 +192,8 @@ async function restockReturn(workspaceId, returnId, req) {
       req,
       transaction,
     });
-    await outbox.record(transaction, 'return.received', { workspaceId, returnId: ret.id, orderId: ret.orderId, resolution: ret.resolution });
+    // Already sent when the courier brought it back (returnPickupStatus.js, item 396).
+    if (wasStatus !== 'received') await outbox.record(transaction, 'return.received', { workspaceId, returnId: ret.id, orderId: ret.orderId, resolution: ret.resolution });
 
     return ret;
   });

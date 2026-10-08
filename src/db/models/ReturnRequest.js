@@ -9,7 +9,7 @@ module.exports = (sequelize, DataTypes) => {
       orderId: { type: DataTypes.UUID, allowNull: false, field: 'order_id' },
       reason: { type: DataTypes.STRING(300), allowNull: false },
       status: {
-        type: DataTypes.ENUM('requested', 'approved', 'rejected', 'received', 'refunded'),
+        type: DataTypes.ENUM('requested', 'approved', 'rejected', 'received', 'refunded', 'cancelled'), // cancelled: migration 530 (item 396)
         allowNull: false,
         defaultValue: 'requested',
       },

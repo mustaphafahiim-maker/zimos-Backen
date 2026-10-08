@@ -100,6 +100,14 @@ async function createReturnPickup(creds, input) {
   };
 }
 
+/**
+ * Cancelling a sandbox return pickup (item 396): the sandbox keeps nothing,
+ * so there is nothing to refuse — only an SBX-R- waybill is accepted.
+ */
+async function cancelReturnPickup(creds, trackingNumber) {
+  if (!/^SBX-R-\d{8}$/.test(String(trackingNumber))) throw new CarrierError(`The sandbox courier has no return pickup ${trackingNumber}`);
+}
+
 async function findShipment(trackingNumber) {
   return db.Shipment.findOne({ where: { carrierCode: CODE, waybillNumber: String(trackingNumber) } });
 }
@@ -168,6 +176,7 @@ module.exports = defineAdapter({
     bulkStatus: true,
     addressLevels: ['city', 'district'],
     returnPickup: true,
+    returnPickupCancel: true,
   },
   pollIntervalMinutes: 5,
   credentialFields: [{ key: 'apiKey', label: 'Any key (8+ characters)', secret: true }],
@@ -182,6 +191,7 @@ module.exports = defineAdapter({
   cancelShipment,
   isCancelSettled,
   createReturnPickup,
+  cancelReturnPickup,
   // For the dev advance endpoint (../sandboxCarrierRoutes.js).
   PATH,
   ENDINGS,

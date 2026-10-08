@@ -72,6 +72,8 @@ async function processUpdate(adapter, account, parsed) {
       carrierResponse: { [Op.ne]: null },
     },
   });
+  // Item 396: not a shipment, but maybe a return pickup booked with this courier.
+  if (!shipment && (await require('../returns/returnPickupStatus').fromWebhook(adapter, account, ref))) return;
   if (!shipment) {
     logger.info('Carrier webhook for an unknown shipment — acknowledged and ignored', {
       workspaceId: account.workspaceId,

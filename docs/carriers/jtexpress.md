@@ -37,6 +37,14 @@ sandbox `https://demoopenapi.jtjms-eg.com/webopenplatformapi/api`.
 | bulkStatus | true | trace takes up to 30 waybills per call (the adapter chunks at 30) |
 | addressLevels | `governorate`, `city`, `area` | `getLocation` returns province/city/area rows, and addOrder takes all three names |
 
+Return pickups (item 396): **not supported**. No reverse / return order is
+among the endpoints read for this adapter (listed under Sources), and the
+platform could not be re-read for item 396 (open.jtjms-eg.com was not
+reachable from the build environment), so `capabilities.returnPickup` stays
+off and a pickup booked with J&T answers 422 `CARRIER_NO_RETURN_PICKUP`. The
+merchant books it with J&T and records the waybill as a manual pickup. Ask J&T
+Egypt for a reverse-order API before switching it on.
+
 ## Unverified
 
 The numbers match the `UNVERIFIED (n)` comments in the adapter.

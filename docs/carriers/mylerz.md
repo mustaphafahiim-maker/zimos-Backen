@@ -108,3 +108,32 @@ The numbers match the `UNVERIFIED (n)` comments in the adapter.
 - Nothing to paste into Mylerz, because there are no webhooks.
 - Status updates come only from polling, so the `sync-carrier-shipments` cron
   must run.
+
+## Return pickups (item 396)
+
+- Source: the official plugin's return order (`mylerz.php`,
+  `constructMylerzReturnOrder` / `mylerzBulkReturnOrdersById`, changelog 2.1.0
+  "Added Cancel AWB, Return Order & Get Shipments Status"; read from the
+  plugin's 4.4.3 source). It is the same `POST api/Orders/AddOrders` with
+  `Service_Category: "RETURN"` and the customer's address; the plugin keeps
+  the answer's barcode as the order's return barcode and from then on reads
+  its status (`GetPackageListStatus`) and cancels it (`CancelPackage`) by that
+  barcode. The adapter does the same (`createReturnPickup`,
+  `getReturnPickup(s)`, `cancelReturnPickup`).
+- Differences from the plugin: we send `Payment_Type: "PP"` and
+  `COD_Value: "0"` (the plugin sends minus the refunded amount on a COD
+  order, i.e. Mylerz pays the customer back at the door); the refund stays
+  the merchant's. `Reference` is `<order>-R`; the original delivery's barcode
+  and the merchant's note go in `Special_Notes`.
+- Polled like shipments (every 60 minutes, `returns.poll_pickups`).
+
+Unverified:
+
+- **R1.** What `Status` a return package shows along the way is not
+  documented. "Delivered, Thank you :-)" is read as handed to the merchant
+  (`returned_to_merchant`, which marks the return received) and "Rejected -
+  reason to be mentioned" as the customer refusing (`failed`). Every other
+  value leaves the pickup `requested`, is stored as its `carrierStatus` and is
+  logged.
+- **R2.** Whether `CancelPackage` refuses a return already collected, and its
+  wording, is not documented; a refusal surfaces Mylerz's `ErrorMessage`.

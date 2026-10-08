@@ -5035,3 +5035,27 @@ The sending domain (item 173) now runs on Brevo in production; the sandbox is de
   - `ownership` «إثبات ملكية المتجر» / "Store ownership" (TXT on `_zimos-mail.<domain>`) — required; without it the domain stays pending even when Brevo says it is fine.
   - On bought domains these appear in the DNS editor as `email_brevo_code` / `email_ownership` (same hint as the other `email_*` rows).
 - `sendingDomain.providerChanged: true` (a domain set up before the switch to Brevo): status reads `pending`, `records` is empty → show «اضغط تحقق علشان تاخد السجلات الجديدة» / "Press Verify to get the new records" with the Verify button; Verify returns the new records.
+
+## 396. Courier return pickups: status, cancel, and cancelling a return — UI: pending (small)
+
+Return pickups (item 372) now also work with Bosta and Mylerz (not J&T), report where the parcel is, and can be cancelled. A return can be cancelled too. API `/api/v1/workspaces/:workspaceId/returns`, `orders.manage`.
+
+### Changed
+- `return.pickup` has new fields: `status` (`requested` | `picked_up` | `in_transit` | `returned_to_merchant` | `failed` | `cancelled`), `carrierStatus` (`{ code, value }`, the courier's own words), `statusAt`, `history` (`[{ status, carrierCode, carrierValue, at, trigger }]`, newest last), `reference`, `labelUrl` (null today), `cancelledAt`, `cancelMode`. A pickup booked before this has no `status`: read it as `requested`.
+- Return `status` has a new value `cancelled` (also `?status=cancelled` on the list).
+- When the courier reports `returned_to_merchant`, an approved return becomes `received` by itself (not restocked: the Restock button stays until `restockedAt` is set).
+- `GET /carriers`: `capabilities` also has `returnPickupStatus` and `returnPickupCancel` (Bosta, Mylerz true; sandbox cancel only; J&T none).
+- Storefront tracking page `returns[].pickup` has `status` too.
+
+### New endpoints
+- **POST `/returns/:returnId/pickup/sync`** → 200 `{ "return": { … } }` — asks the courier now. 409 `RETURN_NO_PICKUP`, 409 `RETURN_PICKUP_MANUAL` (booked outside ZIMOS), 422 `CARRIER_NO_RETURN_PICKUP_STATUS`.
+- **DELETE `/returns/:returnId/pickup`** `{ "acknowledgeManualCancel"?: true }` → 200 `{ "return": { …, "pickup": { "status": "cancelled", … } } }`; the return stays approved and a new pickup can be booked.
+- **POST `/returns/:returnId/cancel`** `{ "note"?: "…", "acknowledgeManualCancel"?: true }` → 200 `{ "return": { "status": "cancelled", … } }`; a live pickup is cancelled at the courier first. An exchange's replacement order is not touched.
+- Errors: 409 `RETURN_PICKUP_COLLECTED` (the courier already has the parcel), 409 `RETURN_PICKUP_CANCEL_FAILED` (the courier refused; its `message` says why; nothing changed), 409 `RETURN_PICKUP_MANUAL_CANCEL_REQUIRED` (resend with `acknowledgeManualCancel: true` after cancelling in the courier's dashboard), 409 `RETURN_NOT_CANCELLABLE`, 422 `CARRIER_PERMISSION_DENIED` (Bosta key without Full Access).
+
+### Screens
+- Return card / queue: pickup status badge — requested «مستني المندوب» / "Waiting for courier", picked_up «المندوب استلم» / "Picked up", in_transit «في الطريق للمتجر» / "On its way back", returned_to_merchant «وصل المتجر» / "Back at the store", failed «فشل الاستلام» / "Pickup failed", cancelled «اتلغى» / "Cancelled"; show `carrierStatus.value` small under it. Button «تحديث الحالة» / "Refresh status" (sync) when the carrier has `returnPickupStatus`.
+- «إلغاء المندوب» / "Cancel pickup" while status is `requested` or `failed` (confirm: «هنلغي الاستلام عند شركة الشحن» / "We'll cancel the pickup with the courier"); after a cancel, show «احجز مندوب تاني» / "Book again".
+- «إلغاء المرتجع» / "Cancel return" on requested/approved returns not restocked, with an optional note; status label «ملغي» / "Cancelled". On `RETURN_PICKUP_MANUAL_CANCEL_REQUIRED` show the message with a checkbox «لغيته بنفسي عند شركة الشحن» / "I cancelled it with the courier myself" and resend.
+- Error texts: `RETURN_PICKUP_COLLECTED` «المندوب استلم الشحنة بالفعل وهي راجعة — اعمل ريستوك لما توصل» / "The courier already has the parcel — restock it when it arrives".
+- Storefront tracking page: under the pickup line, the status in the shopper's words (same labels).

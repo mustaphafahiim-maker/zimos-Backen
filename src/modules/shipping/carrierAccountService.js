@@ -203,6 +203,9 @@ function describeAdapter(adapter) {
       typedAddressNames: Boolean(adapter.capabilities.typedAddressNames),
       // The courier collects returns from the shopper (returns/returnPickup.js, item 372).
       returnPickup: Boolean(adapter.capabilities.returnPickup),
+      // Item 396: its status comes back from the courier, and it can be cancelled there.
+      returnPickupStatus: Boolean(adapter.capabilities.returnPickupStatus),
+      returnPickupCancel: Boolean(adapter.capabilities.returnPickupCancel),
     },
   };
 }

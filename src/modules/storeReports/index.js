@@ -411,7 +411,7 @@ router.get('/returns', requirePermission(PERMISSIONS.ANALYTICS_VIEW), validate({
                      FROM return_requests r JOIN o ON o.id = r.order_id
                      CROSS JOIN LATERAL jsonb_array_elements(r.items) it
                      JOIN order_items oi ON oi.id = (it->>'orderItemId')::uuid
-                    WHERE r.status <> 'rejected' GROUP BY 1)`;
+                    WHERE r.status NOT IN ('rejected', 'cancelled') GROUP BY 1)`;
   const products = await run(
     `${RETURN_CTES}
      SELECT COALESCE(sold.product_id, back.product_id) AS "productId", COALESCE(sold.name, p.name) AS name,

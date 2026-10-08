@@ -73,7 +73,7 @@ async function eligibility(workspace, order) {
   const items = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC']] });
   const open = await db.ReturnRequest.findAll({ where: { orderId: order.id, workspaceId: workspace.id }, order: [['createdAt', 'DESC']] });
   const asked = new Map();
-  for (const r of open.filter((x) => x.status !== 'rejected')) for (const l of r.items || []) asked.set(l.orderItemId, (asked.get(l.orderItemId) || 0) + Number(l.quantity));
+  for (const r of open.filter((x) => x.status !== 'rejected' && x.status !== 'cancelled')) for (const l of r.items || []) asked.set(l.orderItemId, (asked.get(l.orderItemId) || 0) + Number(l.quantity));
   const at = await deliveredAt(order);
   const deadline = at ? new Date(new Date(at).getTime() + s.windowDays * 864e5) : null;
   let reason = null;
@@ -115,7 +115,7 @@ function shopperView(r, exchangeOrderNumber = null) {
     decisionNote: r.decisionNote || null,
     decidedAt: r.decidedAt || null,
     exchangeOrderNumber,
-    pickup: p ? { carrierCode: p.carrierCode, waybillNumber: p.waybillNumber, trackingUrl: p.trackingUrl || null, bookedAt: p.bookedAt } : null,
+    pickup: p ? { carrierCode: p.carrierCode, waybillNumber: p.waybillNumber, trackingUrl: p.trackingUrl || null, bookedAt: p.bookedAt, status: p.status || 'requested' } : null,
     createdAt: r.createdAt,
   };
 }
@@ -170,7 +170,7 @@ async function requestReturn(workspace, order, { reasonCode, reasonDetail, items
     // Counted again under the order's lock (item 316): two requests at once queue here, and the second
     // sees what the first asked for — the same pieces can't be asked back twice.
     await db.Order.findOne({ where: { id: order.id, workspaceId: workspace.id }, attributes: ['id'], lock: transaction.LOCK.UPDATE, transaction });
-    const earlier = await db.ReturnRequest.findAll({ where: { orderId: order.id, workspaceId: workspace.id, status: { [Op.ne]: 'rejected' } }, attributes: ['items'], transaction });
+    const earlier = await db.ReturnRequest.findAll({ where: { orderId: order.id, workspaceId: workspace.id, status: { [Op.notIn]: ['rejected', 'cancelled'] } }, attributes: ['items'], transaction });
     const asked = new Map();
     for (const r of earlier) for (const l of r.items || []) asked.set(l.orderItemId, (asked.get(l.orderItemId) || 0) + Number(l.quantity));
     const late = [];
