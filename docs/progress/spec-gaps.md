@@ -2695,3 +2695,17 @@ piece was never written", plus one bug the Decisions list still marks open. Outs
   - Review fix: accounts still backing off are left out of the due query, so ~20 failing PayPal accounts can't take every run's places and starve Stripe or sandbox accounts. Verified: run 1 picked the failing account, run 2 found it not due.
 - [x] 404. [low] Palestine (970) was missing from the calling codes, so a Palestinian store's local numbers were read as Egyptian (from item 398). (backend fix; no UI change)
   - `PS: '970'` added to `storeCountry.CALLING_CODES`. Verified: `+970 59 123 4567` normalises to 970591234567, and an Egyptian 010… number is unchanged.
+
+## Thirtieth pass (2026-10-08) — every route and its guards
+
+An inventory of ~1,336 routes (865 under /workspaces/:workspaceId, 158 public /store, 124 /admin, 64 /auth and /me, the
+public API, webhooks) with their middleware. Every store route goes through authenticate + resolveTenant with a permission
+on writes; every /me and /admin route has authenticate and a platform permission; no shadowed routes; every webhook checks
+a signature or secret. What it found:
+
+- [ ] 405. [medium] Platform 2FA reset ignores who the target is — POST /admin/users/:userId/two-factor/reset only needs support.manage; apply userModerationService.lockTarget's rules (a creator target needs a creator actor; another console account needs admins.manage) and refuse resetting your own account.
+- [ ] 406. [medium-low] The public product feed skips the draft / unpaid-store rules — GET /feeds/:workspaceSlug/:file checks only workspace.status; use accessFor and answer 404 for draft or restricted stores, like every other public surface.
+- [ ] 407. [low-medium] Secret tokens in URL paths reach the request log — redactUrl hides /store/:ws/subscriptions/:token…, /downloads/:token…, /recover/:token, and the `ticket` query parameter.
+- [ ] 408. [low] Retrying a queue job only needs system.view — add a system.manage platform permission and require it on POST /admin/system/queues/jobs/:jobId/retry.
+- [ ] 409. [low] trackingLimiter does nothing on POST routes (it reads only query phone/number) — gift-card check, product questions, quotes, search click, Google account, self-service cancel/confirm/address get a working per-IP limiter.
+- [ ] 410. [low] Two simultaneous referral payout requests can both pass the "no open request" check — POST /me/referrals/payouts takes a lock (or a partial unique index) so only one open request exists.
