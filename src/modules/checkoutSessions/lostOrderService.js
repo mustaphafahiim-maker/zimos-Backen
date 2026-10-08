@@ -406,7 +406,7 @@ async function convert(workspaceId, sessionId, body, req) {
       },
       req,
       // The shopper's photos belong to their visitor id (customerUploads).
-      { source: 'manual', customFields: { visitorId: session.visitorId || null } }
+      { source: 'manual', customFields: { visitorId: session.visitorId || null }, locale: session.locale }
     ));
   } catch (err) {
     await db.CheckoutSession.update({ status: previous }, { where: { id: sessionId, workspaceId, status: 'converted', convertedOrderId: null } });
@@ -638,6 +638,8 @@ async function fileRefusal(req, refusal) {
       },
       ipAddress: visitor.ip,
       ipCountry: visitor.ipCountry,
+      // The shopper's language (item 383).
+      locale: require('../orders/orderLocale').fromRequest(workspace, req),
       source: body.funnelId ? 'funnel' : 'store',
       lastActivityAt: new Date(),
       ...(snapshot.length ? { items: snapshot, subtotalAmount: add(...totals), currency } : {}),
@@ -717,6 +719,7 @@ async function fileUnpaidOrder(orderId) {
       currency: order.currency,
       ipAddress: order.ipAddress || null,
       ipCountry: order.ipCountry || null,
+      locale: order.locale || null,
       source: order.funnelId ? 'funnel' : 'store',
       lastActivityAt: new Date(),
     };

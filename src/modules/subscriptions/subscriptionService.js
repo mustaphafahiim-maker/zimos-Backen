@@ -269,7 +269,7 @@ async function renewOne(subscriptionId) {
         notes: `Renewal of ${first.orderNumber}`,
       },
       SYSTEM_REQ,
-      { skipFraudRules: true }
+      { skipFraudRules: true, locale: first.locale }
     );
     order = created.order || created;
     await db.Order.update({ linkedFromOrderId: first.id }, { where: { id: order.id } });

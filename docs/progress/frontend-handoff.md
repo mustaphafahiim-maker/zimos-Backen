@@ -4602,3 +4602,35 @@ Same endpoints as before: **POST `/orders`**, **POST `/orders/manual/preview`**,
 - **Order page → Edit items**: the same three controls; existing custom lines are sent back with their `orderItemId`. «إزالة الخصم اليدوي» / "Remove staff discount" sends `manualDiscount: null`. The difference line stays «الفرق {differenceAmount}» / "Difference {differenceAmount}".
 - **Order page**: a custom line shows a «مخصص» / "Custom" badge instead of a picture; an overridden line shows «سعر معدّل» / "Price changed" with the catalogue price struck through and, on hover, «بواسطة {actorName}» / "By {actorName}". In the totals, the staff discount is its own row with its reason.
 - **Team → roles / invite**: the new permission label «تعديل الأسعار في الطلبات» / "Change prices on orders", help «سعر سطر، سطر مخصص، أو خصم يدوي على الطلب» / "A line's price, a custom line, or a staff discount on the order".
+
+## 383. Customer messages in the shopper's language — UI: pending
+
+Orders now remember the language the shopper used the store in, and the customer's emails (and WhatsApp templates, when the store has them approved in that language) go out in it.
+
+### Storefront
+- Send **`X-Store-Locale: <ar|en|fr…>`** (the language the shopper is reading in) on **POST `/store/:ws/checkout`**, **POST `/store/:ws/checkout-sessions`** (autosave) and the funnel checkout — the same header the product pages already send. A language the store does not offer is ignored (the order gets the store's default). Nothing in the answers changes.
+
+### Orders
+- Every order has `locale` (`"ar"`, `"en"`, `"fr"`…; `null` on orders from before = the store's default) on GET `/orders/:id` and in create answers.
+- **POST `/orders`** and **POST `/orders/manual/preview`** take an optional `"locale": "en"` — one of the store's languages. Left out = the store's default. Not offered → 422 `VALIDATION_ERROR`, `details[0].field` `locale`, message "This store does not offer "de". Its languages: ar, en, fr" («المتجر مش بيدعم اللغة دي» / "This store doesn't offer this language").
+
+### Order emails per language
+All under `/api/v1/workspaces/:ws/order-emails` (workspace.manage); `?locale=` combines with `?funnelId=` / `?websiteId=`.
+- **GET `?locale=en`** → `{ scope, locale: "en", defaultLocale: "ar", languages: ["ar","en","fr"], templates: [...], tokens }`. Without `locale` (or with the store's own language) it is the default version as before. Each template now also has:
+  - `locale` — the language shown;
+  - `version` — `"default"` (the default version), `"language"` (this language has its own version), `"fallback"` (none yet: what goes out today — the changed default version, else the built-in text in that language);
+  - `textLocale` — the language the shown text is written in (`"ar"` when an English tab falls back to an Arabic default);
+  - `defaults` — the built-in text in that language (English exists; French has none, so it shows the default version's text).
+- **PUT `/:key?locale=en`** `{ "subject": "We got your order {{order_number}}", "body": "Hi {{customer_name}}, …", "blocks": [...] }` saves the English version. A field left empty uses the built-in text in that language (else the default version's). `isEnabled` sent here switches the whole email (the default version holds the on/off) — one switch per email for all languages.
+- **DELETE `/:key?locale=en`** removes the English version → English customers get the fallback again. 404 when there is none; 422 when neither a language nor a funnel/website is named.
+- **POST `/:key/preview?locale=en`** and **POST `/:key/test?locale=en`** preview/send that language's version (English sample values, left-to-right).
+- Not offered / malformed `locale` → 422 `VALIDATION_ERROR` (`details[0].field` `locale`).
+- Which text a customer gets: their language's version → else the changed default version → else the built-in text in their language (Arabic, English) → else the store's language. A language version wins over a funnel's or website's override in another language.
+
+### Screens
+- **Settings → Order emails**: when `languages.length > 1`, tabs above the list, one per language: «العربية» / "Arabic", «English», «Français» (from `languages`; the store's own first, marked «الافتراضية» / "Default"). Switching a tab reloads with `?locale=`.
+  - In a non-default tab, each email row shows a badge: `version: "language"` → «مترجمة» / "Translated"; `version: "fallback"` → «بتتبعت بـ{textLocale == defaultLocale ? "اللغة الافتراضية" : "النص الجاهز"}» / "Sent in {the default language | the built-in text}".
+  - The editor in a non-default tab: prefill subject/body from the template (or `defaults` when `version` is `"fallback"`), the on/off switch stays the same switch for all languages (hint «التشغيل والإيقاف لكل اللغات» / "On/off applies to every language"), and a «حذف ترجمة {language}» / "Remove the {language} version" button (DELETE `?locale=`) when `version` is `"language"`, with the confirm «العملاء اللي بيتسوقوا بالـ{language} هيستلموا النسخة الافتراضية» / "Customers shopping in {language} will get the default version".
+  - The editor box's direction: `dir="rtl"` for Arabic, `dir="ltr"` otherwise.
+- **Create order (manual)**: when the store has more than one language, a select «لغة رسائل العميل» / "Customer's message language" with the store's languages, default the store's default; sent as `locale`.
+- **Order page**: next to the customer, a small tag with the order's language when it is not the store's default: «اللغة: English» / "Language: English".

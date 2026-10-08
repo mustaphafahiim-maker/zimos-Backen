@@ -63,6 +63,8 @@ module.exports = (sequelize, DataTypes) => {
       // Where the order ships from (migration 477, modules/stockLocations); null = the default location.
       stockLocationId: { type: DataTypes.UUID, allowNull: true, field: 'stock_location_id' },
       amountRefunded: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'amount_refunded' },
+      // The language the customer's messages go out in (migration 520, orders/orderLocale.js); null = the store's default.
+      locale: { type: DataTypes.STRING(10), allowNull: true },
 
       // Contact/address snapshot — never joined live against Customer for
       // display, since the customer's info can change after the order.

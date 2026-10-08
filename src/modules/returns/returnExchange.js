@@ -119,7 +119,7 @@ async function createReplacementOrder(workspaceId, ret, { shippingAmount = 0 } =
       [EXACT_PRICES]: true,
     },
     req,
-    { transaction, shippingOverride: { amount: Number(shippingAmount) || 0 } }
+    { transaction, shippingOverride: { amount: Number(shippingAmount) || 0 }, locale: order.locale }
   );
   await db.Order.update({ tags: [...new Set([...(created.tags || []), 'exchange'])] }, { where: { id: created.id }, hooks: false, transaction });
   return created;

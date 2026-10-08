@@ -49,7 +49,8 @@ const send = asyncHandler(async (req, res) => {
   if (refused) throw new AppError('MARKETING_NOT_ALLOWED', `Not sent: ${refused}`, 422);
 
   const name = req.body.template || DEFAULT_TEMPLATE;
-  const language = req.body.language || 'ar';
+  // The shopper's language when the store has the template approved in it (item 383).
+  const language = req.body.language || (await require('../whatsapp/templateLanguage').languageFor(workspaceId, name, session.locale, 'ar'));
   const synced = await db.WhatsappTemplate.findOne({ where: { workspaceId, name, language }, attributes: ['paramsCount'] });
   const count = synced ? synced.paramsCount : 3;
   const params = PARAM_ORDER.slice(0, count).map((key) => String((subject && subject.vars[key]) || '—'));

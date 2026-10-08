@@ -112,6 +112,13 @@ function ipKeyOf(req) {
  * errors the shopper sees. A phone blocked from codes goes through the same
  * checks and gets a stand-in row instead of a code, so nothing tells it apart.
  */
+/** The code's language: the shopper's (X-Store-Locale, when the store offers it) if Arabic or English, else as before (item 383). */
+function codeLocale(workspace, req) {
+  const shopper = req ? require('../orders/orderLocale').fromRequest(workspace, req) : null;
+  if (shopper === 'ar' || shopper === 'en') return shopper;
+  return String(workspace.defaultLocale || '').startsWith('ar') ? 'ar' : 'en';
+}
+
 async function sendCode(workspace, rawPhone, { strict = false, req = null } = {}) {
   const phone = normalizePhone(rawPhone);
   if (!phone) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
@@ -150,7 +157,8 @@ async function sendCode(workspace, rawPhone, { strict = false, req = null } = {}
   const message = {
     recipient: phone,
     template: 'otp_checkout',
-    data: { code, purpose: PURPOSE, minutes: 5, locale: String(workspace.defaultLocale || '').startsWith('ar') ? 'ar' : 'en' },
+    // In the shopper's language (X-Store-Locale, item 383) when the store offers it, else the store's.
+    data: { code, purpose: PURPOSE, minutes: 5, locale: codeLocale(workspace, req) },
     workspaceId: workspace.id,
   };
   // WhatsApp goes through the authentication template; SMS is the fallback when it cannot be sent.

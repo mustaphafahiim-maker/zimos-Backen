@@ -69,7 +69,12 @@ const RUNNERS = {
       to: subject.phone,
       // Lets the customer's quick-reply to this message find its order.
       orderId: subject.kind === 'order' ? subject.order.id : null,
-      template: { name: step.template, language: step.language || 'ar', params: (step.params || []).map((p) => render(p, subject.vars)) },
+      // In the customer's language when the store has the template approved in it (item 383).
+      template: {
+        name: step.template,
+        language: await require('../whatsapp/templateLanguage').languageFor(workspaceId, step.template, require('../whatsapp/templateLanguage').localeOfSubject(subject), step.language || 'ar'),
+        params: (step.params || []).map((p) => render(p, subject.vars)),
+      },
     });
     return `whatsapp_template ${step.template}`;
   },

@@ -30,8 +30,9 @@ router.use(require('./orderEmailSender').router);
 router.use(require('../emailDomains/sendingDomain').router);
 
 // ?funnelId= or ?websiteId=: that funnel's or website's own versions (item 175); none = the store's.
-const scopeQuery = Joi.object({ funnelId: Joi.string().uuid(), websiteId: Joi.string().uuid() }).oxor('funnelId', 'websiteId');
-const scopeOf = (req) => ({ funnelId: req.query.funnelId, websiteId: req.query.websiteId });
+// ?locale=: the version in one of the store's languages (item 383); none = the default version.
+const scopeQuery = Joi.object({ funnelId: Joi.string().uuid(), websiteId: Joi.string().uuid(), locale: Joi.string().trim().lowercase().pattern(/^[a-z]{2}$/) }).oxor('funnelId', 'websiteId');
+const scopeOf = (req) => ({ funnelId: req.query.funnelId, websiteId: req.query.websiteId, locale: req.query.locale });
 
 router.get('/', validate({ params: Joi.object(ws), query: scopeQuery }), asyncHandler(async (req, res) => res.json(await service.list(wid(req), scopeOf(req)))));
 

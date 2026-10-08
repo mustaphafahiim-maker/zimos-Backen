@@ -127,6 +127,8 @@ module.exports = {
       notes: Joi.string().max(2000).allow('').optional(),
       // Staff may set the shipping themselves (minor units); omitted, it is calculated.
       shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
+      // The language the customer's messages go out in: one the store offers (item 383); omitted = the store's default.
+      locale: Joi.string().trim().lowercase().pattern(/^[a-z]{2}$/).optional(),
     }),
   },
   // POST /manual/preview — the same body, priced and not saved; the customer may still be blank.
@@ -162,6 +164,7 @@ module.exports = {
       paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).default('cod'),
       discountCode: Joi.string().max(100).optional(),
       shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
+      locale: Joi.string().trim().lowercase().pattern(/^[a-z]{2}$/).optional(),
     }),
   },
   manualCustomer: {

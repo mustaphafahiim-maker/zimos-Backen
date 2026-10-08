@@ -218,7 +218,8 @@ staff.post('/orders/:orderId/ready', requirePermission(PERMISSIONS.ORDERS_MANAGE
   if (email) {
     try {
       const workspace = await db.Workspace.findByPk(p.workspaceId, { attributes: ['id', 'name', 'defaultLocale'] });
-      const locale = workspace.defaultLocale === 'en' ? 'en' : 'ar';
+      // The order's language (item 383), else the store's.
+      const locale = require('../orders/orderLocale').textLang(p.order.locale, workspace);
       const loc = p.locationSnapshot || {};
       await require('../notifications/notify').email({
         recipient: email,

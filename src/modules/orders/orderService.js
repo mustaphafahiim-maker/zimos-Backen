@@ -272,6 +272,8 @@ async function createOrder(
     // Last check inside the transaction, once nothing else refused the order; a throw rolls it back
     // (the storefront COD deposit, checkout/checkoutController.js, item 362 review).
     beforeCommit = null,
+    // A follow-on order's language (an exchange, a renewal, a converted lost order) — orderLocale.js, item 383.
+    locale: inheritedLocale = null,
   } = {}
 ) {
   // A picked place names the address it prices (places/placePricing.alignAddress, item 314).
@@ -590,6 +592,8 @@ async function createOrder(
         customerId: customer.id,
         // The store's next short number (#1001…), taken under this transaction (orderNumbers.js, item 381).
         orderNumber: await require('./orderNumbers').next(workspaceId, transaction),
+        // The language the customer's messages go out in (item 383).
+        locale: await require('./orderLocale').forNewOrder(workspaceId, payload, req, { inherited: inheritedLocale, transaction }),
         paymentMethod,
         currency: pricedLines[0].currency,
         subtotalAmount: subtotal,

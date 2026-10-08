@@ -88,10 +88,10 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
   const [row] = await db.sequelize.query(
     `INSERT INTO checkout_sessions
        (id, workspace_id, visitor_id, contact_fields, phone_normalized, items, subtotal_amount, currency, source,
-        ip_address, ip_country, attribution, last_activity_at, created_at, updated_at)
+        ip_address, ip_country, attribution, locale, last_activity_at, created_at, updated_at)
      VALUES
        ($id, $workspaceId, $visitorId, $contactFields::jsonb, $phoneNormalized, $items::jsonb, $subtotal, $currency,
-        $source, $ipAddress, $ipCountry, $attribution::jsonb, now(), now(), now())
+        $source, $ipAddress, $ipCountry, $attribution::jsonb, $locale, now(), now(), now())
      ON CONFLICT (workspace_id, visitor_id) WHERE status = 'in_progress' AND visitor_id IS NOT NULL
      DO UPDATE SET
        -- A save without a number (a name typed while the number is being edited)
@@ -111,6 +111,8 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
        -- The funnel / website describe this save's checkout only (item 322): a visitor who moved from a
        -- funnel to the store's own checkout is no longer counted under that funnel.
        attribution = (COALESCE(checkout_sessions.attribution, '{}'::jsonb) - 'funnelId' - 'websiteId') || EXCLUDED.attribution,
+       -- The shopper's language (item 383): the latest save's.
+       locale = COALESCE(EXCLUDED.locale, checkout_sessions.locale),
        last_activity_at = now(),
        updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`,
@@ -128,6 +130,7 @@ async function capture(workspaceId, { contact, items, source = 'store', visitorI
         source,
         ipAddress: visitor.ip || null,
         ipCountry: visitor.ipCountry || null,
+        locale: visitor.locale || null,
         attribution: JSON.stringify({ ...cleanAttribution(attribution), ...(await placeOf(workspaceId, { funnelId, websiteId })) }),
       },
       type: QueryTypes.SELECT,

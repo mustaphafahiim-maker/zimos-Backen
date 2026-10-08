@@ -251,7 +251,8 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
       webhookUrl: ctx.account.webhookUrl,
       expiresInSeconds: Math.max(60, (new Date(expiresAt).getTime() - Date.now()) / 1000),
       storeName: workspace ? workspace.name : null,
-      locale: workspace ? workspace.defaultLocale : null,
+      // The gateway's page in the shopper's language (orders.locale, item 383), else the store's.
+      locale: order.locale || (workspace ? workspace.defaultLocale : null),
       // Keep the card for later charges (savedMethods/README.md, item 380).
       saveCard: await require('./savedMethods/consentedSave').wantsSave(order),
     });
