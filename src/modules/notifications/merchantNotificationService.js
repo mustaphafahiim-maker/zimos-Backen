@@ -64,6 +64,8 @@ const TYPES = Object.freeze({
   'message.undelivered': { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
   // A WhatsApp template submitted from ZIMOS was rejected, or approved and its automation switched on (whatsapp/templateSubmission.js, item 391).
   'whatsapp.template': { permission: PERMISSIONS.AUTOMATIONS_MANAGE, defaults: { inApp: true, email: true } },
+  // A subscription renewal held by the store's side — gateway keys, an outage, sold out, a suspended store (subscriptions/renewalHolds.js, item 394).
+  'subscription.renewal_paused': { permission: PERMISSIONS.ORDERS_MANAGE, defaults: { inApp: true, email: true } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 

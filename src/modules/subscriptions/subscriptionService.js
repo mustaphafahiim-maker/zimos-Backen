@@ -9,6 +9,7 @@ const outbox = require('../../core/outbox/outbox');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const holds = require('./renewalHolds');
 
 /**
  * Subscriptions and installments (SPEC §18.1).
@@ -22,8 +23,10 @@ const { recordAudit } = require('../audit/auditService');
  * (payments/savedMethods): when the first order is paid, the card is saved
  * and a subscription row is created. Each renewal is a new order linked to
  * the first, charged to the saved card. A failed charge is retried after 1, 3
- * and 7 days; then the subscription is cancelled. A COD order never starts
- * one.
+ * and 7 days; then the subscription is cancelled. A failure on the store's
+ * side (gateway keys, an outage, sold out, a suspended store) is held instead,
+ * never counted against the shopper (renewalHolds.js). A COD order never
+ * starts one.
  *
  * A free trial (trialDays on a subscription plan, trialCheckout.js): the first
  * order charges nothing for the product, and the subscription is 'trialing'
@@ -125,6 +128,8 @@ function view(s, extra = {}) {
     installmentsRemaining: s.installmentsRemaining,
     failedAttempts: s.failedAttempts,
     lastFailureReason: s.lastFailureReason,
+    // Held by the store's side, not the shopper's (renewalHolds.js, item 394): { cause, reason, since, lapsesAt, … } or null.
+    renewalHold: holds.viewOf(s.renewalHold),
     cancelledAt: s.cancelledAt,
     // The customer's portal link is /subscriptions/<token> on the storefront.
     portalToken: s.portalToken,
@@ -229,7 +234,7 @@ async function failRenewal(sub, reason) {
   const attempt = sub.failedAttempts + 1;
   const retryDays = RETRY_DAYS[attempt - 1];
   if (retryDays === undefined) {
-    await sub.update({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'payment_failed', nextRenewalAt: null, failedAttempts: attempt, lastFailureReason: reason });
+    await sub.update({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'payment_failed', nextRenewalAt: null, failedAttempts: attempt, lastFailureReason: reason, renewalHold: null });
     await outbox.record(null, 'subscription.cancelled', { workspaceId: sub.workspaceId, subscriptionId: sub.id, customerId: sub.customerId, reason: 'payment_failed' });
     return 'cancelled';
   }
@@ -238,59 +243,88 @@ async function failRenewal(sub, reason) {
     failedAttempts: attempt,
     lastFailureReason: String(reason || 'The charge failed').slice(0, 300),
     nextRenewalAt: new Date(Date.now() + retryDays * 24 * 3600 * 1000),
+    renewalHold: null,
   });
   // Automations send the customer the message with their portal link.
   await outbox.record(null, 'subscription.renewal_failed', { workspaceId: sub.workspaceId, subscriptionId: sub.id, customerId: sub.customerId, attempt });
   return 'past_due';
 }
 
-/** One renewal: a new linked order, charged to the saved card. */
+/**
+ * One renewal: a new linked order, charged to the saved card. A failure that
+ * is the store's or ours, not the shopper's, holds the renewal instead
+ * (renewalHolds.js, item 394): no attempt, no message, the same order and
+ * charge tried again later.
+ */
 async function renewOne(subscriptionId) {
   const sub = await db.CustomerSubscription.findByPk(subscriptionId);
   if (!sub || !LIVE.includes(sub.status) || !sub.nextRenewalAt || new Date(sub.nextRenewalAt) > new Date()) return 'skipped';
-  if (!sub.savedPaymentMethodId || !sub.variantId) return failRenewal(sub, sub.variantId ? 'No saved card' : 'The product is no longer sold');
+  if (!sub.savedPaymentMethodId) return failRenewal(sub, 'No saved card');
 
   /* eslint-disable global-require */
   const orderService = require('../orders/orderService');
   const savedMethods = require('../payments/savedMethods/savedMethodService');
   /* eslint-enable global-require */
-  const first = await db.Order.findOne({ where: { id: sub.orderId, workspaceId: sub.workspaceId } });
-  if (!first) return failRenewal(sub, 'The first order no longer exists');
+  // The renewal order kept by an earlier held try: charged again rather than a new one, so its charge keeps its key.
+  const held = sub.renewalHold && sub.renewalHold.orderId && !sub.renewalHold.lapsedAt ? sub.renewalHold : null;
+  let order = held ? await db.Order.findOne({ where: { id: held.orderId, workspaceId: sub.workspaceId } }) : null;
+  if (order && order.cancelledAt) order = null;
+  // While the gateway's answer is unknown, the same card: another card would be another charge.
+  const cardId = order && held.unknown && held.savedMethodId ? held.savedMethodId : sub.savedPaymentMethodId;
+  const keep = order ? { orderId: order.id, savedMethodId: held.savedMethodId || cardId } : {};
 
-  let order;
-  try {
-    const created = await orderService.createOrder(
-      sub.workspaceId,
-      {
-        items: [{ variantId: sub.variantId, quantity: sub.quantity }],
-        contact: first.contactSnapshot,
-        shippingAddress: first.shippingAddressSnapshot || undefined,
-        paymentMethod: first.paymentMethod,
-        notes: `Renewal of ${first.orderNumber}`,
-      },
-      SYSTEM_REQ,
-      { skipFraudRules: true, locale: first.locale }
-    );
-    order = created.order || created;
-    await db.Order.update({ linkedFromOrderId: first.id }, { where: { id: order.id } });
-  } catch (err) {
-    // The store's prepaid Zimos balance can't pay the order fee (billing/walletService):
-    // the merchant's balance, not the customer's card. Tried again tomorrow, no failure counted, no message.
-    if (err.code === 'WALLET_BALANCE_TOO_LOW') {
-      await sub.update({ nextRenewalAt: new Date(Date.now() + 24 * 3600 * 1000), lastFailureReason: 'Waiting for the store to top up its Zimos balance' });
-      return 'deferred';
+  const blocked = await holds.storeBlock(sub.workspaceId);
+  if (blocked) return holds.hold(sub, blocked, keep);
+  if (!sub.variantId) return holds.hold(sub, { cause: 'product_unavailable', unknown: false }, keep);
+
+  if (!order) {
+    const first = await db.Order.findOne({ where: { id: sub.orderId, workspaceId: sub.workspaceId } });
+    if (!first) return failRenewal(sub, 'The first order no longer exists');
+    try {
+      const created = await orderService.createOrder(
+        sub.workspaceId,
+        {
+          items: [{ variantId: sub.variantId, quantity: sub.quantity }],
+          contact: first.contactSnapshot,
+          shippingAddress: first.shippingAddressSnapshot || undefined,
+          paymentMethod: first.paymentMethod,
+          notes: `Renewal of ${first.orderNumber}`,
+        },
+        SYSTEM_REQ,
+        { skipFraudRules: true, locale: first.locale }
+      );
+      order = created.order || created;
+      await db.Order.update({ linkedFromOrderId: first.id }, { where: { id: order.id } });
+    } catch (err) {
+      // The store's Zimos balance (billing/walletService), a sold-out or archived product, a plan limit:
+      // the store's side, not the customer's card — held, not counted, no message.
+      const merchantSide = holds.classify(err, 'order');
+      if (merchantSide) return holds.hold(sub, merchantSide, { err });
+      return failRenewal(sub, `The renewal order could not be created: ${err.message}`);
     }
-    return failRenewal(sub, `The renewal order could not be created: ${err.message}`);
   }
 
-  try {
-    await savedMethods.chargeOrder(sub.workspaceId, sub.savedPaymentMethodId, order.id, SYSTEM_REQ);
-  } catch (err) {
-    // The order was never paid: cancel it so its stock is released.
-    await orderService.cancelOrder(sub.workspaceId, order.id, { reason: 'Subscription renewal payment failed' }, SYSTEM_REQ).catch((cancelErr) =>
-      logger.error(`[subscriptions] could not cancel unpaid renewal order ${order.id}: ${cancelErr.message}`)
-    );
-    return failRenewal(sub, err.message);
+  const alreadyPaid = Number(order.amountPaid) >= Number(order.totalAmount) && Number(order.totalAmount) > 0;
+  if (!alreadyPaid) {
+    try {
+      await savedMethods.chargeOrder(sub.workspaceId, cardId, order.id, SYSTEM_REQ);
+    } catch (err) {
+      const merchantSide = holds.classify(err, 'charge');
+      if (merchantSide) {
+        // Keys read before the charge (gatewayRuntime.contextFor) are not alerted by chargeOrder.
+        if (err.code === 'GATEWAY_CREDENTIALS_UNREADABLE') {
+          const saved = await db.PaymentMethodSaved.findByPk(cardId, { attributes: ['providerCode'] });
+          if (saved) require('../notifications/integrationAlerts').gateway(sub.workspaceId, saved.providerCode, err);
+        }
+        // The order stays as it is, unpaid, for the next try.
+        return holds.hold(sub, merchantSide, { err, orderId: order.id, savedMethodId: cardId });
+      }
+      // The order was never paid: cancel it so its stock is released.
+      await orderService.cancelOrder(sub.workspaceId, order.id, { reason: 'Subscription renewal payment failed' }, SYSTEM_REQ).catch((cancelErr) =>
+        logger.error(`[subscriptions] could not cancel unpaid renewal order ${order.id}: ${cancelErr.message}`)
+      );
+      return failRenewal(sub, err.message);
+    }
   }
 
   const periodStart = sub.currentPeriodEnd;
@@ -307,6 +341,7 @@ async function renewOne(subscriptionId) {
     nextRenewalAt: finished ? null : periodEnd,
     failedAttempts: 0,
     lastFailureReason: null,
+    renewalHold: null,
   });
   await outbox.record(null, 'subscription.renewed', { workspaceId: sub.workspaceId, subscriptionId: sub.id, orderId: order.id, customerId: sub.customerId });
   return finished ? 'completed' : 'renewed';
@@ -357,6 +392,7 @@ async function overview(workspaceId) {
             (COUNT(*) FILTER (WHERE status = 'paused'))::int AS paused,
             (COUNT(*) FILTER (WHERE status = 'cancelled'))::int AS cancelled,
             (COUNT(*) FILTER (WHERE status = 'completed'))::int AS completed,
+            (COUNT(*) FILTER (WHERE renewal_hold IS NOT NULL AND status IN ('trialing', 'active', 'past_due')))::int AS on_hold,
             COUNT(*)::int AS total,
             (COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW())))::int AS new_this_month,
             COALESCE(SUM(amount) FILTER (WHERE status = 'active'), 0) AS active_amount
@@ -387,6 +423,8 @@ async function overview(workspaceId) {
     active: counts.active,
     pastDue: counts.past_due,
     paused: counts.paused,
+    // Renewals held by the store's side (renewalHolds.js): not charged, the customer not told.
+    onHold: counts.on_hold,
     cancelled: counts.cancelled,
     completed: counts.completed,
     newThisMonth: counts.new_this_month,

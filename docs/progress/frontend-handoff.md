@@ -5005,3 +5005,21 @@ The Google Sheets page (`/apps/google-sheets`, API `/api/v1/workspaces/:workspac
 - "Use an existing spreadsheet" now takes a pasted link (`https://docs.google.com/spreadsheets/d/<id>/…`) or the id in `spreadsheetId`; hint: «ZIMOS يقدر يستخدم الشيتات اللي عملها بنفسه بس» / "ZIMOS can only reuse spreadsheets it created". Errors: 404 `SHEETS_NOT_FOUND` (its `message`), 403 `SHEETS_PERMISSION_DENIED` «الحساب ده مايقدرش يعدّل الشيت ده» / "This account can't edit that spreadsheet".
 - `spreadsheetUrl` is now a real Google Sheets link: show «افتح في Google Sheets» / "Open in Google Sheets" (new tab).
 - `GET /connections/:id/rows` works with Google too (preview). It may answer 429 `SHEETS_UNREACHABLE` «Google طالب نستنى شوية — جرّب بعد دقيقة» / "Google asked us to slow down — try again in a minute", or 403 `SHEETS_ACCESS_REVOKED` (show the reconnect banner).
+
+## 394. Subscription renewals held by the store's side — UI: pending (small)
+
+A renewal that failed for the store's reason (gateway keys refused or not connected, gateway not answering, product sold out / archived, store suspended or out of balance, plan limit) is now *held*: the customer is not told, no attempt counts, it is retried every 6 hours and lapses after 14 days. API `/api/v1/workspaces/:workspaceId/subscriptions`.
+
+### Subscriptions list
+- Each subscription has `renewalHold`: `null`, or `{ cause, reason, since, tries, lapsesAt, orderId, outcomeUnknown }`. Show a warning badge «التجديد متوقف من جهة المتجر» / "Renewal on hold (store side)" beside the status, with the cause in words and «ينتهي يوم {lapsesAt}» / "Lapses on {lapsesAt}":
+  - `gateway_connection` «بوابة الدفع رفضت المفاتيح أو غير مربوطة» / "The payment gateway refused the keys or isn't connected" → link to Payments
+  - `gateway_unavailable` «بوابة الدفع لم ترد» / "The payment gateway didn't answer"; with `outcomeUnknown: true` add «في انتظار تأكيد البوابة للطلب» / "Waiting for the gateway to confirm the order" linking `orderId`
+  - `out_of_stock` «المنتج نفد» / "Out of stock" → product; `product_unavailable` «المنتج غير معروض للبيع» / "Product not for sale" → product
+  - `store_unavailable` «المتجر موقوف أو الاشتراك منتهٍ» / "Store suspended or plan lapsed" → Billing; `plan_limit` «تم بلوغ حد الباقة» / "Plan limit reached"; `wallet` «رصيد زيموس لا يكفي» / "Zimos balance too low" → Billing; `platform_error` «خطأ مؤقت لدينا» / "A temporary error on our side"
+- A subscription cancelled with `cancelReason: "renewal_on_hold"` reads «انتهى لأن التجديد ظل متوقفًا» / "Lapsed: its renewal stayed on hold".
+
+### Overview
+- New `onHold` count: a tile «تجديدات متوقفة» / "Renewals on hold" (warning colour when > 0) that filters the list to subscriptions with a `renewalHold`.
+
+### Notifications
+- New bell type `subscription.renewal_paused` (orders.manage; in-app and email on by default) with `data.event` `held` | `will_lapse` | `lapsed`; label in the preferences screen «تجديدات الاشتراكات المتوقفة» / "Subscription renewals on hold". The title/body come localized; the link goes to the page that fixes the cause.
