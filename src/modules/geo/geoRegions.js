@@ -4,8 +4,10 @@ const db = require('../../db/models');
 const { normalizeAll } = require('../shipping/carrierAddressMatching');
 
 /**
- * The platform's place list (geo_regions, migration 403): Egypt's
- * governorates with North Coast, Saudi Arabia's regions, and their cities.
+ * The platform's place list (geo_regions, migrations 403 and 532): Egypt's
+ * governorates with North Coast, Saudi Arabia's regions, the divisions of the
+ * other countries a store sells in (regions, wilayas, emirates, governorates,
+ * districts), and their cities.
  *
  * resolve() reads an order's free-text province and city back to places of
  * the list — the key couriers' area lists are mapped by
@@ -30,7 +32,32 @@ const ALIASES = {
   'cairo.rehab': ['الرحاب'],
   'cairo.shorouk': ['الشروق'],
   'cairo.salam-city': ['السلام'],
+  // The other countries (migration 532): English and French forms of the same place.
+  'ma-01.tanger': ['Tanger'],
+  'ma-03.fes': ['Fez'],
+  'ma-07.marrakech': ['Marrakesh'],
+  'ma-06.casablanca': ['Casa'],
+  'dz-16': ['Alger', 'الجزائر العاصمة'],
+  'dz-16.algiers': ['Alger', 'الجزائر العاصمة'],
+  'kw-ku': ['Al Asimah'],
+  'jo-am': ['العاصمة'],
+  'iq-ni': ['Ninawa'],
+  'iq-ar': ['Arbil', 'Hewler', 'هولير'],
+  'om-zu': ['Zufar'],
+  'ly-tb': ['Tarabulus'],
 };
+
+// What a division's name is written with around it: "ولاية وهران", "Emirate of
+// Dubai", "Irbid Governorate" (folded; "محافظة" and "Governorate" tidy() drops).
+const DIVISION_WORDS = /^(ولايه|اماره|جهه|منطقه|بلديه|emirate|wilaya|wilayah|province|region|municipality|district)\s+(?:de\s+|d\s+)?|\s+(emirate|wilaya|wilayah|province|region|municipality|district)$/g;
+// Folding drops a leading "ال" ("الشارقة" → "شارقه"), so it goes once the word before it has.
+const bare = (folded) => {
+  const out = folded.replace(DIVISION_WORDS, '').trim();
+  return out !== folded && out.startsWith('ال') ? out.slice(2) : out;
+};
+
+// "Fès", "M'Sila" are also written "Fes", "MSila".
+const plain = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').replace(/['’‘ʼ]/g, '');
 
 let loading = null;
 
@@ -39,7 +66,7 @@ async function build(transaction) {
   const regions = await db.GeoRegion.findAll({ order: [['country', 'ASC'], ['level', 'ASC'], ['sortOrder', 'ASC']], raw: true, transaction });
   const strings = [];
   const plans = regions.map((r) => {
-    const spellings = [r.code, r.nameAr, r.nameEn, ...(ALIASES[r.code] || [])];
+    const spellings = [r.code, r.nameAr, r.nameEn, plain(r.nameEn), ...(ALIASES[r.code] || [])];
     // "منطقة الرياض" / "Riyadh Region" are also written "الرياض" / "Riyadh".
     if (r.level === 'governorate') {
       spellings.push(r.nameAr.replace(/^منطقة\s+/, ''), r.nameEn.replace(/\s+(Region|Province)$/, ''));
@@ -56,7 +83,8 @@ async function build(transaction) {
   const byCode = new Map();
   const children = new Map();
   const entries = plans.map(({ region, from, to }) => {
-    const entry = { region, names: [...new Set(folded.slice(from, to).filter(Boolean))] };
+    const own = folded.slice(from, to).filter(Boolean);
+    const entry = { region, names: [...new Set(region.level === 'governorate' ? [...own, ...own.map(bare)] : own)].filter(Boolean) };
     byCode.set(region.code, entry);
     if (region.parentCode) {
       if (!children.has(region.parentCode)) children.set(region.parentCode, []);
@@ -93,6 +121,12 @@ async function list({ country = 'EG', parentCode = null, level = null } = {}) {
     .map(view);
 }
 
+/** The countries the list has places for. */
+async function countries() {
+  const { entries } = await index();
+  return [...new Set(entries.map((e) => e.region.country))];
+}
+
 /** The one entry among `entries` carrying the name, else null. */
 function only(entries, names) {
   const hits = entries.filter((e) => names.some((n) => n && e.names.includes(n)));
@@ -116,11 +150,12 @@ async function resolve(address, { transaction } = {}) {
   const a = address || {};
   const { entries, byCode, children } = await index({ transaction });
   const country = a.country && /^[A-Za-z]{2}$/.test(a.country) ? String(a.country).toUpperCase() : null;
-  const provinceRaw = variants(a.province);
-  const cityRaw = variants(a.city);
+  const provinceRaw = variants(a.province).flatMap((v) => [v, plain(v)]);
+  const cityRaw = variants(a.city).flatMap((v) => [v, plain(v)]);
   const folded = await normalizeAll([...provinceRaw, ...cityRaw], { transaction });
-  const provinceNames = folded.slice(0, provinceRaw.length).filter(Boolean);
-  const cityNames = folded.slice(provinceRaw.length).filter(Boolean);
+  const provinceFolded = folded.slice(0, provinceRaw.length).filter(Boolean);
+  const provinceNames = [...new Set([...provinceFolded, ...provinceFolded.map(bare)])].filter(Boolean);
+  const cityNames = [...new Set(folded.slice(provinceRaw.length).filter(Boolean))];
 
   const inCountry = (e) => !country || e.region.country === country;
   const tops = entries.filter((e) => e.region.level === 'governorate' && inCountry(e));
@@ -139,8 +174,17 @@ async function resolve(address, { transaction } = {}) {
       if (city) governorate = byCode.get(city.region.parentCode) || null;
     }
   }
+  if (!governorate && provinceNames.length) {
+    // The province field names a city ("Casablanca" for Casablanca-Settat,
+    // "Tangier"): its division, and the city typed under it, else that city.
+    const named = only(entries.filter((e) => e.region.level === 'city' && inCountry(e)), provinceNames);
+    if (named) {
+      governorate = byCode.get(named.region.parentCode) || null;
+      city = (governorate && only(children.get(governorate.region.code) || [], cityNames)) || named;
+    }
+  }
   return { governorate: governorate ? view(governorate.region) : null, city: city ? view(city.region) : null };
 }
 
 
-module.exports = { list, resolve };
+module.exports = { list, resolve, countries };

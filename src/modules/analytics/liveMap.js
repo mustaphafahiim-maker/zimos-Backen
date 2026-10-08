@@ -19,8 +19,8 @@ const { countsAsSaleSql } = require('../orders/orderStage');
  *   orders     orders placed in the window that count as sales (the
  *              shipping address's country and governorate).
  *
- * A place is { country, region, city } as the source names it; for Egypt's
- * governorates and Saudi regions it also carries the platform's place code
+ * A place is { country, region, city } as the source names it; for a
+ * division of the platform's place list it also carries its place code
  * (geo_regions), so the dashboard can put a dot on it. Countries are ISO
  * codes; the dashboard colours its own world map by them.
  */
@@ -29,7 +29,7 @@ const select = (sql, replacements) => db.sequelize.query(sql, { replacements, ty
 const MAX_PLACES = 300;
 
 async function codeFor(country, region, cache) {
-  if (!country || !region || !['EG', 'SA'].includes(country)) return null;
+  if (!country || !region || !(await require('../geo/geoRegions').countries()).includes(country)) return null;
   const key = `${country}|${region}`;
   if (!cache.has(key)) {
     cache.set(key, require('../shipping/shippingPlaces').placeCode(country, region).catch(() => null));
