@@ -99,7 +99,14 @@ const changePlan = asyncHandler(async (req, res) => {
   res.json(await merchantPlans.changePlan(req.tenant.workspaceId, req.body, req));
 });
 
+// POST /api/v1/workspaces/:workspaceId/billing/plan-move — pay per order → a plan, switched when its charge is paid.
+const requestPlanMove = asyncHandler(async (req, res) => {
+  const result = await merchantPlans.requestPlanMove(req.tenant.workspaceId, req.body, req);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
 module.exports = {
+  requestPlanMove,
   listPlans,
   previewCode,
   listInvoices,

@@ -207,7 +207,10 @@ async function startPayment(workspaceId, { lang, method } = {}, req) {
     return { attempt: created, reused: false };
   });
   if (reused) return { payment: serializeForMerchant(attempt), reused: true };
-  return { payment: await openCheckout(adapter, attempt, { plan: subscription.plan, billingCycle: subscription.billingCycle, lang }, req), reused: false };
+  // A pay-per-order store's move is paid for the plan it moves to.
+  const plan = invoice.targetPlanId ? await db.Plan.findByPk(invoice.targetPlanId) : subscription.plan;
+  const billingCycle = invoice.targetBillingCycle || subscription.billingCycle;
+  return { payment: await openCheckout(adapter, attempt, { plan, billingCycle, lang }, req), reused: false };
 }
 
 /** The hosted checkout for a new attempt; an attempt with no checkout is marked error (502). */

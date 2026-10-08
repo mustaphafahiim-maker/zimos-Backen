@@ -44,6 +44,10 @@ module.exports = (sequelize, DataTypes) => {
       referralCodeId: { type: DataTypes.UUID, allowNull: true, field: 'referral_code_id' },
       currency: { type: DataTypes.STRING(3), allowNull: false },
       status: { type: DataTypes.ENUM('pending', 'paid', 'failed'), allowNull: false, defaultValue: 'pending' },
+      // A pay-per-order store's move (migration 222): the plan and cycle it
+      // switches to when this charge is paid. null on every other charge.
+      targetPlanId: { type: DataTypes.UUID, allowNull: true, field: 'target_plan_id' },
+      targetBillingCycle: { type: DataTypes.STRING(10), allowNull: true, field: 'target_billing_cycle' },
       periodStart: { type: DataTypes.DATE, allowNull: false, field: 'period_start' },
       periodEnd: { type: DataTypes.DATE, allowNull: false, field: 'period_end' },
       paidAt: { type: DataTypes.DATE, allowNull: true, field: 'paid_at' },

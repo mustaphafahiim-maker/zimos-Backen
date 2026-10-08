@@ -54,6 +54,13 @@ module.exports = {
       billingCycle: Joi.string().valid(...BILLING_CYCLES).optional(),
     }),
   },
+  // A pay-per-order store moving to a plan on offer (merchantPlansService.requestPlanMove).
+  requestPlanMove: {
+    body: Joi.object({
+      planId: Joi.string().guid().required(),
+      billingCycle: Joi.string().valid(...BILLING_CYCLES).default('monthly'),
+    }),
+  },
 
   // A top-up transfer, multipart: the amount the merchant sent, minor units
   // (the limits are walletService's), the method, the sender and the `file`.

@@ -31,6 +31,7 @@ router.get('/plans', controller.listPlans);
 router.post('/code-preview', codePreviewLimiter, validate(schemas.previewCode), controller.previewCode);
 router.get('/invoices', validate(schemas.listInvoices), controller.listInvoices);
 router.post('/plan', validate(schemas.changePlan), controller.changePlan);
+router.post('/plan-move', validate(schemas.requestPlanMove), controller.requestPlanMove);
 // Paying the charge online (billing/onlineBillingService), when
 // ONLINE_BILLING_ENABLED is on and the plan is priced in EGP.
 router.post('/payments', validate(schemas.startOnlinePayment), controller.startOnlinePayment);

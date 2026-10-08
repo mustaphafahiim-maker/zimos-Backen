@@ -1,11 +1,12 @@
 'use strict';
 
 const db = require('../../db/models');
-const { ConflictError, NotFoundError } = require('../../core/errors/AppError');
+const { AppError, ConflictError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const access = require('../workspaces/workspaceAccessService');
 const referralCodes = require('../referrals/referralCodeService');
 const goLive = require('./goLiveService');
+const charges = require('./subscriptionChargeService');
 const publicPlans = require('./publicPlansService');
 const wallet = require('./walletService');
 const { planPrice, BILLING_CYCLES } = require('./planPricing');
@@ -87,6 +88,55 @@ function planChangeMode(subscription) {
   return subscription.status === 'draft' || subscription.status === 'trialing' ? 'immediate' : 'support';
 }
 
+/** The store's plan when it is the pay-per-order plan (a fee per order), else null. */
+async function payPerOrderPlanOf(subscription, transaction) {
+  if (!subscription.planId) return null;
+  const plan = await db.Plan.findByPk(subscription.planId, { transaction });
+  return plan && Number(plan.perOrderFeeAmount) > 0 ? plan : null;
+}
+
+/** What a pending move's charge says: where to, for how much. */
+function serializeMove(invoice, plans) {
+  if (!invoice || !invoice.targetPlanId) return null;
+  const plan = plans.find((p) => p.id === invoice.targetPlanId);
+  return {
+    invoiceId: invoice.id,
+    planId: invoice.targetPlanId,
+    planName: plan ? plan.name : null,
+    billingCycle: invoice.targetBillingCycle,
+    amountDue: Number(invoice.amount),
+    currency: invoice.currency,
+    createdAt: invoice.createdAt,
+  };
+}
+
+/**
+ * The move off pay per order, for the Plans tab: offered to a store on that
+ * plan (null otherwise). Its balance and debt (a debt must be cleared first),
+ * and the move waiting for its payment, if any. A move never starts a trial.
+ */
+async function moveFor(workspaceId, subscription, plans) {
+  if (!(await payPerOrderPlanOf(subscription))) return null;
+  const [walletRow, pending] = await Promise.all([
+    db.WorkspaceWallet.findOne({ where: { workspaceId }, attributes: ['cashBalance'] }),
+    db.BillingInvoice.findOne({ where: { subscriptionId: subscription.id, status: 'pending' } }),
+  ]);
+  const balance = walletRow ? Number(walletRow.cashBalance) : 0;
+  const movePlans = pending && pending.targetPlanId && !plans.some((p) => p.id === pending.targetPlanId)
+    ? [...plans, await db.Plan.findByPk(pending.targetPlanId, { attributes: ['id', 'name'] })].filter(Boolean)
+    : plans;
+  return {
+    available: true,
+    trial: false,
+    balance,
+    debt: Math.max(0, -balance),
+    currency: wallet.WALLET_CURRENCY,
+    pending: serializeMove(pending, movePlans),
+    // Another charge is open (not a move): it must be settled first.
+    otherChargeOpen: Boolean(pending && !pending.targetPlanId),
+  };
+}
+
 /** GET /workspaces/:id/billing/plans */
 async function listPlans(workspaceId) {
   const subscription = await loadSubscription(workspaceId);
@@ -114,6 +164,8 @@ async function listPlans(workspaceId) {
     referralCode: code ? referralCodes.serializeCodeForMerchant(code) : null,
     plans: plans.map((plan) => serializePlan(plan, { code: usable, currentPlanId: subscription.planId })),
     payPerOrder: await payPerOrderFor(subscription),
+    // A store on pay per order moving to one of `plans` by itself (requestPlanMove).
+    move: await moveFor(workspaceId, subscription, plans),
   };
 }
 
@@ -152,6 +204,9 @@ function serializeInvoice(invoice) {
     paidAt: invoice.paidAt,
     paymentSource: invoice.paymentSource,
     createdAt: invoice.createdAt,
+    // A pay-per-order store's move: the plan and cycle it switches to when paid.
+    targetPlanId: invoice.targetPlanId || null,
+    targetBillingCycle: invoice.targetBillingCycle || null,
   };
 }
 
@@ -219,4 +274,82 @@ async function changePlan(workspaceId, { planId, billingCycle }, req) {
   return { ...result, plans: await listPlans(workspaceId) };
 }
 
-module.exports = { listPlans, previewCode, listInvoices, changePlan, serializeInvoice, MAX_PAGE_SIZE };
+/**
+ * POST /workspaces/:id/billing/plan-move { planId, billingCycle } — a store
+ * on the pay-per-order plan moves to a plan on offer by itself:
+ *
+ *   - one ordinary charge for that plan and cycle, paid through the usual
+ *     ways (online, a transfer's proof, the console); the plan switches only
+ *     when it is paid (subscriptionChargeService.settlePaid), never before;
+ *   - never a free trial: the account is marked as having had it;
+ *   - refused while the balance is below zero (422 WALLET_DEBT_OUTSTANDING:
+ *     top up first); the balance itself is never touched;
+ *   - the same move asked again while its charge waits gets that charge back
+ *     (`created: false`); any other pending charge refuses it (409
+ *     OPEN_CHARGE_EXISTS).
+ *
+ * Any other store keeps today's rules: a paid subscription changes plan
+ * through support (409 PLAN_CHANGE_NEEDS_SUPPORT); a draft or a trial uses
+ * POST /billing/plan (409 PLAN_MOVE_NOT_AVAILABLE here).
+ */
+async function requestPlanMove(workspaceId, { planId, billingCycle }, req) {
+  const result = await db.sequelize.transaction(async (transaction) => {
+    const subscription = await loadSubscription(workspaceId, transaction, { lock: true });
+    const current = await payPerOrderPlanOf(subscription, transaction);
+    if (!current) {
+      if (planChangeMode(subscription) === 'support') {
+        throw new ConflictError(
+          'Your plan can be changed through Zimos support while a paid subscription runs. Contact support.',
+          'PLAN_CHANGE_NEEDS_SUPPORT'
+        );
+      }
+      throw new ConflictError('Only a store on pay per order moves to a plan this way. Choose the plan instead.', 'PLAN_MOVE_NOT_AVAILABLE');
+    }
+    const plan = await publicPlans.findOfferedPlan(planId, transaction);
+    const cycle = billingCycle && BILLING_CYCLES.includes(billingCycle) ? billingCycle : 'monthly';
+
+    const open = await db.BillingInvoice.findOne({ where: { subscriptionId: subscription.id, status: 'pending' }, transaction });
+    if (open) {
+      if (open.targetPlanId === plan.id && open.targetBillingCycle === cycle) return { invoice: open, created: false };
+      throw new ConflictError('A charge is open. Pay it, or wait for it to be settled, before asking for another plan.', 'OPEN_CHARGE_EXISTS');
+    }
+
+    const walletRow = await db.WorkspaceWallet.findOne({ where: { workspaceId }, attributes: ['cashBalance'], transaction });
+    const balance = walletRow ? Number(walletRow.cashBalance) : 0;
+    if (balance < 0) {
+      throw new AppError(
+        'WALLET_DEBT_OUTSTANDING',
+        'Your Zimos balance is below zero. Top it up to clear what you owe, then move to a monthly plan.',
+        422,
+        { debt: -balance, currency: wallet.WALLET_CURRENCY }
+      );
+    }
+
+    // The pay-per-order plan counts as the account's trial: none on the way out.
+    const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'ownerUserId'], transaction });
+    if (workspace && workspace.ownerUserId) {
+      await goLive.recordTrial(
+        { userId: workspace.ownerUserId, planId: current.id, workspaceId, source: 'pay_per_order', startedAt: new Date() },
+        transaction
+      );
+    }
+
+    const invoice = await charges.createMoveChargeInTransaction(subscription, plan, cycle, { req }, transaction);
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'subscription.plan_move_request',
+      entityType: 'Subscription',
+      entityId: subscription.id,
+      before: { planId: subscription.planId, billingCycle: subscription.billingCycle, status: subscription.status },
+      after: { planId: plan.id, billingCycle: cycle, switchesWhen: 'paid' },
+      metadata: { billingInvoiceId: invoice.id, amount: Number(invoice.amount), currency: invoice.currency, balance },
+      req,
+      transaction,
+    });
+    return { invoice, created: true };
+  });
+  return { created: result.created, invoice: serializeInvoice(result.invoice), plans: await listPlans(workspaceId) };
+}
+
+module.exports = { listPlans, previewCode, listInvoices, changePlan, requestPlanMove, serializeInvoice, MAX_PAGE_SIZE };
