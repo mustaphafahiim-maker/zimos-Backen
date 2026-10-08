@@ -11,7 +11,8 @@ const { publicNavPages } = require('../pages/pageFlags');
 const { publicGeneralSettings } = require('./generalSettings');
 const { resolveCatalogSettings } = require('./catalogSettings');
 const { presentStoreBump } = require('../checkout/orderBump');
-const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
+const { toPublicProduct, toPublicVariant, publicInclude, loadPublicProducts } = require('./publicProduct');
+const soldOut = require('./soldOut');
 const productSearch = require('./productSearch');
 const { notHiddenSql } = require('../catalog/productPage');
 
@@ -36,13 +37,17 @@ function wantsListing(query) {
  * cursor) keep the original id-ordered cursor paging every existing caller
  * relies on; anything from LISTING_PARAMS goes to productSearch.
  */
-async function listProducts(workspaceId, query = {}) {
+async function listProducts(workspaceId, query = {}, { storeListing = false } = {}) {
+  // The store's own listing follows storefront_catalog.sold_out; available=true hides sold-out ones anyway (./soldOut.js, item 390).
+  const rule = soldOut.listingRule(storeListing ? await soldOut.soldOutModeFor(workspaceId) : 'show', query);
   // A search that finds nothing tries the merchant's synonyms (searchInsights/, item 211).
-  if (wantsListing(query)) return require('../searchInsights').searchWithSynonyms(workspaceId, query, (q) => productSearch.searchProducts(workspaceId, q));
+  if (wantsListing(query)) return require('../searchInsights').searchWithSynonyms(workspaceId, query, (q) => productSearch.searchProducts(workspaceId, q, rule));
+  if (rule.last) return listSoldOutLast(workspaceId, query);
 
   const { collectionId, tag, limit = 24, cursor } = query;
   // A hidden product opens by its link only (page_settings.hidden).
   const where = { workspaceId, status: 'active', [db.Sequelize.Op.and]: [db.sequelize.literal(notHiddenSql('"Product"'))] };
+  if (rule.hide) where[db.Sequelize.Op.and].push(db.sequelize.literal(soldOut.availableSql('"Product"')));
   if (cursor) where.id = { [db.Sequelize.Op.gt]: cursor };
   if (tag) where.tags = { [db.Sequelize.Op.contains]: [tag] };
 
@@ -56,6 +61,37 @@ async function listProducts(workspaceId, query = {}) {
   const page = products.slice(0, limit);
 
   return { products: page.map(toPublicProduct), nextCursor: hasMore ? page[page.length - 1].id : null };
+}
+
+/**
+ * The plain id-ordered listing with sold-out products after the rest: the
+ * available ones by id, then the sold-out ones by id. The cursor is still
+ * the last id; which half it sits in is read from that product.
+ */
+async function listSoldOutLast(workspaceId, query) {
+  const { collectionId, tag, limit = 24, cursor } = query;
+  const { QueryTypes } = db.Sequelize;
+  const avail = soldOut.availableSql('p');
+  const conditions = ['p.workspace_id = :ws', "p.status = 'active'", notHiddenSql('p')];
+  const replacements = { ws: workspaceId, limit: limit + 1 };
+  if (tag) {
+    conditions.push('p.tags @> ARRAY[:tag]::varchar[]');
+    replacements.tag = tag;
+  }
+  if (collectionId) {
+    conditions.push('EXISTS (SELECT 1 FROM product_collections lpc WHERE lpc.product_id = p.id AND lpc.collection_id = :collectionId)');
+    replacements.collectionId = collectionId;
+  }
+  if (cursor) {
+    const [at] = await db.sequelize.query(`SELECT ${avail} AS a FROM products p WHERE p.id = :cursor AND p.workspace_id = :ws`, { replacements: { cursor, ws: workspaceId }, type: QueryTypes.SELECT });
+    conditions.push(at && at.a ? `((${avail} AND p.id > :cursor) OR NOT ${avail})` : `(NOT ${avail} AND p.id > :cursor)`);
+    replacements.cursor = cursor;
+  }
+  const rows = await db.sequelize.query(`SELECT p.id FROM products p WHERE ${conditions.join(' AND ')} ORDER BY ${avail} DESC, p.id ASC LIMIT :limit`, { replacements, type: QueryTypes.SELECT });
+  const hasMore = rows.length > limit;
+  const ids = rows.slice(0, limit).map((r) => r.id);
+  const products = await loadPublicProducts(workspaceId, ids);
+  return { products, nextCursor: hasMore ? ids[ids.length - 1] : null };
 }
 
 async function getProductBySlugOrId(workspaceId, idOrSlug) {
@@ -215,7 +251,7 @@ async function getCollection(workspaceId, idOrSlug) {
 
 /** The search box's suggestions — see productSearch.suggest. */
 async function suggestProducts(workspaceId, q) {
-  return productSearch.suggest(workspaceId, q);
+  return productSearch.suggest(workspaceId, q, soldOut.listingRule(await soldOut.soldOutModeFor(workspaceId)));
 }
 
 /* --- Public order tracking ---------------------------------------------- */

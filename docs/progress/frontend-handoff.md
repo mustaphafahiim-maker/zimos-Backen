@@ -4868,3 +4868,31 @@ For stores without the WhatsApp API: the store sends the order's **confirmation 
   - `closed`: no card (the page shows the order as usual).
   - 409 `CONFIRM_NOT_YET`: «لسه بنجهّز طلبك، جرّب تاني بعد دقايق» / "Your order is still being prepared, try again in a few minutes". 429: «محاولات كتير، جرّب بعد شوية» / "Too many tries, try again shortly".
 - **Confirmation queue / order page attempts**: an attempt with `channel: "customer_link"` has `agent: null` — show «العميل أكّد من اللينك» / "Customer confirmed from the link" instead of an agent's name.
+
+## 390. Sold-out products in store listings — UI: pending
+
+The merchant chooses what the store's product lists do with products nobody can buy right now: show them as usual, put them at the end, or hide them. It applies to the shop page, collection pages, search results and the search box's suggestions. A product counts as **available** when any of its variants can be bought: it has stock, the merchant allows selling past stock, stock is not tracked, or it takes pre-orders and is under its pre-order limit.
+
+### Settings — `PATCH /api/v1/workspaces/:ws` (`settings.storefront_catalog`)
+- New key `sold_out`: `"show"` (default) | `"last"` | `"hide"`, next to `sidebar_enabled`, `default_sort` and `filters`:
+```json
+{ "settings": { "storefront_catalog": { "sidebar_enabled": true, "default_sort": "newest", "sold_out": "last", "filters": [{ "key": "collections" }, { "key": "price" }] } } }
+```
+- Optional: a save that leaves it out keeps the stored value. 422 for any other value.
+- `GET /api/v1/store/:ws` → `store.catalog.sold_out` is always filled (`"show"` when never set).
+
+### Storefront — `GET /api/v1/store/:ws/products`
+- Every product now has `available: true | false` (also on `GET /store/:ws/products/:idOrSlug`).
+- `last`: sold-out products come after the available ones, each group in the chosen sort; `total` and facets are unchanged.
+- `hide`: sold-out products are left out, and `total` and every facet count (collections, tags, options, price range) only count what is shown.
+- `available=true` on any request hides them whatever the setting — for an "In stock only" switch in the filter sidebar.
+
+### Screens
+- **Settings → Store design → product listing (catalog card)**: a choice «المنتجات اللي خلصت» / "Sold-out products" with three options:
+  - «اعرضها عادي» / "Show them as usual"
+  - «اعرضها في الآخر» / "Show them at the end"
+  - «اخفيها» / "Hide them"
+  Help: «المنتج يعتبر متاح لو أي مقاس أو لون منه ينفع يتطلب: فيه مخزون، أو البيع بعد نفاد المخزون مسموح، أو بيتطلب طلب مسبق» / "A product counts as available if any of its variants can be ordered: it has stock, selling past stock is allowed, or it takes pre-orders".
+- **Storefront product cards** (shop, collection, search, suggestions): when `available` is false, a badge «نفدت الكمية» / "Sold out" on the picture and a muted price; the card still opens the product page.
+- **Storefront filter sidebar**: a switch «المتاح بس» / "In stock only" that adds `available=true` (hidden when the store's setting is `hide`, since nothing sold out is shown anyway).
+- **Product page**: when `available` is false, the buy button reads «نفدت الكمية» / "Sold out" and is disabled.

@@ -32,6 +32,8 @@ module.exports = {
       page: Joi.number().integer().min(1).max(1000).optional(),
       // Counts per collection, tag, option value and the price range.
       facets: Joi.boolean().optional(),
+      // Only products that can be bought now (storefront/soldOut.js, item 390).
+      available: Joi.boolean().optional(),
       limit: Joi.number().integer().min(1).max(100).default(24),
       cursor: uuid.optional(),
     }),

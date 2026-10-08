@@ -216,6 +216,8 @@ function applyMerchantSettings(current, patch) {
   for (const key of MERCHANT_SETTINGS_KEYS) {
     if (!(key in patch)) continue;
     if (patch[key] === null) delete next[key];
+    // A catalog form that does not send sold_out keeps it (storefront/catalogSettings.js).
+    else if (key === 'storefront_catalog') next[key] = require('../storefront/catalogSettings').keepSoldOut(next[key], patch[key]);
     else next[key] = patch[key];
   }
   for (const key of MERCHANT_SETTINGS_OBJECT_KEYS) {

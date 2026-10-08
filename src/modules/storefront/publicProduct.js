@@ -52,6 +52,8 @@ function toPublicProduct(product) {
     tags: product.tags,
     seo: product.seo,
     variants: (product.variants || []).map((variant) => toPublicVariant(variant, product)),
+    // Any variant can be bought now: stock, overselling, untracked stock or pre-orders (./soldOut.js, item 390).
+    available: require('./soldOut').productAvailable(product),
     // How each option is drawn (buttons, dropdown, colour swatches, images).
     options: Array.isArray(product.options) ? product.options : [],
     priority: product.priority || 0,
