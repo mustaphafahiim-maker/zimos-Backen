@@ -392,7 +392,7 @@ async function overview(workspaceId) {
             (COUNT(*) FILTER (WHERE status = 'paused'))::int AS paused,
             (COUNT(*) FILTER (WHERE status = 'cancelled'))::int AS cancelled,
             (COUNT(*) FILTER (WHERE status = 'completed'))::int AS completed,
-            (COUNT(*) FILTER (WHERE renewal_hold IS NOT NULL AND status IN ('trialing', 'active', 'past_due')))::int AS on_hold,
+            (COUNT(*) FILTER (WHERE renewal_hold->>'cause' IS NOT NULL AND status IN ('trialing', 'active', 'past_due')))::int AS on_hold,
             COUNT(*)::int AS total,
             (COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW())))::int AS new_this_month,
             COALESCE(SUM(amount) FILTER (WHERE status = 'active'), 0) AS active_amount
@@ -439,14 +439,23 @@ async function overview(workspaceId) {
 async function changeStatus(workspaceId, subscriptionId, action, req) {
   const sub = await scoped(db.CustomerSubscription, workspaceId, 'Subscription').findByPkOrThrow(subscriptionId);
   if (['cancelled', 'completed'].includes(sub.status)) throw new AppError('SUBSCRIPTION_ENDED', 'This subscription has already ended', 409);
-  const before = { status: sub.status, nextRenewalAt: sub.nextRenewalAt };
-  if (action === 'pause') await sub.update({ status: 'paused', nextRenewalAt: null });
+  const before = { status: sub.status, nextRenewalAt: sub.nextRenewalAt, renewalHold: holds.viewOf(sub.renewalHold) };
+  let heldOrder = null;
+  if (action === 'pause') {
+    await sub.update({ status: 'paused', nextRenewalAt: null });
+    // A held renewal ends with the pause: its unpaid order cancelled, or kept and flagged (item 402).
+    heldOrder = await holds.release(sub, 'pause', req);
+  }
   if (action === 'resume') {
     if (!sub.savedPaymentMethodId) throw new AppError('SUBSCRIPTION_NO_CARD', 'There is no saved card to charge', 409);
     const end = new Date(sub.currentPeriodEnd);
-    await sub.update({ status: 'active', failedAttempts: 0, lastFailureReason: null, nextRenewalAt: end > new Date() ? end : new Date() });
+    // A hold still running starts a fresh window; an order kept by the pause stays the one charged (item 402).
+    await sub.update({ status: 'active', failedAttempts: 0, lastFailureReason: null, nextRenewalAt: end > new Date() ? end : new Date(), renewalHold: holds.restart(sub.renewalHold) });
   }
-  if (action === 'cancel') await sub.update({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'merchant', nextRenewalAt: null });
+  if (action === 'cancel') {
+    await sub.update({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'merchant', nextRenewalAt: null });
+    heldOrder = await holds.release(sub, 'cancel', req);
+  }
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -454,7 +463,7 @@ async function changeStatus(workspaceId, subscriptionId, action, req) {
     entityType: 'CustomerSubscription',
     entityId: sub.id,
     before,
-    after: { status: sub.status, nextRenewalAt: sub.nextRenewalAt },
+    after: { status: sub.status, nextRenewalAt: sub.nextRenewalAt, renewalHold: holds.viewOf(sub.renewalHold), ...(heldOrder ? { heldOrder } : {}) },
     req,
   });
   return view(sub);
@@ -496,7 +505,16 @@ async function portalCancel(workspaceId, token) {
   const sub = await byToken(workspaceId, token);
   if (!portalView(sub).canCancel) throw new AppError('SUBSCRIPTION_NOT_CANCELLABLE', 'This subscription cannot be cancelled here', 409);
   await sub.update({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'customer', nextRenewalAt: null });
-  await recordAudit({ workspaceId, actorUserId: null, action: 'subscription.cancel_by_customer', entityType: 'CustomerSubscription', entityId: sub.id });
+  // As a merchant's cancel: a held renewal's unpaid order is cancelled, or kept and flagged (item 402).
+  const heldOrder = await holds.release(sub, 'cancel_by_customer', SYSTEM_REQ);
+  await recordAudit({
+    workspaceId,
+    actorUserId: null,
+    action: 'subscription.cancel_by_customer',
+    entityType: 'CustomerSubscription',
+    entityId: sub.id,
+    ...(heldOrder ? { after: { status: sub.status, heldOrder } } : {}),
+  });
   await outbox.record(null, 'subscription.cancelled', { workspaceId, subscriptionId: sub.id, customerId: sub.customerId, reason: 'customer' });
   return { subscription: portalView(sub) };
 }

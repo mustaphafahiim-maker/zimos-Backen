@@ -272,10 +272,88 @@ async function lapse(sub, { cause, causeKey, reason, unknown, orderId }) {
   return 'lapsed';
 }
 
+/**
+ * A held subscription paused or cancelled — by the merchant, or cancelled by
+ * the shopper (item 402). The hold ends with it: the held renewal order, never
+ * paid, is cancelled so its stock goes back. If the gateway may have charged
+ * it (outcome unknown), or a late answer already paid it, the order is kept
+ * and the merchant is told which order to check; on a pause, the order is
+ * remembered so a resume charges that same order with the same key, never a
+ * second charge. Returns what happened to the order, for the audit, or null.
+ * `action` is 'pause' | 'cancel' | 'cancel_by_customer'.
+ */
+async function release(sub, action, req) {
+  const prev = sub.renewalHold || null;
+  if (!prev || prev.lapsedAt || prev.releasedAt) return null;
+  const orderId = prev.orderId || null;
+  const order = orderId ? await db.Order.findOne({ where: { id: orderId, workspaceId: sub.workspaceId } }) : null;
+  const releasedAt = new Date().toISOString();
+  if (!order || order.cancelledAt) {
+    await sub.update({ renewalHold: null });
+    return { orderId, order: order ? 'already_cancelled' : null };
+  }
+  const paid = Number(order.amountPaid) > 0;
+  let why = prev.unknown ? 'outcome_unknown' : paid ? 'paid' : null;
+  if (!why) {
+    /* eslint-disable-next-line global-require */
+    const orderService = require('../orders/orderService');
+    const label = action === 'pause' ? 'paused' : 'cancelled';
+    try {
+      await orderService.cancelOrder(sub.workspaceId, order.id, { reason: `Subscription ${label} while its renewal was on hold` }, req);
+      await sub.update({ renewalHold: null });
+      return { orderId, order: 'cancelled' };
+    } catch (e) {
+      logger.error(`[subscriptions] could not cancel held renewal order ${order.id}: ${e.message}`);
+      why = 'cancel_failed';
+    }
+  }
+  // Kept: a paused subscription remembers the order (and the card it went to) for a resume; no hold window runs.
+  await sub.update({
+    renewalHold: action === 'pause' ? { orderId, savedMethodId: prev.savedMethodId || null, unknown: Boolean(prev.unknown), releasedAt, releasedBy: action } : null,
+  });
+  const what = {
+    outcome_unknown: {
+      en: `the gateway never confirmed whether order ${order.orderNumber} was charged`,
+      ar: `لم تؤكد البوابة ما إذا كان الطلب ${order.orderNumber} قد سُحب`,
+    },
+    paid: { en: `order ${order.orderNumber} was paid`, ar: `الطلب ${order.orderNumber} مدفوع` },
+    cancel_failed: { en: `order ${order.orderNumber} could not be cancelled`, ar: `تعذّر إلغاء الطلب ${order.orderNumber}` },
+  }[why];
+  const done = action === 'pause' ? { en: 'paused', ar: 'أُوقف اشتراكه مؤقتًا', arBody: `أُوقف اشتراك «${sub.productName}» مؤقتًا` } : { en: 'cancelled', ar: 'أُلغي اشتراكه', arBody: `أُلغي اشتراك «${sub.productName}»` };
+  const by = action === 'cancel_by_customer' ? { en: ' by the customer', ar: ' من العميل' } : { en: '', ar: '' };
+  await bell(sub.workspaceId, {
+    cause: prev.cause || 'platform_error',
+    en: {
+      title: `Check order ${order.orderNumber}: its subscription was ${done.en} while the renewal was on hold`,
+      body: `The subscription to "${sub.productName}" was ${done.en}${by.en} while its renewal was on hold, but ${what.en}, so the order was kept. Check it in your gateway's dashboard, then fulfil, refund or cancel it.${action === 'pause' ? ' If the subscription is resumed, this same order is charged, never a second one.' : ''}`,
+    },
+    ar: {
+      title: `راجع الطلب ${order.orderNumber}: ${done.ar} أثناء توقف التجديد`,
+      body: `${done.arBody}${by.ar} أثناء توقف تجديده، لكن ${what.ar}، لذا أبقينا الطلب. راجعه في لوحة البوابة ثم نفّذه أو استرده أو ألغِه.${action === 'pause' ? ' إن استُؤنف الاشتراك يُسحب هذا الطلب نفسه، لا طلب ثانٍ.' : ''}`,
+    },
+    data: { event: 'order_to_check', subscriptionId: sub.id, productName: sub.productName, orderId, orderNumber: order.orderNumber, why, action },
+    dedupeKey: `subscription.renewal_paused:order_to_check:${orderId}:${action}`,
+  });
+  return { orderId, order: 'kept', why };
+}
+
+/**
+ * A resume (item 402): a hold still running starts a fresh window — the
+ * LAPSE_DAYS clock, the tries and the warning from before are dropped —
+ * and an order kept by a pause stays the one to charge. Nothing else changes.
+ */
+function restart(prev) {
+  if (!prev || prev.lapsedAt) return null;
+  if (!prev.cause) return prev.orderId ? { orderId: prev.orderId, savedMethodId: prev.savedMethodId || null, unknown: Boolean(prev.unknown) } : null;
+  const now = new Date();
+  return { ...prev, since: now.toISOString(), tries: 0, warnedAt: null, lapsesAt: new Date(now.getTime() + LAPSE_DAYS * DAY).toISOString(), resumedAt: now.toISOString() };
+}
+
 /** What the dashboard shows for a held renewal. */
 function viewOf(h) {
-  if (!h || h.lapsedAt) return null;
+  // A pause's kept order (release) or a lapse is not a hold running.
+  if (!h || h.lapsedAt || !h.cause) return null;
   return { cause: h.cause, reason: h.reason, since: h.since, tries: h.tries, lapsesAt: h.lapsesAt, orderId: h.orderId || null, outcomeUnknown: Boolean(h.unknown) };
 }
 
-module.exports = { HOLD_RETRY_HOURS, WARN_DAYS, LAPSE_DAYS, CAUSES, classify, storeBlock, hold, viewOf };
+module.exports = { HOLD_RETRY_HOURS, WARN_DAYS, LAPSE_DAYS, CAUSES, classify, storeBlock, hold, release, restart, viewOf };
