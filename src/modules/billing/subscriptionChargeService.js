@@ -315,6 +315,10 @@ async function settlePaid(
   { paidAt, amountPaid, externalReference, note, recordedByUserId, source, frozen = null },
   transaction
 ) {
+  // A move's charge voided before the money came: applied or credited, never lost.
+  if (invoice.status === 'void') {
+    return settleLateMovePayment(invoice, { paidAt, amountPaid, externalReference, note, recordedByUserId, source, frozen }, transaction);
+  }
   const earlierPaid = await db.BillingInvoice.count({
     where: { subscriptionId: invoice.subscriptionId, status: 'paid' },
     transaction,
@@ -379,6 +383,118 @@ async function settlePaid(
       (commission ? `, commission row ${commission.id}` : '')
   );
   return { commission, codeLapsed: payable.codeLapsed };
+}
+
+/**
+ * A pending move's charge stops asking for money (`reason`: cancelled by the
+ * merchant, replaced by another move, expired unpaid): void, with any online
+ * checkout for it superseded. The subscription is not touched. The caller
+ * holds the charge locked. Resolves false when it was no longer a pending move.
+ */
+async function voidMoveCharge(invoice, reason, { actorUserId = null, req = null } = {}, transaction) {
+  if (!invoice || invoice.status !== 'pending' || !invoice.targetPlanId) return false;
+  await invoice.update({ status: 'void', voidedAt: new Date(), voidReason: reason }, { transaction });
+  const [checkoutsSuperseded] = await db.BillingPaymentAttempt.update(
+    { status: 'superseded' },
+    { where: { billingInvoiceId: invoice.id, status: db.BillingPaymentAttempt.IN_PROGRESS }, transaction }
+  );
+  await recordAudit({
+    workspaceId: invoice.workspaceId,
+    actorUserId,
+    action: 'subscription.plan_move_void',
+    entityType: 'BillingInvoice',
+    entityId: invoice.id,
+    before: { status: 'pending' },
+    after: { status: 'void', reason },
+    metadata: { targetPlanId: invoice.targetPlanId, targetBillingCycle: invoice.targetBillingCycle, amount: Number(invoice.amount), checkoutsSuperseded },
+    req,
+    transaction,
+  });
+  return true;
+}
+
+/**
+ * Money arrived for a move's charge after it was voided (a transfer's proof
+ * approved later, a checkout paid late, a payment recorded in the console).
+ * It is never lost:
+ *   - applied, when the store is still on pay per order, the plan is still on
+ *     offer and no other charge is pending: the charge is paid and the plan
+ *     switches as for any move;
+ *   - otherwise credited to the prepaid balance once per payment
+ *     (move_payment_credit, not a top-up, so not refundable by request); the
+ *     charge stays void and records what arrived.
+ */
+async function settleLateMovePayment(invoice, args, transaction) {
+  const subscription = await db.Subscription.findByPk(invoice.subscriptionId, { transaction, lock: transaction.LOCK.UPDATE });
+  const [current, target, otherPending] = await Promise.all([
+    subscription && subscription.planId ? db.Plan.findByPk(subscription.planId, { transaction }) : null,
+    invoice.targetPlanId ? db.Plan.findByPk(invoice.targetPlanId, { transaction }) : null,
+    db.BillingInvoice.findOne({ where: { subscriptionId: invoice.subscriptionId, status: 'pending' }, attributes: ['id'], transaction }),
+  ]);
+  const applicable = Boolean(
+    current &&
+      Number(current.perOrderFeeAmount) > 0 &&
+      target &&
+      target.isActive &&
+      target.isPublic &&
+      !(Number(target.perOrderFeeAmount) > 0) &&
+      !otherPending
+  );
+  const wasVoided = { reason: invoice.voidReason, at: invoice.voidedAt };
+  if (applicable) {
+    await invoice.update({ status: 'pending', voidedAt: null, voidReason: null }, { transaction });
+    const result = await settlePaid(invoice, args, transaction);
+    await recordAudit({
+      workspaceId: invoice.workspaceId,
+      actorUserId: args.recordedByUserId || null,
+      action: 'subscription.plan_move_late_applied',
+      entityType: 'BillingInvoice',
+      entityId: invoice.id,
+      after: { status: 'paid', targetPlanId: invoice.targetPlanId },
+      metadata: { wasVoided, source: args.source, externalReference: args.externalReference || null },
+      transaction,
+    });
+    return { ...result, lateMove: 'applied' };
+  }
+
+  const amount = Number(args.amountPaid == null ? (args.frozen ? args.frozen.amount : invoice.amount) : args.amountPaid);
+  const key = `move_payment_credit:${args.externalReference || `manual:${invoice.id}`}`.slice(0, 120);
+  const wallet = require('./walletService');
+  const walletRow = await wallet.lockWallet(invoice.workspaceId, transaction);
+  let entry = await db.WalletLedgerEntry.findOne({ where: { idempotencyKey: key }, transaction });
+  if (!entry && amount > 0) {
+    entry = await wallet.writeEntry(
+      walletRow,
+      {
+        type: 'move_payment_credit',
+        delta: amount,
+        actorUserId: args.recordedByUserId || null,
+        note: `Paid for a plan move that could no longer be applied (charge ${invoice.id})`,
+        key,
+      },
+      transaction
+    );
+    await invoice.update(
+      {
+        amountPaid: amount,
+        paidAt: args.paidAt || new Date(),
+        ...(args.externalReference ? { externalReference: args.externalReference } : {}),
+        paymentNote: 'Credited to the prepaid balance: the move could no longer be applied.',
+      },
+      { transaction }
+    );
+    await recordAudit({
+      workspaceId: invoice.workspaceId,
+      actorUserId: args.recordedByUserId || null,
+      action: 'subscription.plan_move_payment_credited',
+      entityType: 'BillingInvoice',
+      entityId: invoice.id,
+      after: { status: 'void', credited: amount },
+      metadata: { wasVoided, ledgerEntryId: entry.id, source: args.source, externalReference: args.externalReference || null, currency: invoice.currency },
+      transaction,
+    });
+  }
+  return { commission: null, codeLapsed: false, lateMove: 'credited', ledgerEntryId: entry ? entry.id : null };
 }
 
 /**
@@ -709,6 +825,9 @@ function serializeCharge(invoice, payable = null) {
     // A pay-per-order store's move: the plan and cycle it switches to when paid.
     targetPlanId: invoice.targetPlanId || null,
     targetBillingCycle: invoice.targetBillingCycle || null,
+    // A move's charge that no longer asks for money: cancelled | replaced | expired.
+    voidedAt: invoice.voidedAt || null,
+    voidReason: invoice.voidReason || null,
     commission: invoice.commission
       ? {
           id: invoice.commission.id,
@@ -827,6 +946,8 @@ module.exports = {
   createCharge,
   createChargeInTransaction,
   createMoveChargeInTransaction,
+  voidMoveCharge,
+  settleLateMovePayment,
   quoteCharge,
   settlePaid,
   markChargePaid,

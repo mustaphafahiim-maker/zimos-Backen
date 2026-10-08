@@ -43,7 +43,11 @@ module.exports = (sequelize, DataTypes) => {
       // a commission row.
       referralCodeId: { type: DataTypes.UUID, allowNull: true, field: 'referral_code_id' },
       currency: { type: DataTypes.STRING(3), allowNull: false },
-      status: { type: DataTypes.ENUM('pending', 'paid', 'failed'), allowNull: false, defaultValue: 'pending' },
+      // 'void': a move's charge that no longer asks for money (migration 224).
+      status: { type: DataTypes.ENUM('pending', 'paid', 'failed', 'void'), allowNull: false, defaultValue: 'pending' },
+      voidedAt: { type: DataTypes.DATE, allowNull: true, field: 'voided_at' },
+      // cancelled (by the merchant) | replaced (by another move) | expired (unpaid in time)
+      voidReason: { type: DataTypes.STRING(20), allowNull: true, field: 'void_reason' },
       // A pay-per-order store's move (migration 222): the plan and cycle it
       // switches to when this charge is paid. null on every other charge.
       targetPlanId: { type: DataTypes.UUID, allowNull: true, field: 'target_plan_id' },

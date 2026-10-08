@@ -43,11 +43,23 @@ async function snapshot(wid) {
 }
 
 describe('the prepaid balance never expires', () => {
-  it('no scheduled job is about the wallet', () => {
+  it('no scheduled job is about the wallet, but for the billing ones that never move its money', () => {
     const files = jobFiles();
     expect(files.length).toBeGreaterThan(5);
+    // Known and checked: voiding unpaid move charges, and the fallback to pay
+    // per order (a plan change). Neither writes a ledger entry.
+    const allowed = { 'billing/jobs.js': ['billing.expire_plan_moves', 'billing.wallet_fallback'] };
     for (const file of files) {
-      expect([file, /wallet/i.test(fs.readFileSync(file, 'utf8'))]).toEqual([file, false]);
+      const rel = path.relative(path.join(ROOT, 'src/modules'), file).split(path.sep).join('/');
+      const mentions = /wallet/i.test(fs.readFileSync(file, 'utf8'));
+      if (!allowed[rel]) {
+        expect([file, mentions]).toEqual([file, false]);
+        continue;
+      }
+      // eslint-disable-next-line global-require, import/no-dynamic-require
+      const names = require(file).schedules.map((schedule) => schedule.name);
+      const walletOnes = names.filter((name) => !['billing.manual_pricing_sweep'].includes(name));
+      expect(walletOnes.every((name) => allowed[rel].includes(name))).toBe(true);
     }
   });
 

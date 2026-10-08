@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../../db/models');
+const env = require('../../config/env');
 const { AppError, ConflictError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const access = require('../workspaces/workspaceAccessService');
@@ -207,6 +208,8 @@ function serializeInvoice(invoice) {
     // A pay-per-order store's move: the plan and cycle it switches to when paid.
     targetPlanId: invoice.targetPlanId || null,
     targetBillingCycle: invoice.targetBillingCycle || null,
+    // A move's charge that no longer asks for money: cancelled | replaced | expired.
+    voidReason: invoice.voidReason || null,
   };
 }
 
@@ -294,6 +297,8 @@ async function changePlan(workspaceId, { planId, billingCycle }, req) {
  */
 async function requestPlanMove(workspaceId, { planId, billingCycle }, req) {
   const result = await db.sequelize.transaction(async (transaction) => {
+    // A pending charge is locked before the subscription, the order a payment takes.
+    await lockPendingCharge(workspaceId, transaction);
     const subscription = await loadSubscription(workspaceId, transaction, { lock: true });
     const current = await payPerOrderPlanOf(subscription, transaction);
     if (!current) {
@@ -309,9 +314,15 @@ async function requestPlanMove(workspaceId, { planId, billingCycle }, req) {
     const cycle = billingCycle && BILLING_CYCLES.includes(billingCycle) ? billingCycle : 'monthly';
 
     const open = await db.BillingInvoice.findOne({ where: { subscriptionId: subscription.id, status: 'pending' }, transaction });
+    let replaced = null;
     if (open) {
       if (open.targetPlanId === plan.id && open.targetBillingCycle === cycle) return { invoice: open, created: false };
-      throw new ConflictError('A charge is open. Pay it, or wait for it to be settled, before asking for another plan.', 'OPEN_CHARGE_EXISTS');
+      // Another plan than the move waiting: that move gives way. Any other
+      // charge (a renewal) still has to be settled first.
+      if (!open.targetPlanId) {
+        throw new ConflictError('A charge is open. Pay it, or wait for it to be settled, before asking for another plan.', 'OPEN_CHARGE_EXISTS');
+      }
+      replaced = open;
     }
 
     const walletRow = await db.WorkspaceWallet.findOne({ where: { workspaceId }, attributes: ['cashBalance'], transaction });
@@ -334,6 +345,7 @@ async function requestPlanMove(workspaceId, { planId, billingCycle }, req) {
       );
     }
 
+    if (replaced) await charges.voidMoveCharge(replaced, 'replaced', { actorUserId: req.user.id, req }, transaction);
     const invoice = await charges.createMoveChargeInTransaction(subscription, plan, cycle, { req }, transaction);
     await recordAudit({
       workspaceId,
@@ -343,7 +355,7 @@ async function requestPlanMove(workspaceId, { planId, billingCycle }, req) {
       entityId: subscription.id,
       before: { planId: subscription.planId, billingCycle: subscription.billingCycle, status: subscription.status },
       after: { planId: plan.id, billingCycle: cycle, switchesWhen: 'paid' },
-      metadata: { billingInvoiceId: invoice.id, amount: Number(invoice.amount), currency: invoice.currency, balance },
+      metadata: { billingInvoiceId: invoice.id, amount: Number(invoice.amount), currency: invoice.currency, balance, replacedInvoiceId: replaced ? replaced.id : null },
       req,
       transaction,
     });
@@ -352,4 +364,61 @@ async function requestPlanMove(workspaceId, { planId, billingCycle }, req) {
   return { created: result.created, invoice: serializeInvoice(result.invoice), plans: await listPlans(workspaceId) };
 }
 
-module.exports = { listPlans, previewCode, listInvoices, changePlan, requestPlanMove, serializeInvoice, MAX_PAGE_SIZE };
+/** The store's pending charge, locked (none: nothing). Taken before the subscription row. */
+async function lockPendingCharge(workspaceId, transaction) {
+  const head = await db.BillingInvoice.findOne({ where: { workspaceId, status: 'pending' }, attributes: ['id'], transaction });
+  return head ? db.BillingInvoice.findByPk(head.id, { transaction, lock: transaction.LOCK.UPDATE }) : null;
+}
+
+/**
+ * POST /workspaces/:id/billing/plan-move/cancel — the merchant drops the move
+ * waiting for its payment: its charge is void (not due, not owed), the store
+ * stays exactly as it is. Nothing waiting: nothing changes (`cancelled: false`).
+ */
+async function cancelPlanMove(workspaceId, req) {
+  const cancelled = await db.sequelize.transaction(async (transaction) => {
+    const invoice = await lockPendingCharge(workspaceId, transaction);
+    if (!invoice || !invoice.targetPlanId) return false;
+    return charges.voidMoveCharge(invoice, 'cancelled', { actorUserId: req.user.id, req }, transaction);
+  });
+  return { cancelled, plans: await listPlans(workspaceId) };
+}
+
+/**
+ * The hourly billing job: a move's charge left unpaid WALLET_MOVE_EXPIRY_HOURS
+ * (48) is voided as expired, each in its own transaction with the charge
+ * locked, so a payment arriving at the same moment either settles it first or
+ * finds it void (and is applied or credited). Behind WALLET_ENABLED.
+ */
+async function expirePendingMoves({ now = new Date(), limit = 200 } = {}) {
+  if (!wallet.enabled()) return { expired: 0 };
+  const cutoff = new Date(now.getTime() - env.wallet.moveExpiryHours * 60 * 60 * 1000);
+  const stale = await db.BillingInvoice.findAll({
+    where: { status: 'pending', targetPlanId: { [db.Sequelize.Op.ne]: null }, createdAt: { [db.Sequelize.Op.lt]: cutoff } },
+    attributes: ['id'],
+    order: [['createdAt', 'ASC']],
+    limit,
+  });
+  let expired = 0;
+  for (const { id } of stale) {
+    // eslint-disable-next-line no-await-in-loop
+    const voided = await db.sequelize.transaction(async (transaction) => {
+      const invoice = await db.BillingInvoice.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+      return charges.voidMoveCharge(invoice, 'expired', {}, transaction);
+    });
+    if (voided) expired += 1;
+  }
+  return { expired };
+}
+
+module.exports = {
+  listPlans,
+  previewCode,
+  listInvoices,
+  changePlan,
+  requestPlanMove,
+  cancelPlanMove,
+  expirePendingMoves,
+  serializeInvoice,
+  MAX_PAGE_SIZE,
+};

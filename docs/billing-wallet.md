@@ -42,8 +42,30 @@ A store on the pay-per-order plan moves by itself, with no support:
   `WALLET_DEBT_OUTSTANDING`, with `details.debt`. The balance itself is
   never touched by a move.
 - **Asked twice:** the same plan and cycle while its charge waits get that
-  charge back (200). Anything else while a charge is pending gets 409
+  charge back (200). Another plan or cycle **replaces** the waiting move: its
+  charge is voided (`replaced`) and the new one written, in one transaction.
+  Only a pending charge that isn't a move (a renewal) still gets 409
   `OPEN_CHARGE_EXISTS`.
+- **Never trapped (migration 224):** an unpaid move changes nothing about the
+  store. Its charge becomes `void`, with `void_reason`, which means it isn't
+  due, isn't owed, isn't dunned and doesn't touch the subscription. It gets
+  there three ways:
+  - the merchant cancels it (`POST /billing/plan-move/cancel`): `cancelled`;
+  - another move replaces it: `replaced`;
+  - the hourly billing job `billing.expire_plan_moves` finds it unpaid after
+    `WALLET_MOVE_EXPIRY_HOURS` (48): `expired`. Only with `WALLET_ENABLED`.
+
+  Each is audited (`subscription.plan_move_void`).
+- **Money that arrives for a void move** (a proof approved later, a checkout
+  paid late, the console's record-payment): `settlePaid` hands it to
+  `settleLateMovePayment`, so it's never lost.
+  - It's **applied** when the store is still on pay per order, the plan is
+    still on offer and no other charge is pending.
+  - Otherwise it's **credited** to the balance once per payment
+    (`move_payment_credit`). That's not a top-up, so it isn't refundable by
+    request. The charge stays void and records what arrived.
+  - Audited: `subscription.plan_move_late_applied` /
+    `_payment_credited`.
 - **After the switch:** the plan has no fee, so no order fee is taken. The
   free orders used stay counted.
 - **A manual payment reversed:** the plan, cycle, status and period from
