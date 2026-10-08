@@ -27,6 +27,8 @@ const TOKENS = [
   'coupon_code',
   'review_link',
   'payment_link',
+  // The COD confirmation link (item 388): empty unless the store offers it and the order awaits confirmation.
+  'confirm_link',
   // A subscription's page (cancel, change the card): subscription triggers only.
   'subscription_link',
 ];
@@ -96,6 +98,8 @@ async function loadOrderSubject(workspaceId, orderId) {
       // Signed, so it opens the payment page from a message (payments/paymentLinkToken.js).
       payment_link:
         base && order.paymentMethod !== 'cod' ? `${base}/pay/${order.id}?t=${require('../payments/paymentLinkToken').linkTokenFor(order)}` : '',
+      // The shopper confirms the COD order themselves (cod/customerLinkConfirmation.js, item 388).
+      confirm_link: await require('../cod/customerLinkConfirmation').linkFor(order, base),
     },
     // What "the order moved on" is measured against.
     signature: [order.confirmationState, order.fulfillmentState, order.financialState, order.cancelledAt ? 'cancelled' : 'open'].join('|'),
@@ -136,6 +140,7 @@ async function loadCheckoutSubject(workspaceId, checkoutSessionId) {
       recovery_link: base ? (token ? `${base}/r/${token}` : `${base}/checkout`) : '',
       review_link: '',
       payment_link: '',
+      confirm_link: '',
     },
     // "Contacted" (the sequence's own first message, recoveryContacted.js) is still open; a merchant's recovered/lost is not.
     signature: [session.status, session.recoveryStatus === 'contacted' ? 'not_contacted' : session.recoveryStatus, session.convertedOrderId ? 'converted' : 'open'].join('|'),
@@ -158,6 +163,7 @@ const EMPTY_ORDER_VARS = {
   recovery_link: '',
   review_link: '',
   payment_link: '',
+  confirm_link: '',
 };
 
 /** A customer with no order in hand (lead.created). */

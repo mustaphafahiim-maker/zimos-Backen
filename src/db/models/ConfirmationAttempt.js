@@ -6,7 +6,8 @@ module.exports = (sequelize, DataTypes) => {
     {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       taskId: { type: DataTypes.UUID, allowNull: false, field: 'task_id' },
-      agentUserId: { type: DataTypes.UUID, allowNull: false, field: 'agent_user_id' },
+      // Null: the customer confirmed from the link (cod/customerLinkConfirmation.js, migration 525).
+      agentUserId: { type: DataTypes.UUID, allowNull: true, field: 'agent_user_id' },
       outcome: {
         type: DataTypes.ENUM('confirmed', 'rejected', 'unreachable', 'postponed'),
         allowNull: false,

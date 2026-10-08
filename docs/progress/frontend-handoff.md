@@ -4833,3 +4833,38 @@ Shipments the merchant creates by hand (any courier name plus a waybill) and the
   - After a sync with `changed: false`: «مفيش جديد» / "No new updates". With `newCheckpoints > 0`: «اتضاف {n} تحديث» / "{n} new updates".
   - 409 `SHIPMENT_NO_WAYBILL`: «ضيف رقم البوليصة الأول» / "Add the waybill number first". 502: «مزوّد التتبع مش بيرد دلوقتي، جرّب تاني بعد شوية» / "The tracking provider isn't answering, try again later".
 - **Order timeline**: `courier` events from a manual shipment read the same as a courier's, e.g. «خرجت للتسليم — Nasr City» / "Out for delivery — Nasr City". A failed attempt is «محاولة تسليم فاشلة» / "Delivery attempt failed".
+
+## 388. The shopper confirms a cash-on-delivery order from a link — UI: pending
+
+For stores without the WhatsApp API: the store sends the order's **confirmation link** by SMS or email (an automation step or an order email with `{{confirm_link}}`), and the shopper confirms the order on the storefront with one tap. It is the same outcome as an agent's "confirmed": the order leaves the confirmation queue, and everything that follows a confirmation (webhooks, automations, auto-booking) runs as usual.
+
+### Settings — `/api/v1/workspaces/:ws/order-self-service` (`orders.manage`)
+- `GET` / `PUT` now carry `confirm: { enabled }` next to `cancel` and `address`:
+```json
+{ "cancel": { "enabled": false, "minutes": null }, "address": { "enabled": false, "minutes": null }, "confirm": { "enabled": true } }
+```
+- `confirm` is optional on PUT; left out, the current value is kept. 422 when `enabled` is not a boolean. Off by default.
+
+### Storefront — `/api/v1/store/:ws/orders/:orderId/self-service`
+- The link is `https://<store>/track?t=<tracking token>&confirm=1` — the tracking page with `confirm=1`. The page resolves the order from `t` as it already does, then calls the endpoints below with `token = t`.
+- `GET ?token=…` now also returns:
+```json
+{ "canConfirm": true, "confirmState": "available", "confirmedAt": null, "confirmAvailableAt": null, "canCancel": false, "canChangeAddress": false, "…": "…" }
+```
+  `confirmState`: `available` | `confirmed` | `review` (the store checks the order first) | `cancelled` | `shipped` | `closed` (not offered: setting off, not cash on delivery, or no longer waiting for confirmation). `confirmAvailableAt`: set while a funnel's offer window is still open — confirming works after that time.
+- `POST /confirm` `{ token }` → `200 { "confirmed": true, "orderNumber": "#1002", "confirmedAt": "…" }`. Confirming again returns the same answer.
+  - 404 `NOT_FOUND`: wrong or missing token.
+  - 409 `CONFIRM_NOT_OFFERED` (setting off / not COD), `CONFIRM_NEEDS_REVIEW` (flagged order), `ORDER_CANCELLED`, `CONFIRM_NOT_ALLOWED` (already on its way), `CONFIRM_NOT_YET` (offer window; `details.availableAt`). 429 from the tracking rate limit.
+
+### Screens
+- **Settings → Orders → self-service card**: a third toggle «العميل يقدر يأكّد طلب الدفع عند الاستلام من لينك» / "Customers can confirm cash-on-delivery orders from a link". Help: «ابعت المتغيّر {{confirm_link}} في رسالة SMS أو إيميل، والعميل يأكّد بضغطة من غير مكالمة» / "Put {{confirm_link}} in an SMS or email and the customer confirms with one tap, no call needed".
+- **Automation step editors (SMS, email, WhatsApp params) and order email editor**: add `confirm_link` to the variable picker — «لينك تأكيد الطلب» / "Order confirmation link" — with the hint «فاضي لو الخاصية مقفولة أو الطلب مش مستني تأكيد» / "Empty when the option is off or the order isn't waiting for confirmation". In the email button block it hides the button when empty (already handled server-side).
+- **Storefront tracking page with `confirm=1`** — a card above the order details, by `confirmState`:
+  - `available`: title «أكّد طلبك» / "Confirm your order"; text «طلب رقم {orderNumber} بإجمالي {total} — هيتدفع عند الاستلام» / "Order {orderNumber}, {total} — paid on delivery"; button «تأكيد الطلب» / "Confirm order". While `confirmAvailableAt` is in the future, disable the button with «ثواني وتقدر تأكّد طلبك» / "You can confirm your order in a moment".
+  - after a 200, and `confirmed`: «تم تأكيد طلبك، شكرًا لك! هنجهّزه ونبعتهولك» / "Your order is confirmed, thank you! We'll prepare and ship it".
+  - `review`: «هنراجع طلبك ونتواصل معاك لتأكيده» / "We'll review your order and contact you to confirm it".
+  - `cancelled`: «الطلب ده اتلغى» / "This order was cancelled".
+  - `shipped`: «طلبك في الطريق» / "Your order is on its way".
+  - `closed`: no card (the page shows the order as usual).
+  - 409 `CONFIRM_NOT_YET`: «لسه بنجهّز طلبك، جرّب تاني بعد دقايق» / "Your order is still being prepared, try again in a few minutes". 429: «محاولات كتير، جرّب بعد شوية» / "Too many tries, try again shortly".
+- **Confirmation queue / order page attempts**: an attempt with `channel: "customer_link"` has `agent: null` — show «العميل أكّد من اللينك» / "Customer confirmed from the link" instead of an agent's name.

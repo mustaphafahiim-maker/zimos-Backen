@@ -107,6 +107,7 @@ const SAMPLE_VARS = Object.freeze({
   coupon_code: '',
   review_link: 'https://example.com/products/linen-shirt#reviews',
   payment_link: 'https://example.com/pay/ORD-1042',
+  confirm_link: 'https://example.com/track?t=…&confirm=1',
   subscription_link: 'https://example.com/subscriptions/3f9a…',
 });
 
