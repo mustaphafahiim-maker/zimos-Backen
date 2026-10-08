@@ -11,7 +11,7 @@ const { ACCEPTED_IMAGE_TYPES } = require('../customerUploads/customerUploadServi
  * A shopper's payment screenshot for an order (manualPayments), through the
  * same guards as a shopper's product photo (customerUploads): multer refuses
  * anything over the raw cap while it streams in (customerUploadController.
- * acceptFile, 15 MB); the type is decided from the bytes (JPEG, PNG or WebP —
+ * acceptFile, 5 MB); the type is decided from the bytes (JPEG, PNG or WebP —
  * no GIF, no SVG); sharp re-encodes it upright with no metadata (EXIF and
  * location gone), at most 2400px and 5 MB. Stored privately as
  * customer-uploads/<workspaceId>/<uuid>.<ext> and recorded as `attached` at

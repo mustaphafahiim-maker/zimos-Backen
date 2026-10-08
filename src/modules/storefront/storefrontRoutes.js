@@ -56,7 +56,7 @@ router.use(require('../catalog/productTests').publicRouter);
 router.use(require('../payments/transferResubmit').router);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 // A shopper's photo for a product's image field (customerUploads). Limited
-// before multer reads a byte; multer refuses anything over 15 MB mid-stream.
+// before multer reads a byte; multer refuses anything over 5 MB mid-stream.
 router.post('/uploads', uploadLimiter, customerUploadController.acceptFile, customerUploadController.create);
 router.get('/collections/:collectionId', validate(schemas.getCollection), controller.getCollection);
 

@@ -432,11 +432,21 @@ const env = {
     },
   },
 
+  // Merchant uploads to the media library — product, page-builder, logo and
+  // favicon pictures (item 400, SPEC §7.1). An image may be this large when
+  // sent (10 MB, MEDIA_IMAGE_MAX_MB to change it); it is still re-encoded and
+  // brought down to imageProcessing's MERCHANT_MAX_DIMENSION before storing.
+  media: {
+    imageMaxBytes: positiveInt('MEDIA_IMAGE_MAX_MB', 10) * 1024 * 1024,
+  },
+
   // Photos shoppers attach to an order through a product's custom fields
   // (POST /store/:workspaceId/uploads). See modules/customerUploads.
   customerUploads: {
-    // Refused before any processing above this (413).
-    maxRawBytes: 15 * 1024 * 1024,
+    // Refused while it streams in, before any processing, above this (413):
+    // 5 MB (SPEC §11.3), CUSTOMER_UPLOAD_MAX_MB to change it (item 400). The
+    // same cap covers a manual-payment proof and a transfer receipt.
+    maxRawBytes: positiveInt('CUSTOMER_UPLOAD_MAX_MB', 5) * 1024 * 1024,
     // Photos one visitor may have waiting for an order at once.
     maxPendingPerVisitor: parseInt(process.env.CUSTOMER_UPLOAD_MAX_PENDING || '10', 10),
     // A photo no order took is deleted after this long.

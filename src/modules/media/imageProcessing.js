@@ -15,8 +15,9 @@ const { AppError } = require('../../core/errors/AppError');
  *   - the bytes are a real image: a file sharp cannot decode is refused, so a
  *     polyglot or a truncated upload never reaches storage.
  *
- * Merchant images keep their format and size (the library's 5 MB cap is on
- * what is sent). Shopper photos are resized and compressed until they fit
+ * Merchant images keep their format; one larger than MERCHANT_MAX_DIMENSION
+ * on its long side is brought down to it (the library's 10 MB cap, item 400,
+ * is on what is sent). Shopper photos are resized and compressed until they fit
  * CUSTOMER_MAX_OUTPUT_BYTES. An animated or static GIF is never re-encoded —
  * that would flatten or re-palette it — its comment and XMP blocks are cut out
  * of the byte stream instead (stripGifMetadata).
@@ -30,6 +31,11 @@ const CUSTOMER_MAX_DIMENSION = 2400;
 const CUSTOMER_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 // Decoding bombs: a tiny file that claims gigapixels.
 const MAX_INPUT_PIXELS = 60 * 1000 * 1000;
+// A merchant's picture is stored at most this wide or tall (item 400): enough
+// for a full-width hero on a high-density screen and for the product zoom,
+// and it keeps a 10 MB, 48-megapixel phone photo from being stored as sent.
+// Smaller pictures are never enlarged. A GIF is not resized (see above).
+const MERCHANT_MAX_DIMENSION = 4096;
 
 let sharpModule;
 let sharpError = null;
@@ -63,6 +69,17 @@ function requireSharp() {
 }
 
 const unreadable = () => new AppError('IMAGE_UNREADABLE', 'The image could not be read. Try another photo.', 422);
+
+// sharp's refusal of an image over MAX_INPUT_PIXELS, said as such rather than
+// as an unreadable file.
+function decodeError(err) {
+  if (err instanceof AppError) return err;
+  if (/pixel limit/i.test(String(err && err.message))) {
+    const maxMegapixels = MAX_INPUT_PIXELS / 1e6;
+    return new AppError('IMAGE_DIMENSIONS_TOO_LARGE', `The image is larger than ${maxMegapixels} megapixels`, 422, { maxMegapixels });
+  }
+  return unreadable();
+}
 
 // ---------------------------------------------------------------------------
 // GIF: strip metadata blocks without touching the frames
@@ -148,13 +165,17 @@ async function processMerchantImage(buffer, detected) {
   if (detected.mime === 'image/gif') return stripGifMetadata(buffer);
   const sharp = requireSharp();
   try {
-    const pipeline = sharp(buffer, { failOn: 'error', limitInputPixels: MAX_INPUT_PIXELS }).rotate();
+    // sequentialRead: libvips streams the decode top to bottom with
+    // shrink-on-load, so a 10 MB / 60-megapixel upload is never held whole in
+    // memory as raw pixels.
+    const pipeline = sharp(buffer, { failOn: 'error', limitInputPixels: MAX_INPUT_PIXELS, sequentialRead: true })
+      .rotate()
+      .resize({ width: MERCHANT_MAX_DIMENSION, height: MERCHANT_MAX_DIMENSION, fit: 'inside', withoutEnlargement: true });
     if (detected.mime === 'image/jpeg') return await pipeline.jpeg({ quality: 90, mozjpeg: true }).toBuffer();
     if (detected.mime === 'image/png') return await pipeline.png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer();
     if (detected.mime === 'image/webp') return await pipeline.webp({ quality: 90 }).toBuffer();
   } catch (err) {
-    if (err instanceof AppError) throw err;
-    throw unreadable();
+    throw decodeError(err);
   }
   throw unreadable();
 }
@@ -175,8 +196,8 @@ async function processCustomerImage(buffer) {
   let meta;
   try {
     meta = await sharp(buffer, { failOn: 'error', limitInputPixels: MAX_INPUT_PIXELS }).metadata();
-  } catch {
-    throw unreadable();
+  } catch (err) {
+    throw decodeError(err);
   }
   const keepAlpha = Boolean(meta.hasAlpha) && meta.format !== 'jpeg';
 
@@ -218,4 +239,6 @@ module.exports = {
   stripGifMetadata,
   CUSTOMER_MAX_DIMENSION,
   CUSTOMER_MAX_OUTPUT_BYTES,
+  MERCHANT_MAX_DIMENSION,
+  MAX_INPUT_PIXELS,
 };

@@ -14,7 +14,7 @@ const { signedUploadUrl } = require('./uploadLinks');
  * Photos shoppers attach to an order through a product's image field.
  *
  *   upload    POST /store/:workspaceId/uploads, no login. The raw file is
- *             capped (15 MB, refused before any processing), its type decided
+ *             capped (5 MB, refused before any processing), its type decided
  *             from its bytes (JPEG, PNG or WebP — no GIF, no SVG), then
  *             re-encoded by sharp: upright, no metadata, at most 2400px, at
  *             most 5 MB. Stored privately as

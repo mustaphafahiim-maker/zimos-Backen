@@ -90,9 +90,9 @@ describe('media upload', () => {
     expect(res.body.mimeType).toBe('image/jpeg');
   });
 
-  it('rejects a file over 5MB', async () => {
+  it('rejects an image over 10MB', async () => {
     const { auth, workspace } = await setupWorkspaceWithProduct();
-    const big = Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024 + 1)]);
+    const big = Buffer.concat([PNG, Buffer.alloc(10 * 1024 * 1024 + 1)]);
     const res = await request(app)
       .post(`/api/v1/workspaces/${workspace.id}/media`)
       .set(bearer(auth.accessToken))

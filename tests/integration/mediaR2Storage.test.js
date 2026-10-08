@@ -102,9 +102,9 @@ describe('media upload — R2 backend', () => {
     expect(mockS3Send).not.toHaveBeenCalled();
   });
 
-  it('rejects a file over 5MB before touching R2', async () => {
+  it('rejects an image over 10MB before touching R2', async () => {
     const { auth, workspace } = await setupWorkspaceWithProduct();
-    const big = Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024 + 1)]);
+    const big = Buffer.concat([PNG, Buffer.alloc(10 * 1024 * 1024 + 1)]);
     const res = await upload(workspace.id, auth.accessToken, big, { filename: 'huge.png', contentType: 'image/png' });
     expect(res.status).toBe(413);
     expect(res.body.error.code).toBe('FILE_TOO_LARGE');

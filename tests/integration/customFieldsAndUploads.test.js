@@ -128,9 +128,9 @@ describe('customer uploads', () => {
     expect(await db.CustomerUpload.count()).toBe(0);
   });
 
-  it('refuses a file over 15 MB before processing it', async () => {
+  it('refuses a file over 5 MB before processing it', async () => {
     const ctx = await setup();
-    const huge = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(15 * 1024 * 1024 + 10)]);
+    const huge = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(5 * 1024 * 1024 + 10)]);
     const res = await upload(ctx.ws, huge);
     expect(res.status).toBe(413);
     expect(res.body.error.code).toBe('FILE_TOO_LARGE');

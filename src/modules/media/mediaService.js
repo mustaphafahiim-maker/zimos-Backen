@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const db = require('../../db/models');
+const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
@@ -10,7 +11,15 @@ const { processMerchantImage } = require('./imageProcessing');
 
 const Op = db.Sequelize.Op;
 
-const MAX_BYTES = 5 * 1024 * 1024;
+const MB = 1024 * 1024;
+// A merchant's image — product, page-builder, logo or favicon picture — may be
+// sent at up to 10 MB (item 400, SPEC §7.1; MEDIA_IMAGE_MAX_MB). It is still
+// re-encoded, stripped and brought down to MERCHANT_MAX_DIMENSION by
+// processMerchantImage, so what is stored is usually far smaller. Shoppers'
+// photos, receipts and proofs keep their own 5 MB (customerUploads).
+const MAX_IMAGE_BYTES = env.media.imageMaxBytes;
+// The older name, kept for callers that read it.
+const MAX_BYTES = MAX_IMAGE_BYTES;
 
 // Media library page size when a caller names none. The request cap (100)
 // lives with the rest of the request contract, in mediaValidation.js.
@@ -52,6 +61,18 @@ const MAX_VIDEO_BYTES = 30 * 1024 * 1024;
 // storeImage applies the per-type ceiling.
 const MAX_UPLOAD_BYTES = Math.max(MAX_BYTES, MAX_MODEL_BYTES, MAX_VIDEO_BYTES);
 
+const KIND_LABELS = { image: 'The image', video: 'The video', model: 'The 3D model', file: 'The file' };
+
+/**
+ * 413 FILE_TOO_LARGE naming the limit that applies; `details` carries it for
+ * the dashboard (and errorMessages' Arabic/French wording): kind, maxBytes,
+ * maxMb.
+ */
+function tooLarge(kind, maxBytes) {
+  const maxMb = Math.round((maxBytes / MB) * 10) / 10;
+  return new AppError('FILE_TOO_LARGE', `${KIND_LABELS[kind] || KIND_LABELS.file} is larger than ${maxMb} MB`, 413, { kind, maxBytes, maxMb });
+}
+
 function detectImage(buffer) {
   return SIGNATURES.find((s) => s.match(buffer)) || null;
 }
@@ -65,9 +86,10 @@ async function storeImage(workspaceId, file, req) {
   if (!sig) {
     throw new AppError('UNSUPPORTED_MEDIA_TYPE', 'Only PNG, JPEG, GIF or WEBP images, MP4 or WebM videos, or GLB 3D models, are accepted', 415);
   }
-  const limit = isModel ? MAX_MODEL_BYTES : video ? MAX_VIDEO_BYTES : MAX_BYTES;
+  const limit = isModel ? MAX_MODEL_BYTES : video ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
   if (file.size > limit) {
-    throw new AppError('FILE_TOO_LARGE', `The file exceeds the ${Math.round(limit / (1024 * 1024))}MB limit`, 413);
+    const kind = isModel ? 'model' : video ? 'video' : 'image';
+    throw tooLarge(kind, limit);
   }
 
   // Upright, re-encoded in its own format, and stripped of EXIF / XMP / IPTC
@@ -190,4 +212,16 @@ async function deleteMedia(workspaceId, mediaId, req) {
   return { deleted: true };
 }
 
-module.exports = { storeImage, listMedia, deleteMedia, detectImage, UPLOAD_ROOT, MAX_BYTES, MAX_MODEL_BYTES, MAX_UPLOAD_BYTES };
+module.exports = {
+  storeImage,
+  listMedia,
+  deleteMedia,
+  detectImage,
+  tooLarge,
+  UPLOAD_ROOT,
+  MAX_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_MODEL_BYTES,
+  MAX_VIDEO_BYTES,
+  MAX_UPLOAD_BYTES,
+};

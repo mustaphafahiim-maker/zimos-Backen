@@ -377,7 +377,7 @@ Wording:
 - `GET /store/:ws` → `store.checkout.fields[]` carries `type: "file"`, and `store.checkout.billing_address`.
 
 ### Storefront checkout
-**File field** (photos only: JPEG, PNG, WebP; up to 15MB raw):
+**File field** (photos only: JPEG, PNG, WebP; up to 5 MB, item 400):
 1. On pick, `POST /store/:ws/uploads` (multipart `file`, header `X-Visitor-Id: <the visitor id the storefront already keeps>`)
    → `{ "upload": { "uploadId": "…", "mime": "image/jpeg", "width": 20, "height": 20, "expiresAt": "…" } }`.
    Show a thumbnail (from the local file) and "Change"/"Remove".
@@ -3973,7 +3973,7 @@ A second kind of manual payment, beside the existing "manual transfer with a rec
   ```
   `paymentToken` is shown once: keep it (sessionStorage) for the proof page, as for an online payment. Errors: 422 `VALIDATION_ERROR` field `manualPaymentMethodId` ("is not a payment method this store offers": off, deleted or another store's; "is not allowed" with another `paymentMethod`); `transfer` and `manualPaymentMethodId` together 422; 422 `PAYMENT_METHOD_UNAVAILABLE` (not offered in this funnel); a gift card, points or store credit with it 422 (as for every `bank_transfer`).
 - **GET `/store/:ws/orders/:orderId/manual-payment`** with header `X-Payment-Token` (the checkout's token, or the `pl_…` token of a message's payment link) → 200 `{ "manualPayment": { …as in the checkout answer… } }`; after a rejection `status: "rejected"`, `rejectionReason`, `canSubmit: true`. 404 for a wrong token or order.
-- **POST `/store/:ws/orders/:orderId/manual-payment/proof`** with `X-Payment-Token`, `multipart/form-data`: `payerNumber` (the phone or InstaPay handle they paid from, e.g. `0101 111 2222` or `ahmed@instapay`) and `file` (JPEG, PNG or WebP, up to 15 MB; it is re-encoded without its metadata) → 201 `{ "manualPayment": { …"status": "submitted", "canSubmit": false… } }`. Errors: 422 `VALIDATION_ERROR` field `payerNumber`; 422 `NO_FILE`; 415 `UNSUPPORTED_MEDIA_TYPE`; 413 `FILE_TOO_LARGE`; 422 `IMAGE_UNREADABLE`; 413 `IMAGE_TOO_LARGE`; 409 `PROOF_ALREADY_SUBMITTED` (waiting for review or approved); 409 `ORDER_CANCELLED`; 404 (wrong token or order); 429 `RATE_LIMITED` (5 a minute per IP).
+- **POST `/store/:ws/orders/:orderId/manual-payment/proof`** with `X-Payment-Token`, `multipart/form-data`: `payerNumber` (the phone or InstaPay handle they paid from, e.g. `0101 111 2222` or `ahmed@instapay`) and `file` (JPEG, PNG or WebP, up to 5 MB since item 400; it is re-encoded without its metadata) → 201 `{ "manualPayment": { …"status": "submitted", "canSubmit": false… } }`. Errors: 422 `VALIDATION_ERROR` field `payerNumber`; 422 `NO_FILE`; 415 `UNSUPPORTED_MEDIA_TYPE`; 413 `FILE_TOO_LARGE`; 422 `IMAGE_UNREADABLE`; 413 `IMAGE_TOO_LARGE`; 409 `PROOF_ALREADY_SUBMITTED` (waiting for review or approved); 409 `ORDER_CANCELLED`; 404 (wrong token or order); 429 `RATE_LIMITED` (5 a minute per IP).
 - The /pay page (`GET /store/:ws/orders/:orderId/payment`) for such an order: `paymentMethod: "bank_transfer"`, `status: "awaiting_payment"`, `canRetry` and `canSwitchToCod` false, `methods: []`; retry and switch-to-cod answer 409 `ORDER_IS_MANUAL`.
 
 ### Screens
@@ -5067,3 +5067,22 @@ GET `/profit/pnl` (unchanged path and permission). `actual.zimosFees` / `project
 ### Changed
 - New top-level `zimosPerOrderFee`: `{ amount, currency }` (minor units, wallet currency) when the store pays per order now, else `null`. The projection counts it for open orders that have no wallet charge yet.
 - Next to the ZIMOS fees line, a hint: when `zimosPerOrderFee` is set «رسوم ZIMOS لكل أوردر من رصيدك المدفوع مقدمًا» / "ZIMOS fee per order, from your prepaid balance"; otherwise keep today's percentage hint from `zimosFeeBp`.
+
+## 400. Merchant images up to 10 MB; shoppers' photos up to 5 MB — UI: pending (small)
+
+The media library (`POST /api/v1/workspaces/:ws/media`, multipart `file`) takes images (JPEG, PNG, WebP, GIF) up to **10 MB** — product pictures, page-builder images, logos and favicons all go through it. Videos stay at 30 MB and GLB models at 15 MB. The server still re-encodes every image without its metadata and brings anything wider or taller than 4096 px down to 4096 px (GIFs are kept as sent).
+
+Shoppers' uploads — product-field photos and transfer receipts (`POST /store/:ws/uploads`) and manual-payment proofs (`POST /store/:ws/orders/:orderId/manual-payment/proof`) — now take up to **5 MB** (was 15 MB), refused before processing. The store's billing payment screenshot (item 334) is unchanged at 8 MB.
+
+### Changed
+- 413 `FILE_TOO_LARGE` now names the limit and carries `details: { kind, maxBytes, maxMb }`, `kind` = `image` | `video` | `model` | `file` (media library, before the type is known: 30 MB) | `photo` (shopper routes). Check the size in the browser first with these numbers: media images 10 MB, shopper photos 5 MB.
+  - Media image: "The image is larger than 10 MB" / «الصورة أكبر من 10 ميجابايت.»
+  - Media, any file over the widest limit: "The file is larger than 30 MB" / «الملف أكبر من 30 ميجابايت.»
+  - Video / 3D model: "The video is larger than 30 MB" / «الفيديو أكبر من 30 ميجابايت.»; "The 3D model is larger than 15 MB" / «المجسّم ثلاثي الأبعاد أكبر من 15 ميجابايت.»
+  - Shopper photo, receipt or proof: "The photo is larger than 5 MB" / «الصورة أكبر من 5 ميجابايت.»
+  - The Arabic (and French) text comes back as `message` when the request sends `Accept-Language: ar` or `X-Store-Locale: ar` (English in `messageEn`).
+- New 422 `IMAGE_DIMENSIONS_TOO_LARGE` `details: { maxMegapixels: 60 }` (media and shopper routes): "The image is larger than 60 megapixels" / «أبعاد الصورة أكبر من 60 ميجابكسل. صغّرها وحاول مرة أخرى.» (was `IMAGE_UNREADABLE`).
+
+### Screens
+- Media picker / product images / builder image field: hint «حتى 10 ميجابايت للصورة» / "Images up to 10 MB".
+- Storefront photo field, receipt and proof upload: hint «حتى 5 ميجابايت» / "Up to 5 MB"; refuse a bigger file before sending with the 413 text above.
