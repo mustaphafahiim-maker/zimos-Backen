@@ -116,7 +116,10 @@ async function confirm(workspace, order, expressReq) {
     stageChangeReason: NOTE,
     viaCustomerLink: true,
   };
-  return db.sequelize.transaction(async (transaction) => {
+  // Order, then task — as confirmFromOrder and a cancel lock them — while an agent's queue outcome
+  // (recordOutcome) locks the task first. Should the two meet, Postgres ends one with a deadlock
+  // (40P01); when that is this one, it runs once more and sees what the agent did (item 388 review).
+  const run = () => db.sequelize.transaction(async (transaction) => {
     const locked = await db.Order.findOne({ where: { id: order.id, workspaceId: workspace.id }, transaction, lock: transaction.LOCK.UPDATE });
     if (!locked) throw new NotFoundError('Order');
     // Checked again on the locked row: a second click, an agent or a cancel may have got there first.
@@ -147,6 +150,13 @@ async function confirm(workspace, order, expressReq) {
     await locked.reload({ transaction });
     return result(locked);
   });
+  try {
+    return await run();
+  } catch (err) {
+    const code = (err.parent && err.parent.code) || (err.original && err.original.code);
+    if (code !== '40P01') throw err;
+    return run();
+  }
 }
 
 /**

@@ -109,7 +109,7 @@ async function query(workspaceId, f, { limit, cursor }) {
   };
   const inner = ['m.workspace_id = :ws'];
   if (f.variantId) { inner.push('m.variant_id = :variantId'); r.variantId = f.variantId; }
-  if (f.productId) { inner.push('v.product_id = :productId'); r.productId = f.productId; }
+  if (f.productId) { inner.push('m.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = :productId)'); r.productId = f.productId; }
   if (f.types) { inner.push('m.type::text IN (:types)'); r.types = f.types; }
   if (f.from) { inner.push('m.created_at >= :from'); r.from = f.from; }
   if (f.to) { inner.push('m.created_at < :to'); r.to = f.to; }
@@ -121,8 +121,15 @@ async function query(workspaceId, f, { limit, cursor }) {
   const join = (alias, table, refType) =>
     `LEFT JOIN ${table} ${alias} ON m.reference_type ${Array.isArray(refType) ? 'IN (:orderTypes)' : `= '${refType}'`} AND ${alias}.workspace_id = m.workspace_id AND ${alias}.id::text = m.reference_id`;
 
+  // The page of movements is picked first (index inventory_movements_workspace_created_idx, migration
+  // 526) and only those rows are joined, unless the location is filtered on: it is known only after
+  // the joins, so then every matching movement is joined before the page is cut (item 389 review).
+  const page = outer.length ? '' : 'ORDER BY m.created_at DESC, m.id DESC LIMIT :limit';
+
   return db.sequelize.query(
-    `WITH x AS (
+    `WITH page AS (
+       SELECT m.* FROM inventory_movements m WHERE ${inner.join(' AND ')} ${page}
+     ), x AS (
        SELECT m.id, m.created_at, m.type::text AS type, m.quantity_delta, m.reserved_delta, m.reason,
               m.reference_type, m.reference_id, m.actor_user_id, m.variant_id,
               to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at,
@@ -131,7 +138,7 @@ async function query(workspaceId, f, { limit, cursor }) {
               o.order_number, po.number AS po_number, sc.note AS count_note, sl.lot_code,
               rr.order_id AS return_order_id, ro.order_number AS return_order_number,
               COALESCE(refloc.id, po.location_id, sc.location_id, sl.location_id, o.stock_location_id, ro.stock_location_id, CAST(:def AS uuid)) AS location_id
-         FROM inventory_movements m
+         FROM page m
          LEFT JOIN product_variants v ON v.id = m.variant_id
          LEFT JOIN products p ON p.id = v.product_id
          LEFT JOIN users u ON u.id = m.actor_user_id
@@ -142,7 +149,6 @@ async function query(workspaceId, f, { limit, cursor }) {
          ${join('rr', 'return_requests', 'return_restock')}
          LEFT JOIN orders ro ON ro.id = rr.order_id
          ${join('refloc', 'stock_locations', 'stock_location')}
-        WHERE ${inner.join(' AND ')}
      )
      SELECT x.*, loc.name AS location_name
        FROM x LEFT JOIN stock_locations loc ON loc.id = x.location_id

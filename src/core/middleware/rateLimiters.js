@@ -599,7 +599,11 @@ const paymentWebhookLimiter = [
 ];
 
 // Delivery status webhooks (notifications/deliveryStatus, item 386): every event comes from
-// Brevo's or Twilio's servers, so limited per provider (the path), not per IP.
+// Brevo's or Twilio's servers, so limited per provider (the path), not per IP. The limiter
+// runs before the signature check, so a request that fails (bad proof, 4xx/5xx) is not
+// counted in that shared bucket — junk from anyone cannot use up the provider's budget —
+// and is counted per IP instead, which bounds an unverified caller (item 386 review).
+const DELIVERY_WEBHOOK_FAILURES_PER_IP = 30;
 const deliveryWebhookLimiter = [
   (req, res, next) => {
     req.rateLimitScope = 'delivery_webhook';
@@ -607,10 +611,23 @@ const deliveryWebhookLimiter = [
   },
   rateLimit({
     windowMs: env.rateLimit.windowMs,
+    limit: DELIVERY_WEBHOOK_FAILURES_PER_IP,
+    standardHeaders: false,
+    legacyHeaders: false,
+    skip,
+    skipSuccessfulRequests: true,
+    // A 429 from the shared bucket below is not this caller's failure.
+    requestWasSuccessful: (req, res) => res.statusCode < 400 || res.statusCode === 429,
+    keyGenerator: (req) => `delivery-webhook-failed:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
+    handler,
+  }),
+  rateLimit({
+    windowMs: env.rateLimit.windowMs,
     limit: env.notifications.statusWebhookRateLimitMax,
     standardHeaders: true,
     legacyHeaders: false,
     skip,
+    skipFailedRequests: true,
     keyGenerator: (req) => `delivery-webhook:${String(req.path || '').slice(0, 40)}`,
     handler,
   }),

@@ -54,7 +54,7 @@ const minutes = (n) => n * 60 * 1000;
 const text = (value, max) => (value === undefined || value === null || value === '' ? null : String(value).slice(0, max));
 
 /** Applies one read under the shipment's row lock. */
-async function apply(workspaceId, shipmentId, { provider, registration, checkpoints, fresh }, { trigger, now = new Date() }) {
+async function apply(workspaceId, shipmentId, { provider, registration, checkpoints }, { trigger, now = new Date() }) {
   const { intervalMinutes } = settings.polling();
   return db.sequelize.transaction(async (transaction) => {
     const shipment = await db.Shipment.findOne({ where: { id: shipmentId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
@@ -64,12 +64,28 @@ async function apply(workspaceId, shipmentId, { provider, registration, checkpoi
       return { shipment, changed: false, skipped: true, newCheckpoints: 0, carrierStatus: null };
     }
 
-    const previous = fresh ? {} : shipment.trackingState || {};
+    // What was applied is kept unless the number (or the provider) changed, decided here under the
+    // lock: a re-registration (ref dropped) or two first reads at once must not start over (item 387 review).
+    const state = shipment.trackingState || {};
+    const previous = state.provider === provider.code && state.waybill === registration.waybill ? state : {};
     const seen = new Set(Array.isArray(previous.seen) ? previous.seen : []);
     const sorted = [...checkpoints].sort((a, b) => a.at - b.at);
+    // A checkpoint already stored as an event (same time, code and text) is not stored again.
+    const description = (cp) => text([cp.description, cp.location].filter(Boolean).join(' · '), 300);
+    const eventKey = (at, code, desc) => `${new Date(at).getTime()}|${code || ''}|${desc || ''}`;
+    const existing = await db.ShipmentEvent.findAll({
+      where: { shipmentId: shipment.id },
+      attributes: ['occurredAt', 'carrierStatusCode', 'description'],
+      transaction,
+    });
+    const storedEvents = new Set(existing.map((e) => eventKey(e.occurredAt, e.carrierStatusCode, e.description)));
     const unseen = sorted.filter((cp) => !seen.has(cp.key));
 
+    let added = 0;
     for (const cp of unseen) {
+      const key = eventKey(cp.at, text(cp.code || cp.status, 100), description(cp));
+      if (storedEvents.has(key)) continue;
+      storedEvents.add(key);
       await db.ShipmentEvent.create(
         {
           workspaceId,
@@ -78,12 +94,13 @@ async function apply(workspaceId, shipmentId, { provider, registration, checkpoi
           carrierCode: shipment.carrierCode,
           status: SHIPMENT_STATUS_FOR[cp.status] || null,
           carrierStatusCode: text(cp.code || cp.status, 100),
-          description: text([cp.description, cp.location].filter(Boolean).join(' · '), 300),
+          description: description(cp),
           trigger: text(trigger, 20),
           occurredAt: cp.at,
         },
         { transaction }
       );
+      added += 1;
     }
 
     const appliedAt = previous.appliedAt ? new Date(previous.appliedAt) : null;
@@ -133,7 +150,7 @@ async function apply(workspaceId, shipmentId, { provider, registration, checkpoi
       },
       { transaction }
     );
-    return { shipment, changed, newCheckpoints: unseen.length, carrierStatus };
+    return { shipment, changed, newCheckpoints: added, carrierStatus };
   });
 }
 
@@ -164,7 +181,7 @@ async function trackShipment(shipment, provider, { trigger, now = new Date() }) 
   }
   if (read.courier) registration.providerCourier = read.courier;
   const checkpoints = (read.checkpoints || []).filter((cp) => cp && cp.key && cp.at instanceof Date && !Number.isNaN(cp.at.getTime()));
-  return apply(shipment.workspaceId, shipment.id, { provider, registration, checkpoints, fresh: !known }, { trigger, now });
+  return apply(shipment.workspaceId, shipment.id, { provider, registration, checkpoints }, { trigger, now });
 }
 
 // --- the sync button ------------------------------------------------------------
