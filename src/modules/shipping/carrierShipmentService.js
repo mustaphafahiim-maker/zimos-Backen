@@ -620,6 +620,9 @@ async function findCarrierShipment(workspaceId, orderId, shipmentId) {
 
 /** POST /orders/:orderId/shipments/:shipmentId/sync */
 async function syncShipment(workspaceId, orderId, shipmentId) {
+  // A manual waybill, when the store follows those through a tracking provider (item 387).
+  const manual = await require('./trackingProviders/manualTracking').syncManualShipment(workspaceId, orderId, shipmentId);
+  if (manual) return manual;
   const shipment = await findCarrierShipment(workspaceId, orderId, shipmentId);
   const { adapter, account, credentials } = await accounts.loadConnection(workspaceId, shipment.carrierCode);
   const result = await accounts.withAuthHandling(account, () => adapter.getShipment(credentials, shipment.waybillNumber));

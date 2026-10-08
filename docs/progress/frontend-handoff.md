@@ -4787,3 +4787,49 @@ The dashboard can now show whether a customer email or SMS actually arrived. Bre
   - SMS: «رسالة الطلب {n} لم تصل للعميل» / "Order {n} SMS not delivered"
   - Complaint: «العميل علّم بريد الطلب {n} كرسالة مزعجة» / "The customer marked the order {n} email as spam"
 - **Automation run detail**: an email step to a suppressed address fails with "Suppressed: hard_bounce" / "Suppressed: complaint". Show it as «العنوان موقوف (ارتداد/شكوى)» / "Address suppressed (bounce/complaint)".
+
+## 387. Tracking for manual and imported waybills — UI: pending
+
+Shipments the merchant creates by hand (any courier name plus a waybill) and the ones the tracking CSV import creates can now update themselves. When the store switches on a **tracking provider**, a background job reads each live manual shipment's waybill and moves its status: in transit, out for delivery, failed attempt, delivered or returned. Each checkpoint lands in the order timeline as a courier event. A delivered shipment fires `order.delivered` once, just like a courier booking. The status never moves backwards, and the job stops once the shipment is final. Courier-booked shipments are not affected.
+
+### Endpoints
+- **GET `/api/v1/workspaces/:ws/shipping/tracking-provider`** — **`shipping.manage`**.
+```json
+{
+  "trackingProvider": { "enabled": false, "provider": null },
+  "providers": [
+    { "code": "sandbox", "name": "Sandbox (test)", "sandbox": true, "available": true },
+    { "code": "aftership", "name": "AfterShip", "sandbox": false, "available": false }
+  ],
+  "polling": { "intervalMinutes": 60, "maxAgeDays": 45 }
+}
+```
+- **PUT `/api/v1/workspaces/:ws/shipping/tracking-provider`** — **`shipping.manage`**. Body: `{ "enabled": true, "provider": "sandbox" }`. `provider` is optional and keeps the current one when left out. The answer has the same shape as the GET.
+  - 422 `VALIDATION_ERROR` on `provider` when `enabled` is true with no provider, or the provider has `available: false` (AfterShip without the platform key).
+  - `enabled: false` keeps the provider, so switching it back on is one click.
+- **POST `/orders/:orderId/shipments/:shipmentId/sync`** (the existing "Refresh status" button; `orders.manage` or `shipping.manage`) now also works on a manual shipment when tracking is on:
+```json
+{ "shipment": { "id": "…", "status": "out_for_delivery", "trackingState": { "provider": "sandbox", "courier": "aramex", "lastCheckedAt": "2026-10-08T01:00:42.291Z", "lastCheckpointAt": "…", "lastStatus": "out_for_delivery", "failedWaybill": null, "…": "…" }, "trackingNextPollAt": "…", "trackingFailures": 0, "…": "…" },
+  "changed": true,
+  "carrierStatus": { "code": "OD", "value": "Out for delivery" },
+  "tracking": { "provider": "sandbox", "newCheckpoints": 1 } }
+```
+  - 409 `SHIPMENT_NOT_CARRIER_MANAGED`: as before, when tracking is off.
+  - 409 `SHIPMENT_NO_WAYBILL`: the shipment has no real waybill (none, or the import's `IMP-<order number>` placeholder).
+  - 502 `TRACKING_PROVIDER_FAILED`: the provider could not be read.
+- Shipments in **GET `/orders/:id`** / **`/orders/:id/shipments`** now carry `trackingState` (null until first read), `trackingNextPollAt` and `trackingFailures`. Ignore `trackingState.seen` and `ref`.
+- **GET `/orders/:id/timeline`**: each checkpoint is a `courier` event (`data.status`, `data.carrierStatusCode`, `data.description` = "message · location"), at the checkpoint's own time.
+
+### Screens
+- **Settings → Shipping → «تتبع الشحنات اليدوية» / "Tracking for manual shipments"** (a card under the default courier):
+  - Toggle: «حدّث حالة الشحنات اليدوية تلقائيًا» / "Update manual shipments automatically".
+  - Select «مزوّد التتبع» / "Tracking provider". Show the options from `providers`; disable the ones with `available: false` and add the hint «غير متاح على السيرفر ده» / "Not available on this server". Label the sandbox «تجريبي» / "Test".
+  - Help text: «بنقرا رقم البوليصة من المزوّد كل {intervalMinutes} دقيقة لحد ما الشحنة تتسلّم أو ترجع، ولمدة {maxAgeDays} يوم بحد أقصى. شحنات شركات الشحن المربوطة بتتحدّث لوحدها» / "We read each waybill from the provider every {intervalMinutes} minutes until it is delivered or returned, for up to {maxAgeDays} days. Shipments booked with a connected courier update on their own".
+  - Saved toast: «اتحفظ» / "Saved". On a 422, show the field error under the select.
+- **Order page → shipment card** (manual shipments with a waybill, when tracking is on):
+  - Show the existing «تحديث الحالة» / "Refresh status" button.
+  - A line «آخر تحديث من {provider}: {lastCheckedAt}» / "Last checked with {provider}: {lastCheckedAt}".
+  - When `trackingFailures > 0`: «مقدرناش نقرا الرقم ده — راجع رقم البوليصة» / "We couldn't read this number — check the waybill".
+  - After a sync with `changed: false`: «مفيش جديد» / "No new updates". With `newCheckpoints > 0`: «اتضاف {n} تحديث» / "{n} new updates".
+  - 409 `SHIPMENT_NO_WAYBILL`: «ضيف رقم البوليصة الأول» / "Add the waybill number first". 502: «مزوّد التتبع مش بيرد دلوقتي، جرّب تاني بعد شوية» / "The tracking provider isn't answering, try again later".
+- **Order timeline**: `courier` events from a manual shipment read the same as a courier's, e.g. «خرجت للتسليم — Nasr City» / "Out for delivery — Nasr City". A failed attempt is «محاولة تسليم فاشلة» / "Delivery attempt failed".
