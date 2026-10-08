@@ -546,13 +546,33 @@ async function grantFreeOrders(workspaceId, { count, reason, requestId }, req) {
   );
 }
 
-/** POST /admin/workspaces/:id/wallet/adjustments { amount, reason, requestId } — the balance corrected by hand, either way. */
-async function adjustBalance(workspaceId, { amount, reason, requestId }, req) {
-  return consoleEntry(
+/**
+ * POST /admin/workspaces/:id/wallet/adjustments { amount, reason, requestId,
+ * kind, notifyMerchant } — a correction by hand, either way (kind
+ * 'correction', the default), or a gift that only adds (kind 'gift').
+ * Neither is ever refundable. The store is told only with notifyMerchant.
+ */
+async function adjustBalance(workspaceId, { amount, reason, requestId, kind = 'correction', notifyMerchant = false }, req) {
+  // A gift (migration 223) only adds, and is never refundable: it isn't a top-up.
+  const gift = kind === 'gift';
+  if (gift && !(amount > 0)) throw new AppError('GIFT_MUST_ADD', 'A gift adds to the balance. Use a correction to take from it.', 422);
+  const type = gift ? 'gift' : 'adjustment';
+  const result = await consoleEntry(
     workspaceId,
-    { type: 'adjustment', key: `adjustment:${requestId}`, write: { delta: amount, note: reason }, audit: 'wallet.adjust' },
+    { type, key: `${type}:${requestId}`, write: { delta: amount, note: reason }, audit: gift ? 'wallet.gift' : 'wallet.adjust' },
     req
   );
+  // Told in the bell only when the console asks, and only the first time.
+  if (notifyMerchant && !result.replayed) {
+    await require('../notifications/merchantNotificationEvents').walletCredit(workspaceId, {
+      entryId: result.entry.id,
+      amount,
+      currency: WALLET_CURRENCY,
+      kind: gift ? 'gift' : 'correction',
+      reason,
+    });
+  }
+  return result;
 }
 
 // ------------------------------------------------------- pay-per-order plan

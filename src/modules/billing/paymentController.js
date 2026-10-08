@@ -97,8 +97,13 @@ const choosePayPerOrder = asyncHandler(async (req, res) => {
 const adminWorkspaceWallet = asyncHandler(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const { workspaceId } = req.params;
-  const [summary, entries] = await Promise.all([wallet.summary(workspaceId), wallet.ledger(workspaceId, req.query)]);
-  res.json({ wallet: summary, ledger: entries });
+  const [summary, entries, refunds] = await Promise.all([
+    wallet.summary(workspaceId),
+    wallet.ledger(workspaceId, req.query),
+    walletRefunds.storeBreakdown(workspaceId),
+  ]);
+  // refunds: each paid top-up with its ceiling, what was refunded or is held, what is left; and the totals.
+  res.json({ wallet: summary, ledger: entries, refunds });
 });
 
 const adminGrantFreeOrders = asyncHandler(async (req, res) => {

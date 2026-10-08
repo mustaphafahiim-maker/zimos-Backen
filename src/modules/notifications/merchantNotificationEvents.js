@@ -145,6 +145,18 @@ function walletRefund(workspaceId, request) {
   });
 }
 
+/** Zimos added credit to the prepaid balance and chose to say so. */
+function walletCredit(workspaceId, { entryId, amount, currency, kind, reason }) {
+  return service.create(workspaceId, {
+    type: 'wallet.credit',
+    title: kind === 'gift' ? 'أضاف فريق Zimos رصيدًا هدية إلى محفظتك' : 'عدّل فريق Zimos رصيد محفظتك',
+    body: `${money(amount, currency)}${reason ? ` — ${reason}` : ''}`,
+    link: '/subscription?tab=usage',
+    data: { entryId, amount, currency, kind, reason: reason || null },
+    dedupeKey: `wallet.credit:${entryId}`,
+  });
+}
+
 const HANDLERS = { 'order.created': orderCreated };
 
 /** Fire-and-forget, like automationEngine.emit; awaited under test for the same reason. */
@@ -157,4 +169,4 @@ function emit(workspaceId, event, entityId) {
   return env.isTest ? work : undefined;
 }
 
-module.exports = { emit, orderCreated, integrationFailed, exportReady, walletLow, walletLimitReached, walletRefund };
+module.exports = { emit, orderCreated, integrationFailed, exportReady, walletLow, walletLimitReached, walletRefund, walletCredit };

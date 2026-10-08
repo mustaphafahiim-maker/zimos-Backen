@@ -239,7 +239,14 @@ nothing twice. Each is audited on the store.
 | | Permission | Entry |
 |---|---|---|
 | `POST /admin/workspaces/:id/wallet/free-orders { count, reason, requestId }` | `subscriptions.manage` | `free_orders_grant:<requestId>` |
-| `POST /admin/workspaces/:id/wallet/adjustments { amount, reason, requestId }` | `payments.record` | `adjustment:<requestId>`, either way, not a top-up |
+| `POST /admin/workspaces/:id/wallet/adjustments { amount, reason, requestId, kind, notifyMerchant }` | `payments.record` | `kind: correction` (default): `adjustment:<requestId>`, either way. `kind: gift` (migration 223): `gift:<requestId>`, adds only. Neither is a top-up, so neither is ever refundable. `notifyMerchant` tells the store in the bell (`wallet.credit`) |
+
+`GET /admin/workspaces/:id/wallet` also has `refunds`:
+
+- each paid top-up with its ceiling, what was refunded, what is held and
+  what is left;
+- the lifetime top-ups, what is still refundable, what was refunded and
+  what is pending.
 
 ## Endpoints
 

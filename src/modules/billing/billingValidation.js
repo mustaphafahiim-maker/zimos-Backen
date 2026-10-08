@@ -147,6 +147,9 @@ module.exports = {
       amount: Joi.number().integer().min(-2000000).max(2000000).invalid(0).required(),
       reason: Joi.string().trim().min(3).max(500).required(),
       requestId: Joi.string().guid().required(),
+      // correction (either way, as before) or gift (adds only); never refundable.
+      kind: Joi.string().valid('correction', 'gift').default('correction'),
+      notifyMerchant: Joi.boolean().default(false),
     }),
   },
 
