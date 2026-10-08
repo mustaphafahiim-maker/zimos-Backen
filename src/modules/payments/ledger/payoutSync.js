@@ -214,10 +214,13 @@ const FAIL_BASE_MS = 60 * 60 * 1000;
 async function syncDue({ limit = 20 } = {}) {
   const codes = codesWithPayouts();
   if (!codes.length) return { accounts: 0 };
+  // Accounts still backing off are left out of the query, so they never take the run's places (review of item 403).
+  const waiting = [...failing].filter(([, f]) => f.nextAt > Date.now()).map(([id]) => id);
   const due = await db.PaymentGatewayAccount.findAll({
     attributes: ['id', 'workspaceId', 'providerCode', 'payoutsSyncedAt'],
     where: {
       status: 'active',
+      ...(waiting.length ? { id: { [Op.notIn]: waiting } } : {}),
       providerCode: { [Op.in]: codes },
       [Op.or]: [{ payoutsSyncedAt: null }, { payoutsSyncedAt: { [Op.lt]: new Date(Date.now() - DUE_AFTER_MS) } }],
     },
@@ -227,7 +230,6 @@ async function syncDue({ limit = 20 } = {}) {
   let synced = 0;
   for (const account of due) {
     const streak = failing.get(account.id);
-    if (streak && streak.nextAt > Date.now()) continue;
     try {
       await module.exports.syncAccount(account);
       synced += 1;

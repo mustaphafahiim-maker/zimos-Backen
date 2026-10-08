@@ -154,7 +154,10 @@ async function resolve(address, { transaction } = {}) {
   const cityRaw = variants(a.city).flatMap((v) => [v, plain(v)]);
   const folded = await normalizeAll([...provinceRaw, ...cityRaw], { transaction });
   const provinceFolded = folded.slice(0, provinceRaw.length).filter(Boolean);
-  const provinceNames = [...new Set([...provinceFolded, ...provinceFolded.map(bare)])].filter(Boolean);
+  // The division words and the province-names-a-city fallback are for the countries item 398 added; Egypt and
+  // Saudi Arabia (and no country) keep their earlier matching exactly (review of item 398).
+  const extended = Boolean(country) && country !== 'EG' && country !== 'SA';
+  const provinceNames = [...new Set([...provinceFolded, ...(extended ? provinceFolded.map(bare) : [])])].filter(Boolean);
   const cityNames = [...new Set(folded.slice(provinceRaw.length).filter(Boolean))];
 
   const inCountry = (e) => !country || e.region.country === country;
@@ -174,7 +177,7 @@ async function resolve(address, { transaction } = {}) {
       if (city) governorate = byCode.get(city.region.parentCode) || null;
     }
   }
-  if (!governorate && provinceNames.length) {
+  if (!governorate && provinceNames.length && extended) {
     // The province field names a city ("Casablanca" for Casablanca-Settat,
     // "Tangier"): its division, and the city typed under it, else that city.
     const named = only(entries.filter((e) => e.region.level === 'city' && inCountry(e)), provinceNames);

@@ -173,10 +173,11 @@ function linesSql({ notTest, zimos }) {
              max(ret) OVER (PARTITION BY order_id) * share AS ship_back,
              CASE WHEN payment_method <> 'cod' AND gateway_fee IS NOT NULL THEN gateway_fee * share
                   ELSE order_revenue * share * (CASE WHEN payment_method = 'cod' THEN collection_bp ELSE gateway_bp END) / 10000.0 END AS fees,
-             CASE WHEN wallet_fee IS NOT NULL OR (bucket = 'open' AND rule_fee IS NOT NULL) THEN 0
+             CASE WHEN wallet_fee IS NOT NULL THEN 0
                   ELSE order_revenue * share * (CASE WHEN payment_method = 'cod' THEN ${zimos.codBp} ELSE ${zimos.transactionBp} END) / 10000.0
              END AS zimos,
-             coalesce(wallet_fee, CASE WHEN bucket = 'open' THEN rule_fee END, 0) * share AS zimos_per_order
+             -- An order without wallet rows was never charged per order (add-ons, orders from before the wallet): plan % (review of item 397).
+             coalesce(wallet_fee, 0) * share AS zimos_per_order
         FROM li
     )`;
 }
