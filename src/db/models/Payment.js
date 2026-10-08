@@ -51,6 +51,12 @@ module.exports = (sequelize, DataTypes) => {
       purpose: { type: DataTypes.STRING(20), allowNull: true }, // full | deposit
       reviewedByUserId: { type: DataTypes.UUID, allowNull: true, field: 'reviewed_by_user_id' },
       reviewedAt: { type: DataTypes.DATE, allowNull: true, field: 'reviewed_at' },
+      // The gateway's fee and what reached the balance, and the payout that carried it (item 384, migration 521).
+      feeAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'fee_amount' },
+      netAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'net_amount' },
+      feeCurrency: { type: DataTypes.STRING(3), allowNull: true, field: 'fee_currency' },
+      feesCheckedAt: { type: DataTypes.DATE, allowNull: true, field: 'fees_checked_at' },
+      payoutId: { type: DataTypes.UUID, allowNull: true, field: 'payout_id' },
     },
     { tableName: 'payments', indexes: [{ fields: ['workspace_id'] }, { fields: ['order_id'] }] }
   );

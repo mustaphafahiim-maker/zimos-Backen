@@ -25,5 +25,7 @@ router.delete('/gateways/:code', validate(schemas.gateway), manage, controller.d
 router.get('/methods', validate(schemas.workspace), manage, controller.listMethods);
 router.put('/methods', validate(schemas.updateMethods), manage, controller.updateMethods);
 router.post('/preview-token', validate(schemas.workspace), manage, controller.previewToken);
+// The online payments ledger and payouts (item 384), for financial_reports.view.
+router.use(require('./ledger/ledgerRoutes'));
 
 module.exports = router;

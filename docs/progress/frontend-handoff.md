@@ -4634,3 +4634,51 @@ All under `/api/v1/workspaces/:ws/order-emails` (workspace.manage); `?locale=` c
   - The editor box's direction: `dir="rtl"` for Arabic, `dir="ltr"` otherwise.
 - **Create order (manual)**: when the store has more than one language, a select «لغة رسائل العميل» / "Customer's message language" with the store's languages, default the store's default; sent as `locale`.
 - **Order page**: next to the customer, a small tag with the order's language when it is not the store's default: «اللغة: English» / "Language: English".
+
+## 384. Online payments ledger with gateway fees and payouts — UI: pending
+
+A finance view of the store's online payments: every captured or failed gateway payment and every refund of one, with what the gateway kept (fee), what reached the merchant's gateway balance (net), and the payout that sent it to the bank. Cash on delivery, transfers, gift cards and points are not in it. All endpoints need **`financial_reports.view`** (403 `FORBIDDEN` otherwise — hide the screens). Amounts are integer minor units; fees and net are in `feeCurrency` (the gateway's settlement currency, usually the store's).
+
+### Endpoints (under `/api/v1/workspaces/:ws/payments`)
+- **GET `/transactions`** — query: `gateway` (`sandbox`, `stripe`, `paymob`…), `method` (`card`, `wallet`…), `status` (`captured` | `refunded` | `failed` | `pending`), `type` (`payment` | `refund`), `mode` (`live` | `test`), `orderId`, `payoutId`, `from`, `to` (`YYYY-MM-DD` on the store's calendar, `to` inclusive; or ISO timestamps), `limit` (1–200, default 50), `cursor` (the previous answer's `nextCursor`), `format` (`json` default | `csv` | `xlsx` — a file download of everything the filters select, up to 10,000 rows), `lang` (`en` | `ar`, the file's headers and words). Newest first.
+```json
+{
+  "transactions": [
+    { "type": "refund", "id": "7c1e…", "paymentId": "a51d…", "orderId": "5d80…", "orderNumber": "#1002",
+      "gateway": "stripe", "method": "card", "mode": "live", "status": "refunded", "paymentStatus": "partially_refunded",
+      "amount": -1000, "currency": "EGP", "fee": 0, "feeCurrency": "EGP", "net": -1000,
+      "payoutId": "e0b2…", "payout": { "id": "e0b2…", "externalId": "po_1Q…", "status": "paid", "arrivalDate": "2026-10-10" },
+      "reference": "re_3Q…", "maskedDisplay": null, "failureReason": null, "source": "merchant", "occurredAt": "2026-10-08T00:20:11.000Z" },
+    { "type": "payment", "id": "a51d…", "paymentId": "a51d…", "orderId": "5d80…", "orderNumber": "#1002",
+      "gateway": "stripe", "method": "card", "mode": "live", "status": "captured", "paymentStatus": "partially_refunded",
+      "amount": 10000, "currency": "EGP", "fee": 500, "feeCurrency": "EGP", "net": 9500,
+      "payoutId": "e0b2…", "payout": { … }, "reference": "pi_3Q…", "maskedDisplay": "Visa •••• 4242",
+      "failureReason": null, "source": null, "occurredAt": "2026-10-08T00:19:40.000Z" }
+  ],
+  "totals": {
+    "byCurrency": [ { "currency": "EGP", "payments": 2, "captured": 20000, "refunds": 2, "refunded": 3000, "failed": 1, "feesPending": 0 } ],
+    "feesByCurrency": [ { "currency": "EGP", "fees": 1050, "net": 15950 } ]
+  },
+  "nextCursor": "2026-10-08T00:19:40.000Z|a51d…"
+}
+```
+  - `amount` is signed: a refund is negative. `fee: null` = the gateway hasn't said yet (or never will: Paymob, Kashier and PayPal don't report fees) — show «—» with the tooltip «الرسوم لسه ما وصلتش من البوابة» / "The gateway hasn't reported the fee yet". `net: null` on a failed payment or a pending/failed refund (nothing moved). `payout: null` = not paid out yet.
+  - `totals` is over everything the filters select (only on the first page — keep it while loading more). `feesPending` = captured payments whose fee is still unknown.
+  - 422 `VALIDATION_ERROR`: a bad `status`/`type`/`format`, `from` after `to` (`details[0].field` `from`), a cursor not from this list (`cursor`).
+- **GET `/payouts`** — query `gateway`, `status` (`pending` | `in_transit` | `paid` | `failed` | `canceled`), `from`, `to` (arrival dates, `YYYY-MM-DD`), `limit` (1–100), `cursor`. Newest arrival first.
+```json
+{ "payouts": [ { "id": "e0b2…", "gateway": "stripe", "mode": "live", "externalId": "po_1Q…", "amount": 8450, "currency": "EGP",
+    "fee": 500, "arrivalDate": "2026-10-10", "status": "in_transit", "payments": 1, "refunds": 1,
+    "unmatchedCount": 1, "unmatchedAmount": -50, "syncedAt": "…", "createdAt": "…" } ],
+  "nextCursor": null }
+```
+  `unmatchedCount` / `unmatchedAmount`: lines of the payout that are not a ZIMOS payment or refund (the gateway's own adjustments or fees, sales made outside ZIMOS).
+- **GET `/payouts/:payoutId`** → `{ payout: {…same shape}, summary: { paymentsAmount, refundsAmount, fees, net, unmatchedCount, unmatchedAmount }, payments: [transaction rows], refunds: [transaction rows] }`. `summary.net + summary.unmatchedAmount` = `payout.amount`. 404 `NOT_FOUND` for another store's id.
+- **POST `/payouts/sync`** ("Refresh"; otherwise the server syncs once a day) → `{ "results": [ { "gateway": "stripe", "since": "…", "payouts": 2, "created": 1, "matchedPayments": 4, "matchedRefunds": 1, "unmatched": 1 }, { "gateway": "sandbox", "skipped": "recently_synced" }, { "gateway": "x", "error": "GATEWAY_AUTH_FAILED", "message": "…" } ] }`. 409 `PAYOUTS_NOT_AVAILABLE` when no connected gateway reports payouts. Each account at most once a minute (`skipped: "recently_synced"`).
+- **Sandbox connect form** (built from `GET /payments/gateways` as before): two new optional integer settings with no `method` — `feeBasisPoints` («رسوم تجريبية بجزء من مئة من النسبة المئوية (100 = 1%)» / "Test fee, in 1/100 of a percent (100 = 1%)", 0–10000) and `feeFixedMinor` («رسوم ثابتة تجريبية لكل دفعة بأصغر وحدة (قروش، سنتات)» / "Test fixed fee per payment, in the smallest unit (piastres, cents)"). Only for trying the ledger in test mode.
+
+### Screens
+- **Payments → «المعاملات» / "Transactions"** (new tab next to the gateways; nav entry under Finance/Reports too, visible with financial_reports.view): filters «البوابة» / "Gateway", «الطريقة» / "Method", «الحالة» / "Status" («مدفوع» / "Captured", «مسترد» / "Refunded", «فشل» / "Failed", «قيد التنفيذ» / "Pending"), «النوع» / "Type" («دفعة» / "Payment", «استرداد» / "Refund"), date range «من» / "From" – «إلى» / "To", and a «تجريبي» / "Test" toggle (`mode`). Summary cards per currency from `totals`: «المحصّل» / "Captured", «المسترد» / "Refunded", «رسوم البوابة» / "Gateway fees", «الصافي» / "Net"; when `feesPending > 0` a hint «{n} دفعات رسومها لسه ما وصلتش» / "{n} payments are still waiting for their fee". Table columns: «التاريخ» / "Date", «الطلب» / "Order" (links to the order), «النوع» / "Type", «الحالة» / "Status" (StatusBadge), «البوابة» / "Gateway", «المبلغ» / "Amount" (refunds in red with a minus), «الرسوم» / "Fee", «الصافي» / "Net", «التحويل» / "Payout" (its `arrivalDate` and status, links to the payout). «تحميل المزيد» / "Load more" with `nextCursor`. Export menu «تصدير CSV» / "Export CSV" and «تصدير Excel» / "Export Excel" (same filters + `format`, `lang` = the dashboard's language). Empty state: «مفيش مدفوعات أونلاين لسه» / "No online payments yet".
+- **Payments → «التحويلات البنكية» / "Payouts"**: list with «تاريخ الوصول» / "Arrival date", «البوابة» / "Gateway", «المبلغ» / "Amount", «الرسوم» / "Fees", «الحالة» / "Status" («في الطريق» / "In transit", «وصل» / "Paid", «معلّق» / "Pending", «فشل» / "Failed", «اتلغى» / "Canceled"), «مدفوعات» / "Payments" and «استردادات» / "Refunds" counts; a «تحديث» / "Refresh" button (POST `/payouts/sync`, then reload; show per-gateway errors from `results[].message`, and «اتحدّث من شوية» / "Refreshed a moment ago" for `recently_synced`). Hint under the title: «بنجيب التحويلات من البوابة مرة كل يوم» / "Payouts are fetched from the gateway once a day". Empty state: «مفيش تحويلات لسه — Stripe والـ Sandbox بس اللي بيبعتوا التحويلات دلوقتي» / "No payouts yet — only Stripe and the Sandbox report payouts for now".
+- **Payout page** (`/payments/payouts/:id`): header with amount, status, arrival date and the gateway's id (`externalId`, copyable); summary rows «المدفوعات» / "Payments" (`paymentsAmount`), «الاستردادات» / "Refunds" (`refundsAmount`), «الرسوم» / "Fees", «مش من زيموس» / "Not from ZIMOS" (`unmatchedAmount`, with the tooltip «تسويات أو رسوم من البوابة أو مبيعات من برّه المتجر» / "Gateway adjustments or fees, or sales made outside the store", shown only when `unmatchedCount > 0`), «الإجمالي» / "Total"; then the two tables (same columns as Transactions).
+- **Order page → payments panel**: optional — show «رسوم البوابة {fee}» / "Gateway fee {fee}" under a captured payment when the ledger row has one (GET `/transactions?orderId=`).

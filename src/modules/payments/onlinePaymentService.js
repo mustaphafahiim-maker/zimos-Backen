@@ -493,6 +493,8 @@ async function recordPaymentTransaction(account, tx) {
     // The shopper ticked "save my card" at checkout.
     await require('./savedMethods/consentedSave').afterPaid(order, context);
   }
+  // The gateway's fee, asked in the background — never on the capture's path (item 384).
+  if (String(outcome).startsWith('paid')) require('./ledger/paymentFees').fillSoon(attempt.id);
   return { outcome, ...ids };
 }
 

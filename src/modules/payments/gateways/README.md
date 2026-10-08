@@ -201,3 +201,66 @@ One-click upsells and subscription renewals charge a saved card through `chargeS
   the card), and the signed string for a token payment could not be grounded in its documentation.
 
 Check against stand-ins: `STRIPE_API_BASE`, `PAYPAL_API_BASE` and `PAYMOB_BASE_URL` (outside production).
+
+## Fees and payouts (item 384)
+
+Two optional functions feed the online payments ledger (`../ledger/`): `GET /payments/transactions`,
+`GET /payments/payouts` and `GET /payments/payouts/:id` (financial_reports.view). A gateway without them still
+appears in the ledger; its fees and payouts stay unknown.
+
+### `fetchFees(credentials, { payment, settings })`
+
+The gateway's fee on one captured payment → `{ fee, net, currency }` (integer minor units, `fee ≥ 0`, `net` = what
+reached the merchant's gateway balance; `currency` = the gateway's settlement currency, which may differ from the
+payment's) or `null` while the gateway does not know it yet. Called in the background right after a capture
+commits (never on the capture's path), then by the `payments.fetch_fees` job every 10 minutes for what is still
+unknown: each payment at most every 30 minutes, for 7 days after it was paid. Stored as `payments.fee_amount`,
+`net_amount`, `fee_currency`. The profit report uses `fee_amount` instead of the product's `gateway_fee_bp`
+estimate for an online order once it is known in the store's currency.
+
+### `listPayouts(credentials, { since, settings, candidates? })`
+
+The account's payouts created since `since` (a UTC midnight) →
+
+```js
+[{
+  externalId: 'po_…',            // the gateway's id; unique per store and gateway
+  amount, currency,               // what reached the bank, minor units
+  fee?,                           // the fees of what it carried (default: the sum of its lines' fees)
+  arrivalDate,                    // Date or 'YYYY-MM-DD'
+  status: 'pending' | 'in_transit' | 'paid' | 'failed' | 'canceled',
+  transactions: [{                // what it carried
+    type: 'payment' | 'refund' | 'other',
+    transactionId,                // payment: what Payment.providerTransactionId holds; refund: Refund.providerRefundReference
+    amount, fee, net, currency,   // signed: a refund is negative
+  }],
+}]
+```
+
+`../ledger/payoutSync.js` keeps one `gateway_payouts` row per payout (migration 521), updated on every sync, and
+links each line it can match (`payments.payout_id`, `refunds.payout_id`, plus the line's fee when ours was not
+known yet); lines that match nothing (the gateway's adjustments, sales made elsewhere) are counted on the payout
+as `unmatched_count` / `unmatched_amount`. A failed or cancelled payout does not take a line away from a payout
+that carried it since. The `payments.payouts_sync` job runs hourly and syncs each active account whose last sync
+is a day old (`payment_gateway_accounts.payouts_synced_at`), asking again from a week before the last sync (30
+days on the first), so a payout in transit is seen arriving; `POST /payments/payouts/sync` ("Refresh") syncs the
+store's accounts now, at most once a minute each, audited `payment_payouts.sync`.
+
+`candidates` is passed only to an adapter that sets `wantsPayoutCandidates: true` (the sandbox, which has no
+ledger of its own): `{ payments: [{ id, transactionId, amount, currency, paidAt }], refunds: [{ id, reference,
+amount, currency, processedAt }] }` — what ZIMOS holds for the account since `since`. A real gateway ignores it.
+
+### Who implements them
+
+| Gateway | `fetchFees` | `listPayouts` |
+|---|---|---|
+| `sandbox` | the account's own test settings `feeBasisPoints` (1/100 %) of the amount + `feeFixedMinor`, never more than the amount; unset = no fee | one payout per UTC day and currency for days that are over, from `candidates`: the day's payments (less their fee) less its refunds, arriving two days later (`paid` once that date has come, `in_transit` before); a day that nets ≤ 0 pays nothing; id `sbxpo_<day>_<currency>_<signature>` — asking again gives the same payouts |
+| `stripe` | `GET /v1/payment_intents/:id?expand[]=latest_charge.balance_transaction` → the balance transaction's `fee` / `net` / `currency`; null until Stripe has made it | `GET /v1/payouts?created[gte]=` (pages of 100, at most 5), then `GET /v1/balance_transactions?payout=<po_…>&expand[]=data.source` (pages of 100, at most 20 per payout): `charge` / `payment` lines → their PaymentIntent, `refund` / `payment_refund` → their `re_…`, the payout's own line left out, the rest `other`. Stripe lists lines for automatic payouts only: a manual payout comes without lines |
+| `paymob`, `kashier`, `paypal` | not implemented | not implemented |
+
+Paymob, Kashier and PayPal leave both out for now: their fee and settlement reports are not in the payment APIs
+these adapters use (Paymob's and Kashier's come as dashboard/statement exports; PayPal's are in the separate
+Transaction Search / Reporting APIs that need their own permission on the app). Their payments show in the ledger
+with the fee "not known yet". Adding them is writing the two functions above against those reports.
+
+Stand-in for Stripe: `STRIPE_API_BASE` (outside production).

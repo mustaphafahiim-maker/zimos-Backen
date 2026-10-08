@@ -18,6 +18,8 @@ module.exports = (sequelize, DataTypes) => {
       webhookToken: { type: DataTypes.STRING(64), allowNull: false, field: 'webhook_token' },
       lastVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'last_verified_at' },
       lastWebhookAt: { type: DataTypes.DATE, allowNull: true, field: 'last_webhook_at' },
+      // The last payout sync (item 384, payments/ledger/payoutSync.js).
+      payoutsSyncedAt: { type: DataTypes.DATE, allowNull: true, field: 'payouts_synced_at' },
     },
     {
       tableName: 'payment_gateway_accounts',

@@ -14,7 +14,9 @@ const { campaignSql } = require('../analytics/orderTouch');
  *   − cost of goods for delivered (unit cost + packaging + damage share)
  *   − outbound shipping for everything that shipped (delivered and returned)
  *   − return shipping for what came back
- *   − collection (COD) and gateway (online) fees on delivered revenue
+ *   − collection (COD) and gateway (online) fees on delivered revenue — an online
+ *     order's real gateway fee once the gateway reported it (payments.fee_amount in
+ *     the store currency, item 384), else the product's gateway_fee_bp estimate
  *   − ad spend
  *   − ZIMOS fees (the plan's own percentages)
  *   = net profit
@@ -77,13 +79,16 @@ function linesSql({ notTest, zimos }) {
     WITH ord AS (
       SELECT o.id, o.attribution, ${base.totalSql('o')} AS total_amount, ${base.amountSql('amount_refunded')} AS amount_refunded, o.payment_method,
              to_char(o.created_at AT TIME ZONE :tz, 'YYYY-MM-DD') AS day,
+             (SELECT sum(p.fee_amount) FROM payments p
+               WHERE p.order_id = o.id AND p.fee_amount IS NOT NULL AND p.fee_currency = :storeCurrency
+                 AND p.status IN ('captured', 'partially_refunded', 'refunded')) AS gateway_fee,
              ${STAGE_SQL} AS stage
         FROM orders o${LATEST_SHIPMENT_JOIN}
        WHERE o.workspace_id = :workspaceId AND o.created_at >= :start AND o.created_at < :end
          AND ${countsAsSaleSql('o')} ${notTest}
     ),
     li AS (
-      SELECT ord.id AS order_id, ord.day, ord.payment_method,
+      SELECT ord.id AS order_id, ord.day, ord.payment_method, ord.gateway_fee,
              CASE WHEN ord.stage = 'delivered' THEN 'delivered' WHEN ord.stage = 'returned' THEN 'returned' ELSE 'open' END AS bucket,
              i.product_id, i.product_name_snapshot AS name, i.quantity,
              (i.unit_cost_amount IS NOT NULL) AS costed,
@@ -113,7 +118,8 @@ function linesSql({ notTest, zimos }) {
              unit_cost + packaging + unit_cost * damage_bp / 10000.0 AS goods,
              max(ship) OVER (PARTITION BY order_id) * share AS ship_out,
              max(ret) OVER (PARTITION BY order_id) * share AS ship_back,
-             order_revenue * share * (CASE WHEN payment_method = 'cod' THEN collection_bp ELSE gateway_bp END) / 10000.0 AS fees,
+             CASE WHEN payment_method <> 'cod' AND gateway_fee IS NOT NULL THEN gateway_fee * share
+                  ELSE order_revenue * share * (CASE WHEN payment_method = 'cod' THEN collection_bp ELSE gateway_bp END) / 10000.0 END AS fees,
              order_revenue * share * (CASE WHEN payment_method = 'cod' THEN ${zimos.codBp} ELSE ${zimos.transactionBp} END) / 10000.0 AS zimos
         FROM li
     )`;
@@ -198,7 +204,7 @@ async function getPnl(workspaceId, query = {}) {
   const [zimos, historyRate] = await Promise.all([planFees(workspaceId), historicalDeliveryRate(workspaceId, end)]);
   const notTest = db.Order.rawAttributes.isTest ? `AND o.${db.Order.rawAttributes.isTest.field || 'is_test'} = false` : '';
   const LINES = linesSql({ notTest, zimos });
-  const replacements = { workspaceId, start, end, tz };
+  const replacements = { workspaceId, start, end, tz, storeCurrency: (workspace && workspace.defaultCurrency) || 'EGP' };
   const run = (sql) => db.sequelize.query(sql, { replacements, type: db.Sequelize.QueryTypes.SELECT });
   const groupKey = {
     day: 'day',

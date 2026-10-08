@@ -481,4 +481,6 @@ module.exports = {
   chargeSaved,
   createCardSetup,
   completeCardSetup,
+  // Fees from the charge's balance transaction and payouts with their lines (./stripeLedger.js, item 384).
+  ...require('./stripeLedger')({ call, idOf }),
 };
