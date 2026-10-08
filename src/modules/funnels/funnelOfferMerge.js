@@ -5,6 +5,7 @@ const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { clientIp } = require('../../core/middleware/clientIp');
 const orderService = require('../orders/orderService');
+const storePickup = require('../shipping/storePickup');
 const { OFFER_STEP_TYPES } = require('./funnelGraph');
 
 /**
@@ -285,6 +286,8 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req, variantI
       items: [line],
       contact: order.contactSnapshot,
       shippingAddress: order.shippingAddressSnapshot || undefined,
+      // Collected with the order it follows: a pickup stays a pickup.
+      ...(storePickup.isPickup(order) ? { deliveryMethod: storePickup.METHOD } : {}),
       paymentMethod: 'cod',
       funnelId,
     },

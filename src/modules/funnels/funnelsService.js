@@ -9,6 +9,7 @@ const { clientIp } = require('../../core/middleware/clientIp');
 const logger = require('../../core/utils/logger');
 const slugify = require('../../core/utils/slugify');
 const orderService = require('../orders/orderService');
+const storePickup = require('../shipping/storePickup');
 const {
   validateStepData,
   validateGraph,
@@ -941,6 +942,8 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
       items: [await require('../offers/offerVariantChoice').offerLineFor(offer, variantId, transaction)],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
+      // Collected with the order it follows: a pickup stays a pickup (no address, no fee).
+      ...(storePickup.isPickup(original) ? { deliveryMethod: storePickup.METHOD } : {}),
       paymentMethod: 'cod',
       funnelId,
     },
