@@ -102,7 +102,7 @@ async function timeline(workspaceId, orderId) {
     require('../shipping/shipmentEvents').listForOrder(workspaceId, orderId),
     db.NotificationLog.findAll({
       where: { workspaceId, orderId },
-      attributes: ['id', 'channel', 'template', 'subject', 'status', 'error', 'createdAt'],
+      attributes: ['id', 'channel', 'template', 'subject', 'status', 'error', 'statusAt', 'statusReason', 'createdAt'],
       order: [['createdAt', 'DESC']],
       limit: 100,
     }),
@@ -194,8 +194,18 @@ async function timeline(workspaceId, orderId) {
       type: 'message',
       at: m.createdAt,
       actor: { type: 'system', name: null },
-      data: { channel: m.channel, template: m.template, subject: m.subject, status: m.status, error: m.error },
+      data: { channel: m.channel, template: m.template, subject: m.subject, status: m.status, error: m.error, statusAt: m.statusAt || null, statusReason: m.statusReason || null },
     });
+    // What the provider reported later, at its own time: "email bounced", "SMS not delivered" (item 386).
+    if (['bounced', 'complained', 'undelivered'].includes(m.status) && m.statusAt) {
+      events.push({
+        id: `message_status:${m.id}`,
+        type: 'message_status',
+        at: m.statusAt,
+        actor: { type: 'system', name: null },
+        data: { channel: m.channel, status: m.status, reason: m.statusReason || null, subject: m.subject, messageId: m.id },
+      });
+    }
   }
   for (const w of whatsapps) {
     events.push({

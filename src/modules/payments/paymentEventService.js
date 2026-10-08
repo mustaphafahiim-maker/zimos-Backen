@@ -60,7 +60,11 @@ async function insertEvent(account, parsed, source) {
 /** Routes one stored event to the code that acts on it. */
 async function dispatch(account, transaction) {
   const online = require('./onlinePaymentService');
+  // A webhook the gateway could not be asked about yet (PayPal, item 377): the sweep asks again.
+  if (!transaction) throw new Error('The gateway has not confirmed this event yet');
   if (transaction.kind === 'payment') return online.recordPaymentTransaction(account, transaction);
+  // Card disputes and chargebacks (item 377).
+  if (transaction.kind === 'dispute') return require('./disputeService').recordDisputeTransaction(account, transaction);
   return require('./gatewayRefundService').recordRefundTransaction(account, transaction);
 }
 
@@ -124,8 +128,20 @@ async function reprocessPending({ limit = 50 } = {}) {
   let processed = 0;
   for (const event of events) {
     const adapter = gateways.getAdapter(event.providerCode);
-    if (!adapter || !adapter.normalizeTransaction) continue;
-    const transaction = adapter.normalizeTransaction(event.payload || {});
+    if (!adapter) continue;
+    let transaction = null;
+    if (adapter.normalizeTransaction) transaction = adapter.normalizeTransaction(event.payload || {});
+    else if (adapter.refetchTransaction) {
+      // A gateway that stores only ids (Stripe) is asked again for the transaction (item 300).
+      try {
+        const ctx = await require('./gatewayRuntime').contextFor(event.workspaceId, event.providerCode);
+        transaction = await adapter.refetchTransaction(ctx.credentials, event.payload || {});
+      } catch (err) {
+        require('../../core/utils/logger').warn('[payments] could not ask the gateway again for a stored event', { eventId: event.id, reason: err.message });
+        continue;
+      }
+    }
+    if (!transaction) continue;
     if (!transaction.providerOrderId && event.providerOrderId) transaction.providerOrderId = event.providerOrderId;
     const result = await processEvent(
       { id: event.accountId, workspaceId: event.workspaceId, providerCode: event.providerCode },
@@ -159,7 +175,11 @@ async function acceptWebhook(code, token, req) {
   const account = await accounts.findByWebhookToken(code, token);
   if (!account) throw new NotFoundError('Webhook');
 
-  const parsed = adapter.parseWebhook({ query: req.query || {}, body: req.body, headers: req.headers || {}, rawBody: req.rawBody }, account.credentials);
+  const callback = { query: req.query || {}, body: req.body, headers: req.headers || {}, rawBody: req.rawBody };
+  // A saved-card token the gateway sends on its own (Paymob TOKEN, item 380): held sealed, never an event row.
+  const card = typeof adapter.parseCardToken === 'function' ? adapter.parseCardToken(callback, account.credentials) : null;
+  // Awaited: an adapter may confirm the event with the gateway first (PayPal, item 377).
+  const parsed = card || (await adapter.parseWebhook(callback, account.credentials));
   if (!parsed) return { statusCode: 200, body: { received: true, ignored: true } };
   if (!parsed.valid) {
     // Never log the received or expected signature.
@@ -170,6 +190,10 @@ async function acceptWebhook(code, token, req) {
   }
 
   await db.PaymentGatewayAccount.update({ lastWebhookAt: new Date() }, { where: { id: account.id } });
+  if (card) {
+    const held = await require('./savedMethods/heldCardTokens').hold(account, card);
+    return { statusCode: 200, body: { received: true, outcome: held.outcome } };
+  }
   const result = await ingest(account, parsed, 'webhook');
   const statusCode = result.outcome === 'duplicate' && adapter.webhookDuplicateStatus ? adapter.webhookDuplicateStatus : 200;
   return { statusCode, body: { received: true, outcome: result.outcome } };

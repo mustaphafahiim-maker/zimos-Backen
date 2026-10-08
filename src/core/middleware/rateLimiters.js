@@ -7,6 +7,7 @@ const rateLimit = require('./rateLimitStore').withSharedStore(require('express-r
 const { ipKeyGenerator } = require('express-rate-limit');
 const env = require('../../config/env');
 const { RateLimitError } = require('../errors/AppError');
+const { clientIp } = require('./clientIp');
 const { normalizePhone } = require('../utils/phone');
 const { verifyAccessToken } = require('../security/tokens');
 
@@ -36,7 +37,8 @@ function userOrIpKey(req) {
       // Not a valid access token: counted by IP below.
     }
   }
-  return ipKeyGenerator(req.ip);
+  // The library's default key, from the client IP (core/middleware/clientIp.js).
+  return ipKeyGenerator(clientIp(req));
 }
 
 const generalLimiter = rateLimit({
@@ -47,7 +49,7 @@ const generalLimiter = rateLimit({
   // The public storefront API is limited per shopper by storefrontLimiter,
   // which marks the requests it handled. Counting them again here, by IP,
   // would put every shopper behind our storefront server back in one bucket.
-  skip: (req) => skip() || req.rateLimitScope === 'storefront' || req.rateLimitScope === 'carrier_webhook' || req.rateLimitScope === 'payment_webhook',
+  skip: (req) => skip() || req.rateLimitScope === 'storefront' || req.rateLimitScope === 'carrier_webhook' || req.rateLimitScope === 'payment_webhook' || req.rateLimitScope === 'delivery_webhook',
   keyGenerator: userOrIpKey,
   handler,
 });
@@ -61,7 +63,11 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip,
-  keyGenerator: (req) => `${ipKeyGenerator(req.ip)}:${req.body && req.body.email ? req.body.email : ''}`,
+  // Per IP and the account named: the email, or the email or username typed
+  // into the sign-in's `identifier` (spec-gaps item 330), case folded.
+  // `identifier` first, as auth/authService findForSignIn picks it: a sign-in
+  // sending both must be counted against the account it is checked against.
+  keyGenerator: (req) => `${ipKeyGenerator(clientIp(req))}:${req.body ? String(req.body.identifier || req.body.email || '').trim().toLowerCase() : ''}`,
   handler,
 });
 
@@ -70,9 +76,9 @@ const authLimiter = rateLimit({
  *
  * Our Next.js storefront renders store pages on its own server, so those API
  * calls all arrive from the storefront's IP, while cart/checkout calls come
- * straight from the shopper's browser. Keying on req.ip alone would put every
- * shopper of every store behind a single bucket. The shopper is identified by
- * the first of these that applies, most trusted first:
+ * straight from the shopper's browser. Keying on the client IP alone would put
+ * every shopper of every store behind a single bucket. The shopper is
+ * identified by the first of these that applies, most trusted first:
  *
  * 1. X-Storefront-Client-IP, honoured ONLY when the same request carries an
  *    X-Storefront-Secret equal to STOREFRONT_PROXY_SECRET. Trust: high. The
@@ -81,24 +87,25 @@ const authLimiter = rateLimit({
  *    X-Real-IP and CF-Connecting-IP are deliberately not used for this: our
  *    hosting edge rewrites or appends to them (and its documented behaviour has
  *    changed over time), their leftmost entry is whatever the client sent, and
- *    this API is not served behind Cloudflare (merchant custom domains are, but
- *    they reach /shop, not this API) — none of them can prove the value came
- *    from our storefront.
+ *    CF-Connecting-IP names the visitor, not our storefront — none of them can
+ *    prove the value came from our storefront.
  *
- * 2. req.ip, as Express derives it with `trust proxy` = 1 (the single hop our
- *    hosting edge reports). Trust: medium. The client cannot pick it, but many
- *    shoppers can share it (mobile carrier NAT, offices).
+ * 2. The client IP, clientIp(req) (core/middleware/clientIp.js): req.ip as
+ *    Express derives it with `trust proxy` = 1 (the single hop our hosting edge
+ *    reports), or with TRUST_EDGE_CLIENT_IP on, Cloudflare's CF-Connecting-IP
+ *    when the request proves it crossed Cloudflare. Trust: medium. The client
+ *    cannot pick it, but many shoppers can share it (mobile carrier NAT, offices).
  *
  * 3. X-Cart-Token (the 48-hex-char token cartService issues), only ever
- *    combined with req.ip, never on its own. Trust: low — the client chooses
- *    it — so it just splits shoppers who share an IP. Rotating tokens to dodge
- *    the limit is capped by the per-IP ceiling below.
+ *    combined with the client IP, never on its own. Trust: low — the client
+ *    chooses it — so it just splits shoppers who share an IP. Rotating tokens to
+ *    dodge the limit is capped by the per-IP ceiling below.
  *
  * Every request then passes two limiters:
  *   - visitor:    RATE_LIMIT_MAX per shopper as identified above;
- *   - connection: a ceiling per req.ip — STOREFRONT_IP_RATE_LIMIT_MAX normally,
+ *   - connection: a ceiling per client IP — STOREFRONT_IP_RATE_LIMIT_MAX normally,
  *     STOREFRONT_SERVER_RATE_LIMIT_MAX for our storefront server (valid secret,
- *     or req.ip listed in STOREFRONT_SERVER_IP). The server's own calls that
+ *     or a client IP listed in STOREFRONT_SERVER_IP). The server's own calls that
  *     name no shopper skip the visitor bucket and are bounded by that ceiling
  *     alone, so a gap in IP forwarding degrades to a higher shared limit rather
  *     than stopping every shopper at RATE_LIMIT_MAX. STOREFRONT_SERVER_IP never
@@ -141,7 +148,7 @@ function buildIpList(entries) {
 }
 
 function resolveStorefrontClient(req, { secretDigest, serverIps }) {
-  const connectionIp = parseIp(req.ip);
+  const connectionIp = parseIp(clientIp(req));
   const connection = connectionIp ? ipKeyGenerator(connectionIp) : 'unknown';
 
   const provided = req.headers[STOREFRONT_SECRET_HEADER];
@@ -255,7 +262,13 @@ const storefrontLimiter = createStorefrontLimiter({
 const TRACKING_PHONE_PATTERN = /^[0-9]{10,15}$/;
 const TRACKING_NUMBER_PATTERN = /^[A-Za-z0-9-]{3,40}$/;
 
-/** The shopper's { phone, number } bucket keys, or null if not keyable yet. */
+/**
+ * The shopper's { phone, number } bucket keys, or null if not keyable yet.
+ * Read from the query string only: this limiter is for GET /orders/track and
+ * nothing else. On any other route (a POST with a body, say) it finds nothing
+ * to key on and lets every request through, so a public POST needs a limiter
+ * of its own (storefrontPostLimiters below), not this one.
+ */
 function resolveTrackingKeys(req) {
   const { phone, number } = req.query || {};
   if (typeof phone !== 'string' || typeof number !== 'string') return null;
@@ -316,7 +329,7 @@ const trackingLimiter = createTrackingLimiter({
 function createSuggestLimiter({ minuteMax, hourMax, skip: skipAll = () => false }) {
   const key = (req) => {
     const client = req.storefrontClient;
-    const who = (client && (client.visitorKey || client.connectionKey)) || `ip:${ipKeyGenerator(req.ip || '')}`;
+    const who = (client && (client.visitorKey || client.connectionKey)) || `ip:${ipKeyGenerator(clientIp(req) || '')}`;
     return `suggest:${who}`;
   };
   const bucket = (windowMs, limit, standardHeaders, prefix) =>
@@ -350,7 +363,7 @@ const suggestLimiter = createSuggestLimiter({
 const VISITOR_HEADER_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 function createUploadLimiter({ ipPerMinute, ipPerHour, visitorPerMinute, visitorPerHour, skip: skipAll = () => false }) {
-  const ipKey = (req) => `upload-ip:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`;
+  const ipKey = (req) => `upload-ip:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`;
   const visitorKey = (req) => {
     const id = req.headers['x-visitor-id'];
     return typeof id === 'string' && VISITOR_HEADER_PATTERN.test(id) ? `upload-visitor:${id}` : null;
@@ -393,7 +406,7 @@ const uploadLimiter = createUploadLimiter({
  * for a person trying a few names, not for a list.
  */
 function createUsernameCheckLimiter({ minuteMax, hourMax, skip: skipAll = () => false }) {
-  const ipKey = (req) => `username-check:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`;
+  const ipKey = (req) => `username-check:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`;
   const bucket = (windowMs, limit, prefix, standardHeaders) =>
     rateLimit({
       windowMs,
@@ -420,20 +433,163 @@ const usernameCheckLimiter = createUsernameCheckLimiter({
  * — per address, per account, per IP per hour and day — are counted in the
  * database by otp/verificationCodeService so they hold across instances.
  */
-function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}) {
+function createIpMinuteLimiter(prefix, max, { skip: skipAll = () => false, failedOnly = false } = {}) {
   return rateLimit({
     windowMs: 60 * 1000,
     limit: max,
     standardHeaders: true,
     legacyHeaders: false,
     skip: skipAll,
-    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(req.ip) || req.ip || 'unknown')}`,
+    skipSuccessfulRequests: failedOnly,
+    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
     handler,
   });
 }
 
 const publicPlansLimiter = createIpMinuteLimiter('public-plans', env.rateLimit.publicPlansMinuteMax, { skip });
 const verifyCodeLimiter = createIpMinuteLimiter('verify-code', env.rateLimit.verifyMinuteMax, { skip });
+// A shopper's payment screenshot for a store order (manualPayments, item 340): a few tries a minute per IP.
+const MANUAL_PROOFS_PER_MINUTE = 5;
+const manualProofLimiter = createIpMinuteLimiter('manual-payment-proof', MANUAL_PROOFS_PER_MINUTE, { skip });
+// The checkout code step (risk/checkoutOtp.js, item 348): verify and resend share one budget per IP a minute.
+const CHECKOUT_OTP_PER_MINUTE = 10;
+const checkoutOtpLimiter = createIpMinuteLimiter('checkout-otp', CHECKOUT_OTP_PER_MINUTE, { skip });
+// The storefront deposit quote (payments/manualTransferService.depositQuote, item 362): per IP a minute.
+const DEPOSIT_QUOTES_PER_MINUTE = 10;
+const depositQuoteLimiter = createIpMinuteLimiter('deposit-quote', DEPOSIT_QUOTES_PER_MINUTE, { skip });
+// Custom domains (modules/domains, item 341): each of these asks public DNS, per IP a minute.
+const domainAddLimiter = createIpMinuteLimiter('domain-add', 10, { skip });
+const domainVerifyLimiter = createIpMinuteLimiter('domain-verify', 20, { skip });
+const domainDnsCheckLimiter = createIpMinuteLimiter('domain-dns-check', 30, { skip });
+// A locked store's password and coming-soon sign-up (modules/storeGate, item 349): per IP a minute.
+const STORE_GATE_UNLOCKS_PER_MINUTE = 10;
+const storeGateUnlockLimiter = createIpMinuteLimiter('store-gate-unlock', STORE_GATE_UNLOCKS_PER_MINUTE, { skip });
+const storeGateSignupLimiter = createIpMinuteLimiter('store-gate-signup', 10, { skip });
+// The newsletter sign-up and spin to win (item 363): each makes a contact with marketing consent, per IP a minute.
+const STORE_SIGNUPS_PER_MINUTE = 6;
+const newsletterSignupLimiter = createIpMinuteLimiter('store-signup', STORE_SIGNUPS_PER_MINUTE, { skip });
+const spinWheelLimiter = createIpMinuteLimiter('spin-wheel', STORE_SIGNUPS_PER_MINUTE, { skip });
+// The storefront checkout's refusals (4xx/5xx, no order made), per IP a minute (item 362 review); placed orders do not count.
+const CHECKOUT_REFUSALS_PER_MINUTE = 20;
+const checkoutRefusalLimiter = createIpMinuteLimiter('checkout-refused', CHECKOUT_REFUSALS_PER_MINUTE, { skip, failedOnly: true });
+
+/*
+ * Public storefront POSTs that once (wrongly) used trackingLimiter, which keys
+ * on query phone/number and so let every POST through (item 409). Each gets a
+ * per-minute bucket per shopper IP: the connecting IP, or the shopper's IP our
+ * own storefront server vouched for (X-Storefront-Client-IP with the secret,
+ * read by the storefront limiter as req.storefrontClient) — never the cart
+ * token, which the client picks. Limits sit well above what a person does in
+ * a minute and well below a script guessing codes or filling the inbox.
+ */
+function shopperIpKey(req) {
+  const client = req.storefrontClient;
+  if (client && client.trustedServer && client.visitorKey) return client.visitorKey;
+  return `ip:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`;
+}
+
+function createShopperMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}) {
+  return rateLimit({
+    windowMs: 60 * 1000,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) => `${prefix}:${shopperIpKey(req)}`,
+    handler,
+  });
+}
+
+const STOREFRONT_POST_LIMITS = Object.freeze({
+  giftCardCheck: 10, // POST /store/:ws/gift-cards/check — a code guessed is money
+  productQuestion: 5, // POST /store/:ws/products/:id/questions — lands in the merchant's inbox
+  quoteRequest: 5, // POST /store/:ws/quotes — likewise
+  searchClick: 60, // POST /store/:ws/search/click — one per result opened
+  googleSignIn: 10, // POST /store/:ws/account/google — verifies a Google token
+  orderSelfService: 10, // POST /store/:ws/orders/:id/self-service/{cancel,confirm,address}, one bucket
+});
+const storefrontPostLimiters = Object.freeze(
+  Object.fromEntries(Object.entries(STOREFRONT_POST_LIMITS).map(([name, max]) => [name, createShopperMinuteLimiter(`store-${name}`, max, { skip })]))
+);
+
+/*
+ * Password reset requests, per IP per hour, keyed on the IP alone (unlike
+ * authLimiter, whose key includes the email the caller sends). It answers the
+ * same for every address, so a 429 says nothing about whether one is
+ * registered; the per-account limit lives in the database and is silent
+ * (auth/authService.requestPasswordReset). Item 331, Ziad's 5a33487.
+ */
+function createPasswordResetLimiter({ hourMax, skip: skipAll = () => false }) {
+  return rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: hourMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) => `password-reset:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
+    handler,
+  });
+}
+
+const passwordResetLimiter = createPasswordResetLimiter({ hourMax: env.rateLimit.passwordResetHourMax, skip });
+
+/*
+ * The second limit on the account endpoints, keyed on the IP alone (item 331,
+ * Ziad's be428aa). On top of authLimiter, not instead of it: authLimiter's key
+ * includes the email (or sign-in identifier) the caller sends, so a new one on
+ * each request meant a new allowance and only the general limit was left. Two
+ * counters per IP:
+ *   loginIpLimiter  POST /auth/login, failed attempts only
+ *                   (skipSuccessfulRequests: a sign-in that works, or that
+ *                   answers with a code step, isn't counted);
+ *   authIpLimiter   sign-up, password-reset request and resend-verification,
+ *                   every request.
+ * Everyone behind one IP (an office, a mobile carrier's NAT) shares them.
+ */
+function createAuthIpLimiter({ windowMs, max, failedOnly = false, prefix, skip: skipAll = () => false }) {
+  return rateLimit({
+    windowMs,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: failedOnly,
+    skip: skipAll,
+    keyGenerator: (req) => `${prefix}:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
+    handler,
+  });
+}
+
+const authIpOptions = { windowMs: env.rateLimit.authIpWindowMs, max: env.rateLimit.authIpMax, skip };
+const loginIpLimiter = createAuthIpLimiter({ ...authIpOptions, failedOnly: true, prefix: 'login-ip' });
+const authIpLimiter = createAuthIpLimiter({ ...authIpOptions, prefix: 'auth-ip' });
+
+/*
+ * Per signed-in account, for a request that costs us something to keep: a
+ * payment proof stores an image that a person then has to review. Keyed on
+ * the account, not the IP — many merchants can share one IP — and mounted
+ * after `authenticate`; a request without a user falls back to its IP.
+ */
+const PAYMENT_PROOFS_PER_HOUR = 10;
+
+function createUserLimiter({ prefix, windowMs, max, skip: skipAll = () => false }) {
+  return rateLimit({
+    windowMs,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) =>
+      `${prefix}:${req.user && req.user.id ? `user:${req.user.id}` : ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
+    handler,
+  });
+}
+
+const paymentProofLimiter = createUserLimiter({
+  prefix: 'payment-proof',
+  windowMs: 60 * 60 * 1000,
+  max: PAYMENT_PROOFS_PER_HOUR,
+  skip,
+});
 
 /*
  * Carrier status webhooks (POST /webhooks/carriers/:code/:token). Every
@@ -487,8 +643,44 @@ const paymentWebhookLimiter = [
   }),
 ];
 
+// Delivery status webhooks (notifications/deliveryStatus, item 386): every event comes from
+// Brevo's or Twilio's servers, so limited per provider (the path), not per IP. The limiter
+// runs before the signature check, so a request that fails (bad proof, 4xx/5xx) is not
+// counted in that shared bucket — junk from anyone cannot use up the provider's budget —
+// and is counted per IP instead, which bounds an unverified caller (item 386 review).
+const DELIVERY_WEBHOOK_FAILURES_PER_IP = 30;
+const deliveryWebhookLimiter = [
+  (req, res, next) => {
+    req.rateLimitScope = 'delivery_webhook';
+    next();
+  },
+  rateLimit({
+    windowMs: env.rateLimit.windowMs,
+    limit: DELIVERY_WEBHOOK_FAILURES_PER_IP,
+    standardHeaders: false,
+    legacyHeaders: false,
+    skip,
+    skipSuccessfulRequests: true,
+    // A 429 from the shared bucket below is not this caller's failure.
+    requestWasSuccessful: (req, res) => res.statusCode < 400 || res.statusCode === 429,
+    keyGenerator: (req) => `delivery-webhook-failed:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`,
+    handler,
+  }),
+  rateLimit({
+    windowMs: env.rateLimit.windowMs,
+    limit: env.notifications.statusWebhookRateLimitMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip,
+    skipFailedRequests: true,
+    keyGenerator: (req) => `delivery-webhook:${String(req.path || '').slice(0, 40)}`,
+    handler,
+  }),
+];
+
 module.exports = {
   generalLimiter,
+  deliveryWebhookLimiter,
   carrierWebhookLimiter,
   paymentWebhookLimiter,
   paymentWebhookKey,
@@ -502,9 +694,35 @@ module.exports = {
   createSuggestLimiter,
   uploadLimiter,
   createUploadLimiter,
+  MANUAL_PROOFS_PER_MINUTE,
+  manualProofLimiter,
+  checkoutOtpLimiter,
+  DEPOSIT_QUOTES_PER_MINUTE,
+  depositQuoteLimiter,
+  CHECKOUT_REFUSALS_PER_MINUTE,
+  checkoutRefusalLimiter,
+  domainAddLimiter,
+  domainVerifyLimiter,
+  domainDnsCheckLimiter,
+  STORE_GATE_UNLOCKS_PER_MINUTE,
+  storeGateUnlockLimiter,
+  storeGateSignupLimiter,
+  newsletterSignupLimiter,
+  spinWheelLimiter,
   usernameCheckLimiter,
   createUsernameCheckLimiter,
   publicPlansLimiter,
   verifyCodeLimiter,
   createIpMinuteLimiter,
+  STOREFRONT_POST_LIMITS,
+  storefrontPostLimiters,
+  createShopperMinuteLimiter,
+  passwordResetLimiter,
+  createPasswordResetLimiter,
+  loginIpLimiter,
+  authIpLimiter,
+  createAuthIpLimiter,
+  PAYMENT_PROOFS_PER_HOUR,
+  paymentProofLimiter,
+  createUserLimiter,
 };

@@ -5,7 +5,9 @@ const db = require('../../db/models');
 const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { planPrice, yearlyPriceFor } = require('../billing/planPricing');
+const { effectivePrice } = require('../billing/manualPricing');
 const publicPlans = require('../billing/publicPlansService');
+const { catalogForAdmin, featureDefinition, isAvailableFeature } = require('../billing/featureCatalog');
 
 /**
  * Every write below is audited as a platform-level entry: workspace_id NULL,
@@ -64,6 +66,8 @@ function serializePlan(p) {
     // On the marketing site and at sign-up, in this order.
     isPublic: p.isPublic,
     displayOrder: p.displayOrder,
+    // The pay-per-order fee, minor units; 0 = none (billing/walletService).
+    perOrderFee: Number(p.perOrderFeeAmount || 0),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   };
@@ -118,6 +122,13 @@ function serializeSubscription(s) {
     graceUntil: s.graceUntil,
     cancelAtPeriodEnd: s.cancelAtPeriodEnd,
     externalProvider: s.externalProvider,
+    // billing/manualPricing: paid, free (a gift) or discounted; effectivePrice
+    // is one billing period as the merchant pays it, minor units.
+    pricingKind: s.pricingKind || 'paid',
+    discountPercent: s.discountPercent ?? null,
+    priceOverrideAmount: s.priceOverrideAmount == null ? null : Number(s.priceOverrideAmount),
+    effectivePrice: effectivePrice(s, s.plan),
+    pricingExpiredAt: s.pricingExpiredAt || null,
     // Minor units, normalised to a month so a yearly and a monthly plan can be
     // compared. Only a paying subscription contributes.
     mrr,
@@ -140,7 +151,11 @@ function serializeSubscription(s) {
 function monthlyRunRate(s) {
   if (!s.plan) return 0;
   if (s.status !== 'active' && s.status !== 'past_due') return 0;
-  return s.billingCycle === 'yearly' ? Math.round(planPrice(s.plan, 'yearly') / 12) : planPrice(s.plan, 'monthly');
+  // A free one never counts; a discounted one counts at its own price, until
+  // its period ran out (billing/manualPricing).
+  if (s.pricingKind && s.pricingKind !== 'paid' && s.pricingExpiredAt) return 0;
+  const price = effectivePrice(s, s.plan);
+  return s.billingCycle === 'yearly' ? Math.round(price / 12) : price;
 }
 
 /**
@@ -175,9 +190,38 @@ function aggregateMrr(rows) {
 
 // ---------------------------------------------------------------------- plans
 
+/**
+ * Every plan, in the order the pricing page lists them (display order, then
+ * price, then name — publicPlansService.PLAN_ORDER), with the feature
+ * catalogue the editor ticks from: each key's names and whether it can be
+ * added to a plan (billing/featureCatalog). Item 333, Ziad's 1d70df5.
+ */
 async function listPlans() {
-  const plans = await db.Plan.findAll({ order: [['monthlyPriceAmount', 'ASC']] });
-  return plans.map(serializePlan);
+  const plans = await db.Plan.findAll({ order: publicPlans.PLAN_ORDER });
+  return { plans: plans.map(serializePlan), featureCatalog: catalogForAdmin() };
+}
+
+/**
+ * A feature a plan didn't list before must exist today (catalogue
+ * `available`); one the plan already lists may stay, so an older plan still
+ * saves as it is. 422 PLAN_FEATURE_NOT_AVAILABLE names each refused key.
+ */
+function assertFeaturesAllowed(features, previous) {
+  const had = new Set(previous);
+  const refused = [...new Set(features || [])].filter((key) => !had.has(key) && !isAvailableFeature(key));
+  if (refused.length === 0) return;
+  throw new AppError(
+    'PLAN_FEATURE_NOT_AVAILABLE',
+    `Not available yet, so it can't be added to a plan: ${refused
+      .map((key) => (featureDefinition(key) ? featureDefinition(key).label.en : key))
+      .join(', ')}`,
+    422,
+    refused.map((key) => ({
+      field: 'features',
+      key,
+      message: featureDefinition(key) ? `"${featureDefinition(key).label.en}" isn't available yet` : `"${key}" isn't a feature`,
+    }))
+  );
 }
 
 async function savePlan(input, req) {
@@ -201,6 +245,22 @@ async function savePlan(input, req) {
   if (input.maxFunnelsPerMonth !== undefined) fields.maxFunnelsPerMonth = input.maxFunnelsPerMonth;
   if (input.isPublic !== undefined) fields.isPublic = input.isPublic;
   if (input.displayOrder !== undefined) fields.displayOrder = input.displayOrder;
+  if (input.perOrderFee !== undefined) fields.perOrderFeeAmount = input.perOrderFee;
+
+  // A fee per order belongs to a plan with nothing monthly, in EGP — the
+  // balance's currency (billing/walletService; item 335, Ziad's Q13).
+  const assertFeeAllowed = (plan) => {
+    const fee = fields.perOrderFeeAmount !== undefined ? fields.perOrderFeeAmount : Number((plan && plan.perOrderFeeAmount) || 0);
+    const currency = fields.currency || (plan && plan.currency) || 'EGP';
+    if (fee > 0 && (fields.monthlyPriceAmount !== 0 || currency !== 'EGP')) {
+      throw new AppError(
+        'PER_ORDER_FEE_NOT_ALLOWED',
+        'A fee per order is only for a plan priced 0 a month, in EGP.',
+        422,
+        [{ field: 'perOrderFee', message: 'Set the monthly price to 0 and the currency to EGP, or the fee to 0' }]
+      );
+    }
+  };
 
   // New limits apply from the next store or funnel created; nothing that
   // exists is touched. The public list drops its cached copy either way.
@@ -215,12 +275,16 @@ async function savePlan(input, req) {
     if (input.id) {
       const plan = await db.Plan.findByPk(input.id, { transaction, lock: transaction.LOCK.UPDATE });
       if (!plan) throw new NotFoundError('Plan');
+      assertFeaturesAllowed(fields.features, featureList(plan.features));
+      assertFeeAllowed(plan);
       const before = auditState(serializePlan(plan));
       await plan.update(fields, { transaction });
       const after = serializePlan(plan);
       await audit(req, { action: 'plan.update', entityType: 'Plan', entityId: plan.id, before, after: auditState(after) }, transaction);
       return after;
     }
+    assertFeaturesAllowed(fields.features, []);
+    assertFeeAllowed(null);
     const created = serializePlan(await db.Plan.create(fields, { transaction }));
     await audit(req, { action: 'plan.create', entityType: 'Plan', entityId: created.id, after: auditState(created) }, transaction);
     return created;
@@ -265,8 +329,10 @@ async function listSubscriptions({ status } = {}) {
   const subscriptions = subs.map(serializeSubscription);
   // Totalled here rather than left to the client: every consumer that adds the
   // mrr column up needs the same currency check, and one that forgets it gets a
-  // number that is silently wrong rather than visibly absent.
-  return { subscriptions, ...aggregateMrr(subscriptions) };
+  // number that is silently wrong rather than visibly absent. `paidOnly` is
+  // the same total over the subscriptions at the plan's price.
+  const paid = aggregateMrr(subscriptions.filter((row) => row.pricingKind === 'paid'));
+  return { subscriptions, ...aggregateMrr(subscriptions), paidOnly: { mrr: paid.mrr, mrrCurrency: paid.mrrCurrency, mrrByCurrency: paid.mrrByCurrency } };
 }
 
 // -------------------------------------------------------------- feature flags

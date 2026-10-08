@@ -12,7 +12,7 @@ module.exports = (sequelize, DataTypes) => {
       collectedAmount: { type: DataTypes.BIGINT, allowNull: false, field: 'collected_amount' },
       feeAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'fee_amount' },
     },
-    { tableName: 'cod_settlement_lines', indexes: [{ unique: true, fields: ['workspace_id', 'order_id'] }] }
+    { tableName: 'cod_settlement_lines', indexes: [{ unique: true, fields: ['workspace_id', 'order_id', 'shipment_id'] }] }
   );
   CodSettlementLine.associate = (models) => {
     CodSettlementLine.belongsTo(models.CodSettlement, { foreignKey: 'settlementId', as: 'settlement' });

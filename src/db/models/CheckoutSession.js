@@ -43,6 +43,8 @@ module.exports = (sequelize, DataTypes) => {
       ipAddress: { type: DataTypes.STRING(45), allowNull: true, field: 'ip_address' },
       ipCountry: { type: DataTypes.STRING(2), allowNull: true, field: 'ip_country' },
       abandonedEventAt: { type: DataTypes.DATE, allowNull: true, field: 'abandoned_event_at' },
+      // The shopper's language (X-Store-Locale, migration 520); null = the store's default.
+      locale: { type: DataTypes.STRING(10), allowNull: true },
     },
     {
       tableName: 'checkout_sessions',

@@ -14,7 +14,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { storefrontPostLimiters } = require('../../core/middleware/rateLimiters');
 
 /*
  * Storefront search analytics and synonyms (spec-gaps item 211).
@@ -101,7 +101,7 @@ async function prune() {
 const store = Router({ mergeParams: true });
 store.post(
   '/click',
-  trackingLimiter,
+  storefrontPostLimiters.searchClick,
   resolvePublicWorkspace,
   validate({ params: Joi.object({ workspaceId: Joi.string().required() }), body: Joi.object({ searchId: Joi.string().uuid().required(), productId: Joi.string().uuid().required() }) }),
   asyncHandler(async (req, res) => {

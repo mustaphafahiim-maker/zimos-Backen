@@ -26,7 +26,6 @@ const { validateGraph } = require('./funnelGraph');
 
 const SHARE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
 const MAX_DRAFT_BYTES = 500 * 1024;
-const PRODUCT_PROP_TYPES = new Set(['product_card', 'product_3d', 'price', 'reviews_list', 'cod_form', 'repeater']);
 
 async function loadFunnel(workspaceId, funnelId, transaction) {
   const funnel = await db.Funnel.findOne({ where: { id: funnelId, workspaceId }, transaction });
@@ -88,21 +87,39 @@ async function unshareFunnel(workspaceId, funnelId, req) {
  * removed: product ids in product elements and the page's own product. The
  * copy then follows the importing store's products (empty = its newest).
  */
+// The author's catalogue, wherever it sits in a page: any element type, any depth (item 303).
+const ID_KEYS = new Set(['productId', 'variantId', 'offerId', 'bundleId', 'collectionId']);
+const ID_LIST_KEYS = new Set(['productIds', 'variantIds', 'offerIds', 'bundleIds', 'collectionIds']);
+
 function withoutProducts(tree) {
   if (!tree || typeof tree !== 'object') return tree;
   const copy = JSON.parse(JSON.stringify(tree));
   delete copy.productId;
-  for (const section of copy.sections || []) {
-    for (const row of (section && section.rows) || []) {
-      for (const column of (row && row.columns) || []) {
-        for (const el of (column && column.elements) || []) {
-          if (el && el.props && PRODUCT_PROP_TYPES.has(el.type)) {
-            if ('productId' in el.props) el.props.productId = '';
-            if ('collectionId' in el.props) el.props.collectionId = '';
-          }
-        }
-      }
+  const walk = (node, depth) => {
+    if (!node || typeof node !== 'object' || depth > 40) return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
     }
+    for (const key of Object.keys(node)) {
+      if (ID_KEYS.has(key) && typeof node[key] === 'string') node[key] = '';
+      else if (ID_LIST_KEYS.has(key) && Array.isArray(node[key])) node[key] = [];
+      else walk(node[key], depth + 1);
+    }
+  };
+  walk(copy, 0);
+  return copy;
+}
+
+/**
+ * A path's condition, copied into another store: the products and variants
+ * its `when` names are the source store's, so the lists come over empty and
+ * the issues list (and publish) asks the merchant to pick their own.
+ */
+function importedCondition(condition) {
+  const copy = JSON.parse(JSON.stringify(condition));
+  if (copy.when && typeof copy.when === 'object') {
+    for (const key of ['productIds', 'variantIds']) if (Array.isArray(copy.when[key])) copy.when[key] = [];
   }
   return copy;
 }
@@ -156,7 +173,7 @@ async function importFunnel(workspaceId, { shareCode, name }, req) {
           funnelId: funnel.id,
           fromStepKey: e.fromStepKey,
           toStepKey: e.toStepKey,
-          condition: e.condition ? JSON.parse(JSON.stringify(e.condition)) : null,
+          condition: e.condition ? importedCondition(e.condition) : null,
           priority: e.priority,
         },
         { transaction: t }
@@ -246,8 +263,14 @@ async function listIssues(workspaceId, funnelId) {
   );
   for (const p of graph) {
     const match = /^steps\.([^.]+)/.exec(p.field || '');
-    issues.push({ severity: 'fatal', code: 'graph', stepKey: match ? match[1] : null, field: p.field || null, message: p.message });
+    // An edge problem names the edge by id, not by its place in this unordered list.
+    const edge = /^edges\[(\d+)\]\.(.+)$/.exec(p.field || '');
+    const field = edge && edges[Number(edge[1])] ? `edges.${edges[Number(edge[1])].id}.${edge[2]}` : p.field || null;
+    issues.push({ severity: 'fatal', code: 'graph', stepKey: match ? match[1] : null, field, message: p.message });
   }
+  // A path's condition naming products that are not this store's (funnelRouting `when`).
+  const refs = await require('./funnelRouting').whenReferenceProblems(workspaceId, edges, { fieldOf: (i) => `edges.${edges[i].id}.condition` });
+  for (const p of refs) issues.push({ severity: 'fatal', code: 'graph', stepKey: null, field: p.field, message: p.message });
 
   for (const step of steps) {
     const elements = elementsOf(step.builderData);
@@ -367,4 +390,4 @@ function mount(router, { MANAGE, requireCreationAllowed }) {
   );
 }
 
-module.exports = { mount, shareFunnel, unshareFunnel, importFunnel, getDraft, saveDraft, discardDraft, listIssues, withoutProducts };
+module.exports = { mount, shareFunnel, unshareFunnel, importFunnel, getDraft, saveDraft, discardDraft, listIssues, withoutProducts, importedCondition };

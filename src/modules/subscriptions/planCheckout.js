@@ -41,10 +41,14 @@ async function hasPlannedLine(workspaceId, lines) {
   return products.some((p) => Boolean(publicPlan(p.billingPlan)));
 }
 
-function savesCard(method) {
+async function savesCard(workspaceId, method) {
   if (!method || method.method !== 'card') return false;
   const adapter = gateways.getAdapter(method.provider);
-  return Boolean(adapter && adapter.supportsTokenization);
+  if (!adapter || !adapter.supportsTokenization) return false;
+  // An account that is not set up to charge saved cards (Paymob without its MOTO integration, item 380).
+  if (typeof adapter.savedCardsReady !== 'function') return true;
+  const account = await db.PaymentGatewayAccount.findOne({ where: { workspaceId, providerCode: method.provider }, attributes: ['settings'] });
+  return Boolean(account && adapter.savedCardsReady(account.settings || {}));
 }
 
 function refusal() {
@@ -62,7 +66,7 @@ function refusal() {
  */
 async function assertPayable(workspaceId, lines, method) {
   if (!(await hasPlannedLine(workspaceId, lines))) return false;
-  if (!savesCard(method)) throw refusal();
+  if (!(await savesCard(workspaceId, method))) throw refusal();
   return true;
 }
 

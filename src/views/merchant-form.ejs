@@ -28,7 +28,19 @@
         <label for="bullets">Selling points (one per line)</label>
         <textarea id="bullets" name="bullets"><%= existing.bullets || '' %></textarea>
 
-        <p style="margin-top:20px"><button class="btn" type="submit">Publish product</button></p>
+        <% if (locals.confirm) { %>
+        <div style="margin-top:20px;padding:14px;border:1px solid #e5e7eb;border-radius:8px">
+          <p style="margin-top:0">Confirm your email address to publish. We send a 6-digit code to <strong><%= confirm.email %></strong>; your product stays in this form until you publish.</p>
+          <% if (locals.notice) { %><p style="color:#166534"><%= notice %></p><% } %>
+          <label for="verificationCode">Code from the email</label>
+          <input id="verificationCode" name="verificationCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" />
+        </div>
+        <% } %>
+
+        <p style="margin-top:20px">
+          <button class="btn" type="submit">Publish product</button>
+          <% if (locals.confirm) { %><button class="btn" type="submit" name="intent" value="send_code" formnovalidate>Send me a code</button><% } %>
+        </p>
       </form>
     </div>
   </div>

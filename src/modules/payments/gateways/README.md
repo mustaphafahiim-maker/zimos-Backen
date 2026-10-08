@@ -54,7 +54,7 @@ module.exports = {
   async inquireTransaction(creds, { transactionId, payment }) -> transaction | null,
   async refund(creds, { payment, amount, settings })
       -> { status: 'processed'|'pending'|'failed', providerRefundReference, failureReason, failureCode? },
-  parseWebhook({ query, body, headers }, creds) -> null | { valid, eventKey, transaction, payload },
+  parseWebhook({ query, body, headers, rawBody }, creds) -> null | { valid, eventKey, transaction, payload },  // may be async
   parseRedirect(query, creds)                   -> null | { valid, eventKey, transaction, payload },
 };
 ```
@@ -63,7 +63,7 @@ module.exports = {
 
 ```js
 {
-  kind: 'payment' | 'refund' | 'void',
+  kind: 'payment' | 'refund' | 'void' | 'dispute',
   status,                 // payment: 'paid' | 'failed' | 'pending'; refund/void: 'processed' | 'failed' | 'pending'
   transactionId,          // the gateway's id for this transaction
   parentTransactionId,    // the payment a refund/void belongs to, or null
@@ -95,8 +95,9 @@ module.exports = {
 
 Optional, not called by the core yet (SPEC §11.1 / §11.6): `describe()`,
 `validateCredentials(config)`. Saved cards — `supportsTokenization`, `tokenize`,
-`chargeSaved` — are specified in `../savedMethods/README.md` and implemented
-by the sandbox.
+`chargeSaved`, and optionally `createCardSetup` / `completeCardSetup`,
+`savedCardsReady`, `savedMethod`, `parseCardToken` — are specified in
+`../savedMethods/README.md`; see "Saved cards on the real gateways" below.
 
 ## The `sandbox` adapter
 
@@ -130,7 +131,7 @@ back asks the gateway (`inquire`) and the payments sweep settles anything left.
 | Currencies | USD EUR GBP EGP SAR AED MAD QAR CAD AUD TRY | USD EUR GBP CAD AUD |
 | Payment | Checkout Session, Idempotency-Key = attempt | Orders v2 CAPTURE, PayPal-Request-Id = attempt |
 | Paid when | session `payment_status = paid` | `inquire` captures an APPROVED order (once) |
-| Webhook | `checkout.session.*`, Stripe-Signature over the raw body (5 min tolerance); ignored without a signing secret | not used (verifying needs a call back to PayPal) |
+| Webhook | `checkout.session.*`, refunds (`charge.refunded`, `charge.refund.updated`, `refund.*`) and `charge.dispute.*`; Stripe-Signature over the raw body (5 min tolerance); ignored without a signing secret | `PAYMENT.CAPTURE.REFUNDED` and `CUSTOMER.DISPUTE.*` only; the refund or dispute is fetched from PayPal by its id with the merchant's keys (the body is never believed) |
 | Refund | `/v1/refunds` on the payment intent | `/v2/payments/captures/:id/refund` |
 
 `expressFor(method, settings)` (optional): `{ wallets: [...] }` marks a method
@@ -150,3 +151,129 @@ know it. The pending-refund sweep uses it when present (Stripe, PayPal); otherwi
 with the refund's reference. `refund` also receives `refundId` (our Refund row): use it as the gateway's
 duplicate-request key, so two refunds of the same amount stay two.
 
+### Optional: `cancelPayment(credentials, { payment })` and `refetchTransaction(credentials, payload)`
+
+- `cancelPayment`: an attempt cancelled or expired on our side stops taking payment at the gateway (Stripe
+  expires the Checkout Session). Called after the change commits, best effort; refusals for an already
+  closed page are ignored.
+- `refetchTransaction`: for a gateway whose stored event payload keeps only ids, the sweep asks the
+  gateway again and gets the normalized transaction (same shape as `parseWebhook`'s `transaction`).
+  Used when the adapter has no `normalizeTransaction`.
+
+
+### Refunds made in the gateway and disputes (item 377)
+
+- **Refunds**: a refund webhook returns the normalized `transaction` with `kind: 'refund'` and
+  `parentTransactionId` = the id stored as `Payment.providerTransactionId` (Stripe: the payment intent; PayPal:
+  the capture). `gatewayRefundService.recordRefundTransaction` settles our own refund or records one made in the
+  gateway's dashboard (source `gateway`), never more than what is left of the payment.
+- **Disputes**: `kind: 'dispute'`, with `transactionId` = the gateway's dispute id, `parentTransactionId` as
+  above, `status` one of `inquiry | needs_response | under_review | won | lost | closed`, `providerStatus`,
+  `amount`, `currency`, `reason`, `evidenceDueBy`, `openedAt`. `../disputeService.js` keeps one
+  `payment_disputes` row per dispute (migration 511), flags the order (`payment_disputed`, then
+  `chargeback_lost` when lost — a courier is not booked while either is set), writes a `chargeback` refund for a
+  lost one, an audit row on the order and a `payment.disputed` notification. `eventKey` includes the status, so
+  each move is processed once.
+- An adapter that confirms a webhook by asking the gateway (PayPal) may make `parseWebhook` async. When the
+  gateway cannot be asked, it returns `{ valid: true, transaction: null, payload }`: the event is stored
+  unprocessed and the sweep calls `refetchTransaction(creds, payload)` for it.
+- Sandbox: the `sandbox` gateway does not report disputes; try them with Stripe test keys
+  (card 4000 0000 0000 0259) and a webhook endpoint, or PayPal's sandbox dispute simulator.
+
+### Saved cards on the real gateways (item 380)
+
+One-click upsells and subscription renewals charge a saved card through `chargeSaved`
+(`../savedMethods/README.md` has the contract and the go-live checklist):
+
+- **Stripe** — the card is kept when the shopper agreed (`createPayment` gets `saveCard`: Checkout with
+  `customer_creation=always` + `setup_future_usage=off_session`); the token is `cus_…|pm_…`; charged with an
+  off-session confirmed PaymentIntent and `Idempotency-Key`; `authentication_required` is `needs_shopper`.
+  Card setup without a payment: Checkout in `setup` mode.
+- **Paymob** — the token comes on the TOKEN callback to the same webhook URL (`parseCardToken`, HMAC-SHA512 over
+  card_subtype, created_at, email, id, masked_pan, merchant_id, order_id, token) and is held sealed until saved;
+  charged on the MOTO integration (new optional setting `motoIntegrationId`; without it nothing is saved and
+  subscription products are refused at checkout). No idempotency header: the intention's `special_reference`
+  is the key and a repeat asks `transaction_inquiry` first. A pending 3-D Secure answer is `needs_shopper`.
+- **PayPal** — Vault (new setting `vault`, off by default: the app must have Vault on, or PayPal would refuse
+  the payment). The vault id is the token; charged with `vault_id` and `PayPal-Request-Id`;
+  `PAYER_ACTION_REQUIRED` is `needs_shopper`. A charge is an order payment method `paypal`.
+- **Kashier** — `supportsTokenization: false`: its card tokens belong to the Direct API (our page would collect
+  the card), and the signed string for a token payment could not be grounded in its documentation.
+
+Check against stand-ins: `STRIPE_API_BASE`, `PAYPAL_API_BASE` and `PAYMOB_BASE_URL` (outside production).
+
+## Fees and payouts (item 384)
+
+Two optional functions feed the online payments ledger (`../ledger/`): `GET /payments/transactions`,
+`GET /payments/payouts` and `GET /payments/payouts/:id` (financial_reports.view). A gateway without them still
+appears in the ledger; its fees and payouts stay unknown.
+
+### `fetchFees(credentials, { payment, settings })`
+
+The gateway's fee on one captured payment → `{ fee, net, currency }` (integer minor units, `fee ≥ 0`, `net` = what
+reached the merchant's gateway balance; `currency` = the gateway's settlement currency, which may differ from the
+payment's) or `null` while the gateway does not know it yet. Called in the background right after a capture
+commits (never on the capture's path), then by the `payments.fetch_fees` job every 10 minutes for what is still
+unknown: each payment at most every 30 minutes, for 7 days after it was paid. Stored as `payments.fee_amount`,
+`net_amount`, `fee_currency`. The profit report uses `fee_amount` instead of the product's `gateway_fee_bp`
+estimate for an online order once it is known in the store's currency.
+
+### `listPayouts(credentials, { since, settings, candidates? })`
+
+The account's payouts created since `since` (a UTC midnight) →
+
+```js
+[{
+  externalId: 'po_…',            // the gateway's id; unique per store and gateway
+  amount, currency,               // what reached the bank, minor units
+  fee?,                           // the fees of what it carried (default: the sum of its lines' fees)
+  arrivalDate,                    // Date or 'YYYY-MM-DD'
+  status: 'pending' | 'in_transit' | 'paid' | 'failed' | 'canceled',
+  transactions: [{                // what it carried
+    type: 'payment' | 'refund' | 'other',
+    transactionId,                // payment: what Payment.providerTransactionId holds; refund: Refund.providerRefundReference
+    amount, fee, net, currency,   // signed: a refund is negative
+  }],
+}]
+```
+
+`../ledger/payoutSync.js` keeps one `gateway_payouts` row per payout (migration 521), updated on every sync, and
+links each line it can match (`payments.payout_id`, `refunds.payout_id`, plus the line's fee when ours was not
+known yet); lines that match nothing (the gateway's adjustments, sales made elsewhere) are counted on the payout
+as `unmatched_count` / `unmatched_amount`. A failed or cancelled payout does not take a line away from a payout
+that carried it since. The `payments.payouts_sync` job runs hourly and syncs each active account whose last sync
+is a day old (`payment_gateway_accounts.payouts_synced_at`), asking again from a week before the last sync (30
+days on the first), so a payout in transit is seen arriving; `POST /payments/payouts/sync` ("Refresh") syncs the
+store's accounts now, at most once a minute each, audited `payment_payouts.sync`.
+
+`candidates` is passed only to an adapter that sets `wantsPayoutCandidates: true` (the sandbox, which has no
+ledger of its own): `{ payments: [{ id, transactionId, amount, currency, paidAt }], refunds: [{ id, reference,
+amount, currency, processedAt }] }` — what ZIMOS holds for the account since `since`. A real gateway ignores it.
+
+### Who implements them
+
+| Gateway | `fetchFees` | `listPayouts` |
+|---|---|---|
+| `sandbox` | the account's own test settings `feeBasisPoints` (1/100 %) of the amount + `feeFixedMinor`, never more than the amount; unset = no fee | one payout per UTC day and currency for days that are over, from `candidates`: the day's payments (less their fee) less its refunds, arriving two days later (`paid` once that date has come, `in_transit` before); a day that nets ≤ 0 pays nothing; id `sbxpo_<day>_<currency>_<signature>` — asking again gives the same payouts |
+| `stripe` | `GET /v1/payment_intents/:id?expand[]=latest_charge.balance_transaction` → the balance transaction's `fee` / `net` / `currency`; null until Stripe has made it | `GET /v1/payouts?created[gte]=` (pages of 100, at most 5), then `GET /v1/balance_transactions?payout=<po_…>&expand[]=data.source` (pages of 100, at most 20 per payout): `charge` / `payment` lines → their PaymentIntent, `refund` / `payment_refund` → their `re_…`, the payout's own line left out, the rest `other`. Stripe lists lines for automatic payouts only: a manual payout comes without lines |
+| `paypal` (`paypalLedger.js`, item 399) | `GET /v2/payments/captures/:id` → `seller_receivable_breakdown`: `paypal_fee` / `net_amount` in the transaction's currency, or `paypal_fee_in_receivable_currency` / `receivable_amount` when the capture was credited in another currency and PayPal gives both; null while the capture is pending (PayPal gives no breakdown then) | `GET /v1/reporting/transactions` (Transaction Search; the app needs that feature on, else the sync answers "turn on Transaction search") with `transaction_type` T0400, T0401, T0402, T0403 (PayPal's T04 group, withdrawals from the PayPal balance), `fields=transaction_info`, windows of ≤ 31 days, 500 a page, at most 5 pages per code and window: amount and `fee_amount` as positive numbers, status S → `paid`, P → `in_transit`, D / V → `failed`, date = the day of `transaction_initiation_date`. No lines: a withdrawal comes out of the pooled balance and PayPal does not say which sales it carried, so PayPal payments keep no payout link |
+| `paymob` | not implemented | not implemented |
+| `kashier` | not implemented | not implemented |
+
+Why the gaps (item 399, checked against what each gateway publishes):
+
+- **PayPal** gives no bank arrival date and no per-withdrawal breakdown, so its payouts are dated by the withdrawal
+  and carry no lines; a refund's fee is not read (no `fetchFees` for refunds in the contract).
+- **Paymob**: the transaction object of the inquiry the adapter already calls has `merchant_commission` and
+  `order.commission_fees` fields, but Paymob's docs neither define them nor show them filled (null in every
+  example), so reading them as Paymob's fee would be a guess. Paymob's "Payouts" API is its disbursement product
+  (sending money to wallets and banks), not the settlement of card payments to the merchant; no settlement API is
+  published. Both left out.
+- **Kashier**: its transaction API (`/v2/aggregator/transactions/:id`, the one the adapter calls) documents no
+  fee field. Kashier's docs mention a balance ledger (gross, fees, net per settlement record), but its endpoint and
+  answer could not be checked from here, so it is not built on.
+
+Their payments show in the ledger with the fee "not known yet". Adding one is writing the two functions above
+against an API the gateway documents.
+
+Stand-in for Stripe: `STRIPE_API_BASE` (outside production).

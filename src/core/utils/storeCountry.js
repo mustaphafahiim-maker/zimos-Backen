@@ -14,7 +14,7 @@ const requestContext = require('./requestContext');
  * numbers already stored with their country code, and falls back to Egypt.
  */
 
-const CALLING_CODES = { EG: '20', SA: '966', AE: '971', KW: '965', QA: '974', BH: '973', OM: '968', JO: '962', MA: '212', DZ: '213', TN: '216', IQ: '964', LY: '218' };
+const CALLING_CODES = { EG: '20', SA: '966', AE: '971', KW: '965', QA: '974', BH: '973', OM: '968', JO: '962', MA: '212', DZ: '213', TN: '216', IQ: '964', LY: '218', PS: '970' };
 const FALLBACK = 'EG';
 
 function countryOf(workspace) {

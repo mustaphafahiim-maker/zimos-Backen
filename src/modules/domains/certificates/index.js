@@ -1,22 +1,18 @@
 'use strict';
 
 const env = require('../../../config/env');
+const { CertificateProviderError } = require('./errors');
+const { cloudflare } = require('./cloudflare');
 
 /**
  * Certificate providers for merchant domains — the contract is in README.md.
  * Add a real adapter by requiring it here.
  */
 
-class CertificateProviderError extends Error {
-  constructor(message, { retryable = true } = {}) {
-    super(message);
-    this.name = 'CertificateProviderError';
-    this.retryable = retryable;
-  }
-}
-
 const ADAPTERS = {
   sandbox: require('./sandbox'),
+  // Cloudflare for SaaS custom hostnames (item 341, Ziad's b600e71).
+  cloudflare,
 };
 
 /** The configured adapter. Production never falls back to the sandbox by itself. */
@@ -31,4 +27,14 @@ function getCertificateProvider() {
   return adapter;
 }
 
-module.exports = { getCertificateProvider, CertificateProviderError };
+/** True when a provider can be used (an adapter that exists; the sandbox outside production). */
+function certificateProviderConfigured() {
+  try {
+    getCertificateProvider();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { getCertificateProvider, certificateProviderConfigured, CertificateProviderError };

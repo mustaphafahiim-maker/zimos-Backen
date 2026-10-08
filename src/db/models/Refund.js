@@ -21,6 +21,11 @@ module.exports = (sequelize, DataTypes) => {
       // e.g. REFUND_INSUFFICIENT_GATEWAY_BALANCE — see migration 101.
       failureCode: { type: DataTypes.STRING(60), allowNull: true, field: 'failure_code' },
       processedAt: { type: DataTypes.DATE, allowNull: true, field: 'processed_at' },
+      // From the payout that carried it (item 384, migration 521).
+      feeAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'fee_amount' },
+      netAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'net_amount' },
+      feeCurrency: { type: DataTypes.STRING(3), allowNull: true, field: 'fee_currency' },
+      payoutId: { type: DataTypes.UUID, allowNull: true, field: 'payout_id' },
     },
     { tableName: 'refunds', indexes: [{ fields: ['workspace_id'] }, { fields: ['order_id'] }] }
   );

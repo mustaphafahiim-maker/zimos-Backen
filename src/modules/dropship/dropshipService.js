@@ -137,6 +137,8 @@ async function importProduct(workspaceId, code, productCode, req) {
  * Forwards an order to the provider. Pushing again returns the same reference.
  * `req` is null when it forwards by itself (dropshipOrders.autoForward, via "auto").
  */
+const PUSH_STALE_MS = 2 * 60 * 1000;
+
 async function pushOrder(workspaceId, code, orderId, req, { via = 'manual' } = {}) {
   const provider = providerOrThrow(code);
   const { credentials } = await connection(workspaceId, code);
@@ -145,18 +147,33 @@ async function pushOrder(workspaceId, code, orderId, req, { via = 'manual' } = {
   // A mixed order sends this supplier only its own lines.
   const order = await require('./dropshipOrders').linesFor(workspaceId, code, full);
   const answer = (ref) => ({ orderId, provider: code, externalOrderId: ref.externalOrderId, externalStatus: ref.externalStatus, suggestedStage: provider.mapStatus(ref.externalStatus) });
-  // One remote order per order and supplier (item 307): a double click, or a manual push racing the
-  // automatic one, waits on this lock and then finds the first one's reference — the supplier is asked
-  // once. (Their own duplicate check only looks at their newest orders.)
-  return db.sequelize.transaction(async (transaction) => {
+  // One remote order per order and supplier (items 307, 318): the reference is claimed first, in a short
+  // transaction under a lock, and the supplier is called with no transaction open. A double click, or a
+  // manual push racing the automatic one, finds the claim: 409 while it is being sent, the reference after.
+  // A claim left by a crash is taken over after PUSH_STALE_MS.
+  const { PUSH_PENDING } = require('./dropshipOrders');
+  const claim = await db.sequelize.transaction(async (transaction) => {
     await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `dropship-push:${workspaceId}:${orderId}:${code}` }, transaction });
     const existing = await db.DropshipOrderRef.findOne({ where: { workspaceId, orderId, provider: code }, transaction });
-    if (existing) return answer(existing);
-    const result = await call(() => provider.pushOrder(credentials, order));
-    const ref = await db.DropshipOrderRef.create({ workspaceId, orderId, provider: code, externalOrderId: result.externalOrderId, externalStatus: result.externalStatus || null, forwardedBy: via }, { transaction });
-    await recordAudit({ workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'dropship.push_order', entityType: 'Order', entityId: orderId, after: { provider: code, externalOrderId: ref.externalOrderId }, metadata: { via }, req, transaction });
-    return answer(ref);
+    if (existing && existing.externalOrderId !== PUSH_PENDING) return { done: existing };
+    if (existing && Date.now() - new Date(existing.pushedAt).getTime() < PUSH_STALE_MS) {
+      throw new AppError('DROPSHIP_PUSH_IN_PROGRESS', 'This order is being sent to the supplier — check again in a moment', 409);
+    }
+    if (existing) return { mine: await existing.update({ pushedAt: new Date(), forwardedBy: via, lastError: null }, { transaction }) };
+    return { mine: await db.DropshipOrderRef.create({ workspaceId, orderId, provider: code, externalOrderId: PUSH_PENDING, externalStatus: null, forwardedBy: via }, { transaction }) };
   });
+  if (claim.done) return answer(claim.done);
+  let result;
+  try {
+    result = await call(() => provider.pushOrder(credentials, order));
+  } catch (e) {
+    // Not sent: the claim goes, so the order can be sent again.
+    await db.DropshipOrderRef.destroy({ where: { id: claim.mine.id, externalOrderId: PUSH_PENDING } }).catch(() => {});
+    throw e;
+  }
+  const ref = await claim.mine.update({ externalOrderId: result.externalOrderId, externalStatus: result.externalStatus || null, pushedAt: new Date() });
+  await recordAudit({ workspaceId, actorUserId: req && req.user ? req.user.id : null, action: 'dropship.push_order', entityType: 'Order', entityId: orderId, after: { provider: code, externalOrderId: ref.externalOrderId }, metadata: { via }, req });
+  return answer(ref);
 }
 
 /** Sets each imported variant's stock to what the provider has now. */

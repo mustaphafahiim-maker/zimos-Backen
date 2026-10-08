@@ -53,6 +53,10 @@ const planBody = Joi.object({
   // Shown on the marketing site and offered at sign-up.
   isPublic: Joi.boolean().optional(),
   displayOrder: Joi.number().integer().min(0).max(10000).optional(),
+  // The pay-per-order fee for one order, minor units (50 = EGP 0.50). Only on
+  // a plan with no monthly price, in EGP (platformAdminService.savePlan).
+  // Left out: kept as it is.
+  perOrderFee: Joi.number().integer().min(0).max(100000).optional(),
 });
 
 const flagBody = Joi.object({
@@ -221,6 +225,11 @@ const manualSubscriptionSchemas = {
       duration: manualDuration.optional(),
       endsAt: Joi.date().iso().optional(),
       billingCycle: Joi.string().valid('monthly', 'yearly').optional(),
+      // billing/manualPricing: paid (default), free (a gift) or discounted by a
+      // percent or to a price per period (minor units). Checked against the plan there.
+      pricingKind: Joi.string().valid('paid', 'free', 'discounted').default('paid'),
+      discountPercent: Joi.number().integer().min(1).max(99).allow(null).optional(),
+      priceOverrideAmount: Joi.number().integer().min(1).allow(null).optional(),
       note: manualNote,
     }).xor('duration', 'endsAt'),
   },
@@ -263,9 +272,30 @@ module.exports = {
       q: Joi.string().trim().max(200).allow('').default(''),
       page: Joi.number().integer().min(1).max(10000).default(1),
       limit: Joi.number().integer().min(1).max(50).default(25),
+      // Deleted accounts are hidden from the list unless asked for (item 337).
+      includeDeleted: Joi.boolean().default(false),
     }),
   },
   userParams: { params: Joi.object({ userId: uuid.required() }) },
+  // Suspend, unsuspend and delete an account (item 337). The console asks
+  // before each of these; the API wants the same yes.
+  suspendUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({ reason: Joi.string().trim().min(2).max(500).required(), confirm: Joi.boolean().valid(true).required() }),
+  },
+  unsuspendUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({ reason: Joi.string().trim().max(500).allow('', null).optional(), confirm: Joi.boolean().valid(true).required() }),
+  },
+  deleteUser: {
+    params: Joi.object({ userId: uuid.required() }),
+    body: Joi.object({
+      reason: Joi.string().trim().max(500).allow('', null).optional(),
+      // Required (as 'suspend') when the account owns stores.
+      stores: Joi.string().valid('suspend').optional(),
+      confirm: Joi.boolean().valid(true).required(),
+    }),
+  },
 
   createPlan: { body: planBody },
   updatePlan: { params: Joi.object({ planId: uuid.required() }), body: planBody },

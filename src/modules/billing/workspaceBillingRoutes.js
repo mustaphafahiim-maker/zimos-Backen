@@ -8,6 +8,13 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const controller = require('./billingController');
 const schemas = require('./billingValidation');
+const { createIpMinuteLimiter, paymentProofLimiter } = require('../../core/middleware/rateLimiters');
+const payments = require('./paymentController');
+const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
+const env = require('../../config/env');
+
+// Trying referral codes is limited per IP, so codes can't be walked.
+const codePreviewLimiter = createIpMinuteLimiter('code-preview', 20, { skip: () => env.isTest });
 
 // Mounted at /api/v1/workspaces/:workspaceId/billing. The merchant's side of
 // their own subscription: billing.manage (the owner, and the accountant role).
@@ -25,9 +32,36 @@ router.get('/usage', async (req, res, next) => {
 });
 router.patch('/', validate(schemas.setBillingCycle), controller.setBillingCycle);
 router.post('/referral-code', validate(schemas.attachReferralCode), controller.attachReferralCode);
+// The Subscription section: the plans with their prices, what a code would
+// take off them, the charges page by page, and changing plan while nothing
+// is paid (billing/merchantPlansService; item 333, Ziad's f757e0d).
+router.get('/plans', controller.listPlans);
+router.post('/code-preview', codePreviewLimiter, validate(schemas.previewCode), controller.previewCode);
+router.get('/invoices', validate(schemas.listInvoices), controller.listInvoices);
+router.post('/plan', validate(schemas.changePlan), controller.changePlan);
 // Paying the charge online (billing/onlineBillingService), when
 // ONLINE_BILLING_ENABLED is on and the plan is priced in EGP.
 router.post('/payments', validate(schemas.startOnlinePayment), controller.startOnlinePayment);
 router.get('/payments/:paymentId', validate(schemas.getOnlinePayment), controller.getOnlinePayment);
+// The ways to pay (billing/paymentMethodService), the charge to pay now
+// (nothing written), and a manual transfer's proof, which writes the charge
+// when sent for `next` (billing/paymentProofService).
+router.get('/payment-methods', payments.listPaymentMethods);
+router.post('/invoices/open', payments.openInvoice);
+router.post(
+  '/invoices/:invoiceId/payment-proofs',
+  paymentProofLimiter,
+  payments.acceptProofFile,
+  validate(schemas.submitInvoiceProof),
+  payments.submitInvoiceProof
+);
+router.get('/payment-proofs', payments.listPaymentProofs);
+// The prepaid balance and the pay-per-order plan (billing/walletService,
+// WALLET_ENABLED; item 335, Ziad's ead64d1): the balance, its ledger, a
+// top-up transfer's proof, and choosing the plan.
+router.get('/wallet', payments.getWallet);
+router.get('/wallet/ledger', validate(schemas.walletLedger), payments.getWalletLedger);
+router.post('/wallet/topups', paymentProofLimiter, payments.acceptProofFile, validate(schemas.submitTopup), payments.submitTopup);
+router.post('/pay-per-order', requireConfirmedAccount, payments.choosePayPerOrder);
 
 module.exports = router;

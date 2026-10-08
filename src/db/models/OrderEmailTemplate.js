@@ -16,8 +16,11 @@ module.exports = (sequelize, DataTypes) => {
       blocks: { type: DataTypes.JSONB, allowNull: true },
       // '' = the store's set; 'funnel:<id>' / 'website:<id>' = an override for that funnel or website (migration 456).
       scope: { type: DataTypes.STRING(80), allowNull: false, defaultValue: '' },
+      // The version in one of the store's languages (migration 520, item 383); null = the default version.
+      locale: { type: DataTypes.STRING(10), allowNull: true },
     },
-    { tableName: 'order_email_templates', indexes: [{ unique: true, fields: ['workspace_id', 'key', 'scope'] }] }
+    // Unique on (workspace_id, key, scope, COALESCE(locale, '')): an expression index made by migration 520.
+    { tableName: 'order_email_templates' }
   );
   return OrderEmailTemplate;
 };

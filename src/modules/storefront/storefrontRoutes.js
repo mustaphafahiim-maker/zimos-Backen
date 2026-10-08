@@ -3,7 +3,7 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
-const { trackingLimiter, suggestLimiter, uploadLimiter } = require('../../core/middleware/rateLimiters');
+const { trackingLimiter, suggestLimiter, uploadLimiter, manualProofLimiter, checkoutOtpLimiter, depositQuoteLimiter, checkoutRefusalLimiter } = require('../../core/middleware/rateLimiters');
 const customerUploadController = require('../customerUploads/customerUploadController');
 const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
@@ -15,6 +15,8 @@ const checkoutSessionController = require('../checkoutSessions/checkoutSessionCo
 const checkoutSessionSchemas = require('../checkoutSessions/checkoutSessionValidation');
 const onlinePaymentController = require('../payments/onlinePaymentController');
 const onlinePaymentSchemas = require('../payments/onlinePaymentValidation');
+const manualPaymentController = require('../manualPayments/manualPaymentController');
+const manualPaymentSchemas = require('../manualPayments/manualPaymentValidation');
 const botProtection = require('../risk/botProtection');
 const checkoutOtp = require('../risk/checkoutOtp');
 const lostOrders = require('../checkoutSessions/lostOrderService');
@@ -33,8 +35,9 @@ router.get('/checkout/guard', botProtection.guardConfig);
 // The unsubscribe link in a marketing email (notifications/marketingUnsubscribe.js).
 router.use(require('../notifications/marketingUnsubscribe').router);
 // The code-entry step of a checkout that answered 428 OTP_REQUIRED.
-router.post('/checkout/otp/verify', checkoutOtp.verify);
-router.post('/checkout/otp/resend', checkoutOtp.resend);
+// A few tries a minute per IP across both (item 348); the codes keep their own per-phone limits.
+router.post('/checkout/otp/verify', checkoutOtpLimiter, checkoutOtp.verify);
+router.post('/checkout/otp/resend', checkoutOtpLimiter, checkoutOtp.resend);
 // What a recovery link (/r/:token) rebuilds: the cart and the form.
 router.get('/recover/:token', lostOrderController.recover);
 
@@ -53,7 +56,7 @@ router.use(require('../catalog/productTests').publicRouter);
 router.use(require('../payments/transferResubmit').router);
 router.get('/collections', validate(schemas.workspaceParam), controller.listCollections);
 // A shopper's photo for a product's image field (customerUploads). Limited
-// before multer reads a byte; multer refuses anything over 15 MB mid-stream.
+// before multer reads a byte; multer refuses anything over 5 MB mid-stream.
 router.post('/uploads', uploadLimiter, customerUploadController.acceptFile, customerUploadController.create);
 router.get('/collections/:collectionId', validate(schemas.getCollection), controller.getCollection);
 
@@ -74,12 +77,32 @@ router.post('/shipping-quote', validate(schemas.shippingQuote), controller.shipp
 // The payment methods the checkout offers (COD only while online payments
 // are off). A valid X-Store-Preview header adds test-mode gateway methods.
 // Whether a cash-on-delivery order by this phone needs a deposit first (payments/manualTransferService.js).
+// Under a "risky shoppers only" rule the phone's record is read only with the
+// checkout code's otpToken for that phone; without it the answer is the same
+// for every phone and the checkout decides (item 362).
 router.post(
   '/deposit-quote',
-  validate({ params: onlinePaymentSchemas.storeMethods.params, body: require('joi').object({ phone: require('joi').string().max(32).allow('', null) }) }),
-  require('express-async-handler')(async (req, res) =>
-    res.json({ deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, req.body || {}) })
-  )
+  depositQuoteLimiter,
+  validate({
+    params: onlinePaymentSchemas.storeMethods.params,
+    body: require('joi').object({
+      phone: require('joi').string().max(32).allow('', null),
+      otpToken: require('joi').string().max(512).allow('', null),
+    }),
+  }),
+  require('express-async-handler')(async (req, res) => {
+    const body = req.body || {};
+    let phone = null;
+    try {
+      phone = body.phone ? require('../../core/utils/phone').normalizePhone(body.phone) : null;
+    } catch {
+      phone = null;
+    }
+    const phoneVerified = checkoutOtp.proofValid(body.otpToken, req.publicWorkspace.id, phone);
+    res.json({
+      deposit: await require('../payments/manualTransferService').depositQuote(req.publicWorkspace, { phone: body.phone }, { phoneVerified }),
+    });
+  })
 );
 // Display currencies and their rates — for showing converted prices only (currencies/fxService.js).
 router.get(
@@ -96,6 +119,18 @@ router.get('/payment-methods', validate(onlinePaymentSchemas.storeMethods), onli
 router.get('/orders/:orderId/payment', validate(onlinePaymentSchemas.shopperStatus), onlinePaymentController.shopperStatus);
 router.post('/orders/:orderId/payment/return', validate(onlinePaymentSchemas.shopperReturn), onlinePaymentController.shopperReturn);
 router.post('/orders/:orderId/payment/retry', validate(onlinePaymentSchemas.shopperRetry), onlinePaymentController.shopperRetry);
+// The store's manual methods (InstaPay, a wallet) and, for an order paid by
+// one, the shopper's proof (X-Payment-Token): the number they paid from and a
+// screenshot, limited per IP before multer reads a byte (modules/manualPayments).
+router.get('/manual-payment-methods', validate(manualPaymentSchemas.storeMethods), manualPaymentController.storefrontMethods);
+router.get('/orders/:orderId/manual-payment', validate(manualPaymentSchemas.shopperStatus), manualPaymentController.shopperStatus);
+router.post(
+  '/orders/:orderId/manual-payment/proof',
+  manualProofLimiter,
+  validate(manualPaymentSchemas.shopperStatus),
+  customerUploadController.acceptFile,
+  manualPaymentController.submitProof
+);
 router.post(
   '/orders/:orderId/payment/switch-to-cod',
   validate(onlinePaymentSchemas.shopperSwitchToCod),
@@ -105,6 +140,8 @@ router.post(
 // A draft store, reachable here only through a staff preview, sells nothing.
 router.post(
   '/checkout',
+  // 20 refused checkouts a minute per IP (placed orders do not count), item 362 review.
+  checkoutRefusalLimiter,
   validate(checkoutSchemas.checkout),
   // Honeypot, time token, optional challenge — modules/risk/botProtection.
   botProtection.guardCheckout,

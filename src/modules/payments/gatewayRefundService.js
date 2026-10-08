@@ -35,6 +35,16 @@ async function findRefundedPayment(account, tx) {
   return null;
 }
 
+/** A lost dispute's chargeback of this amount not yet matched to a gateway refund (it still carries the dispute id). */
+async function lostDisputeRefund(paymentId, amount, transaction) {
+  const disputes = await db.PaymentDispute.findAll({ where: { paymentId, status: 'lost', refundId: { [Op.ne]: null } }, transaction });
+  for (const d of disputes) {
+    const row = await db.Refund.findOne({ where: { id: d.refundId, source: 'chargeback', status: 'processed', providerRefundReference: d.providerDisputeId }, transaction });
+    if (row && Number(row.amount) === Number(amount)) return row;
+  }
+  return null;
+}
+
 async function recordRefundTransaction(account, tx) {
   const payment = await findRefundedPayment(account, tx);
   if (!payment) return { outcome: 'unmatched_refund' };
@@ -87,12 +97,24 @@ async function recordRefundTransaction(account, tx) {
       transaction,
     });
     if (existing) return null;
+    // PayPal also reports a lost dispute's money as a refund (item 377): the refund of the same amount is that
+    // chargeback, which takes its reference instead of a second row (a later refund of that amount is its own).
+    const chargeback = await lostDisputeRefund(payment.id, amount, transaction);
+    if (chargeback) {
+      await chargeback.update({ providerRefundReference: tx.transactionId }, { transaction });
+      return false;
+    }
+    // Never more than is left of the payment: a lost chargeback (item 377) may already count this money,
+    // when the gateway also reports it as a refund.
+    const refunded = Number((await db.Refund.sum('amount', { where: { paymentId: payment.id, status: 'processed' }, transaction })) || 0);
+    const counted = Math.min(Number(amount), Math.max(0, Number(payment.amount) - refunded));
+    if (counted <= 0) return false;
     const row = await db.Refund.create(
       {
         workspaceId: account.workspaceId,
         orderId: payment.orderId,
         paymentId: payment.id,
-        amount,
+        amount: counted,
         reason: 'Refunded in the gateway dashboard',
         status: 'pending',
         source: 'gateway',
@@ -103,7 +125,7 @@ async function recordRefundTransaction(account, tx) {
     await paymentService.applyProcessedRefund(account.workspaceId, row, null, transaction);
     return row;
   });
-  return { outcome: created ? 'gateway_refund_recorded' : 'duplicate', ...ids };
+  return { outcome: created ? 'gateway_refund_recorded' : created === false ? 'gateway_refund_already_counted' : 'duplicate', ...ids };
 }
 
 /**

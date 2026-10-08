@@ -71,6 +71,29 @@ async function priceFor(workspaceId, address, transaction) {
   return null;
 }
 
+/**
+ * The address as the picked place names it (item 314): province, city and area from the place's own
+ * path when a `placeId` is sent — the price comes from that place, so the address on the order must be
+ * that place too, not whatever names came with it (a Cairo area's price for an Aswan address). A name
+ * typed in one of the place's spellings (Arabic, English, its code) is kept as typed; levels below the
+ * picked place keep what was typed. An unknown place is left to assertDeliverable to refuse.
+ */
+async function alignAddress(workspaceId, address, transaction) {
+  if (!address || !address.placeId) return address;
+  const places = await placesOf(workspaceId, address, transaction);
+  if (!places) return address;
+  const matches = (typed, place) => typed && spellings(typed).some((n) => same(n, place.nameAr) || same(n, place.nameEn) || (place.geoCode && same(n, place.geoCode)));
+  const named = (typed, place) => (matches(typed, place) ? typed : place.nameAr || place.nameEn);
+  const out = { ...address };
+  if (places.region) {
+    out.province = named(address.province, places.region);
+    if (places.region.country) out.country = places.region.country;
+  }
+  if (places.city) out.city = named(address.city, places.city);
+  if (places.area) out.area = named(address.area, places.area);
+  return out;
+}
+
 /** Whether any visible place of the store's list carries a price (the quote's `configured`). */
 async function hasPrices(workspaceId, transaction) {
   return (await db.StorePlace.count({ where: { workspaceId, hidden: false, shippingAmount: { [Op.ne]: null } }, transaction })) > 0;
@@ -118,4 +141,5 @@ function parseSheetPrice(raw, minorDigits = 2) {
 }
 
 module.exports = {
+  alignAddress,
   hasPrices, RULE, priceFor, placesOf, assertDeliverable, setPrices, parseSheetPrice };

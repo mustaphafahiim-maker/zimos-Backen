@@ -6,6 +6,8 @@ const service = require('./funnelsService');
 // --- funnels ---
 const createFunnel = asyncHandler(async (req, res) => {
   const funnel = await service.createFunnel(req.tenant.workspaceId, req.body, req);
+  // From a template: the copied steps too, so the editor opens on them.
+  if (req.body.templateVersionId) return res.status(201).json({ funnel, steps: await service.listSteps(req.tenant.workspaceId, funnel.id) });
   res.status(201).json({ funnel });
 });
 

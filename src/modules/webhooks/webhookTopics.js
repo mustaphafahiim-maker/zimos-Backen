@@ -35,9 +35,14 @@ const TOPICS = Object.freeze({
   // Item 178 (webhooks/modelEvents.js).
   'funnel.created': 'A funnel was created.',
   'funnel.updated': 'A funnel was edited (its settings, steps map, status or name).',
-  'funnel.deleted': 'A funnel was deleted (its id and name are in the payload).',
+  'funnel.deleted': 'A funnel was deleted: moved to the trash, where it can still be restored (its id and name are in the payload).',
   'payment.paid': 'A payment was received for an order (online, a transfer that was accepted, or cash collected).',
   'contact.updated': "A contact's details, tags or marketing consent were changed.",
+  // Item 372 (returns/): the return, with its order.
+  'return.requested': 'A return or exchange was asked for, by the shopper or by the team (source and resolution are in the payload).',
+  'return.approved': 'A return or exchange was approved (an exchange carries its replacement order id).',
+  'return.rejected': 'A return or exchange was rejected.',
+  'return.received': 'A returned parcel came back to the store: the courier handed it back (source courier) or the team restocked it. Units are back in stock only after the restock step, which may come later.',
 });
 
 const DOMAIN_TO_TOPIC = Object.freeze({
@@ -69,6 +74,10 @@ const DOMAIN_TO_TOPIC = Object.freeze({
   'funnel.deleted': 'funnel.deleted',
   'payment.paid': 'payment.paid',
   'contact.updated': 'contact.updated',
+  'return.requested': 'return.requested',
+  'return.approved': 'return.approved',
+  'return.rejected': 'return.rejected',
+  'return.received': 'return.received',
 });
 
 // The model hooks that record the funnel, payment and contact events (item 178).

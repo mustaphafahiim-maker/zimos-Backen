@@ -35,6 +35,18 @@
  *                   (connection.verification.locationList 'unavailable'),
  *                   a booking may send the carrier's own names as typed
  *                   (carrierAddress.names) and the carrier checks them
+ *   returnPickup    the courier collects a returned parcel from the shopper:
+ *                   createReturnPickup() books it (returns/returnPickup.js,
+ *                   item 372)
+ *   returnPickupStatus
+ *                   getReturnPickup() reads a booked pickup's state back as a
+ *                   pickup status (requested, picked_up, in_transit,
+ *                   returned_to_merchant, failed, cancelled); polled by
+ *                   returns/returnPickupStatus.js when `polling` is on, and
+ *                   re-read on the carrier's webhook (item 396)
+ *   returnPickupCancel
+ *                   cancelReturnPickup() cancels a booked pickup at the
+ *                   carrier (item 396)
  *
  * Tunables: pollIntervalMinutes (default 60), alreadyCancelledPattern (the
  * carrier's wording for "already cancelled" in a refused cancel), and
@@ -52,6 +64,9 @@ const DEFAULT_CAPABILITIES = Object.freeze({
   addressLevels: ['city', 'district'],
   reserveNameWhenUnconnected: false,
   typedAddressNames: false,
+  returnPickup: false,
+  returnPickupStatus: false,
+  returnPickupCancel: false,
 });
 
 const DEFAULT_ALREADY_CANCELLED = /already\s+(been\s+)?(cancell?ed|terminated)/i;
@@ -96,6 +111,14 @@ function defineAdapter(spec) {
   if (capabilities.bulkStatus && typeof spec.getShipments !== 'function') fail(code, 'bulkStatus needs getShipments()');
   if (capabilities.typedAddressNames && typeof spec.typedAddress !== 'function') {
     fail(code, 'typedAddressNames needs typedAddress()');
+  }
+
+  if (capabilities.returnPickup && typeof spec.createReturnPickup !== 'function') fail(code, 'returnPickup needs createReturnPickup()');
+  if (capabilities.returnPickupStatus && (!capabilities.returnPickup || typeof spec.getReturnPickup !== 'function')) {
+    fail(code, 'returnPickupStatus needs returnPickup and getReturnPickup()');
+  }
+  if (capabilities.returnPickupCancel && (!capabilities.returnPickup || typeof spec.cancelReturnPickup !== 'function')) {
+    fail(code, 'returnPickupCancel needs returnPickup and cancelReturnPickup()');
   }
 
   const levels = capabilities.addressLevels;

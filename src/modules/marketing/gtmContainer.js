@@ -15,10 +15,11 @@ const db = require('../../db/models');
  *   variables  dataLayer: ecommerce.value, .currency, .transaction_id, .items, event_id
  *   triggers   one Custom Event trigger per storefront event (EVENTS below)
  *   tags       a Google tag (GA4) on all pages and a GA4 event per trigger,
- *              when a G- id is given or the store has one;
- *              a Google Ads conversion (and the conversion linker) for
- *              purchase and lead, when an AW- id and label are given or set
- *              on the store's Google pixel (items 132, 169).
+ *              when a G- id is given; a Google Ads conversion (and the
+ *              conversion linker) for purchase and lead, when an AW- id and
+ *              label are given (items 132, 169). Not for the store's own
+ *              Google pixels, which the storefront already loads (item 303):
+ *              those are named in the X-Zimos-Skipped-Ids header instead.
  *
  * Meta, TikTok and Snapchat are not put in the container: the store already
  * loads them itself, and a second copy in GTM would count everything twice.
@@ -101,12 +102,41 @@ async function storeGoogleIds(workspaceId) {
   };
 }
 
-async function build(workspaceId, query) {
+/** The Google ids the storefront already loads by itself (the store's active Google pixels, any scope). */
+async function idsSentByStore(workspaceId) {
+  const pixels = await db.TrackingPixel.findAll({ where: { workspaceId, platform: 'google', isActive: true }, attributes: ['pixelId'] });
+  return new Set(pixels.map((p) => String(p.pixelId).toUpperCase()));
+}
+
+/**
+ * The container, and the ids left out of it. The store's own Google pixels are left out (item 303): the
+ * storefront loads them itself, within their funnel / product scope, so a copy in GTM would count every
+ * page view and conversion twice. Only a GA4 / Ads id the store doesn't send (passed in the query) goes in.
+ */
+async function buildWithNotes(workspaceId, query) {
   const own = await storeGoogleIds(workspaceId);
-  const ga4 = query.ga4 || own.ga4;
-  const ads = query.ads
-    ? { id: query.ads, purchaseLabel: query.purchaseLabel || null, leadLabel: query.leadLabel || null }
-    : own.ads;
+  const sent = await idsSentByStore(workspaceId);
+  const skipped = [];
+  const keep = (id) => {
+    if (!id) return null;
+    if (sent.has(String(id).toUpperCase())) {
+      skipped.push(id);
+      return null;
+    }
+    return id;
+  };
+  const ga4 = keep(query.ga4);
+  const adsId = keep(query.ads);
+  const ads = adsId ? { id: adsId, purchaseLabel: query.purchaseLabel || null, leadLabel: query.leadLabel || null } : null;
+  for (const id of [own.ga4, own.ads && own.ads.id]) if (id && !skipped.includes(id) && id !== query.ga4 && id !== query.ads) skipped.push(id);
+  return { container: await containerFor(workspaceId, own, ga4, ads), skipped };
+}
+
+async function build(workspaceId, query) {
+  return (await buildWithNotes(workspaceId, query)).container;
+}
+
+async function containerFor(workspaceId, own, ga4, ads) {
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name'] });
   const name = `Zimos - ${(workspace && workspace.name) || 'store'}`.slice(0, 100);
   return {
@@ -144,8 +174,10 @@ function mount(router) {
     '/gtm/container',
     validate(schemas.container),
     asyncHandler(async (req, res) => {
-      const container = await build(req.tenant.workspaceId, req.query);
+      const { container, skipped } = await buildWithNotes(req.tenant.workspaceId, req.query);
       if (req.query.download) res.set('Content-Disposition', 'attachment; filename="zimos-gtm-container.json"');
+      // Kept out of the file so it imports as is: the Google ids the store already sends (item 303).
+      res.set('X-Zimos-Skipped-Ids', skipped.join(',') || 'none');
       res.json(container);
     })
   );

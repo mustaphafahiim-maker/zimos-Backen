@@ -7,6 +7,8 @@ const { recordAudit } = require('../audit/auditService');
 const access = require('../workspaces/workspaceAccessService');
 const { addMonths } = require('./planPricing');
 const entitlements = require('./entitlementsService');
+const manualPricing = require('./manualPricing');
+const logger = require('../../core/utils/logger');
 
 /**
  * A platform admin setting a store's subscription by hand
@@ -38,6 +40,10 @@ const entitlements = require('./entitlementsService');
  * agent commission is ever recorded for it: recording a payment
  * (subscriptionChargeService) stays the only path to a commission. A charge
  * already open is left alone and reported back so the admin can see it.
+ *
+ * Activate also sets what the period costs (billing/manualPricing): paid
+ * (default, the plan's price), free (a gift) or discounted. Extend and change
+ * plan keep it as it is.
  *
  * Every action needs a note, keeps its before/after in
  * subscription_manual_changes (source 'manual_admin') and in the audit log,
@@ -128,7 +134,7 @@ const CHANGE_INCLUDE = [
 async function getForAdmin(workspaceId) {
   const subscription = await db.Subscription.findOne({
     where: { workspaceId },
-    include: [{ model: db.Plan, as: 'plan', attributes: ['id', 'name', 'key'] }],
+    include: [{ model: db.Plan, as: 'plan' }],
   });
   if (!subscription) throw new NotFoundError('Subscription');
   const lifecycle = access.billingLifecycle(subscription, new Date());
@@ -159,11 +165,38 @@ async function getForAdmin(workspaceId) {
       // Made while REQUIRE_SUBSCRIPTION_TO_GO_LIVE was on and not subscribed
       // yet: Activate takes it out of draft.
       draft,
+      // billing/manualPricing: what one period costs the merchant.
+      pricingKind: subscription.pricingKind,
+      discountPercent: subscription.discountPercent,
+      priceOverrideAmount: subscription.priceOverrideAmount === null ? null : Number(subscription.priceOverrideAmount),
+      effectivePrice: manualPricing.effectivePrice(subscription, subscription.plan),
+      currency: subscription.plan ? subscription.plan.currency : null,
+      pricingExpiredAt: subscription.pricingExpiredAt,
     },
     // The owner's stores and this store's funnels this month, against the plan.
     limits: await entitlements.getLimits(workspaceId),
     openCharge: openCharge ? openCharge.toJSON() : null,
     history: history.map(serializeChange),
+  };
+}
+
+const auditState = (subscription) => ({
+  planId: subscription.planId,
+  status: subscription.status,
+  currentPeriodStart: subscription.currentPeriodStart,
+  currentPeriodEnd: subscription.currentPeriodEnd,
+  pricingKind: subscription.pricingKind,
+  discountPercent: subscription.discountPercent,
+  priceOverrideAmount: subscription.priceOverrideAmount === null ? null : Number(subscription.priceOverrideAmount),
+});
+
+/** The kind and the price of one period as the merchant pays it (minor units), for the audit entry. */
+async function pricingSummary(subscription, transaction) {
+  const plan = subscription.planId ? await db.Plan.findByPk(subscription.planId, { transaction }) : null;
+  return {
+    kind: subscription.pricingKind,
+    amount: manualPricing.effectivePrice(subscription, plan),
+    currency: plan ? plan.currency : null,
   };
 }
 
@@ -191,12 +224,7 @@ async function runAction(workspaceId, action, body, req, mutate) {
       }
     }
 
-    const before = {
-      planId: subscription.planId,
-      status: subscription.status,
-      currentPeriodStart: subscription.currentPeriodStart,
-      currentPeriodEnd: subscription.currentPeriodEnd,
-    };
+    const before = auditState(subscription);
     const patch = await mutate(subscription, transaction);
     await subscription.update(patch, { transaction });
 
@@ -228,13 +256,8 @@ async function runAction(workspaceId, action, body, req, mutate) {
       entityType: 'Subscription',
       entityId: subscription.id,
       before,
-      after: {
-        planId: subscription.planId,
-        status: subscription.status,
-        currentPeriodStart: subscription.currentPeriodStart,
-        currentPeriodEnd: subscription.currentPeriodEnd,
-      },
-      metadata: { source: 'manual_admin', note: body.note, changeId: change.id },
+      after: auditState(subscription),
+      metadata: { source: 'manual_admin', note: body.note, changeId: change.id, pricing: await pricingSummary(subscription, transaction) },
       req,
       transaction,
     });
@@ -261,12 +284,14 @@ async function activate(workspaceId, body, req) {
     if (end.getTime() <= now.getTime()) {
       throw new ValidationError([{ field: 'endsAt', message: 'The period must end in the future' }], 'The period must end in the future');
     }
+    const cycle = body.billingCycle || subscription.billingCycle;
     return {
       ...ACTIVE,
       planId: plan.id,
       currentPeriodStart: start,
       currentPeriodEnd: end,
       ...(body.billingCycle ? { billingCycle: body.billingCycle } : {}),
+      ...manualPricing.pricingPatch(body, plan, cycle, req.user.id),
     };
   });
 }
@@ -294,6 +319,8 @@ async function extend(workspaceId, body, req) {
       ...(subscription.status === 'trialing' ? { graceUntil: null } : ACTIVE),
       ...(lapsed ? { currentPeriodStart: now } : {}),
       currentPeriodEnd: end,
+      // A free or discounted period that had run out runs again, at its price.
+      pricingExpiredAt: null,
     };
   });
 }
@@ -312,4 +339,54 @@ async function endNow(workspaceId, body, req) {
   });
 }
 
-module.exports = { getForAdmin, activate, changePlan, extend, endNow, periodSource, MAX_DAYS };
+/**
+ * A free or discounted period that ran out does not renew at the plan's price
+ * and does not stay active: it moves to past_due (the lifecycle takes it from
+ * there, as for any lapsed period), keeps its pricing as a record, and is
+ * audited as subscription.manual_pricing_expired so the console hears of it
+ * (platformNotifications). Run by the billing.manual_pricing_sweep schedule;
+ * each row in its own transaction, a failure logged and never thrown. A row
+ * already moved to past_due (by an expire_trials run from before that job left
+ * free and discounted rows to this sweep) is still stamped and audited.
+ */
+async function expireManualPricing(now = new Date()) {
+  const { Op } = db.Sequelize;
+  const due = await db.Subscription.findAll({
+    where: {
+      pricingKind: { [Op.in]: ['free', 'discounted'] },
+      pricingExpiredAt: null,
+      status: { [Op.in]: ['active', 'trialing', 'past_due'] },
+      currentPeriodEnd: { [Op.lte]: now },
+    },
+    attributes: ['id'],
+    limit: 500,
+  });
+  let expired = 0;
+  for (const { id } of due) {
+    try {
+      await db.sequelize.transaction(async (transaction) => {
+        const subscription = await db.Subscription.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+        if (!subscription || subscription.pricingExpiredAt || subscription.pricingKind === 'paid') return;
+        if (new Date(subscription.currentPeriodEnd).getTime() > now.getTime()) return;
+        const before = auditState(subscription);
+        await subscription.update({ status: 'past_due', pricingExpiredAt: now, cancelAtPeriodEnd: false }, { transaction });
+        await recordAudit({
+          workspaceId: subscription.workspaceId,
+          action: 'subscription.manual_pricing_expired',
+          entityType: 'Subscription',
+          entityId: subscription.id,
+          before,
+          after: auditState(subscription),
+          metadata: { source: 'manual_admin', pricing: await pricingSummary(subscription, transaction) },
+          transaction,
+        });
+        expired += 1;
+      });
+    } catch (err) {
+      logger.error(`[billing] manual pricing expiry failed for subscription ${id}: ${err.message}`);
+    }
+  }
+  return { expired };
+}
+
+module.exports = { getForAdmin, activate, changePlan, extend, endNow, expireManualPricing, periodSource, MAX_DAYS };

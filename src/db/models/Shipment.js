@@ -34,6 +34,16 @@ module.exports = (sequelize, DataTypes) => {
       nextPollAt: { type: DataTypes.DATE, allowNull: true, field: 'next_poll_at' },
       lastPolledAt: { type: DataTypes.DATE, allowNull: true, field: 'last_polled_at' },
       pollFailures: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'poll_failures' },
+      // Migration 510 (item 375, shipping/partialShipments.js): the units this
+      // parcel carries, [{ orderItemId, quantity }], and what its courier
+      // collects. Both null for a parcel that carries the whole order.
+      items: { type: DataTypes.JSONB, allowNull: true },
+      codAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'cod_amount' },
+      // Migration 524 (item 387, shipping/trackingProviders): a manual
+      // waybill followed through the store's tracking provider.
+      trackingState: { type: DataTypes.JSONB, allowNull: true, field: 'tracking_state' },
+      trackingNextPollAt: { type: DataTypes.DATE, allowNull: true, field: 'tracking_next_poll_at' },
+      trackingFailures: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'tracking_failures' },
     },
     {
       tableName: 'shipments',

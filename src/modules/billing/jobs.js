@@ -25,5 +25,14 @@ module.exports = {
       // eslint-disable-next-line global-require
       handle: () => require('./usageCounters').recountDue(),
     },
+    {
+      // A free or discounted manual period that ran out moves to past_due
+      // instead of renewing (manualSubscriptionService.expireManualPricing;
+      // item 336, Ziad's 3b89de9).
+      name: 'billing.manual_pricing_sweep',
+      everyMs: 60 * MINUTE,
+      // eslint-disable-next-line global-require
+      handle: () => require('./manualSubscriptionService').expireManualPricing(),
+    },
   ],
 };

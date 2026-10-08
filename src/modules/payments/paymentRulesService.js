@@ -156,7 +156,8 @@ async function saveSettings(workspaceId, body, req) {
       }));
     }
     if (body.methodsByFunnel) {
-      const funnels = await db.Funnel.findAll({ where: { workspaceId }, attributes: ['id'], transaction });
+      // A funnel in the trash keeps its rule, so a restore brings it back as it was.
+      const funnels = await db.Funnel.findAll({ where: { workspaceId }, attributes: ['id'], paranoid: false, transaction });
       const known = new Set(funnels.map((f) => f.id));
       const next = {};
       for (const [funnelId, ids] of Object.entries(body.methodsByFunnel).slice(0, MAX_FUNNEL_RULES)) {

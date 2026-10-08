@@ -30,12 +30,14 @@ const schema = {
   body: Joi.object({}),
 };
 
-// The template's body (automationTemplates.js), written out for wa.me.
-const messageFor = (vars) =>
-  `مرحبًا ${vars.customer_name || ''}، استلمنا طلبك رقم ${vars.order_number} بإجمالي ${vars.order_total}. من فضلك أكّد الطلب لنبدأ تجهيزه.`.replace(
-    /\s+،/,
-    '،'
-  );
+// The template's body (automationTemplates.js), written out for wa.me — in English for an English order (item 383).
+const messageFor = (vars, lang = 'ar') =>
+  lang === 'en'
+    ? `Hi ${vars.customer_name || ''}, we received your order ${vars.order_number} for ${vars.order_total}. Please confirm the order so we can start preparing it.`.replace(/\s+,/, ',')
+    : `مرحبًا ${vars.customer_name || ''}، استلمنا طلبك رقم ${vars.order_number} بإجمالي ${vars.order_total}. من فضلك أكّد الطلب لنبدأ تجهيزه.`.replace(
+        /\s+،/,
+        '،'
+      );
 
 async function whatsappConfirm(workspaceId, orderId, req) {
   // Lazy: automations and whatsapp reach back into orders.
@@ -50,7 +52,9 @@ async function whatsappConfirm(workspaceId, orderId, req) {
   const phone = normalizePhone(subject.phone);
   if (!phone) throw new AppError('INVALID_PHONE', 'The order has no valid phone number', 422);
 
-  const message = messageFor(vars);
+  // The order's language (orders.locale, item 383): the wa.me text and, when approved in it, the template.
+  const lang = require('./orderLocale').textLang(order.locale, await require('./orderLocale').loadWorkspace(workspaceId));
+  const message = messageFor(vars, lang);
   const link = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
   const integration = await whatsapp.getIntegration(workspaceId);
   const connected = Boolean(integration && integration.status === 'connected');
@@ -63,7 +67,7 @@ async function whatsappConfirm(workspaceId, orderId, req) {
         {
           to: phone,
           orderId: order.id,
-          template: { name: TEMPLATE, language: 'ar', params: [vars.customer_name, vars.order_number, vars.order_total] },
+          template: { name: TEMPLATE, language: await require('../whatsapp/templateLanguage').languageFor(workspaceId, TEMPLATE, order.locale, 'ar'), params: [vars.customer_name, vars.order_number, vars.order_total] },
         },
         req
       );

@@ -28,6 +28,20 @@ const { generateCode, sameDigest } = require('./otpService');
  * own daily ceilings per IP and per account and only goes to the country
  * codes in VERIFICATION_SMS_COUNTRY_CODES. The code itself never reaches a
  * log line or the audit log.
+ *
+ * The limits per IP come from the environment (env.verificationCodes:
+ * VERIFICATION_CODES_PER_IP_PER_HOUR, _PER_DAY, VERIFICATION_SMS_PER_IP_PER_DAY;
+ * item 331), since everyone behind one IP shares them; the rest are fixed here.
+ *
+ * Every code has a purpose (Ziad's migration 132, item 332): `signup` for
+ * everything above, and the account codes at the end of this file (`reauth`,
+ * `email_change`, `phone_change`). A code is only ever looked up, replaced
+ * and counted within its own purpose, so one kind never satisfies, cancels or
+ * uses up the limits of another. The other codes in the app live in tables
+ * of their own and cannot meet these: a sign-in's second step, a new-device
+ * code and the WhatsApp sign-in code in login_challenges, phone OTPs in
+ * otp_codes (their own `purpose`), shopper sign-in codes and email links in
+ * shopper_login_codes.
  */
 
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -39,9 +53,9 @@ const DAY_MS = 24 * HOUR_MS;
 const LIMITS = Object.freeze({
   targetPerHour: 5,
   targetPerDay: 10,
-  ipPerHour: 20,
-  ipPerDay: 50,
-  smsPerIpPerDay: 5,
+  ipPerHour: env.verificationCodes.ipPerHour,
+  ipPerDay: env.verificationCodes.ipPerDay,
+  smsPerIpPerDay: env.verificationCodes.smsPerIpPerDay,
   smsPerAccountPerDay: 3,
 });
 
@@ -114,15 +128,16 @@ function limited(code, message, retryAfterMs) {
   return new AppError(code, message, 429, { retryAfterSeconds: Math.max(1, Math.ceil(retryAfterMs / 1000)) });
 }
 
+// Sign-up codes only: the account codes below never count here (migration 132).
 async function countSince(where, since) {
-  return db.VerificationCode.count({ where: { ...where, createdAt: { [Op.gt]: since } } });
+  return db.VerificationCode.count({ where: { ...where, purpose: 'signup', createdAt: { [Op.gt]: since } } });
 }
 
 /** Refuses a send that would break a limit (429), before anything is written. */
 async function assertCanSend({ userId, channel, target, ip }, now = new Date()) {
   if (userId) {
     const last = await db.VerificationCode.findOne({
-      where: { userId },
+      where: { userId, purpose: 'signup' },
       order: [['createdAt', 'DESC']],
       attributes: ['createdAt'],
     });
@@ -161,8 +176,8 @@ function targetFor(user, channel) {
 }
 
 /**
- * Sends a fresh code to `user` on `channel` ('email' | 'sms'), replacing any
- * earlier one. Returns what the screen needs: the masked address, when a new
+ * Sends a fresh sign-up code to `user` on `channel` ('email' | 'sms'),
+ * replacing any earlier sign-up code. Returns what the screen needs: the masked address, when a new
  * code can be asked for and when this one expires.
  */
 async function sendCode(user, channel, { ip = null, locale = 'ar', req = null } = {}) {
@@ -177,10 +192,10 @@ async function sendCode(user, channel, { ip = null, locale = 'ar', req = null } 
   await db.sequelize.transaction(async (transaction) => {
     await db.VerificationCode.update(
       { supersededAt: now },
-      { where: { userId: user.id, consumedAt: null, supersededAt: null }, transaction }
+      { where: { userId: user.id, purpose: 'signup', consumedAt: null, supersededAt: null }, transaction }
     );
     await db.VerificationCode.create(
-      { id, userId: user.id, channel, target, codeHash: digest(id, code), expiresAt, requestIp: ip },
+      { id, userId: user.id, channel, target, codeHash: digest(id, code), expiresAt, requestIp: ip, purpose: 'signup' },
       { transaction }
     );
   });
@@ -211,16 +226,17 @@ async function sendCode(user, channel, { ip = null, locale = 'ar', req = null } 
 }
 
 /**
- * Checks `code` against the account's live code. Right: the code is used up
- * and { channel } is returned. Wrong: one attempt is spent (422 INVALID_CODE
+ * Checks `code` against the account's live code of `purpose` (a sign-up code
+ * unless told otherwise). Right: the code is used up and { channel, target }
+ * is returned. Wrong: one attempt is spent (422 INVALID_CODE
  * with the attempts left); the fifth wrong one kills the code (429
  * TOO_MANY_ATTEMPTS). Expired: 422 CODE_EXPIRED. None live: 422
  * NO_ACTIVE_CODE. The row is locked, so two guesses at once each count.
  */
-async function confirmCode(user, code, { req = null } = {}) {
+async function confirmCode(user, code, { req = null, purpose = 'signup' } = {}) {
   const outcome = await db.sequelize.transaction(async (transaction) => {
     const row = await db.VerificationCode.findOne({
-      where: { userId: user.id, consumedAt: null, supersededAt: null },
+      where: { userId: user.id, purpose, consumedAt: null, supersededAt: null },
       order: [['createdAt', 'DESC']],
       transaction,
       lock: transaction.LOCK.UPDATE,
@@ -255,12 +271,110 @@ async function confirmCode(user, code, { req = null } = {}) {
       action: 'auth.verify.fail',
       entityType: 'User',
       entityId: user.id,
-      metadata: { reason: outcome.reason, channel: outcome.row ? outcome.row.channel : null },
+      metadata: { reason: outcome.reason, channel: outcome.row ? outcome.row.channel : null, purpose },
       req,
     });
     throw outcome.error;
   }
-  return { channel: outcome.row.channel };
+  return { channel: outcome.row.channel, target: outcome.row.target };
+}
+
+// ------------------------------------------------------- account codes
+//
+// Codes for changing an account that is already signed in (the dashboard's
+// account settings, auth/accountService; Ziad's 8efcb9d, item 332): `reauth`
+// to the current email of an account with no password, `email_change` to the
+// new email, `phone_change` by SMS to the new number. The same generator,
+// digest, lifetime and five wrong guesses as the sign-up codes, with limits of
+// their own PER ACCOUNT AND PURPOSE only: no request IP is stored, so they
+// never count against the sign-up limits per IP or per address, and those
+// never count against them.
+
+const ACCOUNT_PURPOSES = ['reauth', 'email_change', 'phone_change'];
+const ACCOUNT_CODE_LIMITS = Object.freeze({ perHour: 5, perDay: 10 });
+
+const ACCOUNT_EMAIL_TEMPLATES = { reauth: 'account_reauth_code', email_change: 'email_change_code' };
+
+async function assertCanSendAccountCode(userId, purpose, now = new Date()) {
+  const where = { userId, purpose };
+  const last = await db.VerificationCode.findOne({ where, order: [['createdAt', 'DESC']], attributes: ['createdAt'] });
+  const wait = last ? new Date(last.createdAt).getTime() + RESEND_COOLDOWN_MS - now.getTime() : 0;
+  if (wait > 0) throw limited('RESEND_TOO_SOON', 'Wait a moment before asking for another code', wait);
+  const count = (since) => db.VerificationCode.count({ where: { ...where, createdAt: { [Op.gt]: since } } });
+  if ((await count(new Date(now.getTime() - HOUR_MS))) >= ACCOUNT_CODE_LIMITS.perHour) {
+    throw limited('VERIFICATION_LIMIT_REACHED', 'Too many codes were requested. Try again later.', HOUR_MS);
+  }
+  if ((await count(new Date(now.getTime() - DAY_MS))) >= ACCOUNT_CODE_LIMITS.perDay) {
+    throw limited('VERIFICATION_LIMIT_REACHED', 'Too many codes were requested. Try again later.', DAY_MS);
+  }
+}
+
+// Codes still being sent (see sendAccountCode).
+const pendingDeliveries = new Set();
+
+/** Resolves once every account code started so far has been sent. For shutdown (server.js). */
+function settleAccountCodeDeliveries() {
+  return Promise.all([...pendingDeliveries]);
+}
+
+/**
+ * A fresh `purpose` code for `user` to `target` by `channel` ('email' |
+ * 'sms'), replacing the account's earlier live code of that purpose. The row
+ * is written in the request; the message leaves after it (`deliver`), so the
+ * answer takes the same time whether or not a message goes out. With
+ * `deliver: false` the code exists — guesses at it behave exactly as for one
+ * that was sent — but nobody ever receives it: how an email that belongs to
+ * another account is answered.
+ */
+async function sendAccountCode(user, { purpose, channel = 'email', target, locale = 'ar', deliver = true, req = null }) {
+  if (!ACCOUNT_PURPOSES.includes(purpose)) throw new Error(`Unknown account code purpose: ${purpose}`);
+  const now = new Date();
+  await assertCanSendAccountCode(user.id, purpose, now);
+
+  const code = generateCode();
+  const id = crypto.randomUUID();
+  const expiresAt = new Date(now.getTime() + CODE_TTL_MS);
+  await db.sequelize.transaction(async (transaction) => {
+    await db.VerificationCode.update(
+      { supersededAt: now },
+      { where: { userId: user.id, purpose, consumedAt: null, supersededAt: null }, transaction }
+    );
+    await db.VerificationCode.create(
+      { id, userId: user.id, channel, target, codeHash: digest(id, code), expiresAt, requestIp: null, purpose },
+      { transaction }
+    );
+  });
+
+  const masked = channel === 'email' ? maskEmail(target) : maskPhone(target);
+  await recordAudit({
+    actorUserId: user.id,
+    action: 'auth.account_code.send',
+    entityType: 'User',
+    entityId: user.id,
+    metadata: { purpose, channel, target: masked },
+    req,
+  });
+
+  if (deliver) {
+    const lang = locale === 'en' ? 'en' : 'ar';
+    const minutes = CODE_TTL_MS / 60000;
+    const job = (
+      channel === 'email'
+        ? notify.email({ recipient: target, template: ACCOUNT_EMAIL_TEMPLATES[purpose], data: { code, minutes, locale: lang, fullName: user.fullName } })
+        : notify.sms({ recipient: target, template: `otp_${purpose}`, data: { code, minutes, locale: lang } })
+    )
+      .catch(() => {})
+      .finally(() => pendingDeliveries.delete(job));
+    pendingDeliveries.add(job);
+  }
+
+  return { channel, target: masked, expiresAt, resendAvailableAt: new Date(now.getTime() + RESEND_COOLDOWN_MS) };
+}
+
+/** Checks a `purpose` code; resolves { channel, target } and uses it up, or throws as confirmCode does. */
+function confirmAccountCode(user, code, purpose, { req = null } = {}) {
+  if (!ACCOUNT_PURPOSES.includes(purpose)) throw new Error(`Unknown account code purpose: ${purpose}`);
+  return confirmCode(user, code, { req, purpose });
 }
 
 module.exports = {
@@ -277,4 +391,9 @@ module.exports = {
   assertCanSend,
   sendCode,
   confirmCode,
+  ACCOUNT_PURPOSES,
+  ACCOUNT_CODE_LIMITS,
+  sendAccountCode,
+  confirmAccountCode,
+  settleAccountCodeDeliveries,
 };

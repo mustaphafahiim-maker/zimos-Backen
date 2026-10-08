@@ -23,8 +23,7 @@ async function getOrder(workspaceId, orderId) {
 
 /** The order an integration knows only by the number printed on it ("1042" or "#1042"). */
 async function getOrderByNumber(workspaceId, orderNumber) {
-  const number = String(orderNumber).trim().replace(/^#/, '');
-  const order = await db.Order.findOne({ where: { workspaceId, orderNumber: number }, attributes: ['id'] });
+  const order = await require('../orders/orderNumbers').findByNumber(workspaceId, orderNumber, { attributes: ['id', 'orderNumber'] });
   if (!order) throw new NotFoundError('Order');
   return getOrder(workspaceId, order.id);
 }

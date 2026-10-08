@@ -115,13 +115,20 @@ function storefrontMethods(workspace) {
  * on for this store) the store's own record decides, as before: a
  * reliability score below the threshold, or a rejected order. A shopper
  * neither knows is never asked.
+ *
+ * `phoneVerified` false (the public quote without the checkout code's proof
+ * for this phone, item 362): a "risky only" rule answers the same for every
+ * phone, `required: false` with `decidedAtCheckout: true`, and reads no
+ * record, so a stranger cannot learn a number's history. The checkout and the
+ * COD switch call it with the default (true) and still ask for the deposit.
  */
-async function depositQuote(workspace, { phone }) {
+async function depositQuote(workspace, { phone }, { phoneVerified = true } = {}) {
   const rule = depositRule(workspace);
   const methods = storefrontMethods(workspace);
   const none = { required: false, amountType: null, fixedAmount: null, methods: [] };
   if (!rule.enabled || methods.length === 0) return none;
   if (rule.appliesTo === 'risky') {
+    if (!phoneVerified) return { ...none, decidedAtCheckout: true };
     let normalized = null;
     try {
       normalized = phone ? normalizePhone(phone) : null;

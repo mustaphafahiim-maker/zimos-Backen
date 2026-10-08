@@ -16,5 +16,6 @@ module.exports = {
       handle: (event) => svc().onContactEvent(event),
     },
   ],
-  processors: [{ queue: 'io', name: 'email_marketing.backfill', handle: (job) => svc().backfill(job) }],
+  // The provider upserts contacts: a sync cut off by a restart is run again.
+  processors: [{ queue: 'io', name: 'email_marketing.backfill', handle: (job) => svc().backfill(job), resumable: true, onInterrupted: (job) => svc().backfillInterrupted(job) }],
 };

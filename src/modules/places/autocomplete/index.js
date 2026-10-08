@@ -123,7 +123,9 @@ async function details(workspace, { id, country, lang, session }) {
   const s = await settingsOf(workspace.id);
   if (s.provider === 'off') throw new AppError('ADDRESS_LOOKUP_OFF', 'Address suggestions are off for this store', 404);
   // A store-list id is always read from the list, whichever provider suggested it.
-  const provider = /^(p|g):/.test(id) ? PROVIDERS.builtin : String(id).startsWith('google:') ? PROVIDERS.google : null;
+  // Google only while it is the store's chosen provider (item 310): a store that switched back to its own
+  // list keeps the key stored, but visitors can't spend it by sending a google: id.
+  const provider = /^(p|g):/.test(id) ? PROVIDERS.builtin : String(id).startsWith('google:') && s.provider === 'google' ? PROVIDERS.google : null;
   if (!provider) throw new AppError('ADDRESS_NOT_FOUND', 'That suggestion was not found', 404);
   let address;
   try {

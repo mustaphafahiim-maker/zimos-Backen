@@ -5,6 +5,7 @@ const { Router } = require('express');
 const Joi = require('joi');
 const asyncHandler = require('express-async-handler');
 const db = require('../../db/models');
+const env = require('../../config/env');
 const validate = require('../../core/middleware/validate');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { normalizePhone } = require('../../core/utils/phone');
@@ -39,7 +40,7 @@ const uuid = Joi.string().uuid();
 const schema = {
   params: Joi.object({ workspaceId: workspaceRef().required(), productId: uuid.required() }),
   body: Joi.object({
-    orderNumber: Joi.string().trim().min(3).max(40).required(),
+    orderNumber: Joi.string().trim().min(1).max(41).required(),
     phone: Joi.string().trim().min(6).max(32).required(),
     rating: Joi.number().integer().min(1).max(5).required(),
     comment: Joi.string().trim().max(2000).allow('', null).optional(),
@@ -54,17 +55,22 @@ const notVerified = () =>
 async function deliveredOrder(workspaceId, productId, { orderNumber, phone }) {
   const phoneNormalized = normalizePhone(phone);
   if (!phoneNormalized) throw notVerified();
-  const order = await db.Order.findOne({
-    where: { workspaceId, orderNumber: String(orderNumber).trim().toUpperCase() },
+  const orderNumbers = require('../orders/orderNumbers');
+  // "1001" and "#1001" may both be orders of a store: the exact spelling first, and only one whose phone matches.
+  const spellings = orderNumbers.candidates(orderNumber);
+  const rows = await db.Order.findAll({
+    where: { workspaceId, orderNumber: orderNumbers.matching(orderNumber) },
     include: [
       { model: db.OrderItem, as: 'items', attributes: ['productId'] },
       { model: db.Shipment, as: 'shipments', attributes: ['status'], required: false },
       { model: db.Customer, as: 'customer', attributes: ['id', 'phoneNormalized'], required: false },
     ],
   });
+  const phonesOf = (o) => [o.customer && o.customer.phoneNormalized, normalizePhone(o.contactSnapshot && o.contactSnapshot.phone)];
+  const order = rows
+    .sort((a, b) => spellings.indexOf(a.orderNumber) - spellings.indexOf(b.orderNumber))
+    .find((o) => phonesOf(o).includes(phoneNormalized));
   if (!order) throw notVerified();
-  const phones = [order.customer && order.customer.phoneNormalized, normalizePhone(order.contactSnapshot && order.contactSnapshot.phone)];
-  if (!phones.includes(phoneNormalized)) throw notVerified();
   if (!(order.items || []).some((i) => i.productId === productId)) throw notVerified();
   const delivered = order.fulfillmentState === 'fulfilled' || (order.shipments || []).some((s) => s.status === 'delivered');
   if (!delivered) throw notVerified();
@@ -122,12 +128,24 @@ async function submit(workspaceId, productId, body, { visitorId }) {
   return { id: review.id, rating: review.rating, comment: review.comment, photos: review.photos, status: review.status, created };
 }
 
+// REVIEWS_PUBLIC_SUBMISSION_ENABLED (env.reviews; item 331, Ziad's b0ae907).
+// Ours proves the purchase with the order number and its phone and the
+// storefront's form uses it, so it is open unless the variable is set to
+// something other than "true". Closed, every request gets the same 404 —
+// before the limiter and validation, naming no phone, order or product;
+// reading reviews, moderation and the rating are untouched.
+function submissionGate(req, res, next) {
+  if (env.reviews.publicSubmissionEnabled) return next();
+  return next(new AppError('NOT_FOUND', 'Not found', 404));
+}
+
 const VISITOR_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const limiter = createIpMinuteLimiter('review-submit', 10);
 const router = Router({ mergeParams: true });
 
 router.post(
   '/products/:productId/reviews',
+  submissionGate,
   limiter,
   validate(schema),
   asyncHandler(async (req, res) => {
@@ -138,4 +156,4 @@ router.post(
   })
 );
 
-module.exports = { router, submit, deliveredOrder };
+module.exports = { router, submit, deliveredOrder, submissionGate };

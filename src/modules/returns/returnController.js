@@ -27,4 +27,26 @@ const restock = asyncHandler(async (req, res) => {
   res.json({ return: await service.restockReturn(wid(req), req.params.returnId, req) });
 });
 
-module.exports = { create, listForOrder, list, moderate, restock };
+// Item 372: the courier collects the parcel from the shopper (returnPickup.js).
+const pickup = asyncHandler(async (req, res) => {
+  const ret = await require('./returnPickup').bookPickup(wid(req), req.params.returnId, req.body, req);
+  res.status(201).json({ return: require('./shopperReturns').withPhotos(ret) });
+});
+
+// Item 396: the pickup's status from the courier now, cancelling it, cancelling the return.
+const syncPickup = asyncHandler(async (req, res) => {
+  const ret = await require('./returnPickupStatus').syncPickup(wid(req), req.params.returnId);
+  res.json({ return: require('./shopperReturns').withPhotos(ret) });
+});
+
+const cancelPickup = asyncHandler(async (req, res) => {
+  const ret = await require('./returnPickup').cancelPickup(wid(req), req.params.returnId, req.body || {}, req);
+  res.json({ return: require('./shopperReturns').withPhotos(ret) });
+});
+
+const cancel = asyncHandler(async (req, res) => {
+  const ret = await require('./returnCancel').cancelReturn(wid(req), req.params.returnId, req.body || {}, req);
+  res.json({ return: require('./shopperReturns').withPhotos(ret) });
+});
+
+module.exports = { create, listForOrder, list, moderate, restock, pickup, syncPickup, cancelPickup, cancel };

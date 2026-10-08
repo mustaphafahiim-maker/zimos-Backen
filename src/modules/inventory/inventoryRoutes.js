@@ -11,6 +11,8 @@ const schemas = require('./inventoryValidation');
 
 const router = Router({ mergeParams: true });
 router.use(authenticate, resolveTenant);
+// Stock movement history (item 389), ahead of /:variantId so /movements is not read as a variant id.
+router.use(require('./movementHistory').router);
 
 router.get('/:variantId', requirePermission(PERMISSIONS.INVENTORY_VIEW), controller.getStock);
 router.post('/:variantId/adjust', validate(schemas.adjust), requirePermission(PERMISSIONS.INVENTORY_MANAGE), controller.adjust);

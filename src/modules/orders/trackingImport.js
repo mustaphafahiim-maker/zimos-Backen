@@ -76,10 +76,8 @@ function parseCsv(text) {
 const normalizeHeader = (h) => h.trim().toLowerCase().replace(/[\s-]+/g, '_');
 
 async function applyRow(workspaceId, row, req) {
-  const order = await db.Order.findOne({
-    where: { workspaceId, orderNumber: row.orderNumber.replace(/^#/, '').toUpperCase() },
-    attributes: ['id', 'orderNumber'],
-  });
+  // As printed, with or without its # (orderNumbers.js).
+  const order = await require('./orderNumbers').findByNumber(workspaceId, row.orderNumber, { attributes: ['id', 'orderNumber'] });
   if (!order) throw new AppError('ORDER_NOT_FOUND', 'No order with this number', 404);
 
   const status = row.status ? STATUS_ALIASES[row.status.toLowerCase().replace(/[\s-]+/g, '_')] : null;

@@ -6,6 +6,7 @@ const { NotFoundError } = require('../../core/errors/AppError');
 const { ancestryOf, descendantsOf } = require('../catalog/collectionTree');
 const { loadPublicProducts } = require('./publicProduct');
 const { notHiddenSql } = require('../catalog/productPage');
+const { availableSql } = require('./soldOut');
 
 /*
  * The storefront's product listing with search, filters, sort, paging and
@@ -40,6 +41,9 @@ const { notHiddenSql } = require('../catalog/productPage');
  * One pass scores every product the other filters allow and keeps the
  * matches (up to MAX_MATCHES, best first); the page, the facet counts and the
  * related products are then read off those ids instead of searching again.
+ * Sold-out products follow storefront_catalog.sold_out (./soldOut.js): hidden
+ * ones are filtered like any other condition, 'last' sorts them after the
+ * rest within the chosen sort.
  * On the first page, "related" adds up to eight products that match nothing
  * but share a collection or a tag with the top matches — or, when nothing
  * matched, the nearest names — never repeating one.
@@ -204,6 +208,8 @@ function scoringPipeline(b, q, workspaceId, where, { description = true } = {}) 
  */
 function filterConditions(b, filters, skip = new Set()) {
   const conditions = [`p.workspace_id = ${b.add(filters.workspaceId, 'ws')}`, "p.status = 'active'", notHiddenSql('p')];
+  // Sold-out products hidden (storefront_catalog.sold_out = hide, or available=true): never counted either.
+  if (filters.availableOnly) conditions.push(availableSql('p'));
   if (filters.matchedIds && !skip.has('search')) {
     conditions.push(`p.id = ANY(${b.add(filters.matchedIds, 'm')}::uuid[])`);
   }
@@ -450,9 +456,10 @@ async function relatedFor(filters, topIds) {
  * string; the result keeps the legacy `products` / `nextCursor` keys, so a
  * client that only reads those still works.
  */
-async function searchProducts(workspaceId, query) {
+async function searchProducts(workspaceId, query, soldOutRule = { hide: false, last: false }) {
   const tree = await loadCollections(workspaceId);
   const { filters, resolved } = readFilters(workspaceId, query, tree);
+  if (soldOutRule.hide) filters.availableOnly = true;
   const limit = query.limit || 24;
   const page = query.page || 1;
   const sort = query.sort || (filters.search ? 'relevance' : 'newest');
@@ -502,11 +509,12 @@ async function searchProducts(workspaceId, query) {
                           AND o.created_at > now() - interval '${BEST_SELLING_DAYS} days')`
                    : '0'
                } AS sold,
+               ${soldOutRule.last ? availableSql('p') : 'true'} AS avail,
                COUNT(*) OVER () AS total
           FROM products p ${relevanceJoin}
          WHERE ${conditions.join(' AND ')}
       ) listed
-      ORDER BY ${order}
+      ORDER BY ${soldOutRule.last ? 'avail DESC, ' : ''}${order}
       LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
     b.bind
   );
@@ -562,7 +570,7 @@ async function countOnly(filters) {
  * SUGGEST_LIMIT entries, up to SUGGEST_COLLECTIONS of them collections, the
  * rest products — each with just enough to draw a row.
  */
-async function suggest(workspaceId, rawQuery) {
+async function suggest(workspaceId, rawQuery, soldOutRule = { hide: false, last: false }) {
   const q = cleanQuery(rawQuery);
   if (!q) return { query: q, products: [], collections: [] };
 
@@ -581,12 +589,12 @@ async function suggest(workspaceId, rawQuery) {
   );
 
   const b = binder();
-  const where = `p.workspace_id = ${b.add(workspaceId, 'ws')} AND p.status = 'active' AND ${notHiddenSql('p')}`;
+  const where = `p.workspace_id = ${b.add(workspaceId, 'ws')} AND p.status = 'active' AND ${notHiddenSql('p')}${soldOutRule.hide ? ` AND ${availableSql('p')}` : ''}`;
   const rows = await select(
     `${scoringPipeline(b, q, workspaceId, where, { description: false })}
      SELECT id, name, slug, media, score FROM scored
       WHERE score > 0
-      ORDER BY score DESC, sim DESC, created_at DESC
+      ORDER BY ${soldOutRule.last ? `(SELECT ${availableSql('ap')} FROM products ap WHERE ap.id = scored.id) DESC, ` : ''}score DESC, sim DESC, created_at DESC
       LIMIT ${SUGGEST_LIMIT - collections.length}`,
     b.bind
   );

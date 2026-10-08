@@ -85,7 +85,7 @@ async function backToQueue(workspaceId, orderId, { reason }, req) {
 /**
  * Un-cancel. Takes the order's stock again (409 INSUFFICIENT_STOCK when it is
  * gone — the order stays cancelled), clears the cancellation, and puts a COD
- * order back in the call queue. A rejection recorded on a call is uncounted
+ * or store-manual order back in the call queue. A rejection recorded on a call is uncounted
  * from the customer, as a correction would.
  */
 async function reopen(workspaceId, orderId, { reason }, req) {
@@ -115,7 +115,11 @@ async function reopen(workspaceId, orderId, { reason }, req) {
     }
     await order.update({ cancelledAt: null, cancellationReason: null }, { transaction });
     await setConfirmationState(workspaceId, order.id, 'pending', req, transaction);
-    if (order.paymentMethod === 'cod') {
+    // A store-manual order (manualPayments, item 340) is a queue member too.
+    if (
+      order.paymentMethod === 'cod' ||
+      (await require('../manualPayments/manualPaymentService').hasManualPayment(order, transaction))
+    ) {
       await confirmationService.openTaskForOrder(workspaceId, order.id, transaction);
     }
     await trackStage(workspaceId, order.id, { req, transaction, reason });
@@ -132,6 +136,9 @@ async function reopen(workspaceId, orderId, { reason }, req) {
       req,
       transaction,
     });
+    // Back from cancelled: the pay-per-order fee given back then is charged
+    // again, as a corrected rejection is (billing/walletService). Last lock.
+    await require('../billing/walletService').rechargeOrderFee(order, { actorUserId: req.user.id }, transaction);
   });
 }
 
@@ -157,6 +164,7 @@ async function moveShipment(workspaceId, orderId, from, to, { carrierCode, waybi
       if (!order) throw new NotFoundError('Order');
       carrierShipmentService.assertConfirmedOrPaid(order);
       await carrierShipmentService.assertNoActiveShipment(order.id, transaction);
+      await require('./returnedStock').retakeForReship(workspaceId, order.id, req.user.id, transaction);
       const created = await insertShipment(
         {
           workspaceId,

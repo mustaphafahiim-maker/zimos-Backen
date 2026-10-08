@@ -6,8 +6,8 @@ const { Op } = require('sequelize');
 const db = require('../../db/models');
 const { AppError } = require('../../core/errors/AppError');
 const { registerFonts, drawText, hasArabic } = require('../../core/pdf/bidiText');
-const { computeWaybillModel } = require('../waybill/waybillService');
-const { codAmountFor } = require('../shipping/carrierShipmentService');
+const { computeWaybillModel, waybillShipmentIds } = require('../waybill/waybillService');
+const { SHIPMENT_IN_MOTION } = require('./shipmentLifecycle');
 
 /**
  * Printed paper for many orders at once (SPEC §12.4):
@@ -115,7 +115,7 @@ async function assertOrders(workspaceId, orderIds) {
   return kept;
 }
 
-/** The labels of the given orders, in the order given, as one PDF. */
+/** The labels of the given orders, in the order given, as one PDF; an order sent as several parcels gets one per live parcel (item 375). */
 async function waybillsPdf(workspaceId, { orderIds, format = 'a4x4' }) {
   const layout = FORMATS[format] || FORMATS.a4x4;
   const ids = await assertOrders(workspaceId, orderIds);
@@ -123,10 +123,14 @@ async function waybillsPdf(workspaceId, { orderIds, format = 'a4x4' }) {
   const doc = new PDFDocument({ size: layout.size, margin: 0, autoFirstPage: false, info: { Title: 'Waybills' } });
   registerFonts(doc);
   const done = collect(doc);
-  for (const [index, id] of ids.entries()) {
-    const slot = index % layout.perPage;
-    if (slot === 0) doc.addPage({ size: layout.size, margin: 0 });
-    await drawLabel(doc, await computeWaybillModel(workspaceId, id), layout.cell(doc, slot));
+  let index = 0;
+  for (const id of ids) {
+    for (const shipmentId of await waybillShipmentIds(workspaceId, id)) {
+      const slot = index % layout.perPage;
+      if (slot === 0) doc.addPage({ size: layout.size, margin: 0 });
+      await drawLabel(doc, await computeWaybillModel(workspaceId, id, { shipmentId }), layout.cell(doc, slot));
+      index += 1;
+    }
   }
   doc.end();
   return done;
@@ -155,9 +159,16 @@ async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
     order: [['carrierCode', 'ASC'], ['createdAt', 'ASC']],
     limit: 1000,
   });
-  // One row per order: its newest live shipment.
+  // One row per order: its newest live shipment. An order sent as several
+  // parcels (item 375) has a row per parcel, each with its own COD amount;
+  // for named orders only the parcels not yet handed over (not delivered or
+  // already on the road), so the cash total is what this courier takes now.
   const byOrder = new Map();
-  for (const s of shipments) byOrder.set(s.orderId, s);
+  for (const s of shipments) {
+    if (!Array.isArray(s.items)) byOrder.set(s.orderId, s);
+    else if (!day && SHIPMENT_IN_MOTION.includes(s.status)) continue;
+    else byOrder.set(s.id, s);
+  }
   const rows = [...byOrder.values()];
   if (rows.length === 0) throw new AppError('NO_SHIPMENTS', 'There are no shipments to hand over for this selection', 422);
 
@@ -208,7 +219,7 @@ async function manifestPdf(workspaceId, { orderIds, date, carrier } = {}) {
     }
     const o = s.order;
     const contact = o.contactSnapshot || {};
-    const collectAmount = codAmountFor(o);
+    const collectAmount = require('../shipping/partialShipments').codAmountForShipment(o, s);
     total += collectAmount;
     const cells = [
       String(index + 1),

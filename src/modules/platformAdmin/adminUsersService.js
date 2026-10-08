@@ -215,11 +215,15 @@ async function grantRoleInTransaction({ email, role: roleKey, permissions }, req
       'ALREADY_PLATFORM_USER'
     );
   }
-  if (user.status !== 'active') {
+  // Active is not enough: with SIGNUP_CONFIRM_BY_CODE a new account is active
+  // before its email is confirmed, and anyone can sign up with an address
+  // they don't own (spec-gaps item 330). The email itself, not a phone: the
+  // account was found by its email, and a squatter can confirm their phone.
+  if (user.status !== 'active' || !user.emailVerifiedAt) {
     throw new ConflictError(
       user.status === 'suspended'
         ? 'That account is suspended and cannot be given console access.'
-        : 'That account has not finished verifying its email yet. Try again once it is active.',
+        : 'That account has not confirmed its email yet. Try again once it has.',
       'USER_NOT_ACTIVE'
     );
   }

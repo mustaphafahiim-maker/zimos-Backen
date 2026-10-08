@@ -46,6 +46,30 @@ async function start() {
   // Sign-up and go-live switches (REQUIRE_*), and a verification switch with
   // no email provider behind it (sign-ups are refused until one is set).
   signupPolicy.logBootState(logger);
+  // Public endpoints that can be closed, and the reset link's base (item 331);
+  // the phone change by SMS code in the account settings (item 332).
+  logger.info(
+    `Public switches: shopper review form ${env.reviews.publicSubmissionEnabled ? 'open' : 'closed'}, password reset by SMS ${
+      env.passwordReset.smsEnabled ? 'on' : 'off'
+    }, phone change by SMS ${env.account.phoneChangeEnabled ? 'on' : 'off'}, marketing-site traffic ${env.siteAnalytics.enabled ? 'on' : 'off'}, custom domains ${
+      env.customDomains.enabled ? `on${env.customDomains.subdomainsOnly ? ' (subdomains only)' : ''}` : 'off'
+    }`
+  );
+  // Item 341: Cloudflare for SaaS named without its token or zone answers every certificate request with 502.
+  if (String(process.env.CERTIFICATE_PROVIDER || '').trim().toLowerCase() === 'cloudflare' && !(env.customDomains.cloudflare.apiToken && env.customDomains.cloudflare.zoneId)) {
+    logger.error('CERTIFICATE_PROVIDER=cloudflare needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID: no certificate can be requested until both are set');
+  }
+  // Item 342: Ziad's setting, the order stage table not checked for a shipment status set by hand.
+  if (!env.orderStatusGuards) {
+    logger.warn('ORDER_STATUS_GUARDS=false: a shipment status set by hand is not checked against the order stage table');
+  }
+  // Item 339: on with no origin listed refuses every beacon (403).
+  if (env.siteAnalytics.enabled && env.siteAnalytics.origins.length === 0) {
+    logger.warn('SITE_ANALYTICS_ENABLED is on but SITE_ANALYTICS_ORIGINS is empty: every site event is refused (403 ORIGIN_NOT_ALLOWED)');
+  }
+  if (env.isProduction && !env.frontendUrlConfigured) {
+    logger.error('FRONTEND_URL is not set: password reset requests are refused (503 PASSWORD_RESET_UNAVAILABLE) until it is');
+  }
   // With REQUIRE_SUBSCRIPTION_TO_GO_LIVE off, drafts left from while it was
   // on become the trials they would have been.
   try {
@@ -73,6 +97,10 @@ async function start() {
     logger.info(`Received ${signal}, shutting down gracefully`);
     webhookWorker.stop();
     server.close(async () => {
+      // Reset emails already answered for go out before the database closes.
+      await require('./modules/auth/authService').settlePasswordResets();
+      // And account codes already answered for (item 332).
+      await require('./modules/otp/verificationCodeService').settleAccountCodeDeliveries();
       await workerRuntime.stop();
       await db.sequelize.close();
       process.exit(0);

@@ -11,8 +11,13 @@ const { AppError } = require('../../core/errors/AppError');
  * inside the same order-creation transaction so a usage-limit check and the
  * increment that enforces it can never race. `transaction` is that order
  * transaction, so these reads do not need a second pooled connection.
+ *
+ * `lines` ([{ productId, lineTotalAmount, freeGift? }]) are the priced lines:
+ * a code limited to some products or collections takes its percentage (or
+ * caps its fixed amount) on those lines only (item 345). Without them the
+ * whole subtotal is used.
  */
-async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds, customerId, funnelId, transaction }) {
+async function evaluate(workspaceId, code, { subtotal, productIds, lines = null, customerId, funnelId, transaction }) {
   if (!code) return { discount: null, amount: 0 };
 
   const discount = await db.Discount.findOne({ where: { workspaceId, code, status: 'active' }, transaction });
@@ -24,11 +29,17 @@ async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds
   if (discount.minimumSubtotal && subtotal < discount.minimumSubtotal) {
     throw new AppError('DISCOUNT_MINIMUM_NOT_MET', 'Order subtotal does not meet the discount minimum', 422);
   }
-  if (discount.productRestrictions.length && !discount.productRestrictions.some((id) => productIds.includes(id))) {
+  const eligible = await eligibleProducts(discount, productIds, transaction);
+  if (eligible && eligible.size === 0) {
     throw new AppError('DISCOUNT_NOT_APPLICABLE', 'Discount code does not apply to items in this order', 422);
   }
   if (discount.funnelRestrictions.length && (!funnelId || !discount.funnelRestrictions.includes(funnelId))) {
     throw new AppError('DISCOUNT_NOT_APPLICABLE', 'Discount code does not apply to this funnel', 422);
+  }
+  // A personal code: only the customers it was made for. An unknown shopper
+  // (the storefront's preview) is checked when the order is placed.
+  if ((discount.customerRestrictions || []).length && customerId && !discount.customerRestrictions.includes(customerId)) {
+    throw new AppError('DISCOUNT_NOT_APPLICABLE', 'Discount code does not apply to this customer', 422);
   }
   if (discount.usageLimit !== null && discount.usageCount >= discount.usageLimit) {
     throw new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'Discount code has reached its usage limit', 422);
@@ -40,20 +51,177 @@ async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds
     }
   }
 
-  return { discount, amount: amountFor(discount, subtotal) };
+  // A buy-X-get-Y code needs enough covered units in the cart to give one away (item 353).
+  if (discount.type === 'buy_x_get_y') {
+    const offer = buyXGetY(discount, eligible, lines);
+    if (!offer) throw new AppError('DISCOUNT_NOT_APPLICABLE', 'Discount code does not apply to items in this order', 422);
+    if (offer.amount <= 0) {
+      throw new AppError('DISCOUNT_QUANTITY_NOT_MET', 'Add more items to use this discount code', 422, [
+        { field: 'items', buyQuantity: offer.buyQuantity, getQuantity: offer.getQuantity, units: offer.units, remainingUnits: Math.max(0, offer.buyQuantity + offer.getQuantity - offer.units) },
+      ]);
+    }
+    return { discount, amount: offer.amount };
+  }
+  return { discount, amount: amountOn(discount, eligible, lines, subtotal) };
 }
 
 /**
- * What a code takes off `subtotal`. free_shipping and buy_x_get_y are applied
- * by the caller against shipping/line totals respectively using
- * discount.buyXGetYConfig; this only covers the subtotal-level percentage /
- * fixed cases. Also used when an order's subtotal changes after the code was
+ * A buy_x_get_y discount's settings: buy `buyQuantity` units, get
+ * `getQuantity` more at `getDiscountBasisPoints` off (10000 = free, the
+ * default). null when they are missing or broken.
+ */
+function buyXGetYConfig(discount) {
+  const c = discount.buyXGetYConfig || {};
+  const buyQuantity = Number(c.buyQuantity);
+  const getQuantity = Number(c.getQuantity);
+  const bp = c.getDiscountBasisPoints === undefined || c.getDiscountBasisPoints === null ? 10000 : Number(c.getDiscountBasisPoints);
+  if (!Number.isInteger(buyQuantity) || buyQuantity < 1 || !Number.isInteger(getQuantity) || getQuantity < 1) return null;
+  if (!Number.isInteger(bp) || bp < 1 || bp > 10000) return null;
+  return { buyQuantity, getQuantity, getDiscountBasisPoints: bp };
+}
+
+/**
+ * What a buy_x_get_y discount takes off the priced lines (item 353): the
+ * covered units (the code's products or collections, else every line; never
+ * a free gift) are counted, every full group of buy + get units gives
+ * `getQuantity` units away, and the cheapest units are the ones given, at
+ * the price the line is sold at (after any bundle tier). Returns
+ * { amount, units, buyQuantity, getQuantity }, or null when the discount's
+ * settings are broken.
+ */
+function buyXGetY(discount, eligible, lines) {
+  const config = buyXGetYConfig(discount);
+  if (!config) return null;
+  const groups = [];
+  let units = 0;
+  for (const line of Array.isArray(lines) ? lines : []) {
+    // Product units, not offers: an offer line's quantity is the bundles bought, its shipping rule holds the units
+    // they contain (orders/orderService.priceLine; also on lines rebuilt for an edit or an upsell).
+    const quantity = Number(line.shippingRule && line.shippingRule.units) || Number(line.quantity);
+    const total = Number(line.lineTotalAmount);
+    if (line.freeGift || !(quantity > 0) || (eligible && !eligible.has(line.productId))) continue;
+    // The line's total spread over its units in whole minor units.
+    const base = Math.floor(total / quantity);
+    const extra = total - base * quantity;
+    groups.push({ price: base, count: quantity - extra }, { price: base + 1, count: extra });
+    units += quantity;
+  }
+  let free = Math.floor(units / (config.buyQuantity + config.getQuantity)) * config.getQuantity;
+  let value = 0;
+  for (const group of groups.filter((g) => g.count > 0).sort((a, b) => a.price - b.price)) {
+    if (free <= 0) break;
+    const take = Math.min(free, group.count);
+    value += take * group.price;
+    free -= take;
+  }
+  return { amount: applyBasisPoints(value, config.getDiscountBasisPoints), units, buyQuantity: config.buyQuantity, getQuantity: config.getQuantity };
+}
+
+/** What a discount takes off these lines: a buy-X-get-Y one by units, the others on the covered subtotal. */
+function amountOn(discount, eligible, lines, subtotal) {
+  if (discount.type === 'buy_x_get_y') {
+    const offer = buyXGetY(discount, eligible, lines);
+    return offer ? offer.amount : 0;
+  }
+  return amountFor(discount, eligibleSubtotal(eligible, lines, subtotal));
+}
+
+/**
+ * The products of `productIds` a product- or collection-limited discount
+ * covers: in its product list, or linked to one of its collections (smart
+ * collections keep their links in product_collections too). null when the
+ * discount is not limited, so it covers the whole order.
+ */
+async function eligibleProducts(discount, productIds, transaction) {
+  const products = discount.productRestrictions || [];
+  const collections = discount.collectionRestrictions || [];
+  if (!products.length && !collections.length) return null;
+  const eligible = new Set((productIds || []).filter((id) => products.includes(id)));
+  const rest = [...new Set(productIds || [])].filter((id) => !eligible.has(id));
+  if (collections.length && rest.length) {
+    const links = await db.ProductCollection.findAll({
+      where: { productId: rest, collectionId: collections },
+      attributes: ['productId'],
+      raw: true,
+      transaction,
+    });
+    for (const link of links) eligible.add(link.productId);
+  }
+  return eligible;
+}
+
+/** The part of the order a limited discount works on: its covered lines' totals (free gifts never count). */
+function eligibleSubtotal(eligible, lines, subtotal) {
+  if (!eligible || !Array.isArray(lines)) return subtotal;
+  return lines.filter((l) => !l.freeGift && eligible.has(l.productId)).reduce((sum, l) => sum + Number(l.lineTotalAmount), 0);
+}
+
+/**
+ * amountFor on priced lines: the whole subtotal, or only the covered lines'
+ * for a product- or collection-limited discount. For an order whose lines
+ * change after the code was redeemed (items edited, an upsell joined).
+ */
+async function amountForLines(discount, lines, transaction) {
+  const subtotal = lines.reduce((sum, l) => sum + Number(l.lineTotalAmount), 0);
+  const eligible = await eligibleProducts(discount, lines.filter((l) => !l.freeGift).map((l) => l.productId), transaction);
+  return amountOn(discount, eligible, lines, subtotal);
+}
+
+/**
+ * What a code takes off `subtotal`. A free_shipping code makes the order ship
+ * free (orders/orderService.createOrder) and a buy_x_get_y one is worked out
+ * on the lines (buyXGetY / amountOn, item 353); this only covers the
+ * subtotal-level percentage / fixed cases. Also used when an order's subtotal changes after the code was
  * redeemed (an upsell joined to it), so the same code is not checked again.
  */
 function amountFor(discount, subtotal) {
   if (discount.type === 'percentage') return applyBasisPoints(subtotal, discount.value);
   if (discount.type === 'fixed') return Math.min(Number(discount.value), subtotal);
   return 0;
+}
+
+/**
+ * Whether a limited code still has a use free for a new order (item 366).
+ * An order paid online redeems its code only when the payment lands
+ * (orders/orderCompletion.js, allowOverLimit), so until then the uses it will
+ * take are held by it: the open orders awaiting payment that carry this code
+ * (completion_context.discount, not completed, not cancelled, payment window
+ * still open) count against usageLimit, and the shopper's own against
+ * perCustomerLimit, next to the redemptions already made. Locks the discount
+ * row for the rest of the order's transaction, so two checkouts racing for
+ * the last use wait for each other. Returns null when there is room, else the
+ * AppError to refuse the code with.
+ */
+async function roomFor(discountId, customerId, transaction) {
+  const discount = await db.Discount.findByPk(discountId, { lock: transaction.LOCK.UPDATE, transaction });
+  if (!discount) return null;
+  const perCustomer = discount.perCustomerLimit !== null && customerId;
+  if (discount.usageLimit === null && !perCustomer) return null;
+  const awaiting = {
+    workspaceId: discount.workspaceId,
+    completedAt: null,
+    cancelledAt: null,
+    paymentExpiresAt: { [db.Sequelize.Op.gt]: new Date() },
+    completionContext: { discount: { discountId: discount.id } },
+  };
+  if (discount.usageLimit !== null) {
+    const held = await db.Order.count({ where: awaiting, transaction });
+    if (discount.usageCount + held >= discount.usageLimit) {
+      return held > 0
+        ? new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'The last uses of this discount code are held by orders awaiting payment', 422)
+        : new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'Discount code has reached its usage limit', 422);
+    }
+  }
+  if (perCustomer) {
+    const used = await db.DiscountRedemption.count({ where: { discountId: discount.id, customerId }, transaction });
+    const held = await db.Order.count({ where: { ...awaiting, customerId }, transaction });
+    if (used + held >= discount.perCustomerLimit) {
+      return held > 0
+        ? new AppError('DISCOUNT_PER_CUSTOMER_LIMIT_REACHED', 'This discount code is already on one of your orders awaiting payment', 422)
+        : new AppError('DISCOUNT_PER_CUSTOMER_LIMIT_REACHED', 'You have already used this discount code', 422);
+    }
+  }
+  return null;
 }
 
 /**
@@ -72,6 +240,13 @@ async function redeem(discountId, { orderId, customerId, amountAllocated }, tran
   if (!allowOverLimit && discount.usageLimit !== null && discount.usageCount >= discount.usageLimit) {
     throw new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'Discount code has reached its usage limit', 422);
   }
+  // Counted under the row lock, so two orders by one shopper at once can't both pass (item 366).
+  if (!allowOverLimit && discount.perCustomerLimit !== null && customerId) {
+    const used = await db.DiscountRedemption.count({ where: { discountId, customerId }, transaction });
+    if (used >= discount.perCustomerLimit) {
+      throw new AppError('DISCOUNT_PER_CUSTOMER_LIMIT_REACHED', 'You have already used this discount code', 422);
+    }
+  }
   await discount.update({ usageCount: discount.usageCount + 1 }, { transaction });
   await db.DiscountRedemption.create(
     { workspaceId: discount.workspaceId, discountId, orderId, customerId, amountAllocated },
@@ -79,4 +254,4 @@ async function redeem(discountId, { orderId, customerId, amountAllocated }, tran
   );
 }
 
-module.exports = { evaluate, redeem, amountFor };
+module.exports = { evaluate, redeem, roomFor, amountFor, amountOn, amountForLines, eligibleProducts, eligibleSubtotal, buyXGetYConfig, buyXGetY };

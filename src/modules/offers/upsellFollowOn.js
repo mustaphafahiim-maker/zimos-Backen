@@ -46,12 +46,13 @@ async function createFollowOn(workspaceId, original, line, transaction) {
       items: [line],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
-      paymentMethod: card ? 'card' : 'cod',
+      paymentMethod: card ? require('../payments/savedMethods/consentedSave').methodOf(card) : 'cod',
     },
     { user: null, headers: {}, ip: null },
     // The buyer's own add-on to the order they just paid: the original went
     // through the storefront rules, and duplicate_order would flag every upsell.
-    { transaction, skipFraudRules: true, source: 'upsell', ...(card ? { awaitingPayment: oneClickHold() } : {}) }
+    // One purchase split in two pays one pay-per-order fee (billing/walletService).
+    { transaction, skipFraudRules: true, source: 'upsell', chargeFee: false, locale: original.locale, ...(card ? { awaitingPayment: oneClickHold() } : {}) }
   );
   await order.update({ linkedFromOrderId: original.id }, { transaction });
   const item = await db.OrderItem.findOne({ where: { orderId: order.id }, transaction });

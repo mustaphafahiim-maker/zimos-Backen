@@ -109,6 +109,9 @@ function validateGraph(steps, edges, { requireContent = false } = {}) {
     if (!stepKeys.has(e.toStepKey)) {
       problems.push({ field: `edges[${i}].toStepKey`, message: `Edge points at unknown step "${e.toStepKey}"` });
     }
+    // Its condition, `when` included (funnelRouting.js).
+    const condProblem = require('./funnelRouting').conditionProblem(e.condition);
+    if (condProblem) problems.push({ field: `edges[${i}].condition`, message: condProblem });
   }
 
   const { entryKey, problems: entryProblems } = resolveEntry(steps, edges);

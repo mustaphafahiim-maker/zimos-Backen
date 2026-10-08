@@ -4,6 +4,7 @@ const db = require('../../db/models');
 const { NotFoundError, ConflictError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { validatePageTree } = require('../pages/pageTree');
+const { usesCountsByTemplate, funnelCountsFor } = require('./templateUsage');
 
 // The "current" version of a template = the highest `version` number that is
 // still active. A published template with no active version is not offered.
@@ -19,7 +20,7 @@ async function latestActiveVersion(templateId, transaction) {
 // version's globalStyles, so a template whose denormalized column was never
 // filled in still paints the right swatch. `priceAmount` is a BIGINT column,
 // which pg hands back as a string — the API emits it as a number.
-function toGalleryCard(template, version) {
+function toGalleryCard(template, version, usesCount = 0) {
   return {
     id: template.id,
     name: template.name,
@@ -32,24 +33,57 @@ function toGalleryCard(template, version) {
     tags: template.tags || [],
     rtl: template.rtl,
     templateVersionId: version.id,
+    // Websites and funnels made from it, not counting the trash (templateUsage.js).
+    usesCount,
+    createdAt: template.createdAt,
   };
 }
 
-// `kind` is the gallery's tab (store / funnel / landing). Absent = the whole
-// grid, which is what the picker opens on.
-async function listPublishedTemplates({ kind } = {}) {
-  const templates = await db.Template.findAll({
-    where: { isPublished: true, ...(kind ? { kind } : {}) },
-    order: [['name', 'ASC']],
-  });
+// Gallery sorts (SPEC §9.1 "sorting by newest or most used"). `name` is the
+// order the picker has always opened on, so it stays the default.
+const GALLERY_SORTS = {
+  name: (a, b) => a.name.localeCompare(b.name),
+  newest: (a, b) => b.createdAt - a.createdAt || a.name.localeCompare(b.name),
+  most_used: (a, b) => b.usesCount - a.usesCount || a.name.localeCompare(b.name),
+};
 
+// Language → text direction. A template has no language column, only `rtl`
+// (its Arabic version reads right to left), so that is what the filter reads.
+const RTL_LANGUAGES = new Set(['ar']);
+
+/**
+ * The public gallery. `kind` is the tab (store / funnel / landing; absent =
+ * the whole grid, which is what the picker opens on); `category`, `price`
+ * (free | paid, from the stored isFree flag), `rtl` and `language` narrow
+ * it; `sort` is name | newest | most_used. `categories` lists every category
+ * of the published grid for the current tab, so the chips don't vanish as the
+ * other filters narrow the cards.
+ */
+async function listPublishedTemplates({ kind, category, price, rtl, language, sort = 'name' } = {}) {
+  const where = { isPublished: true, ...(kind ? { kind } : {}) };
+  const tabTemplates = await db.Template.findAll({ where, order: [['name', 'ASC']] });
+
+  const wantRtl = rtl !== undefined ? rtl : language ? RTL_LANGUAGES.has(language) : undefined;
+  const conflicting = rtl !== undefined && language && RTL_LANGUAGES.has(language) !== rtl;
+  const templates = conflicting
+    ? []
+    : tabTemplates.filter(
+        (t) =>
+          (!category || t.category === category) &&
+          (!price || t.isFree === (price === 'free')) &&
+          (wantRtl === undefined || t.rtl === wantRtl)
+      );
+
+  const counts = await usesCountsByTemplate(templates.map((t) => t.id));
   const out = [];
   for (const t of templates) {
     const version = await latestActiveVersion(t.id);
     if (!version) continue;
-    out.push(toGalleryCard(t, version));
+    out.push(toGalleryCard(t, version, counts.get(t.id) || 0));
   }
-  return out;
+  out.sort(GALLERY_SORTS[sort] || GALLERY_SORTS.name);
+  const categories = [...new Set(tabTemplates.map((t) => t.category).filter(Boolean))].sort();
+  return { templates: out, categories };
 }
 
 async function getTemplateDetail(id) {
@@ -59,8 +93,9 @@ async function getTemplateDetail(id) {
   const version = await latestActiveVersion(id);
   if (!version) throw new NotFoundError('Template');
 
+  const counts = await usesCountsByTemplate([template.id]);
   return {
-    ...toGalleryCard(template, version),
+    ...toGalleryCard(template, version, counts.get(template.id) || 0),
     isPublished: template.isPublished,
     version: version.version,
     globalStyles: version.globalStyles,
@@ -93,7 +128,7 @@ const NULLABLE_TEXT = new Set(['category', 'thumbnailUrl', 'primaryColor']);
  *   drops a template with no active version. Without them a published
  *   template that never appears in the gallery has no visible explanation.
  */
-function toAdminRow(template, versions = []) {
+function toAdminRow(template, versions = [], usesCount = 0) {
   const active = versions.find((v) => v.isActive) || null;
   return {
     // Exactly the public gallery's rule (listPublishedTemplates): published
@@ -113,6 +148,8 @@ function toAdminRow(template, versions = []) {
     versionCount: versions.length,
     activeVersion: active ? active.version : null,
     templateVersionId: active ? active.id : null,
+    // Websites and funnels made from any of its versions, not counting the trash — the gallery's number.
+    usesCount,
     createdAt: template.createdAt,
     updatedAt: template.updatedAt,
   };
@@ -141,7 +178,12 @@ async function listAllTemplates({ kind } = {}) {
     if (!byTemplate.has(v.templateId)) byTemplate.set(v.templateId, []);
     byTemplate.get(v.templateId).push(v);
   }
-  return templates.map((t) => toAdminRow(t, byTemplate.get(t.id) || []));
+  const counts = await usesCountsByTemplate(templates.map((t) => t.id));
+  return templates.map((t) => toAdminRow(t, byTemplate.get(t.id) || [], counts.get(t.id) || 0));
+}
+
+async function usesOf(templateId, transaction) {
+  return (await usesCountsByTemplate([templateId], { transaction })).get(templateId) || 0;
 }
 
 function versionsOf(templateId, transaction) {
@@ -210,7 +252,7 @@ async function saveTemplate(input, req = null) {
       { action: 'template.update', entityType: 'Template', entityId: template.id, before, after: templateAuditState(template) },
       transaction
     );
-    return toAdminRow(template, versions);
+    return toAdminRow(template, versions, await usesOf(template.id, transaction));
   });
 }
 
@@ -224,7 +266,7 @@ async function setPublished(id, isPublished, req = null) {
     const template = await db.Template.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!template) throw new NotFoundError('Template');
     const versions = await versionsOf(id, transaction);
-    if (template.isPublished === isPublished) return toAdminRow(template, versions);
+    if (template.isPublished === isPublished) return toAdminRow(template, versions, await usesOf(id, transaction));
 
     if (isPublished && !versions.some((v) => v.isActive)) {
       throw new ConflictError(
@@ -244,7 +286,7 @@ async function setPublished(id, isPublished, req = null) {
       },
       transaction
     );
-    return toAdminRow(template, versions);
+    return toAdminRow(template, versions, await usesOf(id, transaction));
   });
 }
 
@@ -259,13 +301,16 @@ async function deleteTemplate(id, req = null) {
       // database would let this through and quietly cut every affected site
       // loose from the template it came from. This guard is the only thing
       // keeping that provenance.
-      const inUse = await db.Website.count({
+      const built = {
         where: { sourceTemplateVersionId: versions.map((v) => v.id) },
         transaction,
-      });
+        paranoid: false, // a site or funnel in the trash can still be restored
+      };
+      // Funnels made from a funnel or landing template (migration 531) keep the same link.
+      const inUse = (await db.Website.count(built)) + (await db.Funnel.count(built));
       if (inUse > 0) {
         throw new ConflictError(
-          `${inUse} website(s) were created from this template — unpublish it instead`,
+          `${inUse} website(s) or funnel(s) were created from this template — unpublish it instead`,
           'TEMPLATE_IN_USE'
         );
       }
@@ -287,7 +332,7 @@ async function deleteTemplate(id, req = null) {
 // The gallery offers the highest-numbered ACTIVE version (latestActiveVersion).
 
 /** A version without its content — the list the editor shows. */
-function toVersionSummary(version, websiteCounts = new Map()) {
+function toVersionSummary(version, websiteCounts = new Map(), funnelCounts = new Map()) {
   return {
     id: version.id,
     version: version.version,
@@ -297,6 +342,7 @@ function toVersionSummary(version, websiteCounts = new Map()) {
     sectionCount: Array.isArray(version.sections) ? version.sections.length : 0,
     primaryColor: (version.globalStyles || {}).primaryColor || null,
     websiteCount: websiteCounts.get(version.id) || 0,
+    funnelCount: funnelCounts.get(version.id) || 0,
     createdAt: version.createdAt,
   };
 }
@@ -318,8 +364,12 @@ async function getTemplateForAdmin(id) {
   const template = await db.Template.findByPk(id);
   if (!template) throw new NotFoundError('Template');
   const versions = await versionsOf(id);
-  const counts = await websiteCountsFor(versions.map((v) => v.id));
-  return { template: toAdminRow(template, versions), versions: versions.map((v) => toVersionSummary(v, counts)) };
+  const ids = versions.map((v) => v.id);
+  const [counts, funnels, uses] = await Promise.all([websiteCountsFor(ids), funnelCountsFor(ids), usesCountsByTemplate([id])]);
+  return {
+    template: toAdminRow(template, versions, uses.get(id) || 0),
+    versions: versions.map((v) => toVersionSummary(v, counts, funnels)),
+  };
 }
 
 /** GET /admin/templates/:id/versions/:versionId — one version with its content. */
@@ -328,7 +378,7 @@ async function getVersionForAdmin(templateId, versionId) {
   if (!version) throw new NotFoundError('Template version');
   const counts = await websiteCountsFor([version.id]);
   return {
-    ...toVersionSummary(version, counts),
+    ...toVersionSummary(version, counts, await funnelCountsFor([version.id])),
     globalStyles: version.globalStyles,
     pages: version.pages,
     sections: version.sections,
@@ -406,7 +456,7 @@ async function setVersionActive(templateId, versionId, isActive, req = null) {
     const versions = await versionsOf(templateId, transaction);
     const version = versions.find((v) => v.id === versionId);
     if (!version) throw new NotFoundError('Template version');
-    if (version.isActive === isActive) return toVersionSummary(version, await websiteCountsFor([version.id], transaction));
+    if (version.isActive === isActive) return toVersionSummary(version, await websiteCountsFor([version.id], transaction), await funnelCountsFor([version.id], transaction));
 
     if (!isActive && template.isPublished && versions.filter((v) => v.isActive).length === 1) {
       throw new ConflictError(
@@ -428,7 +478,7 @@ async function setVersionActive(templateId, versionId, isActive, req = null) {
       },
       transaction
     );
-    return toVersionSummary(version, await websiteCountsFor([version.id], transaction));
+    return toVersionSummary(version, await websiteCountsFor([version.id], transaction), await funnelCountsFor([version.id], transaction));
   });
 }
 

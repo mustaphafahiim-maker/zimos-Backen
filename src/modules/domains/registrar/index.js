@@ -10,9 +10,24 @@
  *   register({ domain, years, contact })     → { providerRef, expiresAt }
  *   setRecords({ domain, providerRef, records }) → void   (records: [{ type, name, value }])
  *   renew({ domain, providerRef, years })    → { expiresAt }
+ *
+ * Optional: renewQuote({ domain, providerRef, years }), assertReady() (throws
+ * before a purchase when the adapter is not set up), needsContact (the buy
+ * asks for the registrant's details).
+ *
+ * Optional, item 385 (purchaseDns.js; without them the endpoint answers 501):
+ *   getRecords({ domain, providerRef })     → [{ type, name, value, ttl, priority? }]  the whole zone
+ *   unlock({ domain, providerRef })         → void   (registrar lock off, for a transfer)
+ *   authCode({ domain, providerRef })       → { authCode }   (never logged or stored)
+ * setRecords also takes MX records ({ type: 'MX', name, value, priority }).
  */
 
-const ADAPTERS = { sandbox: () => require('./sandboxRegistrar') };
+const ADAPTERS = {
+  sandbox: () => require('./sandboxRegistrar'),
+  // The owner's pick (item 326); Namecheap is the fallback (item 327).
+  dynadot: () => require('./dynadotRegistrar'),
+  namecheap: () => require('./namecheapRegistrar'),
+};
 
 function registrar() {
   const name = process.env.DOMAIN_REGISTRAR || 'sandbox';

@@ -10,7 +10,7 @@ const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { resolvePublicWorkspace } = require('../../core/middleware/publicWorkspace');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { storefrontPostLimiters } = require('../../core/middleware/rateLimiters');
 const { recordAudit } = require('../audit/auditService');
 const svc = require('./giftCardService');
 
@@ -20,11 +20,11 @@ const uuid = Joi.string().uuid();
 const ws = { workspaceId: uuid.required() };
 const money = Joi.number().integer().min(1).max(100000000);
 
-// Mounted at /api/v1/store/:workspaceId/gift-cards — the balance check (rate-limited like order tracking).
+// Mounted at /api/v1/store/:workspaceId/gift-cards — the balance check (rate-limited per shopper IP).
 const store = Router({ mergeParams: true });
 store.post(
   '/check',
-  trackingLimiter,
+  storefrontPostLimiters.giftCardCheck,
   resolvePublicWorkspace,
   validate({ params: Joi.object({ workspaceId: Joi.string().required() }), body: Joi.object({ code: Joi.string().trim().min(4).max(40).required() }) }),
   asyncHandler(async (req, res) => res.json({ giftCard: await svc.check(req.publicWorkspace.id, req.body.code) }))

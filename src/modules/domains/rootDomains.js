@@ -25,6 +25,8 @@
 
 // Second-level public suffixes: ahmedstore.com.eg is a root, shop.ahmedstore.com is not.
 const SECOND_LEVEL = /^(com|net|org|co|gov|edu|ac|info|biz|sch|ltd|plc|me|nom|gen)\.[a-z]{2}$/;
+// And the other ones in the markets we sell in (item 341, from Ziad's domainRules.js).
+const SECOND_LEVEL_EXTRA = new Set(['sci.eg', 'name.eg', 'tv.eg', 'med.sa', 'pub.sa']);
 const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
 
 const labels = (hostname) => String(hostname || '').toLowerCase().split('.').filter(Boolean);
@@ -33,7 +35,8 @@ const labels = (hostname) => String(hostname || '').toLowerCase().split('.').fil
 function isRoot(hostname) {
   const l = labels(hostname);
   if (l.length < 2) return false;
-  const suffix = l.length >= 3 && SECOND_LEVEL.test(l.slice(-2).join('.')) ? 2 : 1;
+  const last2 = l.slice(-2).join('.');
+  const suffix = l.length >= 3 && (SECOND_LEVEL.test(last2) || SECOND_LEVEL_EXTRA.has(last2)) ? 2 : 1;
   return l.length === suffix + 1;
 }
 

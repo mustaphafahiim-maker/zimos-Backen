@@ -72,6 +72,33 @@ const address = Joi.object({
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
 
+// Staff price changes (item 382, staffPricing.js; needs orders.price_override): a catalogue line's
+// own unitPrice, a custom line with no variant, and a manual discount on the whole order.
+const unitPrice = Joi.number().integer().min(0).max(1000000000000);
+const customLine = (edit) =>
+  Joi.object({
+    // An edit keeps a custom line the order already has by naming it.
+    ...(edit ? { orderItemId: uuid.optional() } : {}),
+    // No product behind it (with stripUnknown a variantId would quietly be dropped).
+    variantId: Joi.forbidden(),
+    offerId: Joi.forbidden(),
+    title: Joi.string().trim().min(1).max(300).required(),
+    unitPrice: unitPrice.required(),
+    quantity: Joi.number().integer().min(1).max(10000).required(),
+    sku: Joi.string().trim().max(100).allow('', null).optional(),
+    weightGrams: Joi.number().integer().min(0).max(1000000).optional(),
+  });
+const manualDiscount = Joi.object({
+  type: Joi.string().valid('amount', 'percent').required(),
+  // amount: minor units; percent: 0–100, two decimals.
+  value: Joi.when('type', {
+    is: 'percent',
+    then: Joi.number().min(0).max(100).precision(2).required(),
+    otherwise: Joi.number().integer().min(0).max(1000000000000).required(),
+  }),
+  reason: Joi.string().trim().min(1).max(500).required(),
+});
+
 module.exports = {
   create: {
     params: Joi.object({ workspaceId: uuid.required() }),
@@ -82,10 +109,15 @@ module.exports = {
             variantId: uuid.required(),
             offerId: uuid.optional(),
             quantity: Joi.number().integer().min(1).required(),
-          })
+            unitPrice: unitPrice.optional(),
+            // A catalogue line is not a custom one (with stripUnknown it would quietly become one).
+            title: Joi.forbidden(),
+          }),
+          customLine(false)
         )
         .min(1)
         .required(),
+      manualDiscount: manualDiscount.optional(),
       contact: contact.required(),
       shippingAddress: address.optional(),
       paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).required(),
@@ -95,6 +127,8 @@ module.exports = {
       notes: Joi.string().max(2000).allow('').optional(),
       // Staff may set the shipping themselves (minor units); omitted, it is calculated.
       shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
+      // The language the customer's messages go out in: one the store offers (item 383); omitted = the store's default.
+      locale: Joi.string().trim().lowercase().pattern(/^[a-z]{2}$/).optional(),
     }),
   },
   // POST /manual/preview — the same body, priced and not saved; the customer may still be blank.
@@ -107,10 +141,15 @@ module.exports = {
             variantId: uuid.required(),
             offerId: uuid.optional(),
             quantity: Joi.number().integer().min(1).required(),
-          })
+            unitPrice: unitPrice.optional(),
+            // A catalogue line is not a custom one (with stripUnknown it would quietly become one).
+            title: Joi.forbidden(),
+          }),
+          customLine(false)
         )
         .min(1)
         .required(),
+      manualDiscount: manualDiscount.optional(),
       contact: Joi.object({ fullName: Joi.string().max(200).allow(''), phone: Joi.string().max(32).allow('') })
         .unknown(true)
         .optional(),
@@ -125,6 +164,7 @@ module.exports = {
       paymentMethod: Joi.string().valid(...require('../payments/methodNames').ORDER_METHODS).default('cod'),
       discountCode: Joi.string().max(100).optional(),
       shippingAmount: Joi.number().integer().min(0).max(100000000).optional(),
+      locale: Joi.string().trim().lowercase().pattern(/^[a-z]{2}$/).optional(),
     }),
   },
   manualCustomer: {
@@ -133,6 +173,8 @@ module.exports = {
   },
   manualOptions: { params: Joi.object({ workspaceId: uuid.required() }) },
   get: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }) },
+  // GET /:orderId/waybill — shipmentId picks one parcel of an order sent as several (item 375).
+  waybill: { params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }), query: Joi.object({ shipmentId: uuid.optional() }) },
   cancel: {
     params: Joi.object({ workspaceId: uuid.required(), orderId: uuid.required() }),
     body: Joi.object({
@@ -213,11 +255,17 @@ module.exports = {
             variantId: uuid.required(),
             offerId: uuid.allow(null).optional(),
             quantity: Joi.number().integer().min(1).max(10000).required(),
-          })
+            unitPrice: unitPrice.optional(),
+            // A catalogue line is not a custom one (with stripUnknown it would quietly become one).
+            title: Joi.forbidden(),
+          }),
+          customLine(true)
         )
         .min(1)
         .max(100)
         .required(),
+      // Set or replace the order's manual discount; null removes it; left out it stays (re-applied on the new subtotal).
+      manualDiscount: manualDiscount.allow(null).optional(),
     }),
   },
   refundQuote: {
@@ -334,6 +382,17 @@ module.exports = {
       // Connected couriers only: book as this weight tier instead of the one
       // stored on the order at checkout.
       tierId: uuid.optional(),
+      // Partial fulfilment (item 375, shipping/partialShipments.js): the units
+      // this parcel carries. Left out: the whole order, or what is still to
+      // send once the order has split parcels.
+      items: Joi.array()
+        .items(Joi.object({ orderItemId: uuid.required(), quantity: Joi.number().integer().min(1).max(100000).required() }))
+        .min(1)
+        .max(200)
+        .optional(),
+      // Cash on delivery, split parcels only: what the courier collects for
+      // this one (minor units). Defaults to its share of what is still owed.
+      codAmount: Joi.number().integer().min(0).optional(),
     }),
   },
   updateShipment: {
@@ -344,7 +403,8 @@ module.exports = {
         .optional(),
       waybillNumber: Joi.string().max(100).allow(null, '').optional(),
       trackingUrl: Joi.string().uri().max(500).allow(null, '').optional(),
-      // With status 'cancelled' on a booking whose courier has no cancel API.
+      // With status 'cancelled' on a booking whose courier has no cancel API,
+      // or whose cancel by API failed with details.manualCancelAllowed.
       acknowledgeManualCancel: Joi.boolean().optional(),
     })
       .min(1)

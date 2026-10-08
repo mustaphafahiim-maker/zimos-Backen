@@ -207,6 +207,14 @@ router.get(
   requirePermission(PERMISSIONS.ORDERS_VIEW),
   controller.listShipments
 );
+// Partial fulfilment (item 375): each line's units in parcels, delivered and
+// still to send, and the suggested next parcel with its COD amount.
+router.get(
+  '/:orderId/shipments/plan',
+  validate(schemas.listShipments),
+  requirePermission(PERMISSIONS.ORDERS_VIEW),
+  controller.shipmentPlan
+);
 router.post(
   '/:orderId/shipments',
   validate(schemas.createShipment),
@@ -251,7 +259,7 @@ router.post(
 
 router.get(
   '/:orderId/waybill',
-  validate(schemas.get),
+  validate(schemas.waybill),
   requirePermission(PERMISSIONS.ORDERS_VIEW),
   waybillController.waybill
 );
@@ -261,6 +269,8 @@ router.get(
 router.use(require('./orderSessionDetails').router);
 // The shipping card's "Save as draft" (shipmentDraft.js).
 router.use(require('./shipmentDraft').router);
+// A returned (undelivered) parcel back on the shelf: its reserved stock given back (returnedStock.js, item 354).
+router.use(require('./returnedStock').router);
 // The Supplier card: forward to a dropshipping supplier and follow it there (dropship/dropshipOrders.js).
 router.use(require('../dropship/dropshipOrders').router);
 

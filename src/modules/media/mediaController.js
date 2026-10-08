@@ -4,10 +4,11 @@ const multer = require('multer');
 const asyncHandler = require('express-async-handler');
 const service = require('./mediaService');
 const { AppError } = require('../../core/errors/AppError');
-const { MAX_UPLOAD_BYTES } = require('./mediaService');
+const { MAX_UPLOAD_BYTES, tooLarge } = require('./mediaService');
 
-// The widest limit any accepted type allows; storeImage then applies the
-// per-type ceiling (5MB for images, 15MB for GLB models).
+// The widest limit any accepted type allows (a video's); storeImage then
+// applies the per-type ceiling (images 10 MB, GLB models 15 MB, videos 30 MB)
+// and names it in the error.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES } });
 
 // Wrap multer so its errors become our standard AppError shape instead of a 500.
@@ -15,7 +16,8 @@ function acceptFile(req, res, next) {
   upload.single('file')(req, res, (err) => {
     if (!err) return next();
     if (err instanceof multer.MulterError) {
-      if (err.code === 'LIMIT_FILE_SIZE') return next(new AppError('FILE_TOO_LARGE', 'The file exceeds the 15MB limit', 413));
+      // The type is not known yet: the ceiling for any file (a video's).
+      if (err.code === 'LIMIT_FILE_SIZE') return next(tooLarge('file', MAX_UPLOAD_BYTES));
       return next(new AppError('UPLOAD_ERROR', err.message, 422));
     }
     return next(err);

@@ -406,7 +406,7 @@ async function convert(workspaceId, sessionId, body, req) {
       },
       req,
       // The shopper's photos belong to their visitor id (customerUploads).
-      { source: 'manual', customFields: { visitorId: session.visitorId || null } }
+      { source: 'manual', customFields: { visitorId: session.visitorId || null }, locale: session.locale }
     ));
   } catch (err) {
     await db.CheckoutSession.update({ status: previous }, { where: { id: sessionId, workspaceId, status: 'converted', convertedOrderId: null } });
@@ -420,6 +420,12 @@ async function convert(workspaceId, sessionId, body, req) {
   if (payload.formFields) {
     const workspace = await db.Workspace.findByPk(workspaceId);
     await require('../checkout/checkoutForm').saveCheckoutAnswers(order, workspace, payload.formFields);
+    // The photos the shopper uploaded are the order's now (item 310), as a checkout attaches them —
+    // left pending, the hourly sweep would delete them.
+    const ids = Object.values(payload.formFields).map((v) => String(v || '').trim()).filter((v) => /^[0-9a-f-]{36}$/i.test(v));
+    if (ids.length && session.visitorId) {
+      await db.CustomerUpload.update({ status: 'attached', expiresAt: null }, { where: { id: ids, workspaceId, visitorId: session.visitorId, status: 'pending' } }).catch(() => {});
+    }
   }
 
   await db.sequelize.transaction(async (transaction) => {
@@ -632,6 +638,8 @@ async function fileRefusal(req, refusal) {
       },
       ipAddress: visitor.ip,
       ipCountry: visitor.ipCountry,
+      // The shopper's language (item 383).
+      locale: require('../orders/orderLocale').fromRequest(workspace, req),
       source: body.funnelId ? 'funnel' : 'store',
       lastActivityAt: new Date(),
       ...(snapshot.length ? { items: snapshot, subtotalAmount: add(...totals), currency } : {}),
@@ -711,6 +719,7 @@ async function fileUnpaidOrder(orderId) {
       currency: order.currency,
       ipAddress: order.ipAddress || null,
       ipCountry: order.ipCountry || null,
+      locale: order.locale || null,
       source: order.funnelId ? 'funnel' : 'store',
       lastActivityAt: new Date(),
     };

@@ -12,13 +12,18 @@ const upload = multer({
   limits: { fileSize: env.customerUploads.maxRawBytes, files: 1, fields: 4, fieldSize: 200 },
 });
 
-// A file over the raw cap is refused while it streams in — never processed.
+// A file over the raw cap (5 MB, CUSTOMER_UPLOAD_MAX_MB) is refused while it
+// streams in — never processed. Shoppers' photos, transfer receipts and
+// manual-payment proofs all come through here; the merchant's own media
+// library has its larger cap (item 400).
 function acceptFile(req, res, next) {
   upload.single('file')(req, res, (err) => {
     if (!err) return next();
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return next(new AppError('FILE_TOO_LARGE', 'The photo is larger than 15 MB', 413));
+        const maxBytes = env.customerUploads.maxRawBytes;
+        const maxMb = Math.round((maxBytes / (1024 * 1024)) * 10) / 10;
+        return next(new AppError('FILE_TOO_LARGE', `The photo is larger than ${maxMb} MB`, 413, { kind: 'photo', maxBytes, maxMb }));
       }
       return next(new AppError('UPLOAD_ERROR', err.message, 422));
     }

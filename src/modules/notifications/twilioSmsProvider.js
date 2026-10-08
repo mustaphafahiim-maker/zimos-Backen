@@ -18,14 +18,15 @@ function getClient() {
   return client;
 }
 
-async function sendSms({ to, body }) {
+// `statusCallback`: where Twilio posts the delivery status (deliveryStatus/, item 386); none when unset.
+async function sendSms({ to, body, statusCallback = null }) {
   const { fromNumber } = env.notifications.twilio;
   if (!fromNumber) throw new Error('Twilio SMS provider is missing TWILIO_FROM_NUMBER');
 
   const { value, attempts } = await withRetry(
     // Twilio's RestException carries `.status` (HTTP status) so the retry
     // layer skips a permanent 4xx (e.g. 21211 invalid 'To' number).
-    () => getClient().messages.create({ from: fromNumber, to: `+${String(to).replace(/^\+/, '')}`, body }),
+    () => getClient().messages.create({ from: fromNumber, to: `+${String(to).replace(/^\+/, '')}`, body, ...(statusCallback ? { statusCallback } : {}) }),
     { delays: RETRY_DELAYS }
   );
 

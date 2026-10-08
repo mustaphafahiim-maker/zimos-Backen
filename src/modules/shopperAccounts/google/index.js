@@ -15,7 +15,7 @@ const { requirePermission } = require('../../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../../core/security/permissions');
 const { AppError } = require('../../../core/errors/AppError');
 const { recordAudit } = require('../../audit/auditService');
-const { trackingLimiter } = require('../../../core/middleware/rateLimiters');
+const { storefrontPostLimiters } = require('../../../core/middleware/rateLimiters');
 
 // Sign in with Google for shopper accounts (spec-gaps item 217) — see README.md.
 
@@ -95,7 +95,7 @@ store.get('/', resolvePublicWorkspace, validate({ params: sp }), (req, res) => {
   // nonce: pass it to Google's button (initialize({ nonce })); valid 10 minutes (item 279).
   res.json({ enabled: on, clientId: s.enabled ? s.clientId : null, nonce: on ? issueNonce(req.publicWorkspace.id) : null });
 });
-store.post('/', trackingLimiter, resolvePublicWorkspace, validate({ params: sp, body: Joi.object({ idToken: Joi.string().min(10).max(5000).required() }) }), asyncHandler(async (req, res) => res.json(await signIn(req.publicWorkspace, req.body.idToken, req))));
+store.post('/', storefrontPostLimiters.googleSignIn, resolvePublicWorkspace, validate({ params: sp, body: Joi.object({ idToken: Joi.string().min(10).max(5000).required() }) }), asyncHandler(async (req, res) => res.json(await signIn(req.publicWorkspace, req.body.idToken, req))));
 
 // Mounted at /api/v1/workspaces/:workspaceId/shopper-accounts/google (workspace.manage).
 const staff = Router({ mergeParams: true });

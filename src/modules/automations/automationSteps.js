@@ -18,12 +18,14 @@ const { render } = require('./automationContext');
  *   add_tag            tag the order
  *   set_status         confirm or cancel the order
  *   notify_team        a notification in the dashboard bell
+ *   notify_channel     a message to one of the store's team channels
+ *                      (Telegram / Slack / Discord, notifications/teamChannels)
  *
  * A runner returns a short description of what it did (stored on the run row)
  * or throws; a thrown error marks that step failed and the sequence goes on.
  */
 
-const STEP_TYPES = ['wait', 'whatsapp_template', 'sms', 'email', 'webhook', 'add_tag', 'set_status', 'notify_team'];
+const STEP_TYPES = ['wait', 'whatsapp_template', 'sms', 'email', 'webhook', 'add_tag', 'set_status', 'notify_team', 'notify_channel'];
 const WAIT_UNITS = { minutes: 60 * 1000, hours: 60 * 60 * 1000, days: 24 * 60 * 60 * 1000 };
 const MAX_WAIT_MS = 30 * WAIT_UNITS.days;
 
@@ -67,7 +69,12 @@ const RUNNERS = {
       to: subject.phone,
       // Lets the customer's quick-reply to this message find its order.
       orderId: subject.kind === 'order' ? subject.order.id : null,
-      template: { name: step.template, language: step.language || 'ar', params: (step.params || []).map((p) => render(p, subject.vars)) },
+      // In the customer's language when the store has the template approved in it (item 383).
+      template: {
+        name: step.template,
+        language: await require('../whatsapp/templateLanguage').languageFor(workspaceId, step.template, require('../whatsapp/templateLanguage').localeOfSubject(subject), step.language || 'ar'),
+        params: (step.params || []).map((p) => render(p, subject.vars)),
+      },
     });
     return `whatsapp_template ${step.template}`;
   },
@@ -144,6 +151,16 @@ const RUNNERS = {
       data: { message, ruleId: rule ? rule.id : null },
     });
     return 'notify_team';
+  },
+
+  async notify_channel(step, subject, { workspaceId, rule }) {
+    // eslint-disable-next-line global-require
+    const teamChannels = require('../notifications/teamChannels/teamChannelService');
+    const message = render(step.message, subject.vars).slice(0, 500);
+    const link = subject.kind === 'order' ? `/orders/${subject.order.id}` : '/abandoned-carts';
+    const text = teamChannels.compose({}, { title: rule ? rule.name : 'Automation', body: message, link });
+    const channel = await teamChannels.sendAutomationMessage(workspaceId, step.teamChannelId, text);
+    return `notify_channel ${channel.provider}`;
   },
 };
 

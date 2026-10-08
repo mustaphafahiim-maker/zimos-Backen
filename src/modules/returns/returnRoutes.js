@@ -24,5 +24,10 @@ router.post(
   requirePermission(PERMISSIONS.INVENTORY_MANAGE),
   controller.restock
 );
+router.post('/:returnId/pickup', validate(schemas.pickup), requirePermission(PERMISSIONS.ORDERS_MANAGE), controller.pickup);
+// Item 396: the pickup's courier status, cancelling it, and cancelling the return (with its pickup).
+router.post('/:returnId/pickup/sync', validate(schemas.restock), requirePermission(PERMISSIONS.ORDERS_MANAGE), controller.syncPickup);
+router.delete('/:returnId/pickup', validate(schemas.cancelPickup), requirePermission(PERMISSIONS.ORDERS_MANAGE), controller.cancelPickup);
+router.post('/:returnId/cancel', validate(schemas.cancel), requirePermission(PERMISSIONS.ORDERS_MANAGE), controller.cancel);
 
 module.exports = router;

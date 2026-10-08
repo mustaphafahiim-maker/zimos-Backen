@@ -134,7 +134,7 @@ async function check(workspace, order, body, req) {
   if (needsCode(workspace, order, { requireOtp, ruleFlags })) {
     const phone = orderPhone(order);
     if (!phone) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
-    if (!body.otpCode) throw await checkoutOtp.challengeError(workspace, phone);
+    if (!body.otpCode) throw await checkoutOtp.challengeError(workspace, phone, { req });
     await otpService.verifyOtp(phone, checkoutOtp.PURPOSE, body.otpCode);
   }
   return { flags, deposit };

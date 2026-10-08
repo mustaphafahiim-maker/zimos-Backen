@@ -73,7 +73,7 @@ async function build(topic, event) {
 
   // A deleted funnel is gone: the event carries what is left of it.
   if (topic === 'funnel.deleted') {
-    return { subject: { funnelId: payload.funnelId }, data: { funnel: { id: payload.funnelId, name: payload.name || null, subdomain: payload.subdomain || null, deleted: true } } };
+    return { subject: { funnelId: payload.funnelId }, data: { funnel: { id: payload.funnelId, name: payload.name || null, subdomain: payload.subdomain || null, deleted: true, trashed: payload.trashed === true } } };
   }
 
   if (aggregate === 'funnel') {
@@ -101,6 +101,15 @@ async function build(topic, event) {
     const customer = await db.Customer.findOne({ where: { id: payload.customerId, workspaceId } });
     if (!customer) return null;
     return { subject: {}, data: { contact: customer.toJSON() } };
+  }
+
+  // Item 372: a return or exchange, with its order.
+  if (aggregate === 'return' && payload.returnId) {
+    const ret = await db.ReturnRequest.findOne({ where: { id: payload.returnId, workspaceId } });
+    if (!ret) return null;
+    const subject = (await orderSubject(workspaceId, ret.orderId)) || {};
+    const { photoUploadIds, ...rest } = ret.toJSON();
+    return { subject, data: { return: { ...rest, photos: (photoUploadIds || []).length }, source: payload.source || null, order: await orderData(workspaceId, ret.orderId) } };
   }
 
   if (aggregate === 'review' && payload.reviewId) {

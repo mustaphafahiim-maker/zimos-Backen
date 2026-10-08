@@ -35,7 +35,8 @@ async function snapshot(workspaceId) {
         WHERE m.workspace_id = :workspaceId ORDER BY m.created_at`,
       { workspaceId }
     ),
-    q(`SELECT hostname, status, is_primary AS "isPrimary", ssl_status AS "sslStatus" FROM domains WHERE workspace_id = :workspaceId ORDER BY created_at`, { workspaceId }),
+    // Item 341: why a certificate failed, and a domain the domains job suspended (store_suspended | plan).
+    q(`SELECT hostname, status, is_primary AS "isPrimary", ssl_status AS "sslStatus", ssl_detail AS "sslDetail", suspended_reason AS "suspendedReason" FROM domains WHERE workspace_id = :workspaceId ORDER BY created_at`, { workspaceId }),
     q(`SELECT carrier_code AS code, status, is_default AS "isDefault", last_verified_at AS "lastVerifiedAt" FROM carrier_accounts WHERE workspace_id = :workspaceId`, { workspaceId }),
     q(`SELECT provider_code AS code, mode, status, last_webhook_at AS "lastWebhookAt" FROM payment_gateway_accounts WHERE workspace_id = :workspaceId`, { workspaceId }),
     q(`SELECT provider AS code, status, last_error AS "lastError", last_verified_at AS "lastVerifiedAt" FROM workspace_integrations WHERE workspace_id = :workspaceId`, { workspaceId }),

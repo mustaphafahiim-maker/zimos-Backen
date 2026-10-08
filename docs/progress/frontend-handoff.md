@@ -377,7 +377,7 @@ Wording:
 - `GET /store/:ws` → `store.checkout.fields[]` carries `type: "file"`, and `store.checkout.billing_address`.
 
 ### Storefront checkout
-**File field** (photos only: JPEG, PNG, WebP; up to 15MB raw):
+**File field** (photos only: JPEG, PNG, WebP; up to 5 MB, item 400):
 1. On pick, `POST /store/:ws/uploads` (multipart `file`, header `X-Visitor-Id: <the visitor id the storefront already keeps>`)
    → `{ "upload": { "uploadId": "…", "mime": "image/jpeg", "width": 20, "height": 20, "expiresAt": "…" } }`.
    Show a thumbnail (from the local file) and "Change"/"Remove".
@@ -3324,3 +3324,1797 @@ Developer guide: `src/modules/partnerApps/README.md` (link it from the developer
 
 - On funnel pages, send the header `X-Funnel-Id: <funnelId>` on every `/store/:ws/...` call the funnel's checkout makes (places, payment methods, shipping quote, delivery estimate / slots, checkout sessions, uploads, checkout). With a "coming soon" or password store whose funnels stay open, those calls then work; without the header they answer 423 `STORE_LOCKED` unless the body / query already carries `funnelId`.
 - No change for the store's own pages: they show the gate as before.
+
+## 302. Checkout autosave — funnel and website — UI: pending (storefront)
+
+- `POST /store/:ws/checkout-sessions` now accepts `funnelId` and `websiteId` (uuid, optional) beside `source`. Send `funnelId` from funnel checkouts and `websiteId` from the store's website pages. With them, a lost checkout gets that funnel's / website's own cart-recovery email, and the dashboard and Live View filters count it. No visible change.
+
+## 303. GTM container — the store's own Google tags — UI: pending (small)
+
+- `GET /workspaces/:ws/tracking-pixels/gtm/container` no longer includes the store's own Google pixels (they already run on the storefront; a copy in GTM counts twice). Ask for a GA4 / Google Ads id only when it is not set up as a Zimos pixel. The response header `X-Zimos-Skipped-Ids` lists ids left out ("none" otherwise): show «{ids} شغالين من زيموس مباشرة — مش هنحطهم في الملف عشان ميتحسبوش مرتين» / "{ids} already run from Zimos — left out of the file so nothing counts twice".
+
+## 318. Send to supplier — in progress — UI: pending (small)
+
+- `POST …/dropship/…/orders/:orderId/push` can answer 409 `DROPSHIP_PUSH_IN_PROGRESS` while the same order is already being sent: «الطلب بيتبعت للمورد دلوقتي — حدّث الصفحة بعد شوية» / "This order is being sent to the supplier — refresh in a moment". The order's Supplier card may show a reference `externalOrderId: "pending"` for a few seconds: show «جاري الإرسال…» / "Sending…".
+
+## 320. Refund form — send an Idempotency-Key — UI: pending (small)
+
+- `POST /workspaces/:ws/orders/:orderId/refunds`: generate one `Idempotency-Key` (uuid) when the refund dialog opens and send it with the request (and with a retry of that same request). A double click then makes one refund. A new dialog gets a new key. 409 `IDEMPOTENCY_KEY_IN_PROGRESS`: «الاسترجاع بيتنفذ — استنى ثواني» / "The refund is being processed — wait a few seconds".
+
+## 322. Checkout autosave — funnel on every save — UI: pending (storefront, with 302)
+
+- Send `funnelId` (funnel checkouts) or `websiteId` (store pages) on **every** `POST /store/:ws/checkout-sessions` save, not only the first: a save without them now clears them, so a visitor who moves from a funnel to the store's checkout is counted where they are.
+
+## 325. Domain selling price with the platform's margin — UI: pending
+
+No new endpoint; what changes in the existing ones (`/api/v1/workspaces/:ws/domains/*`, `domain.manage`):
+- `GET /search`, `GET /purchases/:id/renew-quote`, and `price` on `GET /purchases` are now the **selling price**. That means the registrar's cost in the platform's selling currency (e.g. EGP) plus the platform's margin, rounded. Same shape `{ amount, currency }`, minor units. The registrar's cost is never sent to the dashboard.
+- `POST /purchases` and `POST /purchases/:id/renew` keep confirming with `acceptPrice` = the price shown. A new error:
+  - **503 `DOMAIN_PRICE_UNAVAILABLE`**: the price can't be worked out right now (no quote, or no exchange rate yet).
+  - «سعر الدومين مش متاح دلوقتي — جرّب كمان شوية» / "This domain's price isn't available right now — try again in a bit".
+- Search results can come back with `price: null` while `available: true` (a TLD the registrar didn't price). Show «السعر مش متاح» / "Price not available" and disable «اشتري».
+- Screens: Store settings → Domains → «اشتري دومين» (search list, buy dialog) and «جدّد» (renew dialog). Format prices in the returned currency (EGP for Egypt), e.g. «735 ج.م في السنة» / "EGP 735 / year".
+
+## 326. Domain owner details in the buy dialog (Dynadot) — UI: pending
+
+All under `/api/v1/workspaces/:ws/domains` (`domain.manage`).
+- **GET `/registrant`** → `{ "required": true, "contact": { "fullName": "Mona Ali", "organization": "Mona Store", "email": "mona@gmail.com", "phoneCountryCode": "20", "phone": "1001234567", "address1": "12 Tahrir St", "address2": null, "city": "Cairo", "state": "Cairo", "postalCode": "11511", "country": "EG" } | null }`.
+  - `required` is false in the sandbox. There the form can be skipped.
+- **POST `/purchases`** takes a new optional field `contact`, with the same fields as above:
+  - required: `fullName` (2–100), `email`, `phoneCountryCode` (1–3 digits), `phone` (4–14 digits, national number without the leading 0), `address1` (≤100), `city` (≤60), `state` (≤60, the governorate), `postalCode` (2–20 letters/digits), `country` (ISO-2);
+  - optional: `organization` (≤100) and `address2` (≤100).
+  - If it's left out, the saved contact is used.
+  - When `required` and nothing is saved → **422 `DOMAIN_CONTACT_REQUIRED`**: «أضف بيانات صاحب الدومين» / "Add the domain owner's details".
+- New error codes on purchase and renew:
+  - **502 `REGISTRAR_REFUSED`**: «شركة الدومينات رفضت الطلب — راجع البيانات وجرّب تاني» / "The domain registrar refused — check the details and try again". The message carries the registrar's reason.
+  - **502 `REGISTRAR_UNAVAILABLE`**: «شركة الدومينات مش بترد دلوقتي — جرّب كمان شوية» / "The domain registrar isn't answering — try again shortly".
+  - **503 `DOMAIN_PRICE_UNAVAILABLE`** also on renew (handoff 325).
+
+### Screen: Store settings → Domains → «اشتري دومين» → buy dialog
+- When `required` is true, add a step «صاحب الدومين» / "Domain owner", pre-filled from `GET /registrant` (or from the store's details the first time).
+- Fields:
+
+  | ar | en |
+  |---|---|
+  | الاسم بالكامل | Full name |
+  | اسم الشركة (اختياري) | Company (optional) |
+  | الإيميل | Email |
+  | كود الدولة + الموبايل | Country code + phone (from the country select, e.g. +20) |
+  | العنوان | Address |
+  | المدينة | City |
+  | المحافظة | Governorate / State |
+  | الرقم البريدي | Postal code |
+  | الدولة | Country |
+
+- A note under the form: «الدومين هيتسجل باسمك وانت صاحبه. هيوصلك إيميل من الجهة المسؤولة عن الدومينات لتأكيد الإيميل — لازم تأكده خلال 15 يوم وإلا الدومين يتوقف.» / "The domain is registered in your name and you own it. You'll get an email from the domain authority to confirm your address — confirm it within 15 days or the domain is suspended."
+- When saved details exist, show them as a summary with «تعديل» / "Edit".
+
+## 330. Sign-in by email or username, confirm the email with a code, the confirmed-account gate, phone at sign-up — UI: pending
+
+Two server switches, both off unless set to exactly `true`. Read them from **GET `/auth/signup-options`**, which now also answers `"confirmByCode": false, "phoneRequired": false`.
+- `SIGNUP_CONFIRM_BY_CODE`: a new account is active and signed in at once and confirms its email with a 6-digit code typed in the dashboard. Off (today): the account is pending until the emailed link is followed, as the dashboard handles now. `REQUIRE_SIGNUP_VERIFICATION` (`verificationRequired`) still comes first when it is on.
+- `REQUIRE_PHONE_AT_SIGNUP`: sign-up must send a phone.
+
+### Endpoints
+- **POST `/auth/login`** (public) `{ "identifier": "mona_store", "password": "…", "locale": "ar" }`. `identifier` is the email or the username, any case. The old `{ "email": "mona@gmail.com", "password": "…" }` still works. Every failure is 401 `INVALID_CREDENTIALS`, as before.
+- **POST `/auth/register`**: `phone` (string, ≤32) is required while `phoneRequired`; otherwise optional.
+  - Missing → 422 `VALIDATION_ERROR` `[{ "field": "phone", "message": "Enter your mobile number" }]`.
+  - Not a mobile number → 422 on `phone`, "Enter a valid mobile number".
+  - Stored normalised ("01012345678" → `"201012345678"`).
+  - With `confirmByCode` the 201 answer is `{ "user": { "status": "active", … }, "accessToken": "…", "refreshToken": "…", "sessionId": "…", "expiresAt": "…", "emailCode": { "sent": true, "channel": "email", "target": "m***@gmail.com", "expiresAt": "2026-10-07T07:00:00Z", "resendAvailableAt": "2026-10-07T06:51:00Z" } }`. `emailCode` is `{ "sent": false }` when no code could be sent. Today's "register, then log in with the same credentials" keeps working.
+- **GET `/auth/me`** adds `"confirmed": true|false`: the email (or phone) is confirmed.
+- **POST `/auth/me/email/send-code`** (Bearer) `{ "locale": "ar" }` → 200 `{ "sent": true, "channel": "email", "target": "m***@gmail.com", "expiresAt": "…", "resendAvailableAt": "…" }`.
+  - Works for an account confirmed by phone only (`confirmed` true, `user.emailVerifiedAt` null): it needs its email confirmed before it can be invited or given a console role, so offer "Send me a code" in account settings while `emailVerifiedAt` is null.
+  - Errors: 409 `ALREADY_VERIFIED` (the email itself is confirmed); 503 `EMAIL_UNAVAILABLE`; 429 `RESEND_TOO_SOON` (`details.retryAfterSeconds`); 429 `VERIFICATION_LIMIT_REACHED`.
+- **POST `/auth/me/email/confirm`** (Bearer) `{ "code": "123456" }` → 200 `{ "user": { …, "emailVerifiedAt": "…" }, "confirmed": true }`. No new tokens: the session goes on.
+  - Errors: 422 `INVALID_CODE` (`details.attemptsLeft`); 422 `CODE_EXPIRED`; 422 `NO_ACTIVE_CODE`; 429 `TOO_MANY_ATTEMPTS`; 409 `ALREADY_VERIFIED`.
+- **403 `EMAIL_NOT_VERIFIED`** `{ "error": { "code": "EMAIL_NOT_VERIFIED", "message": "Confirm your email address first. We can send you a code.", "details": { "email": "m***@gmail.com" } } }`. It is checked before the draft-store check. It comes from:
+  - `POST /workspaces/:ws/start-trial` and `/activate-free-plan`;
+  - `POST /workspaces/:ws/websites/:websiteId/publish` and `/revisions/:revisionId/rollback`;
+  - `POST /workspaces/:ws/funnels/:funnelId/publish`, `/revisions/:revisionId/rollback` and `/resume`;
+  - `POST /workspaces/:ws/funnels/bulk` with `action` `publish` or `resume`.
+  - The quickstart HTML form asks for the code itself (nothing to build).
+- **409 `INVITEE_NOT_CONFIRMED`** on `POST /workspaces/:ws/members` and `POST /workspaces/:ws/team/invite`, when the email belongs to an account that hasn't confirmed its email yet (a confirmed phone is not enough).
+- **Store transfer** (`/workspaces/:ws/ownership-transfer`): `GET /candidates` leaves out members who haven't confirmed. `POST` → 409 `NEW_OWNER_NOT_CONFIRMED`.
+- **Console** `POST /admin/admins`: 409 `USER_NOT_ACTIVE` now also for an active account that hasn't confirmed its email (a confirmed phone is not enough), with the message "That account has not confirmed its email yet. Try again once it has."
+- **Google** `/auth/google/callback` → `/auth/callback?error=ACCOUNT_SUSPENDED` now also for a suspended account that was never linked to Google.
+
+### Screens (merchant dashboard)
+- **Sign in**: the field becomes «الإيميل أو اسم المستخدم» / "Email or username" (type text, autocomplete `username`). Send it as `identifier`.
+  - On a wrong answer: «بيانات الدخول غلط» / "Incorrect sign-in details".
+  - Offer «ابعت إيميل التأكيد تاني» / "Resend the email" only when the field has an "@".
+- **Sign up**: the phone field is «رقم الموبايل» / "Mobile number" and required while `phoneRequired`. Otherwise keep «رقم الهاتف (اختياري)» / "Phone (optional)".
+  - Show the 422 under the field: «اكتب رقم موبايل صحيح» / "Enter a valid mobile number".
+  - With `confirmByCode`, go straight in. When `emailCode.sent`, open the code dialog at once, with the code already sent.
+- **Banner** (app shell, while `confirmed === false`): «أكّد إيميلك عشان تقدر تنشر متجرك وتبدأ التجربة المجانية.» / "Confirm your email to publish your store and start your free trial." Button «ابعتلي كود» / "Send me a code" opens the dialog.
+- **Code dialog** «أكّد إيميلك» / "Confirm your email":
+  - Text: «بعتنا كود من 6 أرقام لـ {target}. صالح 10 دقايق.» / "We sent a 6-digit code to {target}. It's valid for 10 minutes."
+  - Field «الكود» / "Code" (inputmode numeric, autocomplete `one-time-code`).
+  - Buttons: «تأكيد» / "Confirm", and «ابعت كود جديد» / "Send a new code". The second is disabled until `resendAvailableAt`, with «تقدر تطلب كود جديد بعد {s} ثانية» / "You can ask for a new code in {s}s".
+  - States:
+    - wrong code: «الكود مش صحيح — فاضل {n} محاولات» / "That code isn't right — {n} tries left";
+    - expired or none: «الكود انتهى — اطلب كود جديد» / "The code has expired — ask for a new one";
+    - too many tries: «محاولات كتير — اطلب كود جديد» / "Too many tries — ask for a new one";
+    - limit: «طلبت أكواد كتير — جرّب بعد شوية» / "Too many codes requested — try again later";
+    - 503: «مش قادرين نبعت إيميلات دلوقتي — جرّب كمان شوية» / "We can't send emails right now — try again shortly".
+  - Success: toast «تم تأكيد إيميلك» / "Your email is confirmed", reload `/auth/me` and hide the banner.
+- **Any action answering `EMAIL_NOT_VERIFIED`** (go live / start the trial, publish or restore the website or a funnel, resume, bulk publish/resume): open the code dialog with `details.email` and send the same request again once confirmed.
+- **Team → Invite**: `INVITEE_NOT_CONFIRMED` → «صاحب الإيميل ده لسه مأكدش حسابه — اطلب منه يأكده وبعدين ابعت الدعوة تاني» / "That person hasn't confirmed their account yet — ask them to confirm it, then invite them again".
+- **Settings → Transfer store**: `NEW_OWNER_NOT_CONFIRMED` → «الشخص ده لسه مأكدش إيميله» / "That person hasn't confirmed their email yet".
+- **Google callback page**: `ACCOUNT_SUSPENDED` → «الحساب ده موقوف» / "This account has been suspended".
+- **Console (platform-admin) → Admins → Add**: show the `USER_NOT_ACTIVE` message as is, or «الحساب ده لسه مأكدش إيميله» / "That account hasn't confirmed its email yet".
+
+## 331. Password reset that reveals nothing, per-IP sign-in limits, the review-form switch — UI: pending
+
+Server settings, nothing for the UI to read except `reviewFormOpen` below: `PASSWORD_RESET_RATE_LIMIT_PER_HOUR` (10 per IP), `AUTH_IP_RATE_LIMIT_MAX` / `AUTH_IP_RATE_LIMIT_WINDOW_MS` (50 per 15 minutes per IP), `VERIFICATION_CODES_PER_IP_PER_HOUR` / `_PER_DAY` / `VERIFICATION_SMS_PER_IP_PER_DAY` (20 / 50 / 5), `REVIEWS_PUBLIC_SUBMISSION_ENABLED` (unset = open, any value but `true` closes the storefront review form), `PASSWORD_RESET_SMS_ENABLED` (off unless `true`; no screen uses SMS reset — build none).
+
+### Endpoints
+- **POST `/auth/password-reset/request`** (public) `{ "email": "mona@gmail.com", "locale": "ar" }` → 200 `{ "success": true }`, at once and the same for every address.
+  - `locale` (`ar` | `en`, optional) is the email's language; unset, the account's dashboard language, else Arabic. Anything else → 422 `VALIDATION_ERROR` on `locale`.
+  - The link (`{FRONTEND_URL}/reset-password?token=…`, unchanged) is valid **30 minutes** (was one hour), works once, and a newer one replaces the older. Past 3 links an hour or 10 a day for one account the answer is the same and nothing is sent.
+  - 429 `RATE_LIMITED` "Too many requests": 10 requests per hour from one IP, or the per-IP sign-up / reset / resend budget below.
+  - 503 `PASSWORD_RESET_UNAVAILABLE` "Password reset is not available right now. Try again later." (production server without `FRONTEND_URL`; the same for every address).
+- **POST `/auth/password-reset/confirm`** `{ "token": "…", "newPassword": "…" }` → 200 `{ "success": true }`. Unchanged shape. Now it also: signs the account out everywhere (any access token stops at once), forgets remembered browsers, confirms an unconfirmed email and activates a pending account. 400 `INVALID_RESET_TOKEN` for an unknown, used, replaced or expired link.
+- **POST `/auth/login`**: after 50 failed sign-ins in 15 minutes from one IP (whatever emails or usernames were typed) → 429 `RATE_LIMITED`, even with the right password, until the window passes. Successful sign-ins don't count.
+- **POST `/auth/register`**, **POST `/auth/resend-verification`**, **POST `/auth/password-reset/request`**: together 50 requests per 15 minutes per IP → 429 `RATE_LIMITED`.
+- **POST `/auth/me/email/send-code`**, `/auth/verify/send`: 429 `VERIFICATION_LIMIT_REACHED` as before (the per-IP ceilings are now server settings).
+- **GET `/store/:workspaceId/products/:idOrSlug`** adds `"reviewFormOpen": true|false`.
+- **POST `/store/:workspaceId/products/:productId/reviews`** (unchanged body `{ orderNumber, phone, rating, comment, photoIds }`): while closed, every request → 404 `{ "error": { "code": "NOT_FOUND", "message": "Not found" } }`. Open, it answers as today (201/200, 403 `REVIEW_NOT_VERIFIED`, 422 `REVIEW_PHOTO_INVALID`).
+
+### Screens
+- **Merchant dashboard → Forgot password**: send `locale` with the dashboard's language. Keep the one confirmation for every address and change it to «إذا كان هذا البريد الإلكتروني مسجّلًا لدينا، سيصلك رابط لتعيين كلمة مرور جديدة خلال دقائق. الرابط صالح لمدة 30 دقيقة ولمرة واحدة.» / "If this email is registered with us, a link to set a new password will arrive within minutes. The link is valid for 30 minutes and works once."
+  - 429: «طلبات كتير من الشبكة دي — جرّب بعد شوية» / "Too many requests from this network — try again in a while".
+  - 503: «إعادة تعيين كلمة المرور مش متاحة دلوقتي — جرّب كمان شوية» / "Password reset isn't available right now — try again shortly".
+- **Merchant dashboard → Reset password** (`/reset-password?token=`):
+  - `INVALID_RESET_TOKEN`: «الرابط ده انتهى أو اتستخدم قبل كده — اطلب رابط جديد» / "This link has expired or was already used — ask for a new one", with a link «اطلب رابط جديد» / "Ask for a new link" to Forgot password.
+  - Success: «اتغيرت كلمة المرور، وخرجنا من حسابك على كل الأجهزة. سجّل دخولك بكلمة المرور الجديدة.» / "Your password is changed and you've been signed out on every device. Sign in with the new password." Then go to sign-in (clear any stored tokens).
+- **Merchant dashboard → Sign in / Sign up / Resend the email**: on 429 `RATE_LIMITED` show «محاولات كتير من الشبكة دي — استنى ربع ساعة وجرّب تاني» / "Too many attempts from this network — wait 15 minutes and try again". Don't clear the form.
+- **Storefront → product page → reviews**: when `reviewFormOpen` is false, hide «اكتب تقييمًا» / "Write a review" and the form; keep the rating and the approved reviews. If a submission answers 404 `NOT_FOUND`, hide the form and show «التقييمات مقفولة دلوقتي» / "Reviews are closed right now".
+
+---
+## 332. Account settings: change your name, email and phone with codes — UI: pending
+
+One server switch: `PHONE_CHANGE_ENABLED` (off unless exactly `true`). Read it from **GET `/auth/me`**, which now also answers `"account": { "hasPassword": true, "phoneChange": false }`: `hasPassword` false is an account made through Google (it proves it is the owner with a code to its current email instead of a password).
+
+Our existing endpoints are unchanged and keep working: `PATCH /auth/me/profile` (name, picture, language), the email change by link (`GET`/`POST`/`DELETE /auth/me/email`, `POST /auth/email-change/confirm`, the `/account/email-change?token=` page) and `/auth/verify-phone/*`. The account settings screen should move its email change to the code flow below; keep the link page for links already sent. If the code flow changes the email, any pending link change dies, and the other way round. One change to the link flow: **POST `/auth/me/email`** for an account with `hasPassword: false` now needs `"reauthCode": "123456"` (from `POST /auth/me/reauth-code`, below) beside `newEmail`; without it 422 `REAUTH_CODE_REQUIRED`, and the code errors as below (422 `INVALID_CODE` / `CODE_EXPIRED` / `NO_ACTIVE_CODE`, 429 `TOO_MANY_ATTEMPTS`). A password account sends `password` as before. A password reset now also cancels a pending link change.
+
+All the endpoints below are Bearer, act on the signed-in account only, and share a limit of 20 changes an hour per account (with `PATCH /auth/me/username`): past it, 429 `RATE_LIMITED` "Too many requests". A wrong password is **422**, never 401, so it must not sign the dashboard out.
+
+### Endpoints
+- **PATCH `/auth/me/name`** `{ "fullName": "Mona Adel" }` → 200 `{ "user": { …, "fullName": "Mona Adel" } }`. Spaces are collapsed and control characters dropped.
+  - 422 `INVALID_NAME` "The name must be 2 to 200 characters." `details: [{ "field": "fullName", "message": "2 to 200 characters" }]`.
+- **POST `/auth/me/reauth-code`** `{ "locale": "ar" }` (only for `hasPassword: false`) → 200 `{ "sent": true, "channel": "email", "target": "m***@gmail.com", "expiresAt": "2026-10-07T07:26:44Z", "resendAvailableAt": "2026-10-07T07:17:44Z" }`. A 6-digit code to the current email, valid 10 minutes, 5 tries.
+  - 409 `PASSWORD_REQUIRED` (the account has a password: ask for it instead); 503 `EMAIL_UNAVAILABLE`; 429 `RESEND_TOO_SOON` (`details.retryAfterSeconds`, a minute between codes); 429 `VERIFICATION_LIMIT_REACHED` (5 an hour, 10 a day).
+- **POST `/auth/me/email-change`** `{ "newEmail": "mona.new@gmail.com", "currentPassword": "…", "locale": "ar" }` — or `"reauthCode": "123456"` instead of `currentPassword` for `hasPassword: false` → 200 `{ "sent": true, "channel": "email", "target": "m***@gmail.com", "expiresAt": "…", "resendAvailableAt": "…" }`. A code goes to the new address. Nothing changes yet.
+  - The answer is the same when the new address belongs to another account; then no code ever arrives (don't tell the person anything else).
+  - 422 `SAME_EMAIL` (field `newEmail`); 422 `INVALID_PASSWORD` "The current password is not right." (field `currentPassword`); 422 `REAUTH_CODE_REQUIRED` (field `reauthCode`); for a wrong `reauthCode`: 422 `INVALID_CODE` (`details.attemptsLeft`), 422 `CODE_EXPIRED`, 422 `NO_ACTIVE_CODE`, 429 `TOO_MANY_ATTEMPTS`; 503 `EMAIL_UNAVAILABLE`; 429 `RESEND_TOO_SOON` / `VERIFICATION_LIMIT_REACHED` as above; 422 `VALIDATION_ERROR` for a malformed email.
+- **POST `/auth/me/email-change/confirm`** `{ "code": "123456" }` → 200 `{ "user": { …, "email": "mona.new@gmail.com", "emailVerifiedAt": "…" }, "accessToken": "…", "refreshToken": "…" }` (in cookie mode the refresh token goes into the cookie and is left out of the body, as at sign-in). Every other session has ended, the current access token included: **store the new tokens at once**. The old address gets a notice with no link.
+  - 422 `INVALID_CODE` (`details.attemptsLeft`); 422 `CODE_EXPIRED`; 422 `NO_ACTIVE_CODE`; 429 `TOO_MANY_ATTEMPTS`; 409 `EMAIL_TAKEN` (someone took the address meanwhile).
+- **POST `/auth/me/phone-change`** `{ "newPhone": "01022223333", "currentPassword": "…", "locale": "ar" }` (or `reauthCode`) → 200 `{ "sent": true, "channel": "sms", "target": "01******333", "expiresAt": "…", "resendAvailableAt": "…" }`. An SMS code to the new number.
+  - While `phoneChange` is false: the same 200 for any request (`target` may be null) and nothing is sent — don't offer the button.
+  - 422 `INVALID_PHONE` (field `newPhone`); 422 `SAME_PHONE`; 422 `PHONE_COUNTRY_NOT_SUPPORTED`; 422 `INVALID_PASSWORD` / `REAUTH_CODE_REQUIRED` / the code errors as above; 503 `SMS_UNAVAILABLE`; 429 `RESEND_TOO_SOON` / `VERIFICATION_LIMIT_REACHED`.
+- **POST `/auth/me/phone-change/confirm`** `{ "code": "123456" }` → 200 `{ "user": { …, "phone": "201022223333", "phoneVerifiedAt": "…" } }`. The session goes on. Errors as for the email confirm; while off, always 422 `NO_ACTIVE_CODE`.
+- **PATCH `/auth/me/username`**: unchanged, plus 429 `RATE_LIMITED` past the shared limit.
+
+### Screens
+- **Merchant dashboard → Account settings → Name** «الاسم» / "Name": save with `PATCH /auth/me/name` («حفظ» / "Save"; success toast «اتحفظ الاسم» / "Name saved"). Picture and language stay on `/auth/me/profile`. `INVALID_NAME` under the field: «الاسم لازم يكون من 2 لـ 200 حرف» / "The name must be 2 to 200 characters".
+- **Account settings → Email** «البريد الإلكتروني» / "Email": the current address and a button «تغيير البريد» / "Change email" opening a two-step dialog.
+  - Step 1 «البريد الجديد» / "New email" and, when `hasPassword`, «كلمة المرور الحالية» / "Current password"; otherwise a button «ابعتلي رمز على بريدي الحالي» / "Send a code to my current email" (`/auth/me/reauth-code`), then «الرمز اللي وصلك على بريدك الحالي» / "The code sent to your current email". Button «ابعت رمز للبريد الجديد» / "Send a code to the new email".
+  - Step 2 «بعتنا رمز من 6 أرقام على {target}» / "We sent a 6-digit code to {target}", a code field, «تأكيد» / "Confirm", and «ابعت الرمز تاني» / "Send it again" disabled until `resendAvailableAt` with a countdown «تقدر تطلب رمز جديد بعد {s} ثانية» / "You can ask for a new code in {s} s" (resending repeats step 1's request, so keep the password or ask for a new reauth code).
+  - Success: store the returned tokens, refresh `/auth/me`, toast «اتغير بريدك، وخرجنا من حسابك على باقي الأجهزة» / "Your email is changed and you've been signed out on your other devices".
+  - Errors: `SAME_EMAIL` «ده بريدك الحالي بالفعل» / "This is already your email"; `INVALID_PASSWORD` under the password «كلمة المرور مش صحيحة» / "The password isn't right"; `REAUTH_CODE_REQUIRED` «اطلب رمز على بريدك الحالي واكتبه» / "Ask for a code to your current email and enter it"; `INVALID_CODE` «الرمز غلط — باقي {attemptsLeft} محاولات» / "Wrong code — {attemptsLeft} tries left"; `CODE_EXPIRED` / `NO_ACTIVE_CODE` / `TOO_MANY_ATTEMPTS` «الرمز ده مبقاش صالح — اطلب رمز جديد» / "This code is no longer valid — ask for a new one"; `EMAIL_TAKEN` «البريد ده مستخدم في حساب تاني» / "This email is used by another account"; `RESEND_TOO_SOON` «استنى شوية قبل ما تطلب رمز جديد» / "Wait a moment before asking for another code"; `VERIFICATION_LIMIT_REACHED` / `RATE_LIMITED` «طلبات كتير — جرّب بعد شوية» / "Too many requests — try again later"; `EMAIL_UNAVAILABLE` «مش قادرين نبعت رموز على البريد دلوقتي — جرّب كمان شوية» / "We can't send email codes right now — try again shortly".
+- **Account settings → Mobile number** «رقم الموبايل» / "Mobile number": when `account.phoneChange` is true, a button «تغيير الرقم» / "Change number" with the same two steps (new number «الرقم الجديد» / "New number", password or reauth code, then «بعتنا رمز في رسالة على {target}» / "We texted a code to {target}"); success «اتغير رقمك» / "Your number is changed" (no new tokens). When false, show the number as today with no change button.
+  - Errors: `INVALID_PHONE` «اكتب رقم موبايل صحيح» / "Enter a valid mobile number"; `SAME_PHONE` «ده رقمك الحالي بالفعل» / "This is already your number"; `PHONE_COUNTRY_NOT_SUPPORTED` «مش بنبعت رموز للدولة دي» / "We can't send codes to this country"; `SMS_UNAVAILABLE` «مش قادرين نبعت رسائل دلوقتي — جرّب كمان شوية» / "We can't send text messages right now — try again shortly"; the password and code errors as for the email.
+
+---
+## 333. The Subscription section (plans, code preview, charges, plan change), one trial per account, the feature catalogue and its gate — UI: pending
+
+One server switch: `PLAN_FEATURE_ENFORCEMENT` (off unless exactly `true`). The UI never reads it: it handles 403 `PLAN_FEATURE_REQUIRED` wherever it can appear (below). Everything under `/workspaces/:workspaceId/billing` is Bearer + `billing.manage` (the owner and the accountant role); amounts are minor units, like everywhere else. Prices always come from the server: the dashboard never sends one.
+
+### Endpoints (merchant)
+- **GET `/workspaces/:workspaceId/billing/plans`** → 200
+  ```json
+  {
+    "subscription": { "status": "trialing", "billingCycle": "monthly", "planId": "c3bc…", "trialEndsAt": "2026-10-20T18:14:13Z", "currentPeriodEnd": "2026-10-20T18:14:13Z", "draft": false },
+    "trial": { "available": false, "used": false },
+    "planChange": "immediate",
+    "referralCode": null,
+    "plans": [
+      { "id": "6538…", "name": "Growth", "currency": "USD", "monthlyPrice": 79900, "yearlyPrice": 799000, "trialDays": 14,
+        "maxStores": null, "maxFunnelsPerMonth": null, "softOrderQuota": 2000, "features": ["custom_domain", "staff_accounts"],
+        "isCurrent": false, "isPublic": true,
+        "prices": { "monthly": { "gross": 79900, "discount": 0, "net": 79900 }, "yearly": { "gross": 799000, "discount": 0, "net": 799000 } } }
+    ]
+  }
+  ```
+  - `plans`: the plans on offer in the pricing page's order, plus the store's own first when it is a private plan (`isPublic: false` — show it, but it can't be chosen). `prices.*.discount` is what the attached referral code takes off (`referralCode` is the existing merchant view of it: `code`, `discountType`, `discountValue`, `discountCurrency`, `active`).
+  - `trial.available`: the store is a draft (REQUIRE_SUBSCRIPTION_TO_GO_LIVE) and the account never had a free trial. `trial.used`: the account had one, on any plan or store — one per account now.
+  - `planChange`: `immediate` (a draft or a trial: nothing paid yet → POST `/billing/plan`) or `support` (a paid subscription: through support).
+- **POST `/workspaces/:workspaceId/billing/code-preview`** `{ "code": "ahmed10" }` → 200 `{ "code": { "code": "AHMED10", "discountType": "percentage", "discountValue": 1000, "discountCurrency": null, "active": true }, "plans": [{ "planId": "6538…", "prices": { "monthly": { "gross": 79900, "discount": 7990, "net": 71910 }, "yearly": { "gross": 799000, "discount": 79900, "net": 719100 } } }] }`. Attaches nothing: the code is attached with the existing **POST `/billing/referral-code`**.
+  - 422 `REFERRAL_CODE_INVALID` "That referral code isn't valid. Check it and try again." (unknown or inactive, the same answer); 409 `SELF_REFERRAL` (the merchant's own code); 429 `RATE_LIMITED` (20 tries a minute per IP); 422 `VALIDATION_ERROR` (empty code).
+- **GET `/workspaces/:workspaceId/billing/invoices?page=1&pageSize=20`** (pageSize ≤ 50) → 200 `{ "invoices": [{ "id": "…", "status": "paid", "periodStart": "2026-08-01T00:00:00Z", "periodEnd": "2026-09-01T00:00:00Z", "grossAmount": 29900, "discountAmount": 0, "amountDue": 29900, "amountPaid": 29900, "currency": "USD", "paidAt": "2026-09-01T00:00:00Z", "paymentSource": "manual", "createdAt": "…" }], "page": 1, "pageSize": 20, "total": 3 }`, newest first. `status`: `pending` | `paid` | `failed`.
+- **POST `/workspaces/:workspaceId/billing/plan`** `{ "planId": "6538…", "billingCycle": "yearly" }` (`billingCycle` optional, keeps the current one) → 200 `{ "changed": true, "plans": { …the GET /billing/plans answer… } }`; `changed: false` when nothing changed. Takes effect at once; a trial keeps its end date.
+  - 409 `PLAN_CHANGE_NEEDS_SUPPORT` "Your plan can be changed through Zimos support while a paid subscription runs. Contact support."; 422 `PLAN_NOT_AVAILABLE` (field `planId`: a private, inactive or unknown plan); 409 `OPEN_CHARGE_EXISTS` "A charge is open for the current plan. Settle it before changing plan."
+- **POST `/workspaces/:workspaceId/start-trial`** now takes an optional body `{ "planId": "6538…" }` (no body = the store's own plan, as today). The store moves to that plan and its trial runs that plan's `trialDays` from now. 201 / 200 and the answer as today.
+  - 422 `PLAN_NOT_AVAILABLE` (field `planId`); 409 `TRIAL_NOT_AVAILABLE` `details: { "reason": "used" | "no_trial", "days": 14 }` — `used` now means the account had a trial on any plan; 409 `NOT_A_DRAFT`, 403 `EMAIL_NOT_VERIFIED` as before.
+- Changed shapes: **GET `/plans/public`**, **GET `/workspaces/:id/billing`** (`subscription.plan.features` and `features`) list only features that exist (today `priority_support` is never listed). The order of `/plans/public` is unchanged (display order, then price, then name).
+
+### Endpoints (console)
+- **GET `/admin/plans`** (plans.view) → 200 `{ "plans": [ … ], "featureCatalog": [{ "key": "custom_domain", "type": "boolean", "available": true, "label": { "en": "Custom domain", "ar": "نطاق خاص" } }, …, { "key": "priority_support", "type": "boolean", "available": false, "label": { "en": "Priority support", "ar": "دعم ذو أولوية" } }] }`. Plans now come in the pricing page's order (display order, then monthly price, then name), no longer by price alone. Read the feature list and its names from `featureCatalog` instead of a list in the console.
+- **POST `/admin/plans`**, **PATCH `/admin/plans/:planId`** (plans.manage): a key the plan didn't list before must be `available` → 422 `PLAN_FEATURE_NOT_AVAILABLE` "Not available yet, so it can't be added to a plan: Priority support", `details: [{ "field": "features", "key": "priority_support", "message": "\"Priority support\" isn't available yet" }]` (an unknown key: `"\"bogus\" isn't a feature"`). A key the plan already lists can stay or be removed.
+- **GET `/admin/workspaces/:workspaceId/features`**: each row of `features` adds `available` and `label { en, ar }`.
+
+### The gate (while `PLAN_FEATURE_ENFORCEMENT=true`)
+403 `{ "error": { "code": "PLAN_FEATURE_REQUIRED", "message": "Your plan doesn't include Custom domain. Upgrade your plan to use it.", "details": { "feature": "custom_domain", "label": { "en": "Custom domain", "ar": "نطاق خاص" } } } }` on:
+- `custom_domain`: **POST `/workspaces/:id/domains`**, **POST `/domains/:domainId/verify`**, **POST `/domains/purchases`**;
+- `staff_accounts`: **POST `/workspaces/:id/members`**, **POST `/workspaces/:id/team/invite`**;
+- `advanced_analytics`: **GET `/workspaces/:id/analytics/web/stats`**, `/web/series`, `/web/metrics`, `/web/weekly`, `/web/realtime`.
+Everything else stays open (domain list and settings, members, the analytics summary, overview, live view and reports). A console grant on the store lets it through without changing its plan.
+
+### Screens
+- **Merchant dashboard → Settings → Subscription** «الاشتراك» / "Subscription":
+  - A cycle switch «شهري» / "Monthly" · «سنوي (شهرين مجانًا)» / "Yearly (2 months free)"; one card per plan with its name, `prices[cycle].net` per month / year, the gross struck through when `discount > 0` with «خصم الكود {amount}» / "Code discount {amount}", the plan's limits and its features by name (the same Arabic/English names as the console catalogue).
+  - The current plan: badge «باقتك الحالية» / "Your current plan"; a private current plan shows «باقة خاصة» / "Private plan" and no button.
+  - Other plans while `planChange` is `immediate`: «اختار الباقة دي» / "Choose this plan" → POST `/billing/plan` with the plan and the switch's cycle; success toast «اتغيرت باقتك» / "Your plan is changed", redraw from `plans`. While `support`: no button, a note «لتغيير الباقة أثناء اشتراك مدفوع تواصل مع الدعم» / "To change plan while a paid subscription runs, contact support" with a link «افتح تذكرة دعم» / "Open a support ticket".
+  - While `trial.available`: on each plan with `trialDays > 0` «ابدأ تجربة مجانية {trialDays} يوم» / "Start a {trialDays}-day free trial" → POST `/start-trial` `{ planId }`. When `trial.used`: «استخدمت التجربة المجانية قبل كده» / "You've already used your free trial" and only the subscribe/pay actions.
+  - Referral code «كود الإحالة» / "Referral code": a field and «جرّب الكود» / "Try the code" (code-preview) that redraws the prices with the discount, then «استخدم الكود» / "Use this code" (the existing attach). Once attached, show it read-only with its discount.
+  - Charges «الفواتير» / "Charges": a table — period «الفترة» / "Period", amount «المبلغ» / "Amount" (gross, discount, due), paid «المدفوع» / "Paid", status «مدفوعة» / "Paid" · «في الانتظار» / "Pending" · «فشلت» / "Failed", paid on «تاريخ الدفع» / "Paid on"; paged 20 at a time, «لا توجد فواتير بعد» / "No charges yet" when empty.
+  - Errors: `REFERRAL_CODE_INVALID` «الكود ده مش صالح — راجعه وجرّب تاني» / "That code isn't valid — check it and try again"; `SELF_REFERRAL` «مينفعش تستخدم كود الإحالة بتاعك على متجرك» / "You can't use your own referral code on your store"; `RATE_LIMITED` «محاولات كتير — استنى دقيقة وجرّب تاني» / "Too many tries — wait a minute and try again"; `PLAN_NOT_AVAILABLE` «الباقة دي مش متاحة دلوقتي» / "This plan isn't available right now"; `OPEN_CHARGE_EXISTS` «فيه فاتورة مفتوحة على باقتك الحالية — ادفعها الأول» / "There's an open charge on your current plan — settle it first"; `PLAN_CHANGE_NEEDS_SUPPORT` as the note above; `TRIAL_NOT_AVAILABLE` `used` «استخدمت التجربة المجانية قبل كده» / "You've already used your free trial", `no_trial` «الباقة دي مالهاش تجربة مجانية» / "This plan has no free trial".
+- **Draft store → subscribe dialog**: may offer the other plans' trials with `planId`; the same errors.
+- **Wherever the gated actions are** (Domains → add / verify / buy, Team → invite, Analytics → Website traffic): on 403 `PLAN_FEATURE_REQUIRED` show «باقتك مش فيها {label.ar} — رقّي باقتك عشان تستخدمها» / "Your plan doesn't include {label.en} — upgrade your plan to use it" with «شوف الباقات» / "See plans" → the Subscription section. Website traffic shows it in place of the charts.
+- **Console → Plans → edit**: tick features from `featureCatalog` with `label.ar` / `label.en`; a key with `available: false` is disabled with «غير متاحة حاليًا» / "Not available yet", unless the plan already lists it (then it can be unticked, not re-ticked). Show `PLAN_FEATURE_NOT_AVAILABLE` details under the features. The list is in display order now.
+- **Console → Store → Features**: use `label` for each row's name and mark `available: false` rows «غير متاحة حاليًا» / "Not available yet".
+
+## 334. Paying the subscription by InstaPay or a wallet with a transfer proof, the platform's payment methods and their review in the console — UI: pending
+
+No new environment variable. Online payment still needs `ONLINE_BILLING_ENABLED=true` and the `FAWATERAK_*` keys (docs/billing-fawaterak.md); a transfer needs a manual method turned on in the console with its number. Everything under `/workspaces/:workspaceId/billing` is Bearer + `billing.manage`; amounts are minor units; the dashboard never sends a price (`expectedAmount` is only compared). The whole contract is in docs/billing-payment-methods.md.
+
+### Endpoints (merchant)
+- **GET `/workspaces/:workspaceId/billing/payment-methods`** → 200, never cached:
+  ```json
+  {
+    "methods": [
+      { "code": "instapay", "kind": "manual", "label": { "ar": "إنستا باي", "en": "InstaPay" },
+        "accountNumber": "zimos@instapay", "paymentLink": "https://ipn.eg/S/zimos/instapay/abc",
+        "note": { "ar": "حوّل المبلغ بالضبط", "en": "Send the exact amount" } },
+      { "code": "fawaterak", "kind": "gateway", "label": { "ar": "فواتيرك", "en": "Card / Fawry" } }
+    ],
+    "currency": "EGP",
+    "contactSupport": false
+  }
+  ```
+  In the console's order. A manual method is listed only for a plan in EGP and only with its number; `paymentLink` is `null` when none is set (show the number only); `note.ar` / `note.en` may be `null`. A gateway is listed only while it is turned on and configured. `methods: []` with `contactSupport: true` when there is no way to pay.
+- **POST `/workspaces/:workspaceId/billing/invoices/open`** (no body) → always 200, writes nothing:
+  ```json
+  {
+    "invoice": { "id": "next", "status": "pending", "periodStart": "2026-10-07T07:44:10Z", "periodEnd": "2026-11-07T07:44:10Z",
+                 "grossAmount": 29900, "discountAmount": 0, "amountDue": 29900, "amountPaid": null, "currency": "EGP",
+                 "paidAt": null, "paymentSource": null, "createdAt": null },
+    "created": false,
+    "written": false,
+    "methods": [ …as GET /payment-methods… ]
+  }
+  ```
+  `written: true` (and the charge's real `id` and `createdAt`) when a charge is already open; `id: "next"` otherwise — the charge is written only when a proof is sent. `amountDue` is what to transfer. 409 `NO_PAYMENT_METHOD` "There is no way to pay online or by transfer right now. Contact support."; 409 `NO_PLAN`, `PLAN_IS_FREE`.
+- **POST `/workspaces/:workspaceId/billing/invoices/:invoiceId/payment-proofs`** — `multipart/form-data`, `:invoiceId` = the `invoice.id` from `/invoices/open` (`next` or a charge id):
+  - `methodCode` (required): a manual method's `code`;
+  - `senderPhone` (required): the Egyptian mobile number the money came from (`01012345678`, `0101 234 5678`, `+201012345678`);
+  - `file` (required): the screenshot, JPEG, PNG or WebP, up to 8 MB;
+  - `expectedAmount` (send it): the `amountDue` shown.
+  → 201 `{ "proof": { "id": "a6a8…", "purpose": "invoice", "invoiceId": "e552…", "method": { "code": "instapay", "label": { "ar": "إنستا باي", "en": "InstaPay" } }, "senderPhone": "201012345678", "amount": 29900, "currency": "EGP", "status": "pending", "reviewNote": null, "createdAt": "…", "reviewedAt": null } }`.
+  Errors: 409 `CHARGE_AMOUNT_CHANGED` `details: { "amountDue": 30900, "currency": "EGP" }` (show the new amount and ask again; nothing was written); 422 `PAYMENT_METHOD_NOT_AVAILABLE` (field `methodCode`); 422 `INVALID_SENDER_PHONE` (field `senderPhone`); 422 `NO_FILE`; 415 `UNSUPPORTED_MEDIA_TYPE`; 413 `FILE_TOO_LARGE`; 409 `PROOF_IMAGE_DUPLICATE`; 409 `PROOF_ALREADY_OPEN`; 409 `TOO_MANY_OPEN_PROOFS` (3 waiting per store); 409 `CHARGE_NOT_PENDING`; 409 `MANUAL_PAYMENT_CURRENCY_UNSUPPORTED`; 409 `NOTHING_TO_PAY`; 404 `NOT_FOUND` (an unknown charge id); 429 `RATE_LIMITED` (10 an hour per account).
+- **GET `/workspaces/:workspaceId/billing/payment-proofs`** → 200 `{ "proofs": [ …the proof above… ] }`, the latest 20, newest first; `status` `pending` | `approved` | `rejected`; `reviewNote` is set only on a rejected one (the console's note, for the merchant).
+- **POST `/workspaces/:workspaceId/billing/payments`** (the Pay button) takes an optional `"method": "fawaterak"`: a gateway from the list. Without it, Fawaterak as today. 404 `PAYMENT_METHOD_NOT_AVAILABLE` for a code that isn't an offered gateway.
+
+### Endpoints (console)
+- **GET `/admin/payment-methods`** (payments.record) → 200
+  ```json
+  {
+    "methods": [
+      { "id": "aad8…", "code": "instapay", "kind": "manual", "labelAr": "إنستا باي", "labelEn": "InstaPay", "sortOrder": 10, "enabled": true,
+        "accountNumber": "zimos@instapay", "paymentLink": "https://ipn.eg/S/zimos/instapay/abc", "noteAr": "حوّل المبلغ بالضبط", "noteEn": "Send the exact amount",
+        "offered": true, "updatedAt": "…" },
+      { "id": "6f99…", "code": "fawaterak", "kind": "gateway", "labelAr": "Fawaterak", "labelEn": "Fawaterak", "sortOrder": 30, "enabled": true,
+        "gateway": { "name": "Fawaterak", "adapterInstalled": true, "configured": false,
+                     "missing": ["ONLINE_BILLING_ENABLED", "FAWATERAK_CLIENT_ID", "FAWATERAK_CLIENT_SECRET", "FAWATERAK_HASH_KEY", "FAWATERAK_WEBHOOK_TOKEN"],
+                     "currencies": ["EGP"] },
+        "offered": false, "updatedAt": "…" }
+    ],
+    "gatewaysNotAdded": [{ "code": "fawaterak", "name": "Fawaterak", "configured": false, "missing": ["…"], "currencies": ["EGP"] }]
+  }
+  ```
+  `missing` holds variable names only. A gateway in `gatewaysNotAdded` has no row yet: turning it on (PATCH below) adds it.
+- **PATCH `/admin/payment-methods/:code`** (payment_methods.manage) `{ "enabled": true, "labelAr": "…", "labelEn": "…" }` (any of them) → 200 `{ "method": { …one row as above… } }`. 409 `PAYMENT_METHOD_NEEDS_NUMBER` "Set the number this method sends money to before turning it on."; 404 for an unknown code.
+- **PUT `/admin/payment-methods/order`** (payment_methods.manage) `{ "codes": ["wallet", "instapay"] }` → 200, the GET answer. 422 `UNKNOWN_PAYMENT_METHOD`.
+- **PATCH `/admin/payment-methods/:code/account`** (payment_methods.edit_numbers) `{ "accountNumber": "zimos@instapay", "paymentLink": "https://ipn.eg/S/zimos/instapay/abc", "noteAr": "…", "noteEn": "…" }` (any of them; `""` clears one, `paymentLink: null` too) → 200 `{ "method": … }`. 422 `VALIDATION_ERROR` field `paymentLink` (not https); 409 `PAYMENT_METHOD_NEEDS_NUMBER` "Turn this method off before removing its number."; 409 `NOT_A_MANUAL_METHOD` (a gateway).
+- **GET `/admin/payment-proofs?status=pending&page=1&pageSize=20`** (payments.record; `status` pending | approved | rejected | all; pageSize ≤ 50) → 200 `{ "proofs": [{ "id": "…", "purpose": "invoice", "workspace": { "id": "…", "name": "Demo Store", "slug": "demo-store" }, "invoiceId": "…", "method": { "code": "instapay", "labelAr": "إنستا باي", "labelEn": "InstaPay" }, "receivingNumber": "zimos@instapay", "senderPhone": "201012345678", "requestedAmount": 29900, "receivedAmount": null, "currency": "EGP", "status": "pending", "reviewNote": null, "reviewedBy": null, "reviewedAt": null, "submittedBy": { "id": "…", "fullName": "Demo", "email": "demo@zimos.test" }, "createdAt": "…" }], "page": 1, "pageSize": 20, "total": 1 }`. Waiting ones oldest first, the rest newest first.
+- **GET `/admin/payment-proofs/:proofId`** (payments.record) → 200 `{ "proof": { … }, "invoice": { "id": "…", "status": "pending", "amountDue": 29900, "currency": "EGP", "periodStart": "…", "periodEnd": "…", "paidAt": null }, "approvalBlockers": [], "image": { "url": "https://api…/api/v1/payment-proofs/…/image?expires=…&signature=…", "expiresAt": "…", "mime": "image/jpeg" } }`. `image.url` works in an `<img>` without the token for 5 minutes (load the proof again for a new one). `approvalBlockers`: `CHARGE_ALREADY_PAID`, `CHARGE_REPRICED`.
+- **POST `/admin/payment-proofs/:proofId/approve`** (payments.record) `{ "receivedAmount": 29900 }` → 200, the GET answer plus `"alreadyApproved": false` (`true` when it was already approved: nothing done again). 422 `RECEIVED_AMOUNT_MISMATCH` `details: { "requestedAmount": 29900, "receivedAmount": 29899, "currency": "EGP" }`; 409 `CHARGE_ALREADY_PAID`, `CHARGE_REPRICED`, `PROOF_ALREADY_REVIEWED`.
+- **POST `/admin/payment-proofs/:proofId/reject`** (payments.record) `{ "note": "…" }` (3–1000 characters, the merchant reads it) → 200, the GET answer plus `"alreadyRejected"`. 409 `PROOF_ALREADY_REVIEWED` (approved).
+- The two new platform keys `payment_methods.manage` and `payment_methods.edit_numbers` are held through `*` (the creator) unless granted: show them in the permission editor like the others.
+
+### Screens
+- **Merchant dashboard → Settings → Subscription → «ادفع» / "Pay"** opens a dialog from POST `/invoices/open`:
+  - The amount «المبلغ المطلوب» / "Amount due" (`amountDue`, with the discount line when `discountAmount > 0`) and the period «الفترة» / "Period".
+  - One tab or radio per method in `methods`. A gateway: «ادفع أونلاين» / "Pay online" → POST `/billing/payments` `{ lang, method: code }` and the existing redirect.
+  - A manual method: «حوّل {amountDue} على {label.ar}» / "Transfer {amountDue} via {label.en}", the number «رقم التحويل» / "Send to" with a copy button «نسخ» / "Copy", «افتح لينك الدفع» / "Open the payment link" when `paymentLink` is set, the note. Then a form: «رقم الموبايل اللي حوّلت منه» / "The mobile number you sent from", «صورة التحويل (سكرين شوت)» / "Transfer screenshot" (JPEG, PNG or WebP, up to 8 MB), and «أرسل إثبات التحويل» / "Send the transfer proof" → the multipart POST with `expectedAmount`. Success: «وصلنا إثبات التحويل — هنراجعه ونأكدلك» / "We received your transfer proof — we'll check it and confirm".
+  - Empty (`NO_PAYMENT_METHOD` / `contactSupport`): «مفيش طريقة دفع متاحة دلوقتي — تواصل مع الدعم» / "No way to pay is available right now — contact support" with «افتح تذكرة دعم» / "Open a support ticket".
+  - Errors: `CHARGE_AMOUNT_CHANGED` «المبلغ اتغير لـ {amountDue} — راجعه وابعت تاني» / "The amount changed to {amountDue} — check it and send again" (update the amount shown); `INVALID_SENDER_PHONE` «اكتب رقم موبايل مصري صحيح» / "Enter a valid Egyptian mobile number"; `NO_FILE` «ارفع صورة التحويل» / "Attach the transfer screenshot"; `UNSUPPORTED_MEDIA_TYPE` «الصورة لازم تكون JPEG أو PNG أو WebP» / "The screenshot must be JPEG, PNG or WebP"; `FILE_TOO_LARGE` «الصورة أكبر من 8 ميجا» / "The screenshot is larger than 8 MB"; `PROOF_IMAGE_DUPLICATE` «الصورة دي اتبعتت قبل كده — ابعت صورة التحويل ده» / "This screenshot was already sent — send the screenshot of this transfer"; `PROOF_ALREADY_OPEN` «فيه إثبات تحويل للفاتورة دي مستني المراجعة» / "A proof for this charge is already waiting for review"; `TOO_MANY_OPEN_PROOFS` «عندك 3 إثباتات مستنية المراجعة — استنى لما نراجعها» / "You have 3 proofs waiting for review — wait until we check them"; `RATE_LIMITED` «محاولات كتير — جرّب بعد شوية» / "Too many tries — try again later"; `PAYMENT_METHOD_NOT_AVAILABLE` «طريقة الدفع دي مش متاحة دلوقتي» / "This payment method isn't available right now" (reload the methods).
+- **Settings → Subscription → «إثباتات التحويل» / "Transfer proofs"**: from GET `/payment-proofs` — date, method, amount, status «في المراجعة» / "Under review" · «اتقبل» / "Approved" · «اترفض» / "Rejected"; a rejected one shows «سبب الرفض: {reviewNote}» / "Reason: {reviewNote}" and «ادفع تاني» / "Pay again". Empty: «مفيش إثباتات تحويل» / "No transfer proofs".
+- **Console → Billing → «طرق الدفع» / "Payment methods"**: a list in order with drag or up/down to reorder (PUT order); per row the labels, kind «تحويل يدوي» / "Manual transfer" · «بوابة دفع» / "Gateway", a switch «مفعّلة» / "On" (disabled without `payment_methods.manage`). A manual row: «الرقم» / "Number", «لينك الدفع (اختياري)» / "Payment link (optional)" (https only: «اللينك لازم يبدأ بـ https://» / "The link must start with https://"), «ملاحظة بالعربي» / "Note in Arabic", «ملاحظة بالإنجليزي» / "Note in English", editable with `payment_methods.edit_numbers` only. A gateway row: «مضبوطة» / "Configured" or «ناقصها: {missing}» / "Missing: {missing}". `gatewaysNotAdded` rows show «إضافة» / "Add" (PATCH with `enabled`). `PAYMENT_METHOD_NEEDS_NUMBER`: «حط الرقم الأول قبل ما تفعّلها» / "Set the number before turning it on" / «اقفلها الأول قبل ما تمسح الرقم» / "Turn it off before removing the number".
+- **Console → Billing → «إثباتات التحويل» / "Transfer proofs"**: tabs «في الانتظار» / "Waiting" · «مقبولة» / "Approved" · «مرفوضة» / "Rejected" · «الكل» / "All", paged; columns store, method, sent to, sender, amount, date. A proof page: the screenshot (`image.url`), the charge, the blockers «الفاتورة اتدفعت خلاص» / "The charge is already paid" · «سعر الفاتورة اتغير» / "The charge was re-priced"; «قبول» / "Approve" with «المبلغ اللي وصل» / "Amount received" (prefilled empty; must equal the requested amount — `RECEIVED_AMOUNT_MISMATCH` «المبلغ اللي وصل لازم يساوي المطلوب بالظبط — ارفض الإثبات بملاحظة» / "The amount received must equal the amount asked — reject the proof with a note"); «رفض» / "Reject" with a required note «سبب الرفض (هيظهر للتاجر)» / "Reason (the merchant sees it)".
+
+## 335. The prepaid balance: pay per order, top-ups by transfer proof, the balance and its ledger — UI: pending
+
+One server switch: `WALLET_ENABLED` (off unless exactly `true`). Off, nothing below is offered: no fee is charged, no pay-per-order card, top-ups and choosing the plan answer 404 `WALLET_DISABLED`; `GET /billing/wallet` still answers, with `enabled: false` (show nothing then, unless `onFeePlan` is true: a store already on the plan sees its balance read-only). The limits are fixed on the server and come with the balance (`limits`): minimum top-up EGP 100, maximum EGP 20,000, 3 waiting, the overdraft EGP 10, the warning below 20 orders. Everything under `/workspaces/:workspaceId/billing` is Bearer + `billing.manage`; amounts are minor units (EGP piastres); the dashboard never sends a fee or a price. Contract: docs/billing-wallet.md.
+
+### Endpoints (merchant)
+- **GET `/workspaces/:workspaceId/billing/plans`** adds `payPerOrder`:
+  ```json
+  { "payPerOrder": { "available": true, "current": false, "plan": { "id": "d9b4…", "name": "Pay per order", "fee": 400, "currency": "EGP" } } }
+  ```
+  `available`: the card can be chosen now (switch on and a pay-per-order plan offered). `current`: the store is on it (then `plan` is its plan even with the switch off). `plan: null` → no card. The pay-per-order plan never appears in `plans`, `/plans/public` or sign-up; POST `/billing/plan` and `/start-trial` with its id answer 422 `PLAN_NOT_AVAILABLE`.
+- **POST `/workspaces/:workspaceId/billing/pay-per-order`** (no body; a confirmed account) → 200 `{ "changed": true }` (`false` when already on it). From a draft or a trial only: the store is active at once, nothing to pay, a fee per order from the next order.
+  - 409 `PLAN_CHANGE_NEEDS_SUPPORT` "Your plan can be changed through Zimos support while a paid subscription runs. Contact support."; 409 `OPEN_CHARGE_EXISTS` "A charge is open for the current plan. Settle it before changing plan."; 404 `NOT_FOUND` (no pay-per-order plan offered); 404 `WALLET_DISABLED`; 403 `EMAIL_NOT_VERIFIED`.
+- **GET `/workspaces/:workspaceId/billing/wallet`** → 200, never cached:
+  ```json
+  {
+    "wallet": {
+      "enabled": true, "onFeePlan": true,
+      "phase": "ok", "balance": 8600, "fee": 400, "ordersLeft": 24, "ordersBeforeOverdraft": 21, "overdraft": 1000, "currency": "EGP",
+      "totalToppedUp": 9000,
+      "month": { "fees": 400, "orders": 1, "timeZone": "Africa/Cairo" },
+      "limits": { "minTopup": 10000, "maxTopup": 2000000, "maxOpenTopups": 3, "lowOrders": 20 }
+    }
+  }
+  ```
+  `phase`: `ok` · `low` (fewer than `limits.lowOrders` orders before the balance reaches zero) · `overdraft` (at or below zero, still selling) · `exhausted` (the next order is refused; the storefront is closed). `fee`, `ordersLeft`, `ordersBeforeOverdraft` are `null` when the store pays no fee. `balance` may be negative (down to `-overdraft`). `month`: this calendar month in Cairo, fees net of those given back and the orders behind them.
+- **GET `/workspaces/:workspaceId/billing/wallet/ledger?page=1&pageSize=20`** (pageSize ≤ 50) → 200 `{ "entries": [{ "id": "…", "type": "order_fee", "amount": -400, "balanceAfter": -400, "currency": "EGP", "orderId": "c61e…", "orderNumber": "ORD-MUXTMDPM-D5448644", "paymentProofId": null, "note": null, "createdAt": "…" }], "page": 1, "pageSize": 20, "total": 8 }`, newest first. `type`: `topup` (note "Transfer (instapay)", `paymentProofId`) · `order_fee` · `order_fee_reversal` (note `order_cancelled` · `order_rejected` · `payment_expired` · `customer_blocked`) · `order_fee_recharge`. 422 `VALIDATION_ERROR` on a bad page size.
+- **POST `/workspaces/:workspaceId/billing/wallet/topups`** — `multipart/form-data`: `requestedAmount` (minor units, what was sent), `methodCode` (a manual method from GET `/billing/payment-methods`), `senderPhone`, `file` (the screenshot, JPEG/PNG/WebP, ≤ 8 MB) → 201 `{ "proof": { "id": "c725…", "purpose": "topup", "invoiceId": null, "method": { "code": "instapay", "label": { "ar": "إنستا باي", "en": "InstaPay" } }, "senderPhone": "201012345678", "amount": 10000, "currency": "EGP", "status": "pending", "reviewNote": null, "createdAt": "…", "reviewedAt": null } }`. It shows in GET `/billing/payment-proofs` with `purpose: "topup"`.
+  - 422 `TOPUP_AMOUNT_OUT_OF_RANGE` `details: { "min": 10000, "max": 2000000, "currency": "EGP" }`; 404 `WALLET_DISABLED`; and item 334's: 422 `PAYMENT_METHOD_NOT_AVAILABLE`, `INVALID_SENDER_PHONE`, `NO_FILE`; 415 `UNSUPPORTED_MEDIA_TYPE`; 413 `FILE_TOO_LARGE`; 409 `PROOF_IMAGE_DUPLICATE`, `TOO_MANY_OPEN_PROOFS` (3 proofs of any kind waiting), `TOO_MANY_OPEN_TOPUPS`; 429 `RATE_LIMITED`.
+- **Orders while on the plan**: creating an order in the dashboard (or by the public API) that the balance can't pay answers 402 `WALLET_BALANCE_TOO_LOW` "Your Zimos balance is too low to take another order. Top it up from Subscription, then try again." `details: { "balance": -800, "fee": 400, "overdraft": 1000, "currency": "EGP" }`; nothing is created. Shoppers get the store's 423 `STORE_UNAVAILABLE` (the storefront already handles it).
+- **GET `/workspaces/:workspaceId/access`** adds `wallet` (the same `phase`, `balance`, `fee`, `ordersLeft`, `ordersBeforeOverdraft`, `overdraft`, `currency`; `null` when the store pays no fee or the switch is off) and a third `reasons` value, `balance` (with `restricted: true`). Product and funnel creation stay open under `balance`.
+- **GET `/me/stores/overview`**: a store's `alerts` may hold `{ "code": "balance_exhausted" }`.
+
+### Endpoints (console)
+- **POST `/admin/plans`**, **PATCH `/admin/plans/:planId`** (plans.manage) take `perOrderFee` (minor units, 0–100000; left out = kept), and every plan in GET `/admin/plans` carries `perOrderFee` (0 = none). 422 `PER_ORDER_FEE_NOT_ALLOWED` "A fee per order is only for a plan priced 0 a month, in EGP." (field `perOrderFee`). A plan with a fee is never a default, public-list or sign-up plan, whatever `isPublic` says; `isPublic: true` is what offers it as the merchant's pay-per-order card.
+- **GET `/admin/workspaces/:workspaceId/wallet?page=1&pageSize=20`** (subscriptions.view) → 200 `{ "wallet": { …as the merchant's GET /billing/wallet… }, "ledger": { …as GET /billing/wallet/ledger… } }`.
+- **Transfer proofs** (item 334's screens): `proof.purpose` is `invoice` or `topup`. For a top-up, GET `/admin/payment-proofs/:proofId` has `"invoice": null` and `"wallet": { "balance": -400, "currency": "EGP" }` (the balance now). **Approve** `{ "receivedAmount": 9000 }` credits **what arrived**, whatever was asked (no `RECEIVED_AMOUNT_MISMATCH` for a top-up), once; 422 `RECEIVED_AMOUNT_REQUIRED` "Enter the amount that arrived. If nothing arrived, reject the proof with a note." for 0. Reject as for a charge.
+
+### Screens
+- **Settings → Subscription → the pay-per-order card** (when `payPerOrder.plan`): «ادفع على قد طلباتك» / "Pay per order", «{fee} جنيه على كل طلب، من رصيدك المدفوع مقدمًا — من غير اشتراك شهري» / "EGP {fee} per order from your prepaid balance — no monthly fee". While `available` and not `current`: «اختار الدفع بالطلب» / "Switch to pay per order" (confirm dialog «هتتخصم {fee} جنيه من رصيدك مع كل طلب جديد، وتترجع لو الطلب اتلغى أو اترفض قبل الشحن» / "EGP {fee} comes off your balance with every new order, and goes back if the order is cancelled or rejected before it ships") → POST `/pay-per-order`. `current`: badge «باقتك الحالية» / "Your current plan". `PLAN_CHANGE_NEEDS_SUPPORT`: «تواصل مع الدعم عشان تغيّر لباقة الدفع بالطلب» / "Contact support to move to pay per order".
+- **Settings → Subscription → «الرصيد» / "Balance"** tab (when `onFeePlan` or `enabled`): the balance (red when negative) «رصيدك: {balance} جنيه» / "Your balance: EGP {balance}"; «يكفي حوالي {ordersLeft} طلب» / "Enough for about {ordersLeft} orders"; this month «رسوم الشهر ده: {month.fees} جنيه على {month.orders} طلب» / "This month: EGP {month.fees} for {month.orders} orders"; «إجمالي الشحن: {totalToppedUp}» / "Topped up in total: {totalToppedUp}".
+  - «اشحن رصيدك» / "Top up" → a dialog like item 334's transfer dialog with an amount field «المبلغ اللي حوّلته» / "Amount you sent" (min/max from `limits`: «من {min} لحد {max} جنيه» / "From EGP {min} to EGP {max}"), the method's number and link, sender phone, screenshot, «أرسل إثبات الشحن» / "Send the top-up proof". Success: «وصلنا إثبات الشحن — هيتضاف للرصيد بعد المراجعة» / "We received your top-up proof — it's added to your balance once checked". `TOPUP_AMOUNT_OUT_OF_RANGE`: «المبلغ لازم يكون من {min} لحد {max} جنيه» / "The amount must be between EGP {min} and EGP {max}"; `TOO_MANY_OPEN_TOPUPS` / `TOO_MANY_OPEN_PROOFS`: «عندك 3 إثباتات مستنية المراجعة — استنى لما نراجعها» / "You have 3 proofs waiting for review — wait until we check them"; other proof errors as in item 334.
+  - The ledger table «حركة الرصيد» / "Balance activity": date, type «شحن» / "Top-up" · «رسوم طلب» / "Order fee" · «استرجاع رسوم» / "Fee returned" · «رسوم طلب (تاني)» / "Order fee (again)", the order number linking to the order, amount (+ green / − red), balance after; paged; empty «مفيش حركة لسه» / "No activity yet".
+  - Waiting top-ups appear in «إثباتات التحويل» / "Transfer proofs" with «شحن رصيد» / "Balance top-up" as the purpose.
+- **Dashboard banner** (from `access.wallet`, on every page): `low` «رصيدك قرب يخلص — يكفي {ordersBeforeOverdraft} طلب. اشحن دلوقتي» / "Your balance is running low — enough for {ordersBeforeOverdraft} orders. Top up now"; `overdraft` «رصيدك بالسالب — المتجر هيقف بعد {ordersLeft} طلب» / "Your balance is below zero — the store stops after {ordersLeft} more orders"; `exhausted` (or `reasons` has `balance`) «المتجر وقف يستقبل طلبات لأن الرصيد خلص — اشحن عشان يرجع» / "Your store stopped taking orders because the balance ran out — top up to reopen it", each with «اشحن رصيدك» / "Top up".
+- **Orders → new order**: on 402 `WALLET_BALANCE_TOO_LOW` «رصيدك مش كفاية لطلب جديد — اشحن من الاشتراك وجرّب تاني» / "Your balance is too low for another order — top up from Subscription and try again".
+- **All my stores**: alert `balance_exhausted` «الرصيد خلص — المتجر واقف» / "Balance ran out — store stopped".
+- **Console → Plans → edit**: a field «رسوم الطلب (بالقرش)» / "Fee per order (piastres)", shown as EGP; hint «للباقة اللي سعرها الشهري 0 وبالجنيه بس» / "Only for a plan at 0 a month, in EGP"; `PER_ORDER_FEE_NOT_ALLOWED` under the field. The plans list shows «{fee} / طلب» / "{fee} / order" on such a plan.
+- **Console → Store → «الرصيد» / "Balance"** panel (subscriptions.view): the balance, phase, fee, totals and the ledger (GET `/admin/workspaces/:id/wallet`).
+- **Console → Transfer proofs → a top-up**: label «شحن رصيد» / "Balance top-up", «المطلوب: {requestedAmount}» / "Asked: {requestedAmount}", «الرصيد الحالي: {wallet.balance}» / "Balance now: {wallet.balance}", «قبول» / "Approve" with «المبلغ اللي وصل فعلًا» / "Amount that actually arrived" (any amount above 0; it is what gets credited — show «هيتضاف للرصيد {receivedAmount}» / "{receivedAmount} will be added to the balance").
+
+## 336. Manual subscription pricing: paid, free or discounted — UI: pending
+
+No new environment variable or setting. A platform admin activating a store's subscription by hand now says what the period costs the merchant: **paid** (the plan's price, as before and the default), **free** (a gift) or **discounted** (a percent off, or a fixed price per billing period). A free or discounted subscription is never charged at the plan's price: no charge can be written for it, and when its period runs out an hourly job moves it to `past_due` (the usual grace day, then the restriction) instead of renewing. Activate again with `paid` (or extend it) to go on. Amounts are minor units of the plan's currency.
+
+### Endpoints (console)
+- **GET `/admin/workspaces/:workspaceId/subscription`** (subscriptions.view): `subscription` adds
+  ```json
+  {
+    "subscription": {
+      "id": "2f34…", "plan": { "id": "c3bc…", "name": "Starter", "code": "starter" },
+      "status": "active", "storedStatus": "active", "phase": "ok", "billingCycle": "monthly",
+      "currentPeriodStart": "2026-10-07T08:16:28Z", "currentPeriodEnd": "2026-11-07T08:16:28Z", "source": "manual_admin", "draft": false,
+      "pricingKind": "discounted", "discountPercent": 25, "priceOverrideAmount": null,
+      "effectivePrice": 22425, "currency": "EGP", "pricingExpiredAt": null
+    },
+    "limits": { "…": "…" }, "openCharge": null, "history": [ ]
+  }
+  ```
+  `pricingKind`: `paid` · `free` · `discounted`. `effectivePrice`: one billing period as the merchant pays it (0 when free). `discountPercent` (1–99) or `priceOverrideAmount` is set only on a discounted one. `pricingExpiredAt`: when a free or discounted period ran out and the job moved it to `past_due` (`null` otherwise).
+- **POST `/admin/workspaces/:workspaceId/subscription/activate`** (subscriptions.manage) takes three more fields:
+  ```json
+  { "planId": "c3bc…", "duration": { "months": 1 }, "billingCycle": "monthly", "note": "Partner deal",
+    "pricingKind": "discounted", "discountPercent": 25 }
+  ```
+  or `"pricingKind": "discounted", "priceOverrideAmount": 10000` (per billing period, less than the plan's price for that cycle), or `"pricingKind": "free"`. Left out = `paid`. → 201 `{ "change": { … }, "replayed": false, …the GET answer… }` (200 with `replayed: true` for the same Idempotency-Key, as before). Errors, 422 `VALIDATION_ERROR` with the field in `details`: `discountPercent` "Give a percent or a fixed amount, not both" (a discounted one with neither or both); `pricingKind` "A discount needs the discounted pricing" (a percent or an amount with paid or free); `priceOverrideAmount` "The amount must be more than zero and less than the plan price"; a percent outside 1–99 or an unknown `pricingKind` "Invalid body".
+- **change-plan** keeps the pricing (a fixed price above the new plan's price counts as the plan's price); **extend** keeps it and clears `pricingExpiredAt` (a period that had run out runs again at its price); **end** ends the period now (the job then moves a free or discounted one to `past_due`).
+- **GET `/admin/subscriptions`** (subscriptions.view): each row adds `pricingKind`, `discountPercent`, `priceOverrideAmount`, `effectivePrice`, `pricingExpiredAt`; `mrr` is now at the effective price (a free one 0, a free or discounted one whose period ran out 0); the answer adds the same total over paid rows only:
+  ```json
+  { "subscriptions": [ { "workspaceName": "Demo Store", "planName": "Starter", "status": "active", "pricingKind": "free", "effectivePrice": 0, "pricingExpiredAt": null, "mrr": 0, "mrrCurrency": null, "…": "…" } ],
+    "mrr": 0, "mrrCurrency": null, "mrrByCurrency": {}, "paidOnly": { "mrr": 0, "mrrCurrency": null, "mrrByCurrency": {} } }
+  ```
+  The console overview's MRR follows the same rule.
+- **POST `/admin/workspaces/:workspaceId/charges`** (payments.record) → 409 `MANUAL_PRICING` "This subscription is free or discounted by the platform, so it is not charged here." **GET `/admin/workspaces/:workspaceId/charges`** has `nextCharge: null` for such a store.
+- Audit log: the manual actions' before/after carry `pricingKind`, `discountPercent`, `priceOverrideAmount`, and `metadata.pricing { kind, amount, currency }`; a new action `subscription.manual_pricing_expired` (no actor) when the job moves a free or discounted subscription to `past_due`.
+
+### Endpoints (merchant)
+- **GET `/workspaces/:workspaceId/billing`**: `nextCharge` is `null` while the subscription is free or discounted.
+- **POST `/workspaces/:workspaceId/billing/invoices/open`**, **POST `/billing/invoices/next/payment-proofs`** and **POST `/billing/payments`** (Pay, while a gateway is on) → 409 `MANUAL_PRICING` "This subscription is free or discounted by the platform, so it is not charged here." Nothing is written or stored.
+
+### Screens
+- **Console → Store → Subscription → «تفعيل» / "Activate"** dialog: a choice «التسعير» / "Pricing": «مدفوع — سعر الباقة» / "Paid — the plan's price" (default) · «مجاني (هدية)» / "Free (gift)" · «بخصم» / "Discounted". With Discounted, a toggle «نسبة خصم» / "Percent off" (1–99, «٪» / "%") or «سعر ثابت للفترة» / "Fixed price per period" (in the plan's currency, less than the plan's price for the chosen cycle), and a line «التاجر هيدفع {price} كل {شهر|سنة}» / "The merchant pays {price} a {month|year}" worked out from the plan's price. Hint under Free and Discounted: «مفيش فواتير هتتعمل للاشتراك ده، ولما الفترة تخلص هيتحول لمتأخر في الدفع» / "No charges are made for this subscription; when the period ends it becomes past due". Field errors under the field (`details[].field`): «اختار نسبة أو سعر ثابت — واحد بس» / "Choose a percent or a fixed price — one of them"; «النسبة من 1 لـ 99» / "The percent must be 1 to 99"; «السعر لازم يكون أكبر من صفر وأقل من سعر الباقة» / "The price must be above zero and below the plan's price".
+- **Console → Store → Subscription** panel: a badge by the plan — «مدفوع» / "Paid" · «مجاني» / "Free" · «خصم {discountPercent}٪» / "{discountPercent}% off" · «سعر خاص» / "Special price"; «السعر الفعلي: {effectivePrice} {currency}» / "Price paid: {effectivePrice} {currency}". When `pricingExpiredAt`: «انتهت الفترة المجانية/المخفّضة في {pricingExpiredAt} — فعّل الاشتراك أو مدّه» / "The free/discounted period ended on {pricingExpiredAt} — activate or extend it". The «إنشاء فاتورة» / "Create charge" button is off for a free or discounted store with the hint «الاشتراك مجاني أو بخصم من المنصة — مفيش فواتير» / "Free or discounted by the platform — no charges" (`MANUAL_PRICING` shows the same text).
+- **Console → Subscriptions** list: a column «التسعير» / "Pricing" (the badge above) and «السعر الفعلي» / "Price paid"; the MRR header gets a switch «كل الاشتراكات» / "All subscriptions" · «المدفوعة بس» / "Paid only" (`paidOnly`).
+- **Console → Audit log**: `subscription.manual_pricing_expired` «انتهت فترة التسعير اليدوي» / "Manual pricing period ended".
+- **Merchant → Settings → Subscription**: with `nextCharge: null` hide the next-charge line. On `MANUAL_PRICING` from Pay or the pay dialog: «اشتراكك مجاني أو بخصم من زيموس — مفيش حاجة تدفعها هنا. لو الفترة خلصت تواصل مع الدعم» / "Your subscription is free or discounted by Zimos — there's nothing to pay here. If the period has ended, contact support", with «افتح تذكرة دعم» / "Open a support ticket".
+
+## 337. Suspend, unsuspend and delete an account from the console; deleted accounts hidden from the user list — UI: pending
+
+No new environment variable or setting. A platform admin with `workspaces.manage` (the store suspension's permission) can suspend a person's account (they can't sign in until it is lifted), lift the suspension, or delete the account. Deleting is soft: the row stays so its stores, orders and audit rows keep working, but the email, phone, name, username and picture are wiped, the password removed and every way back in closed. An account that owns stores is deleted only together with suspending those stores. Every call needs `confirm: true` (the console asks first) and is in the audit log. Nobody can do this to their own account, only a creator can do it to a creator's account, another console account (admin, agent) also needs `admins.manage`, and the last creator can't be suspended or deleted.
+
+### Endpoints (console)
+- **POST `/admin/users/:userId/suspend`** (workspaces.manage)
+  ```json
+  { "reason": "Fraud report from a carrier", "confirm": true }
+  ```
+  `reason` 2–500 characters, required. → 200
+  ```json
+  { "user": { "id": "4dee…", "status": "suspended", "suspendedAt": "2026-10-07T08:35:36Z", "suspendedReason": "Fraud report from a carrier", "deletedAt": null } }
+  ```
+  Every session of the account ends at once (it is signed out everywhere); its API keys and the partner apps it approved stop working until it is unsuspended.
+- **POST `/admin/users/:userId/unsuspend`** (workspaces.manage)
+  ```json
+  { "reason": "Checked with the carrier", "confirm": true }
+  ```
+  `reason` optional (up to 500). → 200 `{ "user": { "id": "…", "status": "active", "suspendedAt": null, "suspendedReason": null, "deletedAt": null } }`. `status` is `pending_verification` instead when the account had not confirmed its email when it was suspended and still hasn't.
+- **POST `/admin/users/:userId/delete`** (workspaces.manage)
+  ```json
+  { "reason": "Asked to be deleted", "stores": "suspend", "confirm": true }
+  ```
+  `reason` optional (up to 500); `stores: "suspend"` is required when the account owns any store, and suspends every active one it owns. → 200
+  ```json
+  { "user": { "id": "58ed…", "status": "suspended", "suspendedAt": "2026-10-07T08:35:38Z", "suspendedReason": "Asked to be deleted", "deletedAt": "2026-10-07T08:35:38Z", "suspendedStores": ["3ba3…"] } }
+  ```
+- Errors (all three): 422 `VALIDATION_ERROR` (no `confirm: true`, a reason too short or long, `stores` not `"suspend"`); 404 `NOT_FOUND` (no such account); 409 `CANNOT_ACT_ON_SELF` "You cannot do this to your own account."; 403 `CREATOR_REQUIRED` "Only a creator can act on a creator's account."; 403 `ADMINS_MANAGE_REQUIRED` "Only an admin who manages platform users can act on a console account." (the account has a console role and you lack `admins.manage`); 409 `LAST_CREATOR` "This is the last creator."; 409 `USER_ALREADY_SUSPENDED` (suspend); 409 `USER_NOT_SUSPENDED` (unsuspend); 409 `USER_DELETED` "This account was deleted." (any of the three on a deleted account); 409 `OWNS_STORES` with `details: [{ "field": "stores", "message": "Owns 2 store(s)" }]` (delete without `stores`); 403 without `workspaces.manage`.
+- **GET `/admin/users?q=&page=&limit=&includeDeleted=`** (workspaces.view): deleted accounts are left out of `users` and `total` unless `includeDeleted=true`. Each row adds `"deleted": false|true`, and each of its store rows adds `"owner": true|false` (true only for the store's owner of record; a member on the Owner role has `role: "owner"` with `owner: false`). `includeDeleted` other than true/false → 422.
+- **GET `/admin/users/:userId`** (workspaces.view): still opens a deleted account; `user` adds `"suspendedAt"`, `"suspendedReason"`, `"deletedAt"` (and `deleted`), beside `twoFactor` as before.
+- Audit log (console): `user.suspend` (metadata `reason`, `sessionsRevoked`, `challengesClosed`), `user.unsuspend` (`reason`, `suspensionReason`), `user.delete` (`reason`, `suspendedStores`, and the counts of what was closed), and `workspace.suspend` with `metadata.ownerDeleted` for each store a deletion suspended.
+
+### Endpoints (sign-in; dashboard and console login screens)
+- **POST `/auth/login`** and the Google sign-in (`/auth/google/callback`): 401 `ACCOUNT_SUSPENDED` "This account has been suspended" (as before) and, new, 401 `ACCOUNT_DELETED` "This account was deleted" (Google, for a deleted account's Google login; a password sign-in to a deleted account is `INVALID_CREDENTIALS`, since its address and password are gone).
+- A signed-in person whose account is suspended or deleted gets 401 `SESSION_ENDED` on the next call (then `ACCOUNT_INACTIVE`); refresh gives 401. Send them to the sign-in page.
+- Partner apps: **POST `/oauth/token`** → 400 `invalid_grant` "The person who approved can no longer sign in" when the approver was suspended or deleted after approving.
+
+### Screens
+- **Console → Users → a user**: a status badge «نشط» / "Active" · «في انتظار التأكيد» / "Pending confirmation" · «موقوف» / "Suspended" · «محذوف» / "Deleted". When suspended: «موقوف من {suspendedAt}: {suspendedReason}» / "Suspended since {suspendedAt}: {suspendedReason}". When deleted: «الحساب ده اتمسح في {deletedAt} — البيانات الشخصية اتشالت» / "This account was deleted on {deletedAt} — its personal details were removed", and no action buttons. Buttons (only with `workspaces.manage`, and also `admins.manage` when the user has a `platformRole`; hidden on your own account): «إيقاف الحساب» / "Suspend account", «إلغاء الإيقاف» / "Lift suspension" (when suspended), «حذف الحساب» / "Delete account" (red).
+- **Suspend dialog**: title «إيقاف الحساب؟» / "Suspend this account?"; text «الشخص ده مش هيقدر يسجل دخول، وهيتعمله تسجيل خروج من كل الأجهزة، ومفاتيح الـAPI والتطبيقات اللي وافق عليها هتقف لحد ما تلغي الإيقاف. متاجره مش هتتوقف.» / "This person won't be able to sign in and is signed out everywhere; their API keys and the apps they approved stop until you lift the suspension. Their stores keep running."; a required field «السبب» / "Reason" (2–500); buttons «إيقاف» / "Suspend" and «إلغاء» / "Cancel".
+- **Lift suspension dialog**: «إلغاء إيقاف الحساب؟» / "Lift the suspension?", optional «ملاحظة» / "Note", «إلغاء الإيقاف» / "Lift suspension".
+- **Delete dialog**: title «حذف الحساب نهائيًا؟» / "Delete this account for good?"; text «الإيميل والموبايل والاسم واسم المستخدم والصورة هيتمسحوا، والحساب مش هيقدر يدخل تاني. الطلبات والسجلات بتفضل. مفيش رجوع.» / "Email, phone, name, username and picture are wiped and the account can never sign in again. Orders and records stay. This can't be undone."; optional «السبب» / "Reason". When the user owns stores (its `workspaces` rows with `owner: true` — not `role: "owner"`, which a member kept on the Owner role also has), list them and a required checkbox «إيقاف متاجره ({n})» / "Suspend their stores ({n})" that sends `stores: "suspend"`; the button stays off until it is ticked. Buttons «احذف الحساب» / "Delete account" (red) and «إلغاء» / "Cancel". After it: «تم حذف الحساب وإيقاف {n} متجر» / "Account deleted and {n} store(s) suspended", {n} = the length of the answer's `suspendedStores` (an already suspended store is not counted). A 409 `OWNS_STORES` (ownership changed meanwhile) re-opens the dialog with the checkbox.
+- Error texts: `CANNOT_ACT_ON_SELF` «مينفعش تعمل كده على حسابك» / "You can't do this to your own account"; `CREATOR_REQUIRED` «الحساب ده Creator — محتاج Creator يعمل كده» / "This is a creator's account — only a creator can do this"; `ADMINS_MANAGE_REQUIRED` «الحساب ده له صلاحيات في الكونسول — محتاج صلاحية إدارة المستخدمين» / "This is a console account — you need permission to manage platform users"; `LAST_CREATOR` «ده آخر Creator» / "This is the last creator"; `USER_ALREADY_SUSPENDED` «الحساب موقوف بالفعل» / "Already suspended"; `USER_NOT_SUSPENDED` «الحساب مش موقوف» / "Not suspended"; `USER_DELETED` «الحساب ده اتمسح» / "This account was deleted"; `OWNS_STORES` «الحساب ده بيملك متاجر — اختار إيقافها الأول» / "This account owns stores — choose to suspend them first".
+- **Console → Users** list: deleted accounts are hidden; a toggle «إظهار الحسابات المحذوفة» / "Show deleted accounts" sends `includeDeleted=true`, and deleted rows show the «محذوف» / "Deleted" badge, greyed. Suspended rows show «موقوف» / "Suspended".
+- **Console → Audit log**: `user.suspend` «إيقاف حساب» / "Account suspended", `user.unsuspend` «إلغاء إيقاف حساب» / "Suspension lifted", `user.delete` «حذف حساب» / "Account deleted".
+- **Dashboard and console sign-in**: `ACCOUNT_SUSPENDED` «الحساب ده موقوف. تواصل مع الدعم» / "This account is suspended. Contact support"; `ACCOUNT_DELETED` «الحساب ده اتمسح» / "This account was deleted".
+
+## 338. Console notifications for platform admins, with read state and settings — UI: pending
+
+No new environment variable or setting. The console gets a bell: the server writes one notification per event (a sign-up, a new store, a subscription activated by hand or by a recorded payment, one ending within 7 days or ended, a payment proof sent, a failed subscription charge, a support ticket, a store joining with a referral code, an account suspended). Every console admin sees the same rows, but only the types their console permissions open (below), and each admin has their own read state and their own settings per type. Nothing is sent by email yet: the email switch is stored for later, and the settings answer `emailDelivery: false`.
+
+Who sees which type (besides `overview.view`, which every call needs):
+
+| `type` | needs | label |
+|---|---|---|
+| `user_signup` | workspaces.view | «تسجيل جديد» / "New sign-up" |
+| `workspace_created` | workspaces.view | «متجر جديد» / "New store" |
+| `user_suspended` | workspaces.view | «إيقاف حساب» / "Account suspended" |
+| `subscription_activated` | subscriptions.view | «تفعيل اشتراك» / "Subscription activated" |
+| `subscription_expiring` | subscriptions.view | «اشتراك قرّب يخلص» / "Subscription ending soon" |
+| `subscription_expired` | subscriptions.view | «اشتراك خلص» / "Subscription ended" |
+| `referral_signup` | subscriptions.view | «متجر بكود إحالة» / "Joined with a referral code" |
+| `payment_failed` | subscriptions.view | «فشل دفع اشتراك» / "Subscription payment failed" |
+| `payment_proof_submitted` | payments.record | «إثبات دفع جديد» / "Payment proof sent" |
+| `support_ticket` | support.view | «تذكرة دعم جديدة» / "New support ticket" |
+
+### Endpoints (console)
+- **GET `/admin/notifications?type=&unread=&cursor=&limit=`** (overview.view). Newest first. `type` one of the ten above; `unread` `true`/`false` (or `1`/`0`); `limit` 1–50 (default 20); `cursor` is the previous page's `nextCursor`. Types the admin can't see or turned off are left out. → 200
+  ```json
+  {
+    "notifications": [
+      {
+        "id": "5f0c…",
+        "type": "payment_proof_submitted",
+        "title": "Balance top-up proof sent",
+        "body": null,
+        "link": "/payment-proofs/8b1e…",
+        "data": { "action": "payment_proof.submit", "entityId": "8b1e…", "purpose": "topup", "amount": 10000, "currency": "EGP" },
+        "actorUserId": "9656…",
+        "subjectUserId": null,
+        "subjectUserName": null,
+        "workspaceId": "0c20…",
+        "workspaceName": "Demo Store",
+        "createdAt": "2026-10-07T08:46:23.512Z",
+        "readAt": null
+      }
+    ],
+    "nextCursor": "MjAyNi0xMC0wN1Q…",
+    "unread": 7
+  }
+  ```
+  `title` is English and only a fallback: show the console's own text per `type` (below). `body` is free text when there is one (the note of a manual activation, the reason of a suspension, the failure reason of a charge). `link` is the console page it is about: `/users/{id}`, `/workspaces/{id}`, `/payment-proofs/{id}` or `/tickets/{id}` — map it to the console's routes. `data` per type: `user_signup` `method` (`password` / `google`); `workspace_created` —; `subscription_activated` `pricing { kind, amount, currency }` (a manual activation) or nothing (a recorded payment, `data.action` `billing_invoice.record_payment`); `subscription_expiring` / `subscription_expired` `subscriptionId`, `periodEnd`, `name`, `pricingKind` (from the hourly check), or `pricing` (a free or discounted period that ran out, `data.action` `subscription.manual_pricing_expired`); `payment_proof_submitted` `purpose` (`invoice` / `topup`), `amount` (minor units), `currency`; `payment_failed` `invoiceId`, `amount`, `currency`; `support_ticket` `subject`. Amounts are minor units, as everywhere in billing. 422 `VALIDATION_ERROR` for a bad `cursor` ("Invalid cursor"), an unknown `type` or a `limit` outside 1–50.
+- **GET `/admin/notifications/unread-count`** (overview.view) → 200 `{ "unread": 7 }`. For the bell's badge; poll it (e.g. every 60 s) or refresh after any action.
+- **POST `/admin/notifications/read`** (overview.view) — this admin only.
+  ```json
+  { "ids": ["5f0c…", "77a1…"] }
+  ```
+  or `{ "all": true }` (every unread one this admin can see). Exactly one of the two; `ids` up to 200 uuids. → 200 `{ "unread": 5 }`. Marking one already read changes nothing. 422 `VALIDATION_ERROR` for both, neither, or an id that is not a uuid.
+- **GET `/admin/notification-prefs`** (overview.view) → 200
+  ```json
+  { "prefs": [ { "type": "user_signup", "enabled": true, "email": false }, { "type": "workspace_created", "enabled": true, "email": false } ], "emailDelivery": false }
+  ```
+  One row per type this admin can see, defaults filled in (shown in the console, no email).
+- **PUT `/admin/notification-prefs`** (overview.view)
+  ```json
+  { "prefs": [ { "type": "user_signup", "enabled": false, "email": false } ] }
+  ```
+  1–10 rows; `type` and `enabled` required, `email` optional (default false). Only the types sent change. → 200, the same body as GET. A type turned off disappears from this admin's list and count (not other admins'); its rows are not deleted, turning it back on shows them again. 422 `VALIDATION_ERROR` for an unknown type, an empty list or a row without `enabled`.
+- 401 without a token; 403 `FORBIDDEN` "Missing required platform permission: overview.view" without it.
+
+### Screens
+- **Console top bar → bell**: a badge with `unread` (hidden at 0, «+99» / "99+" above 99). Opening it shows the latest 10: an icon per type, the line below, the store or account name, the time ago («من 5 دقايق» / "5 min ago"), bold while unread. Clicking a row marks it read (`ids: [id]`) and opens its page (`link`). At the bottom: «تعليم الكل كمقروء» / "Mark all as read" (`all: true`) and «عرض الكل» / "See all". Empty: «مفيش إشعارات» / "No notifications".
+- **Console → Notifications** (full page): tabs «الكل» / "All" and «غير المقروء» / "Unread" (`unread=true`), a type filter (the labels in the table, only the types from the settings call), «تحميل المزيد» / "Load more" while `nextCursor` is not null, and «تعليم الكل كمقروء» / "Mark all as read".
+- Row lines (fall back to `title` for anything missing):
+  - `user_signup`: «{subjectUserName} عمل حساب جديد» / "{subjectUserName} signed up"; with `method: google` add «بجوجل» / "with Google".
+  - `workspace_created`: «متجر جديد: {workspaceName}» / "New store: {workspaceName}".
+  - `user_suspended`: «تم إيقاف حساب {subjectUserName}: {body}» / "{subjectUserName}'s account was suspended: {body}".
+  - `subscription_activated`: manual «تم تفعيل اشتراك {workspaceName} يدويًا ({pricing.kind})» / "{workspaceName}'s subscription was activated by hand ({pricing.kind})" with `body` as the note; recorded payment «اتسجل دفع لـ{workspaceName} والاشتراك اتفعّل» / "Payment recorded for {workspaceName}; subscription active". Pricing kind: `paid` «مدفوع» / "paid", `free` «مجاني» / "free", `discounted` «بخصم» / "discounted".
+  - `subscription_expiring`: «اشتراك {workspaceName} هيخلص {periodEnd}» / "{workspaceName}'s subscription ends on {periodEnd}".
+  - `subscription_expired`: «اشتراك {workspaceName} خلص» / "{workspaceName}'s subscription ended"; for `subscription.manual_pricing_expired` «الفترة المجانية أو المخفضة لـ{workspaceName} خلصت ومتجددتش» / "{workspaceName}'s free or discounted period ended and was not renewed".
+  - `payment_proof_submitted`: `invoice` «{workspaceName} بعت إثبات دفع بـ{amount}» / "{workspaceName} sent a payment proof for {amount}"; `topup` «{workspaceName} بعت إثبات شحن رصيد بـ{amount}» / "{workspaceName} sent a balance top-up proof for {amount}".
+  - `payment_failed`: «فشل دفع اشتراك {workspaceName} ({amount}): {body}» / "{workspaceName}'s subscription payment failed ({amount}): {body}".
+  - `support_ticket`: «تذكرة جديدة من {workspaceName}: {data.subject}» / "New ticket from {workspaceName}: {data.subject}".
+  - `referral_signup`: «{workspaceName} دخل بكود إحالة» / "{workspaceName} joined with a referral code".
+- **Console → Settings → Notifications**: one row per type from GET `/admin/notification-prefs` (only the ones this admin can see), the label from the table, two switches «في الكونسول» / "In the console" (`enabled`) and «بالإيميل» / "By email" (`email`). While `emailDelivery` is false, show under the email column «الإيميل لسه مش بيتبعت — اختيارك هيتحفظ» / "Email isn't sent yet — your choice is kept". Save sends the changed rows; then «تم حفظ الإعدادات» / "Settings saved".
+- Errors: «الصفحة دي محتاجة صلاحية على الكونسول» / "This page needs a console permission" (403); «حصل خطأ، جرّب تاني» / "Something went wrong, try again" for anything else.
+
+## 339. Marketing-site traffic for the console, linked to the account at sign-up — UI: pending
+
+Three places: the marketing site (zimos.co) sends anonymous beacons, the dashboard's sign-up passes on which site visit it came from, and the console shows the traffic and, per account, where it came from. Server settings (names only in `.env.example`): `SITE_ANALYTICS_ENABLED` (on only when exactly `true`; off today) and `SITE_ANALYTICS_ORIGINS` (the site's origins, comma-separated, e.g. `https://zimos.co,https://www.zimos.co`, no trailing slash). The clients need no switch of their own: while it is off the beacon answers 404 and sign-up ignores `siteSessionId`, so both can always be sent. Nothing identifies a person: no IP and no cookie is stored, only an HMAC of the browser's random id and the day.
+
+### Endpoints
+- **POST `/public/site-events`** (public, no token, no cookies; only from an origin in `SITE_ANALYTICS_ORIGINS`). Send the body as `text/plain` (no preflight) or `application/json`, at most 2 kb:
+  ```json
+  { "visitorId": "8c1f2a9e-4b7d-4c0e-9a51-2f3d6e7b8a90", "sessionId": "b2e4c6d8-1a3f-4e5b-8c7d-9e0f1a2b3c4d", "event": "view", "path": "/pricing", "locale": "ar", "referrer": "https://www.google.com/", "utmSource": "facebook", "utmMedium": "cpc", "utmCampaign": "launch" }
+  ```
+  - `visitorId`, `sessionId`: 8–64 letters, digits or `-` (a `crypto.randomUUID()` fits). `event`: `view`, `ping` or `cta_click`. `path`: starts with `/`, ≤300 (no query string needed). `locale` `ar`/`en`, `referrer` ≤500, `utm*` ≤100 each: all optional. Any other key → 422.
+  - → **204** with no body. Known crawlers also get 204 and nothing is kept.
+  - Errors (log them, never show them): 403 `ORIGIN_NOT_ALLOWED` (origin not listed, or none); 422 `VALIDATION_ERROR` (`details[].field`); 413 `PAYLOAD_TOO_LARGE`; 400 `INVALID_JSON`; 429 `RATE_LIMITED` (120 a minute per IP); 404 `ROUTE_NOT_FOUND` while the server has it off.
+- **POST `/auth/register`** adds an optional `"siteSessionId": "b2e4c6d8-1a3f-4e5b-8c7d-9e0f1a2b3c4d"` (same 8–64 rule; anything else → 422 on `siteSessionId`). The answer is unchanged; the link is made on the server and never fails the sign-up, and an unknown session just links nothing.
+- **GET `/admin/site-traffic/summary?range=today|7d|30d`** (console, `overview.view`; default `today`; anything else → 422). Days are UTC days, `today` included. → 200
+  ```json
+  {
+    "enabled": true,
+    "range": "7d",
+    "since": "2026-10-01T00:00:00.000Z",
+    "visits": 3,
+    "uniqueVisitors": 2,
+    "avgSecondsOnSite": 8,
+    "topPages": [ { "path": "/pricing", "visits": 1 }, { "path": "/features", "visits": 1 } ],
+    "topSources": [ { "source": "facebook", "sessions": 1 }, { "source": "direct", "sessions": 1 } ],
+    "funnel": { "visit": 2, "ctaClick": 1, "signup": 1 },
+    "daily": [ { "day": "2026-10-01", "visits": 0, "uniqueVisitors": 0 }, { "day": "2026-10-07", "visits": 3, "uniqueVisitors": 2 } ]
+  }
+  ```
+  `visits` counts page views; `funnel` counts sessions (viewed, clicked a sign-up button, signed up). `topSources[].source` is the session's first `utmSource`, else the referrer's host, else `direct`. Top lists hold at most 10. `daily` has one row per day of the range. Answered whether collection is on or off (`enabled`). 401 without a token, 403 `FORBIDDEN` without `overview.view`.
+- **GET `/admin/users/:userId`** (console, `workspaces.view`): `user` adds `acquisition`, `null` or
+  ```json
+  { "landingPath": "/pricing", "referrerHost": "www.google.com", "utmSource": "facebook", "utmMedium": "cpc", "utmCampaign": "launch", "firstVisitAt": "2026-10-07T08:54:11.021Z", "signedUpAt": "2026-10-07T08:54:11.542Z", "secondsBeforeSignup": 1 }
+  ```
+
+### Marketing site (zimos.co)
+- `visitorId`: made once and kept in `localStorage`. `sessionId`: made per visit and kept in `sessionStorage` (a new tab or a new day starts a new one).
+- `view` on every page shown (route changes too), with `path` and `locale`; `referrer` (`document.referrer`) and the `utm_source` / `utm_medium` / `utm_campaign` of the address only on the session's first view.
+- `ping` every 15 s while the tab is visible (`document.visibilityState === "visible"`), with the current `path`. The server counts 15 s per ping whatever the client says.
+- `cta_click` when a sign-up / "start free" button is clicked, with the current `path`.
+- Send with `navigator.sendBeacon(url, new Blob([JSON.stringify(body)], { type: "text/plain" }))` (or `fetch` with `keepalive: true`, `credentials: "omit"`, `Content-Type: text/plain`). Fire and forget; never block the page on it.
+- Every link to the dashboard's sign-up adds `?sv={sessionId}`.
+
+### Dashboard sign-up
+- Read `sv` from the address on the sign-up page (keep it in `sessionStorage` if the visitor moves between sign-up steps) and send it as `siteSessionId` on POST `/auth/register` when it matches `^[A-Za-z0-9-]{8,64}$`; otherwise leave it out. Nothing is shown to the visitor. Google sign-up does not carry it.
+
+### Screens (console)
+- **Console → Site traffic** «زيارات الموقع» / "Site traffic" (only with `overview.view`). Tabs «النهارده» / "Today", «آخر 7 أيام» / "Last 7 days", «آخر 30 يوم» / "Last 30 days" (`range`).
+  - Tiles: «الزيارات» / "Visits" (`visits`), «زوار مختلفين» / "Unique visitors" (`uniqueVisitors`, with the note «الزائر بيتحسب مرة في اليوم» / "A visitor is counted once per day"), «متوسط الوقت على الموقع» / "Average time on site" (`avgSecondsOnSite` as m:ss).
+  - Funnel: «زيارة» / "Visit" → «ضغط على زرار التسجيل» / "Clicked sign-up" → «عمل حساب» / "Signed up", with each step's share of the first.
+  - «أكتر الصفحات زيارة» / "Top pages" (path, visits) and «مصادر الزيارات» / "Top sources" (source, sessions; `direct` shown as «مباشر» / "Direct").
+  - A daily chart of visits and unique visitors from `daily`.
+  - `enabled: false`: a banner «تتبع زيارات الموقع مقفول على السيرفر — الأرقام دي من قبل ما يتقفل» / "Site traffic collection is off on the server — these numbers are from before it was turned off". Everything zero: «لسه مفيش زيارات في الفترة دي» / "No visits in this period yet".
+- **Console → Users → a user**: a card «جه منين» / "Where they came from": «أول صفحة» / "Landing page" (`landingPath`), «المصدر» / "Source" (`utmSource`, else `referrerHost`, else «مباشر» / "Direct"), «الوسيط» / "Medium" (`utmMedium`), «الحملة» / "Campaign" (`utmCampaign`), «أول زيارة» / "First visit" (`firstVisitAt`), «اتسجل بعد {duration} من أول زيارة» / "Signed up {duration} after the first visit" (`secondsBeforeSignup`). Empty fields are hidden. `acquisition: null`: «مفيش بيانات — اتسجل من غير ما يعدي على الموقع، أو قبل ما التتبع يشتغل» / "No data — signed up without going through the site, or before tracking was on".
+- Errors: «الصفحة دي محتاجة صلاحية على الكونسول» / "This page needs a console permission" (403); «حصل خطأ، جرّب تاني» / "Something went wrong, try again" for anything else.
+
+## 340. Store manual payments by InstaPay or wallet with a screenshot proof — UI: pending
+
+A second kind of manual payment, beside the existing "manual transfer with a receipt" (Settings → Payments → manual transfers, `/manual-transfers`, unchanged). Here the merchant lists InstaPay accounts and wallet numbers; the shopper picks one at checkout, the order is placed unpaid, and they send the number they paid from and a screenshot afterwards. Staff approve or reject it; until it is approved the order can't be confirmed or shipped. No new environment variable and no setting key: a store opts in by adding a method. The store's payment rules apply to it as the `bank_transfer` method (its fee or discount, and a funnel's method list by `store_method:<id>`). Amounts are minor units.
+
+### Endpoints (dashboard)
+- **GET `/workspaces/:workspaceId/manual-payments/methods`** (`workspace.manage`) → 200, in the merchant's order:
+  ```json
+  { "methods": [
+    { "id": "27793e5a-…", "kind": "wallet", "label": "Vodafone Cash", "accountNumber": "0101 234 5678", "paymentLink": null, "instructions": null, "active": true, "sortOrder": 0, "createdAt": "…", "updatedAt": "…" },
+    { "id": "2ec548b1-…", "kind": "instapay", "label": "InstaPay", "accountNumber": "demo@instapay", "paymentLink": "https://ipn.eg/S/demo/instapay/abc", "instructions": "حوّل المبلغ بالظبط", "active": true, "sortOrder": 1, "createdAt": "…", "updatedAt": "…" }
+  ] }
+  ```
+- **POST `/workspaces/:workspaceId/manual-payments/methods`** (`workspace.manage`) `{ "kind": "instapay", "label": "InstaPay", "accountNumber": "demo@instapay", "paymentLink": "https://ipn.eg/S/demo/instapay/abc", "instructions": "حوّل المبلغ بالظبط", "active": true }` → 201 `{ "method": { …as above… } }`. `kind` `instapay` | `wallet` and `label` (1–80) and `accountNumber` are required; `paymentLink` (https only, ≤500), `instructions` (≤1000), `active` (default true) and `sortOrder` optional. `""` or `null` for the link or the instructions = none (stored `null`). `accountNumber`: a wallet takes a phone number (8–15 digits, spaces, dashes and a leading + allowed, kept as typed); InstaPay takes a handle, phone or account number (3–80 of letters, digits, `@ . _ + -` and spaces). Errors: 422 `VALIDATION_ERROR` with `details[].field` `accountNumber` ("must be a wallet phone number" / "must be an InstaPay account or number"), `paymentLink` (not https), `label`, `kind`; 409 `TOO_MANY_PAYMENT_METHODS` (50 per store).
+- **PATCH `/workspaces/:workspaceId/manual-payments/methods/:methodId`** (`workspace.manage`) — any of the fields above → 200 `{ "method": … }`. Changing `kind` re-checks the number (422 on `accountNumber`). 404 `NOT_FOUND` for another store's or an unknown id.
+- **DELETE `/workspaces/:workspaceId/manual-payments/methods/:methodId`** (`workspace.manage`) → 204. Orders already placed with it keep their own copy of the method.
+- **PUT `/workspaces/:workspaceId/manual-payments/methods/order`** (`workspace.manage`) `{ "ids": ["27793e5a-…", "2ec548b1-…"] }` (1–50, no repeats) → 200 `{ "methods": [ … ] }`. 404 when an id isn't this store's.
+- **GET `/workspaces/:workspaceId/manual-payments/orders/:orderId`** (`orders.view`) → 200 `{ "manualPayment": null }` for an order not paid this way, else:
+  ```json
+  { "manualPayment": {
+    "id": "7aff0470-…", "status": "submitted", "awaitingReview": true,
+    "kind": "instapay", "label": "InstaPay", "accountNumber": "demo@instapay", "paymentLink": "https://ipn.eg/S/demo/instapay/abc",
+    "payerNumber": "201011112222",
+    "proofUrl": "https://api…/api/v1/customer-uploads/…?expires=…&signature=…", "proofUrlExpiresAt": "…",
+    "submittedAt": "…", "reviewedAt": null, "reviewedByUserId": null, "rejectionReason": null
+  } }
+  ```
+  `status`: `awaiting_proof` (nothing sent yet) → `submitted` → `approved` | `rejected` (the shopper may send again after a rejection). `payerNumber` is a phone as digits with the country code, or an InstaPay handle. `proofUrl` opens in an `<img>` without the token until `proofUrlExpiresAt` (load again for a new one). 404 for another store's or an unknown order.
+- **POST `/workspaces/:workspaceId/manual-payments/orders/:orderId/approve`** (`orders.manage`, no body) → 200 `{ "manualPayment": { …status "approved"… } }`. The order becomes paid at its own total, and a captured payment (provider `manual`, method `bank_transfer`, the payer number as sender, the screenshot as receipt) appears in the order's `payments` and in GET `/manual-transfers/orders/:orderId`. 409 `MANUAL_PAYMENT_NOT_SUBMITTED` (nothing waiting for review, or already approved / rejected), `NO_MANUAL_PAYMENT` (the order wasn't paid this way), `ORDER_CANCELLED` (cancelled, or rejected on a confirmation call: reopen it first).
+- **POST `/workspaces/:workspaceId/manual-payments/orders/:orderId/reject`** (`orders.manage`) `{ "reason": "المبلغ ناقص" }` (1–500, required; the shopper sees it) → 200 `{ "manualPayment": { …status "rejected", "rejectionReason": "المبلغ ناقص"… } }`. 409 as approve.
+- **GET `/workspaces/:workspaceId/orders/:orderId`**: a `bank_transfer` order carries `manualPayment` (the object above, or `null` for one paid by our receipt transfer). **GET `/confirmation-tasks`**: such a task's `order.manualPayment` too.
+- **POST `/orders/:orderId/confirmation`**, a queue outcome `confirmed` and a correction to `confirmed` answer 409 `MANUAL_PAYMENT_NOT_APPROVED` "Approve the payment proof before confirming this order" until it is approved. These orders are in the confirmation queue from the start.
+- **PUT `/payment-rules`**: an `adjustments` rule on `bank_transfer` prices these orders too; `methodsByFunnel` lists may hold `store_method:<id>`.
+
+### Endpoints (storefront, no login)
+- **GET `/store/:ws/payment-methods`**: after the gateways, COD and the receipt-transfer methods (`manual:<id>`), one entry per active method:
+  ```json
+  { "id": "store_method:2ec548b1-…", "provider": "store_method", "method": "bank_transfer", "mode": "live", "name": "InstaPay",
+    "manualPaymentMethodId": "2ec548b1-…", "kind": "instapay", "accountNumber": "demo@instapay", "paymentLink": "https://ipn.eg/S/demo/instapay/abc",
+    "instructions": "حوّل المبلغ بالظبط", "proofAfterCheckout": true,
+    "adjustment": { "type": "discount", "valueType": "percent", "value": 500, "label": "Transfer discount" } }
+  ```
+  (`adjustment` only when the store has a `bank_transfer` rule.) **GET `/store/:ws/manual-payment-methods`** gives the same methods alone: `{ "methods": [{ "id", "kind", "label", "accountNumber", "paymentLink", "instructions" }] }`.
+- **POST `/store/:ws/checkout`** with `"paymentMethod": "bank_transfer", "manualPaymentMethodId": "2ec548b1-…"` (no `transfer`) → 201:
+  ```json
+  { "order": { "id": "…", "orderNumber": "ORD-…", "totalAmount": "23750", "paymentAdjustmentAmount": "-1250", "financialState": "pending", … },
+    "manualPayment": { "orderId": "…", "orderNumber": "ORD-…", "totalAmount": 23750, "currency": "EGP", "status": "awaiting_proof", "rejectionReason": null, "submittedAt": null, "canSubmit": true,
+                       "method": { "kind": "instapay", "label": "InstaPay", "accountNumber": "demo@instapay", "paymentLink": "https://ipn.eg/S/demo/instapay/abc", "instructions": "حوّل المبلغ بالظبط" } },
+    "paymentToken": "q9…", "trackingToken": "…" }
+  ```
+  `paymentToken` is shown once: keep it (sessionStorage) for the proof page, as for an online payment. Errors: 422 `VALIDATION_ERROR` field `manualPaymentMethodId` ("is not a payment method this store offers": off, deleted or another store's; "is not allowed" with another `paymentMethod`); `transfer` and `manualPaymentMethodId` together 422; 422 `PAYMENT_METHOD_UNAVAILABLE` (not offered in this funnel); a gift card, points or store credit with it 422 (as for every `bank_transfer`).
+- **GET `/store/:ws/orders/:orderId/manual-payment`** with header `X-Payment-Token` (the checkout's token, or the `pl_…` token of a message's payment link) → 200 `{ "manualPayment": { …as in the checkout answer… } }`; after a rejection `status: "rejected"`, `rejectionReason`, `canSubmit: true`. 404 for a wrong token or order.
+- **POST `/store/:ws/orders/:orderId/manual-payment/proof`** with `X-Payment-Token`, `multipart/form-data`: `payerNumber` (the phone or InstaPay handle they paid from, e.g. `0101 111 2222` or `ahmed@instapay`) and `file` (JPEG, PNG or WebP, up to 5 MB since item 400; it is re-encoded without its metadata) → 201 `{ "manualPayment": { …"status": "submitted", "canSubmit": false… } }`. Errors: 422 `VALIDATION_ERROR` field `payerNumber`; 422 `NO_FILE`; 415 `UNSUPPORTED_MEDIA_TYPE`; 413 `FILE_TOO_LARGE`; 422 `IMAGE_UNREADABLE`; 413 `IMAGE_TOO_LARGE`; 409 `PROOF_ALREADY_SUBMITTED` (waiting for review or approved); 409 `ORDER_CANCELLED`; 404 (wrong token or order); 429 `RATE_LIMITED` (5 a minute per IP).
+- The /pay page (`GET /store/:ws/orders/:orderId/payment`) for such an order: `paymentMethod: "bank_transfer"`, `status: "awaiting_payment"`, `canRetry` and `canSwitchToCod` false, `methods: []`; retry and switch-to-cod answer 409 `ORDER_IS_MANUAL`.
+
+### Screens
+- **Dashboard → Settings → Payments → «إنستا باي والمحافظ» / "InstaPay & wallets"** (only with `workspace.manage`): a list in order (drag or up/down → PUT order) with, per row, «إنستا باي» / "InstaPay" or «محفظة» / "Wallet", the name, the number, «فيه لينك دفع» / "Has a payment link", a switch «ظاهرة في الدفع» / "Shown at checkout" (`active`), «تعديل» / "Edit", «حذف» / "Delete" (confirm: «الطلبات اللي اتعملت بيها هتفضل محتفظة بالرقم» / "Orders placed with it keep its number"). «إضافة طريقة» / "Add a method" opens a form: «النوع» / "Type" (InstaPay / «محفظة (فودافون كاش، اتصالات كاش…)» / "Wallet (Vodafone Cash, Etisalat Cash…)"), «الاسم اللي يظهر للعميل» / "Name the shopper sees", «رقم المحفظة» / "Wallet number" or «حساب إنستا باي أو الرقم» / "InstaPay account or number", «لينك الدفع (اختياري)» / "Payment link (optional)", «تعليمات للعميل (اختياري)» / "Instructions for the shopper (optional)". Errors: «اكتب رقم محفظة صحيح» / "Enter a valid wallet number"; «اكتب حساب إنستا باي أو رقم صحيح» / "Enter a valid InstaPay account or number"; «اللينك لازم يبدأ بـ https://» / "The link must start with https://"; `TOO_MANY_PAYMENT_METHODS` «وصلت لأقصى عدد طرق (50)» / "You've reached the most methods (50)". Empty: «مفيش أرقام دفع — ضيف رقم إنستا باي أو محفظة يدفع عليه العميل وبعدها يبعت صورة التحويل» / "No payment numbers yet — add an InstaPay or wallet number the shopper pays to and then sends a screenshot". A note that the `bank_transfer` fee or discount in Payment rules applies to these too.
+- **Order page → a card «الدفع بإنستا باي / محفظة» / "Paid by InstaPay / wallet"** when `manualPayment` is set: the method and number, the status badge «مستني صورة التحويل» / "Waiting for the screenshot" (`awaiting_proof`) · «مستني المراجعة» / "Waiting for review" (`submitted`) · «اتقبل» / "Approved" · «اترفض» / "Rejected"; «حوّل من» / "Paid from" (`payerNumber`), «اتبعت» / "Sent" (`submittedAt`), the screenshot (`proofUrl`, click to enlarge). With `orders.manage` and `awaitingReview`: «قبول الدفع» / "Approve payment" (confirm: «هيتسجل الطلب مدفوع بالكامل {total}» / "The order will be marked paid in full {total}") and «رفض» / "Reject" with a required reason «سبب الرفض (هيظهر للعميل)» / "Reason (the shopper sees it)". Rejected: «سبب الرفض: {rejectionReason}» / "Reason: {rejectionReason}" and «العميل يقدر يبعت صورة تانية» / "The shopper can send another screenshot". Errors: `MANUAL_PAYMENT_NOT_SUBMITTED` «مفيش صورة تحويل مستنية المراجعة» / "There's no screenshot waiting for review" (reload); `ORDER_CANCELLED` «الطلب ده اتلغى» / "This order is cancelled".
+- **Order page and the confirmation queue**: while `manualPayment.status` isn't `approved`, the confirm button shows «لازم تقبل الدفع الأول» / "Approve the payment first" (disabled, or show `MANUAL_PAYMENT_NOT_APPROVED` with that text); the queue row gets a badge «إنستا باي / محفظة — {status}» / "InstaPay / wallet — {status}" and the screenshot thumbnail.
+- **Storefront checkout**: each `store_method` entry is a payment option «{name}» with «ادفع على {accountNumber}» / "Pay to {accountNumber}" and a copy button «نسخ» / "Copy", the instructions, and «افتح لينك الدفع» / "Open the payment link" when `paymentLink` is set; its `adjustment` as for other methods. Placing the order sends `paymentMethod: "bank_transfer"` and `manualPaymentMethodId`, then goes to the proof page.
+- **Storefront proof page** (the thank-you step for this order, and the /pay link of such an order: when GET `/payment` shows `paymentMethod: "bank_transfer"`, try GET `/manual-payment` with the same token and show this page on 200): «حوّل {totalAmount} على {label}» / "Send {totalAmount} via {label}", the number with «نسخ» / "Copy", the link, the instructions; then «الرقم أو حساب إنستا باي اللي حوّلت منه» / "The number or InstaPay account you paid from", «صورة التحويل (سكرين شوت)» / "Transfer screenshot", «ابعت إثبات الدفع» / "Send payment proof". Submitted: «وصلنا إثبات الدفع — المتجر هيراجعه ويأكد طلبك» / "We received your payment proof — the store will check it and confirm your order". Approved: «الدفع اتأكد» / "Payment confirmed". Rejected: «المتجر رفض إثبات الدفع: {rejectionReason}» / "The store rejected the payment proof: {rejectionReason}" and the form again. Cancelled (`canSubmit` false, not approved): «الطلب ده اتلغى» / "This order is cancelled". Errors: payerNumber «اكتب الرقم أو حساب إنستا باي اللي حوّلت منه» / "Enter the number or InstaPay account you paid from"; `NO_FILE` «ارفع صورة التحويل» / "Attach the transfer screenshot"; `UNSUPPORTED_MEDIA_TYPE` / `IMAGE_UNREADABLE` «الصورة لازم تكون JPEG أو PNG أو WebP» / "The screenshot must be JPEG, PNG or WebP"; `FILE_TOO_LARGE` / `IMAGE_TOO_LARGE` «الصورة كبيرة — جرّب صورة أصغر» / "The screenshot is too large — try a smaller one"; `PROOF_ALREADY_SUBMITTED` «إثبات الدفع اتبعت خلاص» / "The payment proof was already sent" (reload the status); `RATE_LIMITED` «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute"; 404 «اللينك ده مش صالح» / "This link isn't valid".
+
+## 341. Custom domains: the verification TXT on `_zimos-verify`, deployment rules, certificate states and suspension — UI: pending
+
+The domains screen (Dashboard → Settings → Domains, `domain.manage`) keeps everything it has (root domains with A / ALIAS records and their www, the primary domain, redirects, buying a domain). What changes: the verification TXT record now goes on its own name, `_zimos-verify.<domain>`, so it never sits beside the CNAME; another store's unverified claim to a domain no longer blocks its owner; the certificate is asked for right after verification and followed by the server (no need to press "Check" any more, though the button stays); a certificate can be `moved`; a domain can be suspended. Each deployment rule is a server setting (names only in `.env.example`), and the overview says which apply so the screen can adapt: `CUSTOM_DOMAINS_ENABLED` (unset = on; anything but `true` closes the whole section), `CUSTOM_DOMAINS_SUBDOMAINS_ONLY` (`true` = no root domains, no buying), `CUSTOM_DOMAIN_CNAME_TARGET` (one host every domain points at; unset = the store's own `<slug>.<platform domain>`), `CUSTOM_DOMAINS_MAX_PER_STORE`, `CUSTOM_DOMAINS_PENDING_TTL_DAYS`, `DOMAIN_VERIFY_RESOLVERS`, `CERTIFICATE_PROVIDER` (`sandbox` | `cloudflare`), `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`. Today (all unset) the screen behaves as before, with the TXT on its new name.
+
+Domains added before this change: the dashboard now shows them the TXT on `_zimos-verify.<domain>`, but a TXT already added on the domain itself (the old place) still verifies them — the merchant need not move it.
+
+### Endpoints (dashboard, all `domain.manage`, under `/workspaces/:workspaceId/domains`)
+- **Closed** (`CUSTOM_DOMAINS_ENABLED` set to anything but `true`): every path below answers 404 `ROUTE_NOT_FOUND` with a token (401 without one), exactly like a path that does not exist. Hide Settings → Domains and the setup-guide step when GET `/domains/overview` answers 404. Domains already verified keep working on the storefront.
+- **GET `/overview`** → 200, new fields marked:
+  ```json
+  {
+    "domains": [{
+      "id": "73deb867-…", "hostname": "ahmedstore.com", "status": "pending_verification", "verifiedAt": null, "isPrimary": false,
+      "sslStatus": "none", "sslProvider": null, "sslCheckedAt": null,
+      "sslDetail": null,
+      "suspended": false, "suspendedReason": null,
+      "verifyBy": null,
+      "homeFunnel": null, "redirectToPrimary": true, "isRoot": true,
+      "records": [
+        { "type": "TXT", "name": "_zimos-verify.ahmedstore.com", "value": "zimos-verify=9e7a0e0e…", "ttl": 300, "purpose": "verification" },
+        { "type": "ALIAS", "name": "ahmedstore.com", "value": "demo-store.zimos.co", "ttl": 300, "purpose": "routing" },
+        { "type": "CNAME", "name": "www.ahmedstore.com", "value": "demo-store.zimos.co", "ttl": 300, "purpose": "redirect" }
+      ],
+      "alternatives": [],
+      "counterpart": { "hostname": "www.ahmedstore.com", "redirect": true, "sslStatus": "none", "dnsManaged": false, "records": […], "alternatives": [] }
+    }],
+    "cnameTarget": "demo-store.zimos.co",
+    "subdomainsOnly": false,
+    "maxPerStore": null,
+    "pendingTtlDays": null,
+    "certificateProvider": "sandbox"
+  }
+  ```
+  - `records[0].name` is now `_zimos-verify.<hostname>` (was the hostname). Show the name column as is; many DNS panels want only `_zimos-verify` (or `_zimos-verify.www`) in the "Name/Host" field — show that short form beside it ("Host: `_zimos-verify`").
+  - `cnameTarget`: with `CUSTOM_DOMAIN_CNAME_TARGET` set it is that one host (e.g. `customers.zimos.co`) for every store and every routing record uses it.
+  - `sslStatus`: `none` | `pending` | `issued` | `failed` | **`moved`** (the certificate was issued but the domain no longer points at the store). `sslDetail`: the provider's reason as a sentence (show as is under the status), or null.
+  - `suspended` / `suspendedReason`: `store_suspended` (the store is suspended by the platform) or `plan` (the plan no longer includes custom domains while plan features are enforced). Set and cleared by the server within 10 minutes.
+  - `verifyBy`: for a `pending_verification` domain when `pendingTtlDays` is set, the time after which it can no longer be verified (and is removed); null otherwise.
+  - `subdomainsOnly: true`: no root domains (adding one answers `APEX_NOT_SUPPORTED`), no buying (search / purchase answer `APEX_NOT_SUPPORTED`), `counterpart` is null. `maxPerStore`: the most domains one store may hold (verified or not), null = only the plan's limit. `pendingTtlDays`: null = an unverified domain waits for ever.
+- **GET `/`** (the short list): each item adds `"routing": [ { "type", "name", "value", "ttl", "purpose" } ]` (the records that point it at the store: a subdomain's CNAME, a root's A records or ALIAS, as in the overview) and `"cname": { "type": "CNAME", "name": "<hostname>", "value": "<cnameTarget>" }`, which is null for a root domain (a root cannot take a CNAME; show `routing`); `record.name` is `_zimos-verify.<hostname>`.
+- **POST `/`** `{ "hostname": "www.ahmedstore.com" }` → 201 `{ "domain": {…}, "record": { "type": "TXT", "name": "_zimos-verify.www.ahmedstore.com", "value": "zimos-verify=…" }, "next": "…" }`. The hostname is stored lower-case; an Arabic name in its `xn--` form (show `hostname` as the browser would, or as is). Errors:
+  - 422 `VALIDATION_ERROR` field `hostname`: "Enter a valid domain like www.ahmedstore.com", or "That is a zimos.co subdomain — it already works, no setup needed".
+  - 400 `DOMAIN_NOT_ALLOWED`: an IP address, or a name that can never be a store's (the platform's hosting zones, `.local`, `.internal`, `.test`, `.example`, `.localhost` …).
+  - 400 `APEX_NOT_SUPPORTED` (subdomains-only): `details.suggestion` = `"www.ahmedstore.com"`.
+  - 409 `DOMAIN_ALREADY_ADDED` (already on this store), `DOMAIN_TAKEN` (verified by another store — an unverified claim elsewhere no longer counts), `DOMAIN_LIMIT_REACHED` (`maxPerStore`), `STORE_NOT_SET_UP`; 403 `PLAN_FEATURE_REQUIRED` / plan limit as before; 429 `RATE_LIMITED` (10 a minute per IP).
+- **POST `/:domainId/verify`** → 200 as before. The TXT is looked for on `_zimos-verify.<hostname>`, then on the hostname itself (older domains). On success the certificate is requested at once: reload the overview (`sslStatus` usually `pending`). Errors: 400 `DOMAIN_NOT_VERIFIED` (message names `_zimos-verify.<hostname>`); 409 `DOMAIN_TAKEN` (another store verified it first); 409 `DOMAIN_VERIFICATION_EXPIRED` (past `verifyBy`: remove it and add it again); 429 `RATE_LIMITED` (20 a minute per IP).
+- **GET `/:domainId/dns-check`** → `dns.txt` adds `"name": "_zimos-verify.<hostname>"` and `"foundOnHost": true|false` (`found` is true when either place has it); 429 `RATE_LIMITED` (30 a minute per IP).
+- **POST `/:domainId/ssl/check`**: the answer's `domain` carries `sslDetail`; `sslStatus` may be `moved`.
+- **PATCH `/:domainId`** `{ "redirectCounterpart": true }` → 400 `APEX_NOT_SUPPORTED` in subdomains-only mode.
+- **GET `/search`**, **POST `/purchases`** → 400 `APEX_NOT_SUPPORTED` in subdomains-only mode. A purchase now checks `DOMAIN_LIMIT_REACHED` / `DOMAIN_ALREADY_ADDED` / `DOMAIN_TAKEN` before anything is bought, and a name another store only claimed (unverified) shows as available.
+
+### Storefront proxy and console
+- **GET `/store/resolve-host?host=…`**: a domain suspended for its `plan` answers 404 (treat it as an unknown host, as for any unknown domain). A domain of a suspended store answers as before, so the storefront shows the store's "unavailable" page there. A suspended or `moved` domain is never the `primaryHost`.
+- **POST `/admin/workspaces/:workspaceId/support-view`** (console, `support.view`): each `domains[]` row adds `sslDetail` and `suspendedReason`.
+
+### Screens (dashboard → Settings → Domains)
+- **Add a domain**: the field hint follows `subdomainsOnly`: false «اكتب الدومين، مثلًا ahmedstore.com أو shop.ahmedstore.com» / "Type the domain, e.g. ahmedstore.com or shop.ahmedstore.com"; true «اكتب دومين فرعي، مثلًا www.ahmedstore.com أو shop.ahmedstore.com» / "Type a subdomain, e.g. www.ahmedstore.com or shop.ahmedstore.com". When `maxPerStore` is reached, disable the button with «وصلت لأقصى عدد دومينات ({maxPerStore}) — امسح واحد الأول» / "You've reached the most domains ({maxPerStore}) — remove one first".
+- **DNS records card**: for the TXT row label it «إثبات الملكية» / "Ownership proof" and show «الاسم: _zimos-verify» / "Name: _zimos-verify" (or `_zimos-verify.www` for www) with a copy button «نسخ» / "Copy", and the full name in small text. Note under it: «لو كنت ضفت سجل TXT على الدومين نفسه قبل كده، هيشتغل برضه» / "If you already added the TXT on the domain itself before, it still works". With `verifyBy`: «لازم تأكد الدومين قبل {verifyBy} وإلا هيتمسح» / "Verify the domain before {verifyBy} or it will be removed".
+- **Certificate badge** (`sslStatus`): «مفيش شهادة لسه» / "No certificate yet" (`none`) · «الشهادة بتتجهز» / "Certificate in progress" (`pending`, with «بنتابعها تلقائي — مش لازم تعمل حاجة» / "We follow it automatically — nothing to do") · «الشهادة شغالة» / "Certificate active" (`issued`) · «الشهادة فشلت» / "Certificate failed" (`failed`) · «الدومين مبقاش متوجه للمتجر» / "The domain no longer points at the store" (`moved`, with «راجع سجلات الـ DNS وبعدين اضغط افحص تاني» / "Check the DNS records, then press Check again"). Under `failed` / `moved` show `sslDetail` as is.
+- **Suspended**: a warning on the row — `store_suspended` «الدومين متوقف لأن المتجر موقوف» / "This domain is paused because the store is suspended"; `plan` «الدومين متوقف — باقتك مش فيها دومين خاص» / "This domain is paused — your plan doesn't include a custom domain" with «رقّي الباقة» / "Upgrade plan" (→ Subscription). It comes back by itself once the reason is gone.
+- **Errors**: `DOMAIN_NOT_ALLOWED` «الدومين ده مينفعش يتوصل بمتجر» / "This domain can't be connected to a store"; `APEX_NOT_SUPPORTED` «وصّل دومين فرعي زي {suggestion}، وحوّل الدومين الأساسي له من عند شركة الدومين» / "Connect a subdomain such as {suggestion}, and forward the main domain to it at your domain registrar" (button «استخدم {suggestion}» / "Use {suggestion}" fills the field); `DOMAIN_ALREADY_ADDED` «الدومين ده متضاف للمتجر خلاص» / "This domain is already on your store"; `DOMAIN_TAKEN` «الدومين ده متوصل بمتجر تاني» / "This domain is connected to another store"; `DOMAIN_LIMIT_REACHED` as above; `DOMAIN_VERIFICATION_EXPIRED` «عدّت المدة ومتأكدش — امسحه وضيفه تاني» / "It wasn't verified in time — remove it and add it again"; `RATE_LIMITED` «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute".
+- **Buy a domain** tab: hidden when `subdomainsOnly` is true (the API answers `APEX_NOT_SUPPORTED`).
+- **Console → a store → support view → Domains**: show `suspendedReason` («موقوف: المتجر موقوف» / "Paused: store suspended", «موقوف: الباقة» / "Paused: plan") and `sslDetail` beside the certificate state.
+
+## 346. Team: nobody gives, changes or removes access above their own — UI: pending
+
+A teammate with `users.manage` / `roles.manage` (the Admin, or a custom role) can no longer make themselves Owner, invite an Owner, demote or remove an Owner, or create a role with permissions they do not hold. Only an Owner (`*`) works with Owner access. Nothing new to call; the existing calls can now answer one new error.
+
+### Endpoints (all `/api/v1/workspaces/:workspaceId`, Bearer, unchanged permissions)
+- **POST `/members`** `{ "email", "roleId" }` (users.manage), **POST `/team/invite`** `{ "access": "admin" | "partial", … }` (users.manage): 403 `ROLE_ABOVE_YOURS` when the role holds Owner access or a permission the caller lacks (a non-admin teammate inviting with `access: "admin"` gets it too).
+- **PATCH `/members/:membershipId`** `{ "roleId" }` (users.manage): 403 `ROLE_ABOVE_YOURS` when the new role is beyond the caller's, or when the teammate is an Owner and the caller is not. A teammate whose current role holds something the caller lacks (an Admin changing a Confirmation Agent or Accountant) can still be moved to a role within the caller's access.
+- **DELETE `/members/:membershipId`** (users.manage): 403 `ROLE_ABOVE_YOURS` only when the teammate (or pending invite) holds Owner access and the caller is not an Owner; an Admin can remove a Confirmation Agent or Accountant and cancel their invites.
+- **POST `/roles`** `{ "name", "key", "permissions": [...] }` (roles.manage): 403 `ROLE_ABOVE_YOURS` naming the permissions the caller lacks.
+- Error body: `{ "error": { "code": "ROLE_ABOVE_YOURS", "message": "Only an Owner can give, change or remove Owner access" } }` or `{ "error": { "code": "ROLE_ABOVE_YOURS", "message": "You cannot give or change access you do not have: billing.manage", "details": [ { "field": "permissions", "message": "Not held by you: billing.manage" } ] } }`.
+
+### Screens (dashboard → Settings → Team)
+- **Members list**: for a caller who is not an Owner, hide or disable "Change role" and "Remove" on rows whose role is Owner (`role.key === "owner"`), with the tooltip «بس المالك يقدر يغيّر صلاحيات المالك» / "Only an Owner can change an Owner's access". In the role picker, leave the Owner role out unless the caller is an Owner, and disable roles holding a permission the caller lacks (for an Admin: Confirmation Agent and Accountant, which hold orders.confirm / billing.manage) with «الدور ده فيه صلاحيات مش عندك، اطلبه من المالك» / "This role has access you don't have; ask the Owner". Keep "Change role" and "Remove" enabled on those rows.
+- **Create role / partial invite**: untick and disable permissions the caller does not hold (`GET /team/access-options` already lists them; compare with the caller's own role).
+- **Error `ROLE_ABOVE_YOURS`**: toast «مينفعش تدّي أو تغيّر صلاحيات أعلى من صلاحياتك» / "You can't give or change access above your own"; for the Owner case «بس المالك يقدر يدّي أو يغيّر أو يشيل صلاحيات المالك» / "Only an Owner can give, change or remove Owner access".
+
+## 347. Google sign-in: verified email only, two-step sign-in, and the OAuth state — UI: pending
+
+Google sign-in still starts with a full-page visit to `GET /api/v1/auth/google` and comes back to the dashboard's `/auth/callback` page. Nothing new to call; the callback page gets new query values.
+
+### What changed in the flow
+- `GET /auth/google` now sets a short httpOnly cookie (`zimos_gstate`, 10 minutes) and sends a `state` to Google. The sign-in must start and finish in the same browser: always open `/auth/google` with a full-page navigation (no `fetch`, no new browser), as today.
+- An account with two-step sign-in on (authenticator app, email code or WhatsApp code) is no longer signed in straight away by Google. The callback redirects to:
+  `/auth/callback?twoFactorRequired=true&challengeToken=<uuid>&channel=totp` (or `channel=email&sentTo=m***@company.com`, `channel=whatsapp|sms&sentTo=+20•••••5678`, and `codeNotSent=true` when too many codes went out — a backup code still works).
+  Show the same "Enter your code" step as after a password sign-in and finish with the existing **POST `/api/v1/auth/two-factor/verify`** (no auth; same permission as today) `{ "challengeToken": "<uuid>", "code": "123456", "rememberDevice": true }` → 200 `{ "user": {…}, "accessToken": "…", "refreshToken": "…" }` (refresh token in the cookie in cookie mode, as usual); 401 `INVALID_TWO_FACTOR_CODE`, 429 `TOO_MANY_ATTEMPTS`.
+- Without two-step sign-in nothing changes: `?status=ok` (cookie mode) or `?accessToken=…&refreshToken=…`.
+
+### New `error` values on `/auth/callback`
+| `error` | When | Arabic | English |
+|---|---|---|---|
+| `GOOGLE_EMAIL_UNVERIFIED` | The Google account's email is not verified by Google (any sign-in, also with a Google account linked before) | «إيميل حساب جوجل ده مش متأكد. أكّده عند جوجل أو ادخل بالإيميل وكلمة السر» | "This Google account's email isn't verified. Verify it with Google, or sign in with your email and password" |
+| `GOOGLE_STATE_MISMATCH` | The sign-in was not started from this browser, or took over 10 minutes | «انتهت محاولة الدخول بجوجل. جرّب تاني» | "The Google sign-in expired. Please try again" |
+| `GOOGLE_LOGIN_FAILED` | Google refused the sign-in code (used twice, expired) | «الدخول بجوجل منجحش. جرّب تاني» | "Google sign-in didn't work. Please try again" |
+
+Each error screen shows a «جرّب تاني» / "Try again" button that opens `/api/v1/auth/google` again, and a link back to the sign-in page. `ACCOUNT_SUSPENDED` / `ACCOUNT_DELETED` are unchanged.
+
+## 348. Checkout code: Resend only after the checkout asked for a code, and a per-IP limit — UI: pending
+
+The storefront's code-entry step (shown after the checkout answers 428 `OTP_REQUIRED`) keeps the same two calls. Resend now only sends again to a phone this store's checkout challenged in the last 30 minutes, and both calls share a limit of 10 a minute per IP. Nothing new to call.
+
+### Endpoints (public, no auth, unchanged bodies)
+- **POST `/api/v1/store/:workspaceId/checkout/otp/resend`** `{ "phone": "+201001234567" }` → 200 `{ "sent": true, "resendAfterSeconds": 60 }`.
+  - 409 `OTP_NOT_REQUESTED` `{ "error": { "code": "OTP_NOT_REQUESTED", "message": "Place the order again to get a code" } }`: this store sent no code to that phone in the last 30 minutes (the shopper changed the phone, or came back much later). Nothing is sent.
+  - 429 `OTP_RESEND_TOO_SOON` / `OTP_RATE_LIMITED` (unchanged), 422 `INVALID_PHONE` (unchanged).
+  - 429 `RATE_LIMITED`: over 10 verify + resend calls a minute from one IP.
+  - 429 `OTP_RATE_LIMITED` also when one IP has had 3 checkout codes in the last minute or 10 in the last hour, across every store (review of item 348).
+- **POST `/api/v1/store/:workspaceId/checkout/otp/verify`** `{ "phone", "code" }` → 200 `{ "verified": true, "otpToken": "…" }` (unchanged); can now answer 429 `RATE_LIMITED` as above.
+- **POST `/api/v1/store/:workspaceId/checkout`** and **POST `/api/v1/store/:workspaceId/orders/:orderId/payment/switch-to-cod`**: where they would answer 428 `OTP_REQUIRED` and send the first code, they answer 429 `OTP_RATE_LIMITED` `{ "error": { "code": "OTP_RATE_LIMITED", "message": "Too many codes requested — try again later" } }` instead once that IP budget is spent; nothing is sent and no code step opens.
+
+### Screens (storefront → checkout → code step)
+- Always send the Resend call with the same phone the checkout was submitted with; if the shopper edits the phone, submit the order again instead of calling Resend.
+- `OTP_NOT_REQUESTED`: close the code step, keep the form filled and show «اضغط "اطلب" تاني عشان نبعتلك كود جديد» / "Press "Place order" again and we'll send you a new code".
+- `RATE_LIMITED`: «محاولات كتير — جرّب بعد دقيقة» / "Too many tries — try again in a minute"; keep the code field and the Resend countdown as they are.
+- `OTP_RATE_LIMITED` from the checkout or the COD switch: keep the form filled and show «طلبت أكواد كتير — جرّب بعد شوية» / "Too many codes requested — try again a bit later".
+
+## 351. Cancelling a courier shipment now cancels it at the courier — UI: pending
+
+The "Cancel shipment" action on the order page (and any status picker that sets a shipment to cancelled) keeps the same call, but for a shipment booked with Bosta, J&T, Mylerz or the sandbox courier that is still waiting for pickup (`created`) or in an exception (`failed`), the backend now cancels it at the courier first. If the courier refuses, nothing changes here and the call answers an error the screen must show. Nothing new to call.
+
+### Endpoint (unchanged body)
+- **PATCH `/api/v1/workspaces/:workspaceId/orders/:orderId/shipments/:shipmentId`** — permission `orders.manage` or `shipping.manage`. Same route on the public API (`PATCH /api/v1/public/orders/:orderId/shipments/:shipmentId`, scope `orders:update`).
+  `{ "status": "cancelled" }` → 200 `{ "shipment": { "id": "…", "status": "cancelled", "cancelMode": "api", "nextPollAt": null, … } }`.
+  - 409 `CARRIER_CANCEL_FAILED` `{ "error": { "code": "CARRIER_CANCEL_FAILED", "message": "Bosta did not cancel shipment 12345678: <courier's reason> The shipment was not cancelled.", "details": { "shipmentId": "…", "carrierCode": "bosta", "carrierErrorCode": null } } }` — the courier refused (usually: it already picked the parcel up). The shipment stays as it was.
+  - 422 `CARRIER_PERMISSION_DENIED` — the courier account may not call its cancel endpoint (J&T); message as sent.
+  - 409 `CARRIER_NOT_CONNECTED` — the courier account was disconnected; connect it again to cancel.
+  - These three, and 503 `CARRIERS_NOT_CONFIGURED` / 404 `NOT_FOUND` (the courier is not available to the store), carry `details.manualCancelAllowed: true` and `details.shipmentId`. The merchant may then cancel the parcel in the courier's own dashboard and send `{ "status": "cancelled", "acknowledgeManualCancel": true }`: 200 with `cancelMode: "manual_ack"` and `nextPollAt` set (we check with the courier again later, as for a courier without a cancel API). The courier is still asked first; if it cancels, `cancelMode` is `"api"`.
+  - 409 `INVALID_STATUS_TRANSITION` — the order may not move to the stage it would have without this shipment; nothing was sent to the courier.
+  - 409 `CARRIER_MANUAL_CANCEL_REQUIRED` (unchanged, couriers without a cancel API) and the existing guards stay as they are.
+
+### Screens (dashboard → Orders → order page → Shipment card)
+- While the call runs, show «جاري إلغاء الشحنة عند شركة الشحن…» / "Cancelling the shipment with the courier…" on the button and disable it.
+- Success on a courier booking: toast «اتلغت الشحنة عند شركة الشحن» / "Shipment cancelled with the courier".
+- `CARRIER_CANCEL_FAILED`: keep the shipment card as it is and show an error box «شركة الشحن رفضت إلغاء الشحنة، فالشحنة لسه شغالة. لو المندوب استلمها، كلّم شركة الشحن» / "The courier refused to cancel this shipment, so it is still live. If the courier already picked it up, contact them", with the server's message underneath and a «حدّث الحالة» / "Sync status" button (the existing POST `.../shipments/:id/sync`).
+- `CARRIER_PERMISSION_DENIED`: «حساب شركة الشحن مش مسموح له يلغي شحنات. ألغيها من لوحة شركة الشحن» / "This courier account isn't allowed to cancel shipments. Cancel it in the courier's dashboard".
+- `CARRIER_NOT_CONNECTED`: «اربط حساب شركة الشحن تاني عشان تلغي الشحنة» / "Connect the courier account again to cancel this shipment", linking to Settings → Shipping → Couriers.
+- Whenever `details.manualCancelAllowed` is true, add under the error a secondary button «ألغيتها من لوحة شركة الشحن» / "I cancelled it in the courier's dashboard" that opens a confirm dialog («اتأكد إنك ألغيت الشحنة {waybill} من لوحة شركة الشحن. هنفضل نتابع حالتها، ولو اتحركت هننبهك» / "Make sure you cancelled shipment {waybill} in the courier's dashboard. We'll keep checking it and warn you if it moves.") and repeats the PATCH with `acknowledgeManualCancel: true`.
+
+## 352. Editing a courier-booked order waits for the booking to be cancelled — UI: pending
+
+An order booked with Bosta, J&T, Mylerz or the sandbox courier whose shipment is still waiting for pickup (`created`) or in an exception (`failed`) can no longer have its items, address or receiver changed: the courier would still collect the old COD amount at the old address. The merchant cancels the booking first (the existing shipment cancel, item 351), edits the order, then books again. A manual shipment row does not block anything. Nothing new to call.
+
+### Endpoints (unchanged bodies, one new refusal)
+- **PUT `/api/v1/workspaces/:workspaceId/orders/:orderId/items`** and **POST `.../orders/:orderId/items/preview`** — permission `orders.manage`.
+- **PATCH `/api/v1/workspaces/:workspaceId/orders/:orderId`** — permission `orders.manage`. Refused only when `shippingAddress` changes one of country, province, city, area, addressLine, placeId, postalCode or notes, or `contact` changes fullName, phone or alternatePhone. `notes` alone, a contact email, or the same address sent again still save (200).
+- Refusal, all three: 409
+  `{ "error": { "code": "SHIPMENT_BOOKED", "message": "This order is booked with a courier. Cancel the courier booking before editing this order.", "details": { "shipmentId": "…", "carrierCode": "bosta", "waybillNumber": "12345678" } } }`
+- **GET `/api/v1/store/:workspaceId/orders/:orderId/self-service`** (storefront, shopper) — `canChangeAddress` is now `false` while such a booking is live, and POST `.../self-service/address` answers the existing 409 `ADDRESS_CHANGE_NOT_ALLOWED`.
+
+### Screens
+- Dashboard → Orders → order page → "Edit items" and "Edit address / customer": when the order has a shipment with `status` `created` or `failed` booked with a courier (it has a `waybillNumber` and a courier `carrierCode`, not `manual`), show the buttons disabled with the hint «الطلب محجوز مع شركة الشحن. ألغِ الشحنة الأول عشان تعدّل الطلب، وبعدين احجزه تاني» / "This order is booked with a courier. Cancel the shipment first to edit the order, then book it again", with a «إلغاء الشحنة» / "Cancel shipment" link to the Shipment card's cancel action.
+- On a 409 `SHIPMENT_BOOKED` from any of the three calls (another tab booked it meanwhile): keep the form open with the same message as an error box and the "Cancel shipment" link; the order is unchanged.
+- Storefront order page / tracking page: when `canChangeAddress` is false the "Change address" button stays hidden as today; if the shopper's POST gets `ADDRESS_CHANGE_NOT_ALLOWED`, show «العنوان مينفعش يتغير من هنا دلوقتي، كلّم المتجر» / "The address can no longer be changed here — contact the store".
+
+## 353. Free-shipping and buy-X-get-Y codes now take something off — UI: pending
+
+A discount code of type `free_shipping` now makes the whole order ship free (shipping 0) when the shopper uses it, and a `buy_x_get_y` code takes the given units off the order ("buy 2, get 1 free", or "buy 2, get the third at 50% off"). Before, both were accepted at checkout and used up a redemption without changing the total. Automatic discounts (no code) can now be buy-X-get-Y too.
+
+### Endpoints
+- **POST `/api/v1/workspaces/:workspaceId/discounts`** — permission `discounts.manage` (also the public API `POST /discounts`, scope `discounts:write`). For `type: "buy_x_get_y"`, `buyXGetYConfig` is now required:
+  `{ "code": "B2G1", "type": "buy_x_get_y", "buyXGetYConfig": { "buyQuantity": 2, "getQuantity": 1, "getDiscountBasisPoints": 10000 }, "productRestrictions": [] }`
+  `buyQuantity` and `getQuantity` are whole numbers 1–1000; `getDiscountBasisPoints` is how much comes off each given unit, 1–10000 (10000 = free, the default when left out). `value` is not used for this type. Without the config: 422 `VALIDATION_ERROR`, field `buyXGetYConfig`. Leave `code` out for an automatic one.
+- **PATCH `/api/v1/workspaces/:workspaceId/discounts/:discountId`** — permission `discounts.manage`. Same config shape; a change that would leave a buy-X-get-Y discount without a valid config (type changed to `buy_x_get_y` with no config, or `buyXGetYConfig: null`) is refused 422 `VALIDATION_ERROR` `{ "field": "buyXGetYConfig", "message": "Enter how many units to buy and how many are given" }`.
+- **POST `/api/v1/store/:workspaceId/coupon-preview`** (storefront, public) — answers now carry `freeShipping`:
+  `{ "coupon": { "valid": true, "code": "FREESHIP", "type": "free_shipping", "amount": 0, "freeShipping": true, "subtotal": 25000, "reason": null } }`
+  `{ "coupon": { "valid": true, "code": "B2G1", "type": "buy_x_get_y", "amount": 25000, "freeShipping": false, "subtotal": 75000, "reason": null } }`
+  Too few units for a buy-X-get-Y code:
+  `{ "coupon": { "valid": false, "code": "B2G1", "type": null, "amount": 0, "freeShipping": false, "subtotal": 50000, "reason": "DISCOUNT_QUANTITY_NOT_MET", "details": [{ "field": "items", "buyQuantity": 2, "getQuantity": 1, "units": 2, "remainingUnits": 1 }] } }`
+- **POST `/api/v1/store/:workspaceId/checkout`** (and funnel checkouts) — a buy-X-get-Y code with too few units is refused 422 `DISCOUNT_QUANTITY_NOT_MET` with the same `details`; the order is not placed and the code is not used. With a free-shipping code the order's `shippingAmount` is 0 and `shippingSnapshot.freeShippingGranted` is true.
+- Shipping quote (`automaticDiscount`): may now have `type: "buy_x_get_y"` with `value: 0`; show its `amount`.
+- Units are product units: an offer line (e.g. a "3 shirts" offer) counts the shirts it holds, so `units` / `remainingUnits` in `DISCOUNT_QUANTITY_NOT_MET` count those too. A free-shipping code also beats an offer's own shipping price (shipping 0, `shippingSnapshot.rule` `all_items_free`). Endpoints and response shapes unchanged.
+
+### Screens
+- Dashboard → Discounts → new / edit discount: for the type «اشترِ X واحصل على Y» / "Buy X get Y", show three fields: «عدد القطع اللي يشتريها» / "Units to buy" (`buyQuantity`), «عدد القطع اللي ياخدها» / "Units given" (`getQuantity`), and «الخصم على القطع دي» / "Discount on those units" as a percentage (100% = «مجانًا» / "Free"; sent as `getDiscountBasisPoints` = percent × 100). Hide the value field for this type and for «شحن مجاني» / "Free shipping". Hint under the fields: «القطع الأرخص في السلة هي اللي بتتخصم» / "The cheapest units in the cart are the ones discounted". Show the 422 field error under the fields.
+- Discount list: describe a buy-X-get-Y discount as «اشترِ 2 واحصل على 1 مجانًا» / "Buy 2, get 1 free" (or «… بخصم 50%» / "… at 50% off").
+- Storefront and funnel checkout, code box: for `freeShipping: true` show «الشحن مجاني بالكود ده» / "This code gives you free shipping" and show shipping as «مجاني» / "Free" in the summary. For `DISCOUNT_QUANTITY_NOT_MET` show «زوّد {remainingUnits} قطعة كمان عشان تستخدم الكود ده» / "Add {remainingUnits} more item(s) to use this code" (from `details[0]`), and the same text on that checkout refusal.
+
+## 354. Restock a returned (undelivered) parcel — UI: pending
+
+A parcel that came back undelivered (order stage `returned`, an RTO: the COD customer refused it) kept its units reserved for good. The order page gets a "Back in stock" action that gives them back once the parcel is on the shelf. Booking the order again later takes the units again on its own.
+
+### Endpoints
+- **GET `/api/v1/workspaces/:workspaceId/orders/:orderId/restock-return`** — permission `orders.view`. What a restock would give back, or why not:
+  `{ "canRestock": true, "reason": null, "units": [{ "variantId": "…", "quantity": 2, "sku": "TS-M", "productName": "T-shirt", "optionValues": { "Size": "M" } }], "restockedAt": null }`
+  `reason` is one of `not_returned`, `was_delivered`, `shipment_active`, `nothing_held` when `canRestock` is false (then `units` is `[]`). `restockedAt` is when the order was last restocked, null if never or if it has been booked again since.
+- **POST `/api/v1/workspaces/:workspaceId/orders/:orderId/restock-return`** — permission `orders.manage`, no body. 200:
+  `{ "orderId": "…", "units": [{ "variantId": "…", "quantity": 2, "sku": "TS-M", "productName": "T-shirt", "optionValues": { "Size": "M" } }], "restockedAt": "2026-10-07T11:45:34.305Z" }`
+  - 409 `ORDER_NOT_RETURNED` — the order's parcel is not back.
+  - 409 `ORDER_WAS_DELIVERED` — the parcel was delivered before it came back; it goes through a return (POST `/orders/:orderId/returns`, then restock the return), which now accepts such an order.
+  - 409 `SHIPMENT_ALREADY_EXISTS` — the order has been booked again.
+  - 409 `ORDER_ALREADY_RESTOCKED` — nothing is held any more (restocked already).
+- **POST `/orders/:orderId/shipments`** (unchanged body), and the courier booking: for an order restocked this way, the units are reserved again before anything is booked. When they have been sold since: 409 `INSUFFICIENT_STOCK` "Insufficient stock for variant …: requested 3, available 0", and nothing is booked.
+- **PATCH `/orders/:orderId/shipments/:shipmentId`** (unchanged body): setting a `returned` or `cancelled` shipment to any other status sends the order again, so the same applies: a restocked order takes its units back first, or gets 409 `INSUFFICIENT_STOCK` and the shipment stays as it was.
+- **POST `/orders/:orderId/returns`**: also accepts an order that was delivered without a shipment (a click-and-collect order picked up) and then moved to `returned`; restock-return answers `was_delivered` for it.
+
+### Screens (dashboard → Orders → order page)
+- When the stage is `returned`, call the GET and, if `canRestock`, show a card «الشحنة رجعت؟ رجّع المنتجات للمخزون» / "Parcel back? Put the items back in stock", listing the units (product, options, SKU, quantity) and a button «رجّع للمخزون» / "Back in stock". Confirm: «هترجع الكميات دي للمخزون المتاح للبيع. متأكد إن الشحنة وصلتك؟» / "These units go back to the stock available to sell. Is the parcel with you?".
+- Success toast: «رجعت المنتجات للمخزون» / "Items are back in stock"; then show «اترجعت للمخزون في {date}» / "Restocked on {date}" from `restockedAt`.
+- `reason: was_delivered`: «الشحنة اتسلمت قبل ما ترجع، افتح مرتجع ورجّعه للمخزون من هناك» / "This parcel was delivered before it came back. Open a return and restock it from there", with a link to the returns section.
+- Booking a restocked order again with `INSUFFICIENT_STOCK`: «المنتجات دي اتباعت بعد ما رجعت للمخزون. زوّد المخزون الأول وبعدين احجز الشحنة» / "These items were sold after they went back in stock. Add stock first, then book the shipment".
+
+## 355. A funnel checkout must name a published funnel that sells its items — UI: pending
+
+The storefront checkout, shipping quote and coupon preview took any `funnelId`, so a shopper could name another funnel to get its shipping group, free-shipping threshold and funnel-only coupons. Now the funnel must be a published funnel of this store, and the shopper's lines must be products its published pages sell. Nothing changes for a checkout without `funnelId`, and the request bodies are unchanged.
+
+### Endpoints (storefront, public)
+- **POST `/api/v1/store/:workspaceId/checkout`**, **POST `/api/v1/store/:workspaceId/shipping-quote`**, **POST `/api/v1/store/:workspaceId/coupon-preview`**: when the body carries `funnelId`:
+  - 422 `FUNNEL_NOT_AVAILABLE` "This funnel is not published in this store", `details: [{ "field": "funnelId", "message": "Not a published funnel of this store" }]`: an unknown id, another store's funnel, or a draft.
+  - 410 `FUNNEL_PAUSED` "This funnel is not currently available", `details: [{ "field": "funnelId", "message": "This funnel is paused" }]`: the merchant paused the funnel (the same code the funnel runtime already gives).
+  - 422 `FUNNEL_ITEM_NOT_OFFERED` "This funnel does not sell one or more of these items", `details: [{ "field": "items[0]", "message": "This funnel does not sell this item" }]`: the index is the shopper's own line (`item` = 0, then `extraItems`, or the cart's lines in order).
+- What a funnel sells: each published page's product, every product, variant or offer an element on its pages names (also on running split-test pages), and each step's offer and order bump. A page that shows the catalogue (a product list, a collection band or rail, bundle cards, a gallery, a shoppable image, or a product element — including a buy button, variant or bundle picker or image gallery — with no product on a page with none) sells any of the store's products. A product an element names by slug counts, as does a need picker's alternative product. Order bumps, product bumps, gift wrap and free gifts the server adds are not checked.
+
+### Screens
+- Funnel checkout and its order form: on `FUNNEL_NOT_AVAILABLE` or `FUNNEL_PAUSED`, replace the form with «العرض ده مش متاح دلوقتي» / "This offer is not available right now" and keep the shopper's details in the form state.
+- On `FUNNEL_ITEM_NOT_OFFERED`: «المنتج ده مش من العرض ده. ارجع لصفحة العرض واطلب من هناك» / "This product is not part of this offer. Go back to the offer page and order from there", with a link to the funnel's first page.
+- Dashboard → funnel editor: no change. A product element left empty on a page with no product still makes the funnel sell the whole catalogue, so the existing "page sells nothing yet" warning stays as is.
+
+## 358. Team invites wait for the invitee to accept — UI: pending
+
+Inviting an email that already had a ZIMOS account put that account on the team at once, and an invite to an email with no account was never linked when the account was made. Now every invite is pending until the person signs in with an account whose confirmed email is the invited one and accepts it, whether the account existed already or is made later. The inviter's calls are unchanged; the invitee gets a new "Invitations" page (the invite email already links to `{frontend}/invites`).
+
+### Endpoints — inviter (unchanged bodies)
+- **POST `/api/v1/workspaces/:workspaceId/members`** `{ "email", "roleId" }` and **POST `/api/v1/workspaces/:workspaceId/team/invite`** `{ "email", "access", "sections", "permissions" }` (users.manage): always 201 with `membership.status: "invited"`, `userId: null` and `invitedEmail` in lower case, whether or not the email has an account:
+  `{ "membership": { "id": "…", "status": "invited", "invitedEmail": "sara@example.com" }, "role": { … } }`
+  - 409 `ALREADY_MEMBER` — that account is on the team already.
+  - 409 `ALREADY_INVITED` — that email has a pending invite (any letter case).
+  - 409 `INVITEE_NOT_CONFIRMED` is no longer returned: the invitee must confirm their email before they can accept.
+- The person appears under **GET `/invites`** (pending, with Resend) until they accept, and not under ownership-transfer candidates until then. A pending invite still takes a seat.
+
+### Endpoints — invitee (any signed-in account)
+- **GET `/api/v1/me/invites`** →
+  `{ "emailConfirmed": true, "invites": [{ "id": "<membershipId>", "workspace": { "id": "…", "name": "Demo Store", "slug": "demo-store" }, "role": { "id": "…", "key": "custom_…", "name": "Analytics" }, "invitedAt": "2026-10-07T12:07:27.820Z" }] }`
+  An account whose email is not confirmed gets `{ "emailConfirmed": false, "invites": [] }`. Invites to closed stores are left out.
+- **POST `/api/v1/me/invites/:membershipId/accept`** (no body) → 200
+  `{ "membership": { "id": "…", "status": "active" }, "workspace": { "id": "…", "name": "Demo Store", "slug": "demo-store" }, "role": { "id": "…", "key": "…", "name": "Analytics" } }`
+  - 409 `EMAIL_NOT_CONFIRMED` — confirm the account's email first.
+  - 409 `ALREADY_MEMBER` — already on that team (the invite is removed).
+  - 404 `NOT_FOUND` — no such pending invite for this account's email (another email's invite, declined, withdrawn or already used).
+- **POST `/api/v1/me/invites/:membershipId/decline`** (no body) → 200 `{ "declined": true }`; 404 `NOT_FOUND` as above.
+
+### Screens
+- Dashboard → **Invitations** (route `/invites`, also a badge in the store switcher when `GET /me/invites` has any): one card per invite «{store} دعتك تنضم لفريقها بصلاحية {role}» / "{store} invited you to join its team as {role}", buttons «قبول» / "Accept" and «رفض» / "Decline". After accepting: toast «انضممت لفريق {store}» / "You joined {store}'s team", refresh the store list and switch to that store.
+- `emailConfirmed: false`: «أكّد إيميلك عشان تشوف الدعوات اللي جاتلك» / "Confirm your email to see invitations sent to you", with the existing "Send me a code" action. Same text for `EMAIL_NOT_CONFIRMED`.
+- Empty list: «مفيش دعوات دلوقتي» / "No invitations right now".
+- 404 on accept or decline: «الدعوة دي مبقتش متاحة» / "This invitation is no longer available"; reload the list.
+- Sign-up and sign-in: when the person came from the invite link, go to `/invites` after sign-in and after confirming the email.
+- Team → Invite (inviter): the success message for every invite is «اتبعتت الدعوة لـ {email}. هتظهر في الفريق لما يقبلها» / "Invitation sent to {email}. They join the team once they accept it"; remove the `INVITEE_NOT_CONFIRMED` message.
+
+## 359. Wrong sign-in codes now lock the account's second step for a while — UI: pending
+
+The "Enter your code" step of a sign-in (authenticator app, email code, WhatsApp code or a backup code) had only 5 tries per sign-in, and anyone with the password could sign in again for 5 more, without end. Now an account gets at most 10 wrong codes in 15 minutes and 30 in 24 hours, over all its sign-ins; after that every code is refused, even the right one, until the time passes or the password is reset. Parallel tries are counted properly too.
+
+### Endpoint (unchanged body)
+- **POST `/api/v1/auth/two-factor/verify`** (no auth) `{ "challengeToken": "<uuid>", "code": "123456", "rememberDevice": true }` → 200 `{ "user": {…}, "accessToken": "…", "refreshToken": "…" }` as before.
+  - 401 `INVALID_TWO_FACTOR_CODE` — wrong or expired code (as before).
+  - 429 `TOO_MANY_ATTEMPTS` — 5 wrong codes on this sign-in (as before): go back to the sign-in form.
+  - **new** 429 `TWO_FACTOR_LOCKED` — too many wrong codes on this account: `{ "error": { "code": "TWO_FACTOR_LOCKED", "message": "Too many wrong codes for this account. Try again later, or reset your password." } }`
+- The same 429 `TWO_FACTOR_LOCKED` can come back on the Google sign-in's code step and the WhatsApp sign-in's follow-up step, since they finish through this endpoint.
+- A password reset (`POST /auth/password-reset/confirm`, `POST /auth/password-reset/sms/confirm`) clears the lock once in 24 hours (a second reset within the day leaves it on until the time passes) and always ends any sign-in still waiting for its code.
+
+### Screens
+- Sign-in → "Enter your code" step, on `TWO_FACTOR_LOCKED`: disable the code field and show «اتكتب أكواد غلط كتير على الحساب ده. استنى شوية وجرّب تاني، أو غيّر كلمة المرور» / "Too many wrong codes were entered for this account. Wait a while and try again, or reset your password", with a link «نسيت كلمة المرور؟» / "Forgot your password?" to the reset page and a "Back to sign-in" button. Don't show a countdown (the API gives none).
+- No settings change.
+
+## 362. Deposit quote: a "risky shoppers only" rule is decided at checkout unless the phone is verified — UI: pending
+
+The storefront asks POST `/deposit-quote` whether a cash-on-delivery order needs a deposit by transfer first. When the store's deposit rule is "risky shoppers only", the answer used to say whether that phone had a bad record, for any number anyone typed. Now the phone's record is read only with the checkout code's `otpToken` for that same phone; without it the answer is the same for every phone and the checkout decides. The call also has a limit of 10 a minute per IP.
+
+### Endpoint (public, no auth)
+- **POST `/api/v1/store/:workspaceId/deposit-quote`** `{ "phone": "+201001234567", "otpToken": "…" }` (`otpToken` optional: the one POST `/checkout/otp/verify` answered for this phone, valid 30 minutes).
+  - Rule "every COD order" (unchanged, token not needed): 200 `{ "deposit": { "required": true, "amountType": "shipping", "fixedAmount": null, "methods": [ { "id": "manual:…", "name": "InstaPay", "instructions": "…", "requireReceipt": true, "requireSender": false, … } ] } }`
+  - Rule "risky shoppers only", no token or a token for another phone: 200 `{ "deposit": { "required": false, "amountType": null, "fixedAmount": null, "methods": [], "decidedAtCheckout": true } }`
+  - Rule "risky shoppers only", valid token: the real answer, `required: true` with the methods, or `required: false` without `decidedAtCheckout`.
+  - No rule or no transfer method: `{ "deposit": { "required": false, "amountType": null, "fixedAmount": null, "methods": [] } }` (unchanged).
+  - 429 `RATE_LIMITED`: over 10 quotes a minute from one IP.
+- POST `/checkout`: a COD order by a risky phone with no `transfer` still answers 422 `DEPOSIT_REQUIRED` `{ "error": { "code": "DEPOSIT_REQUIRED", "details": { "amountType": "shipping", "fixedAmount": null } } }`, but now only once everything else about the order is fine (lines, stock, delivery slot, code step); any other problem is answered first, as for every phone. A wrong deposit transfer (e.g. 422 `PAYMENT_METHOD_UNAVAILABLE`) also comes last.
+  - 429 `RATE_LIMITED` (new): over 20 refused checkouts a minute from one IP (placed orders do not count). Show «محاولات كتير، جرّب تاني بعد دقيقة» / "Too many tries, please try again in a minute" and keep the form filled.
+
+### Screens (storefront → checkout, cash on delivery)
+- `decidedAtCheckout: true`: show no deposit box yet and no warning. Don't call the quote on every phone keystroke; call it once when the shopper picks cash on delivery, and again after the code step if the checkout gave an `otpToken` (send it).
+- When the checkout answers 422 `DEPOSIT_REQUIRED`: open the transfer box (the existing `TransferDetails` with the deposit notice, using the methods from GET `/payment-methods`) with «الطلب ده محتاج عربون بالتحويل قبل الدفع عند الاستلام» / "This order needs a deposit by transfer before cash on delivery", keep the form filled and let the shopper place the order again with the transfer.
+- `RATE_LIMITED` on the quote: ignore it quietly and let the checkout decide (no message).
+- No settings change in the dashboard.
+
+## 363. Newsletter sign-up and spin to win carry the bot guard's token and have a per-IP limit — UI: pending
+
+Both storefront sign-ups make a contact with marketing consent, so a script could fill the store's contacts (and the plan's leads limit) with random numbers. Now each has a limit of 6 a minute per IP, and when the store's bot guard is on (Settings → fraud rules → bot protection, on by default in production) each must carry the same time token the checkout and the funnel opt-in already send. A sign-up with a forged, stale or too-fresh token is answered as if it worked but nothing is kept and no coupon is given. A sign-up with no token at all is still accepted while the guard is on only by its production default (so forms that do not send it yet keep working), and refused only on stores that switched bot protection on themselves, so send the token.
+
+### Endpoints (public, no auth)
+- **GET `/api/v1/store/:workspaceId/checkout/guard`** (unchanged): `{ "enabled": true, "token": "…", "minSeconds": 3, "honeypotField": "website", "captcha": null }`. Get it when the popup or the footer form is shown (or reuse the page's checkout token, valid 12 hours), and send it at least `minSeconds` after it was issued (lib/botGuard.ts already waits this out for the checkout autosave). With `enabled: false` send nothing.
+- **POST `/api/v1/store/:workspaceId/newsletter/subscribe`** `{ "phone": "+201001234567", "fullName": "Sara", "email": null, "website": "", "botToken": "…" }`
+  - 201 `{ "subscribed": true, "couponCode": "WELCOME10" }` (unchanged).
+  - Guard on and the token forged, stale or under 3 seconds old (or missing, when the store set bot protection on itself): 201 `{ "subscribed": true, "couponCode": null }` and nothing stored.
+  - 429 `RATE_LIMITED`: over 6 sign-ups a minute from one IP.
+- **POST `/api/v1/store/:workspaceId/spin-wheel/spin`** `{ "phone": "+201001234567", "fullName": "Sara", "marketingConsent": true, "website": "", "botToken": "…" }`
+  - 201 `{ "sliceId": "…", "label": "10%", "prize": true, "couponCode": "SPIN10" }` (unchanged); 409 `ALREADY_SPUN` unchanged.
+  - Guard on and the token forged, stale or under 3 seconds old (or missing, when the store set bot protection on itself): 201 `{ "sliceId": null, "label": null, "prize": false, "couponCode": null }` and nothing stored.
+  - 429 `RATE_LIMITED`: over 6 spins a minute from one IP.
+
+### Screens (storefront)
+- Newsletter form (footer and popup) and the spin-to-win popup: add the `botToken` field from the guard, and keep the hidden `website` field empty. No visible change for a real shopper.
+- On 429 `RATE_LIMITED`: «محاولات كتير، جرّب تاني بعد دقيقة» / "Too many tries, please try again in a minute", keeping what was typed.
+- A spin answered with `sliceId: null` shows the wheel's "better luck next time" result: «حظ أوفر المرة الجاية» / "Better luck next time".
+- No settings change in the dashboard.
+
+## 364. COD settlement shows what each line actually added to the order — UI: pending
+
+Confirming a courier settlement used to add every line's collected cash to its order again, even when the order had been marked paid another way (the courier integration's "cash collected", or a teammate's captured payment) after the draft was made, or had been cancelled. Now each line adds only what the order still owes at confirm time; a paid, refunded or cancelled order gets nothing. The settlement's own totals stay as the courier reported them. The detail now says, per line, how much was really added.
+
+### Endpoints (dashboard, `financial_reports.view` to read, `refunds.manage` to confirm)
+- **POST `/api/v1/workspaces/:workspaceId/settlements/:settlementId/confirm`** (unchanged request, still 409 `SETTLEMENT_CONFIRMED` the second time) and **GET `/api/v1/workspaces/:workspaceId/settlements/:settlementId`**: each line has a new `appliedAmount` (null while the settlement is a draft):
+  `{ "settlement": { "status": "confirmed", "collectedAmount": 2000, "lines": [ { "orderNumber": "1001", "collectedAmount": 500, "feeAmount": 20, "appliedAmount": 0, "financialState": "paid" }, { "orderNumber": "1002", "collectedAmount": 500, "feeAmount": 20, "appliedAmount": 300, "financialState": "paid" }, { "orderNumber": "1003", "collectedAmount": 500, "feeAmount": 20, "appliedAmount": 500, "financialState": "paid" } ] } }`
+- The confirm audit row (`settlement.confirm`) carries `metadata.notApplied`: the lines that added less than collected, with `orderNumber`, `collectedAmount`, `appliedAmount`, `financialState` and `cancelled`.
+
+### Screens (dashboard → Finance → COD settlements → a settlement)
+- Confirmed settlement, lines table: add a column «اتسجل على الطلب» / "Added to order" showing `appliedAmount`.
+- When `appliedAmount` is less than `collectedAmount`, show a muted note on the line: «الطلب كان مدفوع أو ملغي قبل التأكيد، فاتسجل الباقي بس» / "The order was already paid or cancelled before confirming, so only what it still owed was added".
+- Draft settlement: no change (hide the column while `appliedAmount` is null).
+
+## 370. A courier-booked shipment's waybill can no longer be changed — UI: pending
+
+A shipment booked through a connected courier (Bosta, J&T, Mylerz, sandbox) is found by its waybill when the courier sends a status update. Typing another number on it cut it off from every update, so the backend now refuses a different waybill on such a shipment. The same number, or only a tracking link, is still accepted. Manual shipments are unchanged.
+
+### Endpoints (dashboard, `orders.manage` or `shipping.manage`; fulfill needs `orders.manage`)
+- **PATCH `/api/v1/workspaces/:workspaceId/orders/:orderId/shipments/:shipmentId`** `{ "waybillNumber": "Y123" }` on a courier booking: 422 `{ "error": { "code": "CARRIER_WAYBILL_LOCKED", "message": "The courier assigned this waybill; it cannot be changed" } }`. `{ "trackingUrl": "https://…" }` or the unchanged waybill: 200 as before.
+- **POST `/api/v1/workspaces/:workspaceId/orders/:orderId/fulfill`** `{ "trackingNumber": "Y123" }` when the order's waiting shipment is a courier booking with another waybill: the same 422 `CARRIER_WAYBILL_LOCKED`. Without a tracking number, or with the booking's own, it ships as before.
+- **POST `/api/v1/workspaces/:workspaceId/orders/import-tracking`**: such a row comes back `{ "ok": false, "code": "CARRIER_WAYBILL_LOCKED", "message": "…" }`; the other rows still apply.
+- Public API `PATCH /orders/:orderId/shipments/:shipmentId`: the same 422.
+
+### Screens (dashboard → Orders → an order → shipping card)
+- Shipment edit form: for a courier-booked shipment (the one that shows "Sync status" and "Print label"), show the waybill read-only, keep the tracking link editable, and add a hint «رقم البوليصة من شركة الشحن ومينفعش يتغير» / "The courier assigned this waybill number; it can't be changed".
+- On 422 `CARRIER_WAYBILL_LOCKED` (edit form or "Shipped" by hand): «الشحنة دي محجوزة مع شركة الشحن برقم بوليصة تاني. الغي الحجز الأول لو هتشحن بطريقة تانية» / "This shipment is booked with the courier under another waybill. Cancel the booking first if you're shipping another way."
+- Tracking import results: show the row's message as for other row errors.
+- No settings change.
+
+## 372. Returns: exchanges, courier return pickup and the shopper hears the decision — UI: pending
+
+Three gaps against Lightfunnels are closed in the backend. (1) A shopper (or the team) can ask to swap a line for another size or colour of the same product instead of a refund; approving it makes a linked replacement order. (2) An approved return can have the store's courier booked to collect the parcel from the shopper (the sandbox courier supports it; others can be added through the adapter contract), or a pickup booked elsewhere can be recorded. (3) Approving or rejecting sends the shopper an email (on by default, can be switched off) and a push, and the decision with the store's note shows on the tracking page. Every step is now an event for webhooks and automations.
+
+### Settings (dashboard → Settings → Returns, `orders.manage`)
+- **GET / PUT `/api/v1/workspaces/:workspaceId/shopper-returns`**: new `exchanges` boolean (default false):
+  `{ "enabled": true, "windowDays": 14, "photoRequiredFor": ["damaged", "defective"], "exchanges": true }`
+- Toggle label: «السماح بالاستبدال (مقاس أو لون تاني)» / "Allow exchanges (another size or colour)". Hint: «العميل يقدر يطلب مقاس أو لون تاني من نفس المنتج بدل استرداد فلوسه» / "Shoppers can ask for another size or colour of the same product instead of their money back".
+
+### Endpoints (storefront, public)
+- **GET `/api/v1/store/:workspaceId/returns/eligibility?token=…`** (or `orderId` + `X-Shopper-Token`): new `exchanges` flag; each item has `exchangeOptions` when exchanges are on (active variants of active products only); each return has the decision fields:
+  `{ "eligible": true, "exchanges": true, "items": [ { "orderItemId": "…", "name": "Linen shirt", "variantOptions": { "Size": "M" }, "quantity": 2, "returnable": 1, "exchangeOptions": [ { "variantId": "…", "options": { "Size": "L" }, "inStock": true }, { "variantId": "…", "options": { "Size": "XL" }, "inStock": false } ] } ], "returns": [ { "id": "…", "status": "approved", "reason": "other: too small", "resolution": "exchange", "items": [ { "orderItemId": "…", "quantity": 1, "exchangeVariantId": "…" } ], "source": "shopper", "decisionNote": "We will collect the M and send an L", "decidedAt": "2026-10-07T13:03:45Z", "exchangeOrderNumber": "ORD-MUY4CD6R-06ED61DB", "pickup": { "carrierCode": "sandbox", "waybillNumber": "SBX-R-94403235", "trackingUrl": null, "bookedAt": "…" }, "createdAt": "…" } ] }`
+- **POST `/api/v1/store/:workspaceId/returns`**: new `resolution` (`refund` default, or `exchange`) and per line `exchangeVariantId`:
+  `{ "token": "…", "reasonCode": "other", "reasonDetail": "too small", "resolution": "exchange", "items": [ { "orderItemId": "…", "quantity": 1, "exchangeVariantId": "…" } ] }` → 201 `{ "return": { …same shape as in returns[] above } }`
+  - 422 `VALIDATION_ERROR` with `field: "resolution"` when the store takes no exchanges; `items.N.exchangeVariantId` when it is missing, the same variant, another product's, no longer sold, or out of stock.
+
+### Endpoints (dashboard)
+- **POST `/api/v1/workspaces/:workspaceId/orders/:orderId/returns`** (`orders.manage`): new `resolution` and per line `exchangeVariantId`, as above. Returns now carry `resolution`, `exchangeOrderId`, `decisionNote`, `decidedAt`, `pickup` in every list.
+- **PATCH `/api/v1/workspaces/:workspaceId/returns/:returnId`** (`orders.manage`):
+  `{ "action": "approve", "note": "We will collect the M and send an L", "exchangeShippingAmount": 3000 }`
+  - `note` (≤ 500) is shown to the shopper; `notifyCustomer: false` sends no email, push or automation for this decision, `true` sends the email even while the store switched its template off, and leaving it out lets the store's return_approved / return_rejected switch decide (on unless turned off); `exchangeShippingAmount` (minor units, default 0) is what the replacement order charges for shipping.
+  - Approving an exchange makes the replacement order (cash on delivery, tag `exchange`, each line priced at what the new variant costs more than the returned one, else 0) and answers `exchangeOrderId`. Out of stock or a variant gone fails the approval with the order's usual error and changes nothing.
+  - 409 `RETURN_NOT_PENDING` as before.
+- **POST `/api/v1/workspaces/:workspaceId/returns/:returnId/pickup`** (`orders.manage`), approved returns only:
+  - Courier: `{ "carrierCode": "sandbox", "carrierAddress": { "cityId": "…", "districtId": "…" }, "notes": "Call before" }` (`carrierAddress` only when the address cannot be matched, as for a booking) → 201 `{ "return": { …, "pickup": { "carrierCode": "sandbox", "waybillNumber": "SBX-R-94403235", "trackingUrl": null, "carrierShipmentId": null, "bookedAt": "…", "bookedBy": "…" } } }`
+  - Booked elsewhere: `{ "carrierCode": "manual", "waybillNumber": "MAN-372" }` → 201, same shape.
+  - Errors: 409 `RETURN_NOT_APPROVED`, 409 `RETURN_PICKUP_EXISTS`, 409 `CARRIER_NOT_CONNECTED`, 422 `CARRIER_NO_RETURN_PICKUP` (that courier can't collect returns through ZIMOS), 422 `CARRIER_ADDRESS_UNMATCHED` / `CARRIER_ADDRESS_NAMES_REQUIRED` as for a booking, 424 `CARRIER_BOOKING_NOT_SAVED`.
+- **GET `/api/v1/workspaces/:workspaceId/carriers`**: each carrier's `capabilities` has `returnPickup` (true for the sandbox courier today).
+- Webhook topics (Settings → Webhooks list): `return.requested`, `return.approved`, `return.rejected`, `return.received` (`data.return`, `data.order`). Automation triggers (Automations → new rule → trigger list): the same four.
+- Order emails (Settings → Order emails): two new templates, on by default: `return_approved` «تمت الموافقة على الإرجاع» / "Return approved" and `return_rejected` «رفض الإرجاع» / "Return rejected".
+
+### Screens
+- **Storefront → order tracking page → "Return items"**: when `exchanges` is true, add a choice «استرداد المبلغ» / "Refund" and «استبدال بمقاس أو لون تاني» / "Exchange for another size or colour". On exchange, each picked line gets a select of `exchangeOptions` (show `options` values, e.g. "L"), out-of-stock ones disabled with «نفدت الكمية» / "Out of stock". Submit button «اطلب الاستبدال» / "Request exchange".
+- **Storefront → order tracking page → "Your returns"**: per return show the status: requested «قيد المراجعة» / "Under review", approved «تمت الموافقة» / "Approved", rejected «مرفوض» / "Not accepted", received «تم الاستلام» / "Received". Show `decisionNote` under it as «رسالة المتجر: …» / "Message from the store: …". For an exchange show «طلب الاستبدال: {exchangeOrderNumber}» / "Replacement order: {exchangeOrderNumber}". When `pickup` is set: «المندوب هيستلم الشحنة منك — رقم البوليصة {waybillNumber}» / "A courier will collect the parcel from you — waybill {waybillNumber}" (link it when `trackingUrl` is set).
+- **Dashboard → Returns (queue and the order's returns card)**: show a «استبدال» / "Exchange" badge when `resolution` is `exchange`, with "M → L" per line (the order item's options → the exchange variant's options).
+- Approve / reject dialog: textarea «رسالة للعميل (اختياري)» / "Message to the customer (optional)"; checkbox «بلّغ العميل» / "Tell the customer" (ticked by default; ticked = leave `notifyCustomer` out so the store's email switch decides, unticked = `notifyCustomer: false`); for an exchange, an amount field «مصاريف شحن البديل» / "Shipping for the replacement" (default 0) and the note «هيتعمل طلب جديد بالمقاس الجديد، والعميل يدفع فرق السعر بس لو المقاس الجديد أغلى» / "A new order is made for the new size; the customer pays only the price difference if the new one costs more". After approving, link «فتح طلب الاستبدال» / "Open replacement order" to `exchangeOrderId`.
+- Approved return: button «احجز مندوب لاستلام المرتجع» / "Book courier pickup" opening a dialog with the connected couriers whose `capabilities.returnPickup` is true, plus «اتحجز بره زيمّوس» / "Booked elsewhere" with a waybill field (`carrierCode: "manual"`). Once booked, show the carrier and waybill on the return and hide the button.
+- Error texts: `RETURN_NOT_APPROVED` «لازم توافق على المرتجع الأول» / "Approve the return first"; `RETURN_PICKUP_EXISTS` «فيه مندوب محجوز للمرتجع ده بالفعل» / "A pickup is already booked for this return"; `CARRIER_NO_RETURN_PICKUP` «شركة الشحن دي مش بتستلم مرتجعات من خلال زيمّوس — احجز معاهم وسجّل رقم البوليصة» / "This courier can't collect returns through ZIMOS — book it with them and record the waybill".
+
+## 373. Deleted funnels, websites and pages go to a trash and can be restored — UI: pending
+
+Deleting a funnel, a website or a page (one at a time, or funnels through the bulk action) no longer destroys it. It goes to a trash for 30 days: it stops serving at once (a funnel's link answers 404 `FUNNEL_NOT_FOUND`; a website leaves the store), it disappears from every list and picker, and it keeps everything hanging off it (a funnel's steps, revisions and sessions; a website's pages, revisions, redirects and domains). Orders keep their funnel name throughout, and also after the funnel is deleted for good. After 30 days the backend deletes it for good on its own. A trashed page still serves from the live snapshot until the next publish, as a deleted page did before.
+
+### Changed endpoints (same permissions as before)
+- **DELETE `/api/v1/workspaces/:workspaceId/funnels/:funnelId`** (`funnels.manage`), **DELETE `/websites/:websiteId`** and **DELETE `/websites/:websiteId/pages/:pageId`** (`website.edit`): still 200, now with the trash fields:
+  `{ "deleted": true, "trashed": true, "purgeAt": "2026-11-06T13:14:40.179Z" }` (a page also keeps `wasLive`).
+- **POST `/funnels/bulk`** `{ "action": "delete", … }`: each funnel goes to the trash; results as before.
+- **POST `/websites/:websiteId/pages`** and **PATCH `/websites/:websiteId/pages/:pageId`** with a path held by a page in the trash: 409 `PAGE_PATH_IN_TRASH` "A page in the trash uses "/about": restore it, or delete it for good, first". A page in the trash keeps its path, and a funnel or website keeps its link (`FUNNEL_SUBDOMAIN_TAKEN` as before).
+- Orders (list and detail): `funnelName` is still filled when the funnel is in the trash, and after it is deleted for good (`funnelId` is then null).
+- Webhook `funnel.deleted` now fires when the funnel goes to the trash, with `data.funnel.trashed: true`; a restore sends `funnel.updated`; deleting for good sends nothing more.
+
+### New endpoints
+- **GET `/api/v1/workspaces/:workspaceId/trash`** (`?kind=funnel|website|page` optional). Lists the kinds the teammate may manage (funnels with `funnels.manage`, websites and pages with `website.edit`; 403 when neither), newest first:
+  `{ "retentionDays": 30, "items": [ { "kind": "funnel", "id": "…", "name": "Summer offer", "subdomain": "summer-offer", "status": "published", "deletedAt": "2026-10-07T13:14:40Z", "deletedBy": { "id": "…", "fullName": "Demo Owner" }, "purgeAt": "2026-11-06T13:14:40Z" }, { "kind": "page", "id": "…", "name": "About", "path": "/about", "websiteId": "…", "websiteName": "My store", "websiteInTrash": true, "wasLive": false, "deletedAt": "…", "deletedBy": null, "purgeAt": "…" } ] }`
+- **POST `/trash/:kind/:id/restore`** (permission of the kind) → 200 `{ "restored": true, "kind": "funnel", "id": "…", "item": { …the funnel or website, or for a page { id, websiteId, path, title } } }`. It comes back exactly as it was: a published funnel is live again at once.
+  - A funnel or website that was published comes back live, so its restore also needs what publishing needs: `funnels.publish` / `website.publish` (403 `FORBIDDEN` "Missing required permission: funnels.publish"), a confirmed account (403 `EMAIL_NOT_VERIFIED`, the code dialog as on publish) and a live store (403 `SUBSCRIPTION_REQUIRED`, the subscribe screen). A draft or paused one, and a page, need only the kind's permission. Hide or disable Restore on a published item (`status: "published"`) for a teammate without the publish permission, with the hint «محتاج صلاحية النشر علشان ترجعه» / "Restoring it puts it live, which needs the publish permission".
+  - 404 `NOT_FOUND` when it is not in the trash; 409 `WEBSITE_IN_TRASH` "This page's website is in the trash: restore the website first".
+- **DELETE `/trash/:kind/:id`** (permission of the kind) → 200 `{ "purged": true, "kind": "website", "id": "…" }`. Deletes it for good. A website's domains move to another website of the store; 409 `WEBSITE_HAS_DOMAINS` when it is the store's only website and domains point at it.
+
+### Screens
+- **Dashboard → Funnels** and **Dashboard → Online store → Pages**: a «سلة المحذوفات» / "Trash" link at the top of the list, with the count when not empty.
+- Delete confirmations (funnel, website, page, bulk): change the text to «هيتنقل لسلة المحذوفات وتقدر ترجعه خلال 30 يوم. الرابط هيوقف فورًا.» / "It moves to the trash, where you can restore it for 30 days. Its link stops working right away." Button «انقل للمحذوفات» / "Move to trash". After success, a toast «اتنقل لسلة المحذوفات» / "Moved to trash" with an «تراجع» / "Undo" action calling the restore endpoint.
+- **Trash page** (one table, tabs «الكل» / "All", «الفانلز» / "Funnels", «المواقع» / "Websites", «الصفحات» / "Pages", hiding tabs the teammate can't manage): columns name (a page also shows its path and website), «اتحذف» / "Deleted" (date and `deletedBy.fullName`), «هيتمسح نهائيًا» / "Deleted for good on" (`purgeAt`). Row actions «استرجاع» / "Restore" and «حذف نهائي» / "Delete for good" (confirm: «مش هتقدر ترجعه تاني. الطلبات هتفضل شايلة اسم الفانل.» / "This can't be undone. Orders keep the funnel's name."). Empty state: «سلة المحذوفات فاضية» / "The trash is empty". Hint under the title: «أي حاجة في السلة بتتمسح نهائيًا بعد 30 يوم» / "Anything in the trash is deleted for good after 30 days".
+- For a page with `websiteInTrash`, disable Restore with the hint «ارجع الموقع الأول» / "Restore its website first".
+- Error texts: `PAGE_PATH_IN_TRASH` «فيه صفحة في سلة المحذوفات على الرابط ده. ارجعها أو امسحها نهائيًا الأول» / "A page in the trash uses this path. Restore it or delete it for good first"; `WEBSITE_HAS_DOMAINS` «ده الموقع الوحيد والدومينات مربوطة بيه. شيل الدومينات الأول» / "This is the store's only website and its domains point at it. Remove the domains first".
+- No settings.
+
+## 374. Checkout marketing-consent and terms checkboxes — UI: pending
+
+The checkout can now show two boxes, each switched on by the merchant: "Email me news and offers" (unticked by default) and "I agree to the terms" (must be ticked to order). A buyer who ticks the marketing box becomes a marketing contact (so the Klaviyo/Mailchimp sync takes them), unless they unsubscribed earlier. What the buyer agreed to is kept on the order. Both are off until the merchant turns them on, so nothing changes for existing stores.
+
+### Settings (dashboard → Settings → Checkout, `website.edit`, as the rest of the checkout form)
+- **PATCH `/api/v1/workspaces/:workspaceId`**, inside `settings.checkout_settings` (sub-keys merge; `null` restores the default):
+  `{ "settings": { "checkout_settings": { "marketing_checkbox": "on", "marketing_checkbox_label": { "ar": "ابعتلي العروض والجديد على الإيميل", "en": "Email me news and offers" }, "terms_checkbox": "required", "terms_checkbox_label": { "ar": "أوافق على الشروط والأحكام وسياسة الخصوصية", "en": "I agree to the terms of service and privacy policy" } } } }`
+  - `marketing_checkbox`: `"off"` (default) | `"on"`. `terms_checkbox`: `"off"` (default) | `"required"`. Labels ≤ 300 characters each; empty = the storefront's built-in wording. Another value: 422 `VALIDATION_ERROR` on `settings.checkout_settings.terms_checkbox`.
+- Toggles: «خانة الموافقة على الرسائل التسويقية» / "Marketing consent checkbox", hint «العميل يختار بنفسه؛ الخانة مش متعلّمة مسبقًا. اللي يوافق يتضاف لقائمة التسويق إلا لو كان لغى اشتراكه قبل كده» / "The buyer ticks it themselves; it is never pre-ticked. Buyers who tick it join your marketing list, unless they unsubscribed before". «خانة الموافقة على الشروط (إجبارية)» / "Terms checkbox (required)", hint «الطلب مش هيتم من غير الموافقة. بنربط سياسة الشروط والخصوصية اللي كاتبها في الإعدادات» / "Orders can't be placed without it. We link the terms and privacy policies you've written in Settings → Policies".
+- When `terms_checkbox` is on and the store has no terms of service written (`store.checkout.consent.terms.policies` empty), show a warning: «لسه ما كتبتش الشروط والأحكام — اكتبها من الإعدادات ← السياسات» / "You haven't written your terms of service yet — add them in Settings → Policies".
+
+### Storefront (public)
+- **GET `/api/v1/store/:workspaceId`** → `store.checkout.consent`:
+  `{ "marketing": { "enabled": true, "label": { "ar": "", "en": "" } }, "terms": { "enabled": true, "required": true, "label": { "ar": "أوافق على الشروط", "en": "I agree to the terms" }, "policies": ["terms_of_service", "privacy_policy"] } }`
+  - Show each box only when `enabled`. Never pre-tick the marketing box. In the terms label, link each of `policies` to GET `/api/v1/store/:workspaceId/policies/:key` (opened in a sheet or a new tab).
+  - Built-in wording when a label is empty: «ابعتلي العروض والجديد على الإيميل والواتساب» / "Send me news and offers"; «أوافق على الشروط والأحكام وسياسة الخصوصية» / "I agree to the terms of service and privacy policy".
+- **POST `/api/v1/store/:workspaceId/checkout`**: new booleans `acceptsMarketing` and `acceptsTerms` (send the boxes' state when shown).
+  - Terms required and not `true`: 422 `{ "error": { "code": "VALIDATION_ERROR", "message": "Invalid body", "details": [ { "field": "acceptsTerms", "message": "\"acceptsTerms\" must be [true]" } ] } }` (with any other form problems). Show under the box: «لازم توافق على الشروط علشان تكمل الطلب» / "Please accept the terms to place your order". The storefront should also keep the order button disabled until it is ticked.
+  - A box the store doesn't show is ignored if sent.
+  - The 201 answer's `order` does not include `consents` (it would tell whoever typed the phone or email whether that contact unsubscribed earlier); the storefront already knows what it sent. The record is on the dashboard order only.
+
+### Dashboard order page (`orders.view`)
+- **GET `/api/v1/workspaces/:workspaceId/orders/:orderId`** → `order.consents` (null when the store showed neither box):
+  `{ "marketing": { "accepted": true, "applied": true, "at": "2026-10-07T13:21:18.571Z", "label": { "ar": "", "en": "" } }, "terms": { "accepted": true, "at": "2026-10-07T13:21:18.571Z", "label": { "ar": "أوافق على الشروط", "en": "I agree to the terms" }, "policies": ["terms_of_service"], "version": "111e1d44a7208ab6" } }`
+  - `marketing.applied: false` with `reason: "opted_out"`: the buyer ticked it but had unsubscribed earlier, so they were not added.
+- In the customer card: «وافق على الرسائل التسويقية وقت الطلب» / "Agreed to marketing at checkout"; with `opted_out`: «وافق وقت الطلب، بس كان لاغي اشتراكه قبل كده فما اتضافش» / "Ticked marketing at checkout, but had unsubscribed earlier, so wasn't added". Terms: «وافق على الشروط (نسخة 111e1d44) في 7 أكتوبر 2026 1:21 م» / "Accepted the terms (version 111e1d44) on 7 Oct 2026, 1:21 PM".
+
+## 375. Partial fulfilment: send an order as several parcels — UI: pending
+
+An order can now go out as several parcels: ship what is ready now and the rest later (a pre-order line, two suppliers or stock places). Each parcel lists the units it carries and, for cash on delivery, its own amount to collect. Nothing changes for an order shipped whole: a shipment created without `items` on an order with no parcel is the whole order, as before, and still blocks a second one until it is cancelled or returned.
+
+### Endpoints (permissions as before: `orders.manage` or `shipping.manage` to ship, `orders.view` to read)
+- **GET `/api/v1/workspaces/:workspaceId/orders/:orderId/shipments/plan`** (`orders.view`) → where every line stands and a suggested next parcel:
+  `{ "plan": { "orderId": "…", "paymentMethod": "cod", "unitsRemaining": 1, "codRemaining": 42000, "lines": [ { "orderItemId": "…", "productName": "Cream", "variantOptions": null, "sku": null, "quantity": 2, "shippable": true, "preorderShipsAt": null, "inShipments": 2, "delivered": 0, "remaining": 0 }, { "orderItemId": "…", "productName": "Serum", "quantity": 1, "shippable": true, "preorderShipsAt": "2026-11-06", "inShipments": 0, "delivered": 0, "remaining": 1 } ], "suggested": { "wholeOrder": false, "items": [ { "orderItemId": "…", "quantity": 1 } ], "codAmount": 42000, "heldBack": [] }, "shipments": [ { "id": "…", "status": "created", "carrierCode": "sandbox", "waybillNumber": "SBX-…", "trackingCode": "zg…", "items": [ { "orderItemId": "…", "quantity": 2 } ], "codAmount": 63000, "createdAt": "…" } ] } }`
+  - `suggested` leaves out pre-order lines whose ship date is still ahead when something else is ready (listed in `heldBack`); null when nothing is left to send. `wholeOrder: true` means the suggestion is the whole order (no parcel yet). `shippable: false` = a digital or service line, never in a parcel. Amounts in minor units.
+- **POST `/orders/:orderId/shipments`** (manual or connected courier, as before) takes two new optional fields:
+  `{ "carrierCode": "bosta", "carrierAddress": { … }, "items": [ { "orderItemId": "…", "quantity": 2 } ], "codAmount": 63000 }`
+  - `items`: the units in this parcel. Left out: the whole order when it has no parcel yet, or everything still to send once it has split parcels. Naming every unit of an order with no parcel is the whole order.
+  - `codAmount` (COD orders, split parcels only): what the courier collects for this parcel. Default: the parcel's share of what is still owed, by the value of its goods; the parcel that empties the order takes everything left (shipping included).
+  - The answer is the shipment as before, with `items` (null for a whole-order parcel) and `codAmount` (null for a whole-order parcel, which collects what the order still owes). Shipments everywhere (GET `/orders/:id`, GET `/orders/:id/shipments`) carry both.
+  - Errors: 409 `SHIPMENT_ITEMS_UNAVAILABLE` `{ "details": { "items": [ { "orderItemId": "…", "requested": 3, "remaining": 2 } ] } }`; 409 `SHIPMENT_ALREADY_EXISTS` (a whole-order parcel is live, or every unit is already in a parcel); 422 `VALIDATION_ERROR` on `items[0].orderItemId` ("Not a line of this order", "This line is not shipped (digital or service)", "This line is listed twice") or `codAmount` ("Only for a shipment that carries part of the order", "Only cash-on-delivery orders collect on delivery"); 422 `COD_EXCEEDS_DUE` `{ "details": { "maxCodAmount": 42000 } }`.
+- Order states: an order with split parcels is `partially_fulfilled` until every unit is delivered, then `fulfilled`. Its stage tab follows its unfinished parcels (one on the road before one still on the desk): Shipped while any parcel is in transit, Delivered only once every parcel is delivered or returned. An order whose first parcel arrived and whose next is not booked yet shows under Delivered: use `fulfillmentState: "partially_fulfilled"` (or the plan's `unitsRemaining`) to badge it.
+- **GET `/orders/:orderId/waybill?shipmentId=…`**: `shipmentId` (optional) prints that parcel's waybill: its tracking code and its own amount to collect. Without it, an order with two or more live parcels still to go answers 422 `SHIPMENT_REQUIRED` `{ "details": { "shipmentIds": ["…", "…"] } }`; 404 when the parcel is not a live one of this order. **POST `/orders/documents/waybills`** prints one label per live parcel of such an order. **POST `/orders/documents/manifest`** with `orderIds` lists only the parcels not yet handed over (split parcels on the road or delivered are left out).
+- **PUT `/orders/:orderId/items`** answers 409 `ORDER_SPLIT_SHIPPED` `{ "details": { "shipmentId": "…" } }` while the order has a live split parcel.
+- Automations and webhooks: «تم الشحن» / "Shipped" and «خرج للتوصيل» / "Out for delivery" go out for each parcel; «تم التوصيل» / "Delivered" (and loyalty points, referral rewards, review requests, the `order.fulfilled` webhook) only once the whole order is delivered.
+- **Settlements** (`/api/v1/workspaces/:workspaceId/settlements`): GET `/unsettled` has a row per delivered parcel of a split order, with `"partial": true`, its `shipmentId` and `dueAmount` = that parcel's COD; whole orders as before (`"partial": false`). POST `/` and PATCH `/:id` lines take an optional `shipmentId`: `{ "carrierCode": "bosta", "lines": [ { "orderId": "…", "shipmentId": "…", "collectedAmount": 63000 } ] }`. 422 `SHIPMENT_REQUIRED` `{ "details": { "shipmentIds": ["…", "…"] } }` when an order has two parcels to settle and the line names none. Settlement detail lines carry `shipmentId`, and `appliedAmount` is that line's own (two parcels of one order no longer both show the order's sum). Courier statement import matches each parcel by its waybill.
+
+### Screens
+- **Order page → shipping card**: button «شحن جزء من الطلب» / "Ship part of the order" next to the usual ship button. It opens a dialog fed by the plan: one row per line with the product, «في الطلب» / "Ordered", «اتشحن» / "In parcels", «فاضل» / "Left" and a quantity stepper (0 to `remaining`), pre-filled from `suggested`; a pre-order line shows «بيتشحن من {preorderShipsAt}» / "Ships from {preorderShipsAt}". Digital/service lines show «مش بيتشحن» / "Not shipped" and no stepper. For COD a field «المبلغ اللي هيحصّله المندوب» / "Amount the courier collects", pre-filled with `suggested.codAmount`, hint «باقي على العميل {codRemaining}» / "The customer still owes {codRemaining}". Then the usual courier / manual choice. Submit «احجز الشحنة دي» / "Book this parcel".
+- Shipments list on the order: when there are several, title each «شحنة 1 من 2» / "Parcel 1 of 2" with its units ("2 × Cream") and «تحصيل {codAmount}» / "Collect {codAmount}". When the plan has `unitsRemaining > 0` after a parcel, show «فاضل {n} قطعة ما اتشحنتش» / "{n} units not shipped yet" with «اشحن الباقي» / "Ship the rest".
+- Orders list: badge «اتشحن جزء» / "Partly shipped" when `fulfillmentState` is `partially_fulfilled` and the stage is `delivered` or `ready_to_ship`.
+- Settlements → new settlement / unsettled list: a parcel row shows the waybill and «جزء من الطلب» / "Part of order {orderNumber}"; send its `shipmentId` on the line.
+- Order page → print waybill: when the order has several parcels, print from each parcel's row (`?shipmentId=`), or on `SHIPMENT_REQUIRED` ask which parcel. `ORDER_SPLIT_SHIPPED` «جزء من الطلب في شحنة — الغي الشحنات الأول عشان تعدّل المنتجات» / "Part of this order is in a parcel — cancel its parcels to edit the items".
+- Error texts: `SHIPMENT_ITEMS_UNAVAILABLE` «القطع دي في شحنة تانية بالفعل» / "These units are already in another parcel"; `SHIPMENT_ALREADY_EXISTS` «كل قطع الطلب في شحنات بالفعل» / "Every unit of this order is already in a parcel"; `COD_EXCEEDS_DUE` «المبلغ أكبر من الباقي على العميل ({maxCodAmount})» / "That's more than the customer still owes ({maxCodAmount})"; `SHIPMENT_REQUIRED` «الطلب ده له أكتر من شحنة — اختار الشحنة» / "This order has more than one parcel — choose which".
+- No settings.
+
+## 376. Funnel paths that branch on what was bought, the order total and the payment method — UI: pending
+
+A path (edge) between funnel steps can now also check the order the visitor placed in this funnel: the products in it, its total and how it was paid. Example: buyers of the face cream go to the serum upsell, buyers of the shampoo to the conditioner upsell, orders under 500 EGP to a cheaper offer, card buyers to the one-click upsell and COD buyers to another step. The server checks this against the order in the database, never against what the browser sends; the storefront runtime needs no change.
+
+### Endpoints (as before: `funnels.manage` to edit paths, `funnels.publish` to publish)
+- **POST `/api/v1/workspaces/:workspaceId/funnels/:funnelId/edges`** and **PATCH `/edges/:edgeId`**: `condition` takes a new optional `when` object next to `type`:
+  `{ "fromStepKey": "checkout", "toStepKey": "serum-upsell", "priority": 30, "condition": { "type": "completed_checkout", "when": { "productIds": ["<face cream product id>"] } } }`
+  `{ "fromStepKey": "checkout", "toStepKey": "cheap-offer", "priority": 20, "condition": { "type": "completed_checkout", "when": { "maxTotal": 50000 } } }`
+  `{ "fromStepKey": "checkout", "toStepKey": "one-click", "priority": 10, "condition": { "type": "completed_checkout", "when": { "paymentMethods": ["card", "wallet"] } } }`
+  - `when` keys (at least one; every key given must hold):
+    - `productIds` / `variantIds`: up to 50 ids each; the order holds any of them (either list). Counted lines: the checkout order's lines, the upsells joined to it, and the follow-on upsell orders of this funnel.
+    - `minTotal` (order total ≥) and `maxTotal` (order total <), whole amounts in minor units of the funnel's currency (500 EGP = 50000). `maxTotal` must be above `minTotal`.
+    - `paymentMethods`: any of `cod`, `card`, `wallet`, `valu`, `kiosk`, `paypal`, `bank_transfer`, `on_account`.
+  - `when` works with every `type`: on a checkout step use `completed_checkout`, on an upsell `accepted_offer` / `declined_offer`, on a page `clicked_through`, or `always`. On steps after the checkout it still checks the checkout order (the session's order). Before any order exists a `when` never matches, so keep a plain path (no `when`, lowest priority) as the fallback.
+  - Paths are tried by `priority` (highest first); the first that matches wins, as before.
+  - Errors: 422 `VALIDATION_ERROR` with `details: [{ "field": "condition", "message": "…" }]`, e.g. "when needs at least one of productIds, variantIds, minTotal, maxTotal, paymentMethods", "unknown when key \"color\" …", "when.maxTotal must be a whole amount in minor units (0 or more)", "when.maxTotal must be above when.minTotal", "unknown payment method \"bitcoin\" …", "The product <id> in this path's condition is not in this store".
+- **POST `/funnels/:funnelId/publish`** and **GET `/funnels/:funnelId/issues`**: a path whose `when` is invalid or names a product or variant that is not in this store (deleted since) blocks publishing (`edges[i].condition` in the publish details; a fatal `graph` issue with field `edges.<edgeId>.condition` in the issues list).
+- **Imported funnels** (POST `/funnels/import`) and **marketplace templates** (POST `/marketplace/templates/:id/use`): the `productIds` / `variantIds` of a path come over empty (they belonged to the other store), so the issue "when.productIds must list at least one id" (field `edges.<edgeId>.condition`) shows until the merchant picks their own products.
+- **Storefront runtime** (POST `/funnels/:funnelId/sessions/:sessionId/advance`, unchanged shape): `completed_checkout` with `orderId` only counts the order placed during this session (created after it started, in no other funnel, not another session's). Any other order id is ignored: the visitor moves on without an order, so a `when` path does not match.
+
+### Screens
+- **Funnel map → path (edge) settings**: under the existing condition picker, a section «شروط على الطلب» / "Order conditions" with an «أضف شرط» / "Add condition" menu:
+  - «اشترى منتج» / "Bought a product": product (and optional variant) multi-picker → `productIds` / `variantIds`. Label on the path: «لو اشترى {names}» / "If they bought {names}".
+  - «إجمالي الطلب» / "Order total": «على الأقل» / "At least" → `minTotal`, «أقل من» / "Less than" → `maxTotal`, in the funnel currency (send minor units). Label: «لو الطلب أقل من {amount}» / "If the order is under {amount}".
+  - «طريقة الدفع» / "Payment method": checkboxes «الدفع عند الاستلام» / "Cash on delivery", «بطاقة» / "Card", «محفظة» / "Wallet", «فاليو» / "valU", «كشك» / "Kiosk", «باي بال» / "PayPal", «تحويل بنكي» / "Bank transfer", «على الحساب» / "On account". Label: «لو دفع {methods}» / "If they paid by {methods}".
+  - Hint under the section: «الشروط دي بتتشيك على طلب الزائر في الفانل. خلّي مسار من غير شروط كآخر اختيار.» / "These conditions check the visitor's order in this funnel. Keep one path without conditions as the last choice."
+  - A priority control (up / down) on the paths leaving a step, since the first matching path wins.
+- Issues panel: the condition messages above, pointing at the path.
+- No settings.
+
+## 377. Card disputes, chargebacks and refunds made in Stripe or PayPal — UI: pending
+
+When a shopper who paid by card (Stripe, Apple Pay / Google Pay through Stripe, or PayPal) opens a dispute with their bank or PayPal, ZIMOS now records it on the order, flags the order so it is not shipped by mistake, and tells the team. A dispute lost writes the money back as a refund (source `chargeback`). Refunds the merchant makes in the Stripe or PayPal dashboard now show on the order like refunds made here. The merchant still answers the dispute (uploads evidence) in Stripe or PayPal; ZIMOS links there.
+
+### Settings → Payments → Stripe / PayPal (`workspace.manage`)
+- **GET `/api/v1/workspaces/:workspaceId/payments/gateways`**: `webhookSetup` now carries `events`, the list to tick in the gateway, and PayPal's `automatic` is now `false` (its webhook URL must be added by hand):
+  `{ "code": "stripe", "webhookSetup": { "field": "Webhook endpoint URL", "perIntegration": false, "automatic": false, "events": ["checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "checkout.session.expired", "charge.refunded", "charge.refund.updated", "refund.created", "refund.updated", "refund.failed", "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed"] }, "connection": { "webhookUrl": "https://…/api/v1/webhooks/payments/stripe/<token>", … } }`
+  `{ "code": "paypal", "webhookSetup": { "field": "Webhook URL", "perIntegration": false, "automatic": false, "events": ["PAYMENT.CAPTURE.REFUNDED", "CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.UPDATED", "CUSTOMER.DISPUTE.RESOLVED"] } }`
+- Show the webhook URL with a copy button and the events as a checklist under it: «فعّل الأحداث دي في الـ Webhook» / "Turn on these events for the webhook". `setupSteps` (already rendered) say why. For Stripe, without the signing secret nothing arrives: next to an empty `webhookSecret` show «من غير مفتاح التوقيع، الاسترجاعات والنزاعات اللي بتحصل في Stripe مش هتوصل» / "Without the signing secret, refunds and disputes from Stripe won't reach ZIMOS".
+
+### Disputes list (`orders.view`)
+- **GET `/api/v1/workspaces/:workspaceId/payment-disputes?status=open&orderId=&limit=50&cursor=`** — `status` is `open` (inquiry + needs_response + under_review) or one status; newest first:
+  `{ "disputes": [ { "id": "…", "orderId": "…", "orderNumber": "1042", "paymentId": "…", "providerCode": "stripe", "providerDisputeId": "dp_1Q…", "status": "needs_response", "providerStatus": "needs_response", "amount": 100000, "currency": "EGP", "reason": "fraudulent", "evidenceDueBy": "2026-10-14T13:55:22.000Z", "openedAt": "2026-10-07T13:55:22.000Z", "closedAt": null, "refundId": null, "createdAt": "…", "updatedAt": "…" } ], "openCount": 1, "nextCursor": null }`
+- Statuses: `inquiry` «استفسار» / "Inquiry" (no money taken yet), `needs_response` «محتاج ردك» / "Needs your response", `under_review` «تحت المراجعة» / "Under review", `won` «كسبته» / "Won", `lost` «خسرته» / "Lost", `closed` «اتقفل» / "Closed". Amounts in minor units. `reason` is the gateway's code (Stripe: `fraudulent`, `product_not_received`, `duplicate`, `subscription_canceled`, `general`…; PayPal: `UNAUTHORISED`, `MERCHANDISE_OR_SERVICE_NOT_RECEIVED`…): show it humanised, e.g. `fraudulent` «العميل بيقول إنه ما عملش الدفعة» / "Customer says they didn't make this payment", `product_not_received` «العميل بيقول إن الطلب ما وصلوش» / "Customer says the order never arrived", anything else «سبب تاني ({reason})» / "Other reason ({reason})".
+- Errors: 422 `VALIDATION_ERROR` on a bad `status` / `orderId`.
+
+### Order page (`orders.view`)
+- **GET `/orders/:orderId/payment-timeline`** has a new `disputes` array (same shape as above, oldest first), and `alerts` can now hold `payment_disputed` and `chargeback_lost` next to the existing payment alerts.
+- Payment card banner, per dispute:
+  - open: «فيه نزاع على الدفعة دي ({amount}) — آخر ميعاد للرد {evidenceDueBy}» / "This payment is disputed ({amount}) — respond by {evidenceDueBy}", button «رد من لوحة {Stripe|PayPal}» / "Respond in {Stripe|PayPal}" linking to `https://dashboard.stripe.com/disputes/{providerDisputeId}` (test keys: `https://dashboard.stripe.com/test/disputes/{providerDisputeId}`) or `https://www.paypal.com/resolutioncenter`.
+  - won: «النزاع اتقفل لصالحك» / "Dispute closed in your favour"; closed (inquiry): «الاستفسار اتقفل من غير خصم» / "Inquiry closed, nothing was taken".
+  - lost: «خسرت النزاع — البنك رجّع {amount} للعميل» / "Dispute lost — the bank returned {amount} to the customer". The refund list shows that refund with `source: "chargeback"`: label «رد بنكي (Chargeback)» / "Chargeback"; a refund with `source: "gateway"`: «اترجع من لوحة {gateway}» / "Refunded in {gateway}".
+- Order timeline (GET `/orders/:orderId/timeline`): an `audit` event with `data.action: "order.payment_dispute"`, `actor.type: "system"`, `data.before: { "status": "needs_response" } | null`, `data.after: { "status": "lost", "amount": 100000, "providerCode": "stripe" }`: «نزاع على الدفعة: {status}» / "Payment dispute: {status}".
+- Shipping: booking a courier or adding a shipment on a flagged order answers 409 `ORDER_PAYMENT_DISPUTED`: «الدفع بالبطاقة عليه نزاع أو اترجع من البنك — راجع الطلب قبل ما تشحنه» / "This card payment is disputed or was charged back — review the order before shipping it". The existing "approve flagged order" action (fraud review) clears the flag if the merchant still wants to ship; show it in that error with «اشحن برضه» / "Ship anyway".
+- Orders list: the flags show with the other risk flags: `payment_disputed` «عليه نزاع» / "Disputed", `chargeback_lost` «اترجع من البنك» / "Charged back".
+
+### Notifications
+- New type **`payment.disputed`** (to teammates with `refunds.manage`; in-app, email and push on by default) in the bell and in the notification settings matrix: «نزاعات على الدفع» / "Payment disputes". `data`: `{ "orderId", "orderNumber", "disputeId", "status", "amount", "currency", "providerCode", "evidenceDueBy" }`; `link`: `/orders/:orderId`. Titles come localised (e.g. «نزاع على دفعة بالبطاقة — محتاج ردك» / "Card payment disputed — your response is needed").
+
+### Dashboard home (optional)
+- A card when `openCount > 0` from `GET /payment-disputes?status=open&limit=5`: «{openCount} نزاع مفتوح على الدفع» / "{openCount} open payment disputes", each row with the order number, amount and deadline.
+
+## 378. Team channels: alerts in Telegram, Slack and Discord — UI: pending
+
+A store can now send its alerts (new orders, suspicious orders, low stock, a failing integration, disputed payments…) to a Telegram group, a Slack channel or a Discord channel shared with its team, media buyer or fulfilment partner. A channel is not a seat: it is a place, with the alert types it asked for. Up to 10 per store. The bot token and webhook URL are stored sealed and never come back; the API shows a `hint`.
+
+### Endpoints (`workspace.manage`; routing a type also needs that type's own permission, e.g. `orders.view` for `order.new`)
+- **GET `/api/v1/workspaces/:workspaceId/team-channels`**
+  `{ "channels": [ { "id": "…", "provider": "telegram", "name": "Orders group", "hint": "-1001234567890 · ••••2345", "locale": "ar", "types": ["order.new", "stock.low"], "isActive": true, "lastStatus": "sent", "lastError": null, "lastSentAt": "2026-10-07T14:03:10.747Z", "failureCount": 0, "createdAt": "…", "updatedAt": "…" } ], "providers": ["telegram", "slack", "discord"], "types": ["order.new", "order.suspicious", "stock.low", "integration.failed", "plan.limit_reached", "automation", "quote.request", "product.question", "stock.lot_expiring", "payment.disputed"], "adapter": { "available": true, "sandbox": true } }`
+  - `types` = the alert types this person may route. `adapter.sandbox: true` (development only): show a «وضع تجريبي — الرسائل مش بتتبعت فعلاً» / "Test mode — messages are not really sent" badge. `available: false` → the section shows «غير متاح حاليًا» / "Not available yet".
+- **POST `/team-channels`** → 201 `{ "channel": {…} }`
+  - Telegram: `{ "provider": "telegram", "name": "Orders group", "locale": "ar", "types": ["order.new"], "botToken": "123456789:AAE…", "chatId": "-1001234567890" }` (`chatId` may be `@channelname`).
+  - Slack: `{ "provider": "slack", "name": "#orders", "locale": "en", "types": ["order.new", "payment.disputed"], "webhookUrl": "https://hooks.slack.com/services/T…/B…/…" }`
+  - Discord: `{ "provider": "discord", "name": "Fulfilment", "types": ["order.new"], "webhookUrl": "https://discord.com/api/webhooks/123…/abc…" }`
+  - `types` defaults to `["order.new"]`, `locale` to `ar` (the language its messages are written in), `isActive` to true. Saving sends nothing; use the test button.
+- **PATCH `/team-channels/:channelId`** `{ "name"?, "locale"?, "types"?, "isActive"?, "botToken"?, "chatId"?, "webhookUrl"? }` → `{ "channel" }`. Send only what changed; a Telegram chat can move without retyping the token. Switching a paused channel back on, or new credentials, resets `failureCount`. New credentials need the permission of every type the channel receives, like choosing those types (403 `TEAM_CHANNEL_TYPE_FORBIDDEN`).
+- **DELETE `/team-channels/:channelId`** → `{ "deleted": true, "id" }`
+- **POST `/team-channels/:channelId/test`** → `{ "result": { "status": "sent" } | { "status": "failed", "error": "Telegram answered 403" }, "channel": {…} }` (works on a paused channel too).
+- **GET `/team-channels/:channelId/deliveries`** → `{ "deliveries": [ { "id", "type": "order.new" | "test" | "automation_step" | …, "status": "sent" | "failed", "error", "createdAt" } ] }` (last 50, kept 30 days).
+- Errors: 422 `VALIDATION_ERROR` with `details[0].field` `botToken` («الصق التوكن اللي أداهولك @BotFather» / "Paste the token @BotFather gave you"), `chatId` («رقم الجروب أو القناة، زي ‎-1001234567890 أو ‎@mychannel» / "The group or channel id, like -1001234567890 or @mychannel"), `webhookUrl` («لينك Incoming Webhook من Slack» / "A Slack incoming-webhook URL", «لينك Webhook من Discord» / "A Discord webhook URL"), `types` («النوع ده ما ينفعش يتبعت لقناة» / "This alert can't go to a team channel"); 403 `TEAM_CHANNEL_TYPE_FORBIDDEN` («مش مسموح لك توجّه التنبيه ده» / "You can't route this alert"); 409 `TEAM_CHANNEL_LIMIT` («الحد الأقصى ١٠ قنوات» / "Up to 10 team channels"); 404; 503 `TEAM_CHANNEL_UNAVAILABLE` on test.
+
+### Screens
+- **Settings → Notifications → «قنوات الفريق» / "Team channels"**: a card per channel (provider icon, name, hint, the alert types as chips, status dot: «شغّالة» / "Working" when `lastStatus` is `sent`, «فيه مشكلة: {lastError}» / "Problem: {lastError}" when `failed`, «متوقفة» / "Paused" when `isActive` is false), a switch for `isActive`, «إرسال رسالة تجريبية» / "Send a test message", «تعديل» / "Edit", «حذف» / "Delete", and «آخر الرسائل» / "Recent messages" (deliveries).
+- **Add channel** «أضف قناة» / "Add channel": pick Telegram / Slack / Discord, then name, language («لغة الرسائل» / "Message language": العربية / English), the alert types as checkboxes (labels as in the notification settings matrix; «أتمتة» / "Automation" for `automation`), and:
+  - Telegram: «توكن البوت» / "Bot token" (password field), «رقم الجروب» / "Group id". Help: «١) كلّم ‎@BotFather واعمل ‎/newbot وانسخ التوكن. ٢) ضيف البوت للجروب. ٣) هات رقم الجروب من ‎@RawDataBot.» / "1) Message @BotFather, send /newbot and copy the token. 2) Add the bot to your group. 3) Get the group id from @RawDataBot."
+  - Slack: «لينك الـ Webhook» / "Webhook URL". Help: «من api.slack.com/apps اعمل App وفعّل Incoming Webhooks واختار القناة وانسخ اللينك.» / "At api.slack.com/apps, create an app, turn on Incoming Webhooks, pick the channel and copy the URL."
+  - Discord: «لينك الـ Webhook» / "Webhook URL". Help: «إعدادات القناة ← Integrations ← Webhooks ← New Webhook ← Copy URL.» / "Channel settings → Integrations → Webhooks → New Webhook → Copy URL."
+  - In edit mode the secret fields are empty with the hint as placeholder: «سيبه فاضي لو مش هتغيّره» / "Leave empty to keep it".
+- A channel that failed 10 times in a row is paused by the server and the store's managers get an `integration.failed` alert («تعذّر الاتصال بـ Telegram: {name}» / "Couldn't reach Telegram: {name}", link `/settings/notifications`).
+
+### Automations
+- New step type **`notify_channel`** (listed in `stepTypes` of GET `/automations`): `{ "type": "notify_channel", "teamChannelId": "<id>", "message": "طلب {{order_number}} محتاج مكالمة" }` (message up to 500, same tokens as `notify_team`). Step picker label «رسالة لقناة الفريق» / "Message a team channel", with a channel dropdown from GET `/team-channels`. The run log shows `notify_channel telegram`, or failed with "team channel "…" is paused" / "the team channel no longer exists".
+
+## 379. Store transfer needs the new owner's yes — UI: pending
+
+The transfer (handoff 252) is now an **offer** the new owner accepts.
+- **POST `/api/v1/workspaces/:ws/ownership-transfer`** (owner only; same body `{ newOwnerUserId, password, keepAs }`) → **201** `{ "offer": { "toUserId": "…", "fromUserId": "…", "keepAs": "workspace_manager", "createdAt": "…", "expiresAt": "…(7 days)", "toUser": { "userId", "fullName", "email" } } }`. The store does not move yet. The same refusals as before apply (NOT_STORE_OWNER, NEW_OWNER_NOT_CONFIRMED, PLAN_LIMIT_REACHED, wrong password). A new offer replaces the old one.
+- **GET** same path → `{ "offer": {…} | null }`; **DELETE** same path → `{ "withdrawn": true }` (owner only).
+- **GET `/api/v1/me/ownership-offers`** (any signed-in user) → `{ "offers": [{ "workspaceId", "workspaceName", "from": { "fullName", "email" }, "keepAs", "expiresAt" }] }`.
+- **POST `/api/v1/me/ownership-offers/:workspaceId/accept`** → the transfer result `{ workspace, newOwner, previousOwner, billing }`. Every check runs again at this moment. The offer gone or expired → 404. The store changed owner meanwhile → 409 `OFFER_NO_LONGER_VALID`. The new owner's plan is full → 409 `PLAN_LIMIT_REACHED`.
+- **POST `/api/v1/me/ownership-offers/:workspaceId/decline`** → `{ "declined": true }`.
+
+### Screens
+- **Store settings → «نقل ملكية المتجر» / "Transfer ownership":** after confirming, show «بعتنا عرض لـ {name} — المتجر هيتنقل لما يوافق» / "Offer sent to {name} — the store moves when they accept". Show the pending offer with its end date and «إلغاء العرض» / "Withdraw offer".
+- **For the person (dashboard home or the store switcher, from `GET /me/ownership-offers`):** a banner «{from} عايز ينقل لك ملكية {store}» / "{from} wants to give you {store}", with «موافق» / "Accept" and «رفض» / "Decline". Before accepting, add a note «المتجر هيتحسب من عدد متاجر باقتك» / "The store will count toward your plan's stores".
+
+## 380. One-click upsells and renewals on Stripe, Paymob and PayPal — UI: pending
+
+Saved cards now work on the real gateways (not only the sandbox). What the screens see:
+- **Payments → connect form** (built from `GET /payments/gateways`, no new endpoint): Paymob has a new optional integer setting `motoIntegrationId` («رقم تكامل الكروت المحفوظة (MOTO) — اختياري» / "Saved cards (MOTO) integration ID — optional") with **no `method`** — show it under the method integration IDs, not as a checkout method. PayPal has a new boolean setting `vault` (method `paypal`), off by default; PayPal's `methodsFromAccount` is now `false` because it has a setting field. Both have one more setup step in `setupSteps`.
+- **New error code** `SAVED_METHOD_NEEDS_SHOPPER` (422) from `POST /saved-payment-methods/:savedId/charge`: «البنك عايز العميل يأكد الدفع بنفسه — ابعتله رابط الدفع» / "The card's bank wants the customer to confirm this payment — send them the payment link". Not a decline: don't say the card was declined.
+- **Storefront upsell / funnel offer answer:** `payment: { status: 'declined', code }` can now carry `code: 'SAVED_METHOD_NEEDS_SHOPPER'` besides `SAVED_METHOD_DECLINED`; same fallback as today (the offer order stays unpaid). Message: «محتاجين تأكيد من البنك — الطلب الإضافي ما اتدفعش» / "Your bank needs you to confirm — the extra order was not charged".
+- **Declined one-click charges are kept** (review fix): a saved-card charge the bank refused (or that needs the shopper) now leaves a `failed` payment attempt on the order — it shows in the order's payment timeline and in GET `/payments/transactions` with its `failureReason`, `maskedDisplay` and no net. Two charges of one order at once: the second answers 409 `ORDER_ALREADY_PAID` («الطلب ده اتدفع خلاص» / "This order is already paid"). Charging again after a decline really tries the card again.
+- **Saved methods list:** a saved PayPal shows `brand: 'PayPal'`, `last4: null`, `expiresAt: null` — show «PayPal» without "•••• ····". A charge to it is an order with payment method `paypal`.
+
+## 381. Short sequential order numbers (#1001) — UI: pending
+
+New orders get short store numbers: prefix + number + suffix (`#1001`, `ZM-5000-EG`, `7000`). A store that never set this numbers from **#1001**. Older orders keep their `ORD-…` numbers and are still found by them. Nothing else in the order API changes: `orderNumber` is still a string.
+- **GET `/api/v1/workspaces/:ws/order-numbers`** (orders.view) → `{ "prefix": "#", "suffix": "", "start": 1001, "isDefault": true, "lastNumber": null | 1010, "nextNumber": 1011, "nextOrderNumber": "#1011" }`.
+- **PUT** same path (workspace.manage), the whole object → the same shape:
+  `{ "prefix": "ZM-", "suffix": "-EG", "start": 5000 }`
+  - `prefix`, `suffix`: 0–10 characters, English letters, digits, `#` and `-` only; sent in lower case they are stored in upper case. Empty is allowed.
+  - `start`: whole number 1–1,000,000,000. It is the lowest number the next order may get: numbers never go back, so a start below `nextNumber` changes nothing. Show `nextOrderNumber` from the answer.
+  - Errors: 422 `VALIDATION_ERROR` with `details[].field` `prefix` / `suffix` («حروف إنجليزي وأرقام و# و- بس، لحد ١٠» / "English letters, digits, # and - only, up to 10") or `start` («رقم صحيح من ١ لـ ١٬٠٠٠٬٠٠٠٬٠٠٠» / "A whole number from 1 to 1,000,000,000"); 403 without workspace.manage.
+- Order search (orders list `q`, ⌘K, storefront tracking, public API by number, tracking import) finds a number with or without its `#` and in any case (`1003`, `#1003`, `zm-5000-eg`). The storefront tracking form now accepts `#`.
+
+### Screens
+- **Settings → Orders → «ترقيم الطلبات» / "Order numbers"**: fields «بادئة» / "Prefix" (placeholder `#`), «لاحقة» / "Suffix", «ابدأ من» / "Start at" (number); a live preview «الطلب الجاي هيبقى رقمه {nextOrderNumber}» / "Your next order will be {nextOrderNumber}" (compute prefix + max(start, nextNumber) + suffix while typing; after saving, show the server's `nextOrderNumber`). Hint under start: «الأرقام ما بترجعش لورا — لو كتبت رقم أصغر من الجاي هيفضل زي ما هو» / "Numbers never go back — a smaller start keeps the next number as it is". Hint under the fields: «الطلبات القديمة بتفضل بأرقامها» / "Existing orders keep their numbers". «حفظ» / "Save".
+- Order lists and pages: no change; show `orderNumber` as is (don't add another `#`).
+
+## 382. Staff price changes on manual orders and order edits — UI: pending
+
+Staff can now sell a line at their own price, add a line that is not in the catalogue, and take a discount off the whole order — on **Create order** and on **Edit items**. All of it needs the new permission **`orders.price_override`** («تعديل الأسعار في الطلبات» / "Change prices on orders"): Owner always, the system Workspace Manager role, and anyone the owner ticks it for (it is in the "discounts" section of the invite dialog and in the Advanced list). Without it the screens hide the price fields and the requests answer 403 `FORBIDDEN` («مش مسموح لك تغيّر الأسعار» / "You can't change prices"). The storefront never accepts these fields (422).
+
+### Request fields (create, preview, edit)
+Same endpoints as before: **POST `/orders`**, **POST `/orders/manual/preview`**, **POST `/orders/:id/items/preview`**, **PUT `/orders/:id/items`**.
+- A catalogue line may carry `unitPrice` (minor units, ≥ 0): `{ "variantId": "…", "offerId"?: "…", "quantity": 2, "unitPrice": 8000 }`. A quantity bundle's tier never applies on top of it.
+- A custom line has no variant: `{ "title": "Gift wrapping", "unitPrice": 1500, "quantity": 1, "sku"?: "WRAP", "weightGrams"?: 300 }` (title 1–300, sku ≤ 100). It holds no stock; without `weightGrams` it weighs nothing. On an edit, send back a custom line the order already has with its `orderItemId` to keep it (otherwise it is removed and a new one created). Leaving a custom line out removes it, which also needs the permission (403 without it) — without the permission, don't offer removing a custom line.
+- `manualDiscount`: `{ "type": "amount" | "percent", "value": 2500 | 10, "reason": "Loyal customer" }` — amount in minor units, percent 0–100 (two decimals), reason required (1–500). It comes off what is left after the code or automatic discount and never takes the goods below 0. On an edit: left out = the order's discount stays (a percent is worked out again on the new subtotal); `null` = removed.
+- Example create:
+```json
+{ "items": [ { "variantId": "5e7a…", "quantity": 2, "unitPrice": 8000 },
+             { "title": "Gift wrapping", "unitPrice": 1500, "quantity": 1, "sku": "WRAP" } ],
+  "manualDiscount": { "type": "percent", "value": 10, "reason": "Loyal customer" },
+  "contact": { "fullName": "…", "phone": "010…" }, "shippingAddress": { … }, "paymentMethod": "cod" }
+```
+→ subtotal 17500, `discountAmount` 1750.
+
+### What comes back
+- Every order line (GET `/orders/:id`, create, previews, edit answer) has `priceOverride`: `null`, or `{ "kind": "override", "catalogUnitPriceAmount": "10000", "actorUserId", "actorName", "at" }` (show the catalogue price struck through next to the staff price), or `{ "kind": "custom", "actorUserId", "actorName", "at" }` (a custom line: `variantId` and `productId` are null, no picture). The previews also give `custom: true|false` and `sku` per line.
+- `order.manualDiscount` (GET `/orders/:id`, `preview.manualDiscount` on the manual preview, `preview.manualDiscount` on the edit preview): `null` or `{ "kind": "manual", "type": "percent", "value": 10, "reason": "Loyal customer", "amount": 1750, "actorUserId", "actorName": "Demo Owner", "at" }`. It is also an entry of `discountsSnapshot` with `kind: "manual"`. `discountAmount` is the code's discount **plus** the manual one — show them as two rows: coupon = `discountAmount − manualDiscount.amount`.
+- Errors: 403 `FORBIDDEN` (no permission); 422 `VALIDATION_ERROR` with `details[].field` `manualDiscount.value` («النسبة من ٠ لـ ١٠٠» / "A percentage from 0 to 100"; «المبلغ رقم صحيح» / "A whole amount"), `manualDiscount.reason` («اكتب سبب الخصم» / "Write the reason for the discount"), `items.0` (a line that is neither a catalogue line nor a custom line, e.g. both `variantId` and `title`, or a negative price: «السعر لازم يكون صفر أو أكتر» / "The price must be 0 or more"), `items.orderItemId` («السطر ده مش من الطلب» / "This line isn't on the order").
+- The invoice PDF shows «خصم يدوي» / "Staff discount" on its own row under the coupon's "Discount". The orders export has two new columns: `staffDiscount` («خصم يدوي» / "Staff discount") and `staffDiscountReason` («سبب الخصم اليدوي» / "Staff discount reason"). Packing slips, pick list, scan to pack and the per-item export show a custom line by its title (scan to pack lists it to pack by hand). The audit log has `order.price_change` (before: catalogue prices; after: staff prices and the manual discount).
+
+### Screens
+- **Create order** (only with the permission): on each product line a small pencil «تعديل السعر» / "Change price" that turns the unit price into an input; when changed show «سعر المتجر {catalogue}» / "Store price {catalogue}" struck through. Under the lines «+ سطر مخصص» / "+ Custom line" opens a row with «الاسم» / "Title", «السعر» / "Price", «الكمية» / "Quantity", «SKU (اختياري)» / "SKU (optional)", «الوزن بالجرام (اختياري)» / "Weight in grams (optional)". In the totals, «+ خصم يدوي» / "+ Staff discount" opens: a toggle «مبلغ» / "Amount" | «نسبة ٪» / "Percent", the value, and «السبب» / "Reason" (required). Totals show «كود الخصم» / "Discount code" and «خصم يدوي ({reason})» / "Staff discount ({reason})" as separate rows. Everything goes through the preview, so the screen never computes a price.
+- **Order page → Edit items**: the same three controls; existing custom lines are sent back with their `orderItemId`. «إزالة الخصم اليدوي» / "Remove staff discount" sends `manualDiscount: null`. The difference line stays «الفرق {differenceAmount}» / "Difference {differenceAmount}".
+- **Order page**: a custom line shows a «مخصص» / "Custom" badge instead of a picture; an overridden line shows «سعر معدّل» / "Price changed" with the catalogue price struck through and, on hover, «بواسطة {actorName}» / "By {actorName}". In the totals, the staff discount is its own row with its reason.
+- **Team → roles / invite**: the new permission label «تعديل الأسعار في الطلبات» / "Change prices on orders", help «سعر سطر، سطر مخصص، أو خصم يدوي على الطلب» / "A line's price, a custom line, or a staff discount on the order".
+
+## 383. Customer messages in the shopper's language — UI: pending
+
+Orders now remember the language the shopper used the store in, and the customer's emails (and WhatsApp templates, when the store has them approved in that language) go out in it.
+
+### Storefront
+- Send **`X-Store-Locale: <ar|en|fr…>`** (the language the shopper is reading in) on **POST `/store/:ws/checkout`**, **POST `/store/:ws/checkout-sessions`** (autosave) and the funnel checkout — the same header the product pages already send. A language the store does not offer is ignored (the order gets the store's default). Nothing in the answers changes.
+
+### Orders
+- Every order has `locale` (`"ar"`, `"en"`, `"fr"`…; `null` on orders from before = the store's default) on GET `/orders/:id` and in create answers.
+- **POST `/orders`** and **POST `/orders/manual/preview`** take an optional `"locale": "en"` — one of the store's languages. Left out = the store's default. Not offered → 422 `VALIDATION_ERROR`, `details[0].field` `locale`, message "This store does not offer "de". Its languages: ar, en, fr" («المتجر مش بيدعم اللغة دي» / "This store doesn't offer this language").
+
+### Order emails per language
+All under `/api/v1/workspaces/:ws/order-emails` (workspace.manage); `?locale=` combines with `?funnelId=` / `?websiteId=`.
+- **GET `?locale=en`** → `{ scope, locale: "en", defaultLocale: "ar", languages: ["ar","en","fr"], templates: [...], tokens }`. Without `locale` (or with the store's own language) it is the default version as before. Each template now also has:
+  - `locale` — the language shown;
+  - `version` — `"default"` (the default version), `"language"` (this language has its own version), `"fallback"` (none yet: what goes out today — the changed default version, else the built-in text in that language);
+  - `textLocale` — the language the shown text is written in (`"ar"` when an English tab falls back to an Arabic default);
+  - `defaults` — the built-in text in that language (English exists; French has none, so it shows the default version's text).
+- **PUT `/:key?locale=en`** `{ "subject": "We got your order {{order_number}}", "body": "Hi {{customer_name}}, …", "blocks": [...] }` saves the English version. A field left empty uses the built-in text in that language (else the default version's). `isEnabled` sent here switches the whole email (the default version holds the on/off) — one switch per email for all languages.
+- **DELETE `/:key?locale=en`** removes the English version → English customers get the fallback again. 404 when there is none; 422 when neither a language nor a funnel/website is named.
+- **POST `/:key/preview?locale=en`** and **POST `/:key/test?locale=en`** preview/send that language's version (English sample values, left-to-right).
+- Not offered / malformed `locale` → 422 `VALIDATION_ERROR` (`details[0].field` `locale`).
+- Which text a customer gets: their language's version → else the changed default version → else the built-in text in their language (Arabic, English) → else the store's language. A language version wins over a funnel's or website's override in another language.
+
+### Screens
+- **Settings → Order emails**: when `languages.length > 1`, tabs above the list, one per language: «العربية» / "Arabic", «English», «Français» (from `languages`; the store's own first, marked «الافتراضية» / "Default"). Switching a tab reloads with `?locale=`.
+  - In a non-default tab, each email row shows a badge: `version: "language"` → «مترجمة» / "Translated"; `version: "fallback"` → «بتتبعت بـ{textLocale == defaultLocale ? "اللغة الافتراضية" : "النص الجاهز"}» / "Sent in {the default language | the built-in text}".
+  - The editor in a non-default tab: prefill subject/body from the template (or `defaults` when `version` is `"fallback"`), the on/off switch stays the same switch for all languages (hint «التشغيل والإيقاف لكل اللغات» / "On/off applies to every language"), and a «حذف ترجمة {language}» / "Remove the {language} version" button (DELETE `?locale=`) when `version` is `"language"`, with the confirm «العملاء اللي بيتسوقوا بالـ{language} هيستلموا النسخة الافتراضية» / "Customers shopping in {language} will get the default version".
+  - The editor box's direction: `dir="rtl"` for Arabic, `dir="ltr"` otherwise.
+- **Create order (manual)**: when the store has more than one language, a select «لغة رسائل العميل» / "Customer's message language" with the store's languages, default the store's default; sent as `locale`.
+- **Order page**: next to the customer, a small tag with the order's language when it is not the store's default: «اللغة: English» / "Language: English".
+
+## 384. Online payments ledger with gateway fees and payouts — UI: pending
+
+A finance view of the store's online payments: every captured or failed gateway payment and every refund of one, with what the gateway kept (fee), what reached the merchant's gateway balance (net), and the payout that sent it to the bank. Cash on delivery, transfers, gift cards and points are not in it. All endpoints need **`financial_reports.view`** (403 `FORBIDDEN` otherwise — hide the screens). Amounts are integer minor units; fees and net are in `feeCurrency` (the gateway's settlement currency, usually the store's).
+
+### Endpoints (under `/api/v1/workspaces/:ws/payments`)
+- **GET `/transactions`** — query: `gateway` (`sandbox`, `stripe`, `paymob`…), `method` (`card`, `wallet`…), `status` (`captured` | `refunded` | `failed` | `pending`), `type` (`payment` | `refund`), `mode` (`live` | `test`), `orderId`, `payoutId`, `from`, `to` (`YYYY-MM-DD` on the store's calendar, `to` inclusive; or ISO timestamps), `limit` (1–200, default 50), `cursor` (the previous answer's `nextCursor`), `format` (`json` default | `csv` | `xlsx` — a file download of everything the filters select, up to 10,000 rows), `lang` (`en` | `ar`, the file's headers and words). Newest first.
+```json
+{
+  "transactions": [
+    { "type": "refund", "id": "7c1e…", "paymentId": "a51d…", "orderId": "5d80…", "orderNumber": "#1002",
+      "gateway": "stripe", "method": "card", "mode": "live", "status": "refunded", "paymentStatus": "partially_refunded",
+      "amount": -1000, "currency": "EGP", "fee": 0, "feeCurrency": "EGP", "net": -1000,
+      "payoutId": "e0b2…", "payout": { "id": "e0b2…", "externalId": "po_1Q…", "status": "paid", "arrivalDate": "2026-10-10" },
+      "reference": "re_3Q…", "maskedDisplay": null, "failureReason": null, "source": "merchant", "occurredAt": "2026-10-08T00:20:11.000Z" },
+    { "type": "payment", "id": "a51d…", "paymentId": "a51d…", "orderId": "5d80…", "orderNumber": "#1002",
+      "gateway": "stripe", "method": "card", "mode": "live", "status": "captured", "paymentStatus": "partially_refunded",
+      "amount": 10000, "currency": "EGP", "fee": 500, "feeCurrency": "EGP", "net": 9500,
+      "payoutId": "e0b2…", "payout": { … }, "reference": "pi_3Q…", "maskedDisplay": "Visa •••• 4242",
+      "failureReason": null, "source": null, "occurredAt": "2026-10-08T00:19:40.000Z" }
+  ],
+  "totals": {
+    "byCurrency": [ { "currency": "EGP", "payments": 2, "captured": 20000, "refunds": 2, "refunded": 3000, "failed": 1, "feesPending": 0 } ],
+    "feesByCurrency": [ { "currency": "EGP", "fees": 1050, "net": 15950 } ]
+  },
+  "nextCursor": "2026-10-08T00:19:40.000Z|a51d…"
+}
+```
+  - `amount` is signed: a refund is negative. `fee: null` = the gateway hasn't said yet (or never will: Paymob, Kashier and PayPal don't report fees) — show «—» with the tooltip «الرسوم لسه ما وصلتش من البوابة» / "The gateway hasn't reported the fee yet". `net: null` on a failed payment or a pending/failed refund (nothing moved), and on a refund of a payment settled in another currency until its payout reports the net. `payout: null` = not paid out yet.
+  - `totals` is over everything the filters select (only on the first page — keep it while loading more). `feesPending` = captured payments whose fee is still unknown.
+  - 422 `VALIDATION_ERROR`: a bad `status`/`type`/`format`, `from` after `to` (`details[0].field` `from`), a cursor not from this list (`cursor`).
+- **GET `/payouts`** — query `gateway`, `status` (`pending` | `in_transit` | `paid` | `failed` | `canceled`), `from`, `to` (arrival dates, `YYYY-MM-DD`), `limit` (1–100), `cursor`. Newest arrival first.
+```json
+{ "payouts": [ { "id": "e0b2…", "gateway": "stripe", "mode": "live", "externalId": "po_1Q…", "amount": 8450, "currency": "EGP",
+    "fee": 500, "arrivalDate": "2026-10-10", "status": "in_transit", "payments": 1, "refunds": 1,
+    "unmatchedCount": 1, "unmatchedAmount": -50, "syncedAt": "…", "createdAt": "…" } ],
+  "nextCursor": null }
+```
+  `unmatchedCount` / `unmatchedAmount`: lines of the payout that are not a ZIMOS payment or refund (the gateway's own adjustments or fees, sales made outside ZIMOS).
+- **GET `/payouts/:payoutId`** → `{ payout: {…same shape}, summary: { paymentsAmount, refundsAmount, fees, net, unmatchedCount, unmatchedAmount }, payments: [transaction rows], refunds: [transaction rows] }`. `summary.net + summary.unmatchedAmount` = `payout.amount`. 404 `NOT_FOUND` for another store's id.
+- **POST `/payouts/sync`** ("Refresh"; otherwise the server syncs once a day) → `{ "results": [ { "gateway": "stripe", "since": "…", "payouts": 2, "created": 1, "matchedPayments": 4, "matchedRefunds": 1, "unmatched": 1 }, { "gateway": "sandbox", "skipped": "recently_synced" }, { "gateway": "x", "error": "GATEWAY_AUTH_FAILED", "message": "…" } ] }`. 409 `PAYOUTS_NOT_AVAILABLE` when no connected gateway reports payouts. Each account at most once a minute (`skipped: "recently_synced"`).
+- **Sandbox connect form** (built from `GET /payments/gateways` as before): two new optional integer settings with no `method` — `feeBasisPoints` («رسوم تجريبية بجزء من مئة من النسبة المئوية (100 = 1%)» / "Test fee, in 1/100 of a percent (100 = 1%)", 0–10000) and `feeFixedMinor` («رسوم ثابتة تجريبية لكل دفعة بأصغر وحدة (قروش، سنتات)» / "Test fixed fee per payment, in the smallest unit (piastres, cents)"). Only for trying the ledger in test mode.
+
+### Screens
+- **Payments → «المعاملات» / "Transactions"** (new tab next to the gateways; nav entry under Finance/Reports too, visible with financial_reports.view): filters «البوابة» / "Gateway", «الطريقة» / "Method", «الحالة» / "Status" («مدفوع» / "Captured", «مسترد» / "Refunded", «فشل» / "Failed", «قيد التنفيذ» / "Pending"), «النوع» / "Type" («دفعة» / "Payment", «استرداد» / "Refund"), date range «من» / "From" – «إلى» / "To", and a «تجريبي» / "Test" toggle (`mode`). Summary cards per currency from `totals`: «المحصّل» / "Captured", «المسترد» / "Refunded", «رسوم البوابة» / "Gateway fees", «الصافي» / "Net"; when `feesPending > 0` a hint «{n} دفعات رسومها لسه ما وصلتش» / "{n} payments are still waiting for their fee". Table columns: «التاريخ» / "Date", «الطلب» / "Order" (links to the order), «النوع» / "Type", «الحالة» / "Status" (StatusBadge), «البوابة» / "Gateway", «المبلغ» / "Amount" (refunds in red with a minus), «الرسوم» / "Fee", «الصافي» / "Net", «التحويل» / "Payout" (its `arrivalDate` and status, links to the payout). «تحميل المزيد» / "Load more" with `nextCursor`. Export menu «تصدير CSV» / "Export CSV" and «تصدير Excel» / "Export Excel" (same filters + `format`, `lang` = the dashboard's language). Empty state: «مفيش مدفوعات أونلاين لسه» / "No online payments yet".
+- **Payments → «التحويلات البنكية» / "Payouts"**: list with «تاريخ الوصول» / "Arrival date", «البوابة» / "Gateway", «المبلغ» / "Amount", «الرسوم» / "Fees", «الحالة» / "Status" («في الطريق» / "In transit", «وصل» / "Paid", «معلّق» / "Pending", «فشل» / "Failed", «اتلغى» / "Canceled"), «مدفوعات» / "Payments" and «استردادات» / "Refunds" counts; a «تحديث» / "Refresh" button (POST `/payouts/sync`, then reload; show per-gateway errors from `results[].message`, and «اتحدّث من شوية» / "Refreshed a moment ago" for `recently_synced`). Hint under the title: «بنجيب التحويلات من البوابة مرة كل يوم» / "Payouts are fetched from the gateway once a day". Empty state: «مفيش تحويلات لسه — Stripe والـ Sandbox بس اللي بيبعتوا التحويلات دلوقتي» / "No payouts yet — only Stripe and the Sandbox report payouts for now".
+- **Payout page** (`/payments/payouts/:id`): header with amount, status, arrival date and the gateway's id (`externalId`, copyable); summary rows «المدفوعات» / "Payments" (`paymentsAmount`), «الاستردادات» / "Refunds" (`refundsAmount`), «الرسوم» / "Fees", «مش من زيموس» / "Not from ZIMOS" (`unmatchedAmount`, with the tooltip «تسويات أو رسوم من البوابة أو مبيعات من برّه المتجر» / "Gateway adjustments or fees, or sales made outside the store", shown only when `unmatchedCount > 0`), «الإجمالي» / "Total"; then the two tables (same columns as Transactions).
+- **Order page → payments panel**: optional — show «رسوم البوابة {fee}» / "Gateway fee {fee}" under a captured payment when the ledger row has one (GET `/transactions?orderId=`).
+
+## 385. DNS records and transfer-out for domains bought here — UI: pending
+
+A domain bought in the dashboard now has its own DNS records screen, so the merchant can add email (MX), site verification (TXT), subdomains (A, AAAA, CNAME). The store owner can also take the domain to another registrar. All endpoints are under `/api/v1/workspaces/:ws/domains` and need **`domain.manage`**; the transfer code is for the **store owner** only.
+
+### Endpoints
+- **GET `/purchases`** — each row now also has `transferUnlockedAt` (null, or when the owner took the transfer code) and `manage: { "dnsRecords": true, "transferCode": true }`. Show the «سجلات DNS» / "DNS records" and «نقل الدومين» / "Transfer out" actions only when the flag is true.
+- **GET `/purchases/:id/dns-records`**
+```json
+{
+  "hostname": "ahmedstore.com",
+  "registrar": "dynadot",
+  "records": [
+    { "type": "A", "name": "ahmedstore.com", "host": "@", "value": "203.0.113.10", "ttl": 300, "locked": true, "purpose": "routing", "present": true },
+    { "type": "CNAME", "name": "www.ahmedstore.com", "host": "www", "value": "ahmed.zimos.app", "ttl": 300, "locked": true, "purpose": "redirect", "present": true },
+    { "type": "TXT", "name": "_zimos-verify.ahmedstore.com", "host": "_zimos-verify", "value": "zimos-verify=b35b…", "ttl": 300, "locked": true, "purpose": "verification", "present": true },
+    { "type": "MX", "name": "ahmedstore.com", "host": "@", "value": "mx1.mail.example.net", "priority": 10, "ttl": 300, "locked": false, "purpose": null, "editable": true },
+    { "type": "TXT", "name": "ahmedstore.com", "host": "@", "value": "v=spf1 include:spf.mail.zimos.example ~all", "ttl": 300, "locked": false, "purpose": "email_spf", "editable": true }
+  ],
+  "limits": { "maxRecords": 50, "types": ["A", "AAAA", "CNAME", "MX", "TXT"] }
+}
+```
+  - `locked: true` = the store's own record (`purpose` `routing` | `redirect` | `verification`). Show it greyed with a lock icon, never editable. `present: false` = not in the zone yet; it is written on the next save.
+  - `purpose` `email_spf` | `email_dkim` | `email_return_path` | `email_dmarc` = written for the store's email sending domain. It is editable, but show a hint.
+  - `editable: false` = a record type that can't be edited here.
+- **PUT `/purchases/:id/dns-records`** `{ "records": [ { "type": "MX", "name": "@", "value": "mx1.mail.example.net", "priority": 10, "ttl": 300 }, { "type": "TXT", "name": "@", "value": "google-site-verification=abc123" }, { "type": "CNAME", "name": "blog", "value": "blogs.example.org" } ] }` sends **all of the merchant's records** (every unlocked row, with its `ttl`, plus the new ones, minus the deleted ones). Never send the locked ones. `name` is `"@"` for the domain itself, a label like `"mail"`, or the full name. `priority` is required for MX (0–65535) and not allowed for the other types. `ttl` is optional (60–86400, default 300). The answer has the same shape as GET.
+  - 422 `VALIDATION_ERROR` with `details[].field` like `records[2].value` / `records[0].priority` / `records[1].name`, and a message to show under that row (e.g. "Enter the mail server's name, like mx.example.com (not an IP address)", "ahmedstore.com itself can't have a CNAME record — use A records", "www is used by the store's own records: it can't be changed here", "This record is listed twice"). More than 50 records is also 422.
+  - 409 `DNS_RECORDS_UNSUPPORTED` (the zone has records that can't be edited here: contact support), 409 `DOMAIN_REGISTRAR_CHANGED`, 409 `DOMAIN_NOT_ACTIVE`, 501 `DOMAIN_DNS_UNSUPPORTED`, 502 `REGISTRAR_REFUSED` / `REGISTRAR_UNAVAILABLE` (show the message, keep the form).
+- **POST `/purchases/:id/transfer-code`** `{ "password": "…" }` →
+```json
+{ "hostname": "ahmedstore.com", "authCode": "Kq9T2x-7fPz0A#b3Wm", "unlocked": true, "autoRenew": false,
+  "note": "Auto-renew is off: renew the domain at its new registrar. The store stays connected while its DNS records stay as they are.",
+  "purchase": { "id": "…", "autoRenew": false, "transferUnlockedAt": "2026-10-08T00:29:40.000Z", "…": "…" } }
+```
+  - The code is shown **only in this answer**: it is not stored, so don't cache it or put it in a URL. A new request asks the registrar again.
+  - 403 `NOT_STORE_OWNER` (hide the button for anyone but the owner), 422 `VALIDATION_ERROR` field `password` ("The password is not right"), 429 after 5 tries in an hour, 501 `DOMAIN_TRANSFER_UNSUPPORTED` (e.g. on Namecheap: «الكود ده مش متاح أوتوماتيك عند المسجّل ده — كلّم الدعم» / "This registrar doesn't give the code automatically — contact support").
+
+### Screens
+- **Domains → bought domain row**: a menu with «سجلات DNS» / "DNS records" and, for the owner, «نقل لمسجّل تاني» / "Transfer to another registrar". When `transferUnlockedAt` is set, show a badge «مفتوح للنقل» / "Unlocked for transfer".
+- **DNS records page** (`/domains/purchases/:id/dns`): title «سجلات DNS لـ {hostname}» / "DNS records for {hostname}". A table with «النوع» / "Type", «الاسم» / "Name" (`host`), «القيمة» / "Value", «الأولوية» / "Priority" (MX only), «TTL».
+  - Locked rows come first, with a lock icon and the tooltip «السجل ده بيوصّل الدومين بمتجرك — مينفعش يتغيّر» / "This record connects the domain to your store — it can't be changed". When `present` is false, add «هيتكتب مع الحفظ الجاي» / "Will be written on the next save".
+  - Email rows carry a tag «إيميل المتجر» / "Store email", with the hint «لو مسحته، إيميلات الطلبات مش هتتبعت من الدومين ده» / "If you delete it, order emails won't be sent from this domain".
+  - Buttons: «إضافة سجل» / "Add record" (a drawer with type, name, value, priority for MX, TTL), «تعديل» / "Edit" and «حذف» / "Delete" per unlocked row. Changes are kept in the page until «حفظ التغييرات» / "Save changes" sends the full list in one PUT. Then the toast «اتحفظت سجلات DNS — ممكن تاخد لحد ساعة لحد ما تشتغل» / "DNS records saved — they can take up to an hour to work".
+  - Helper text: «@ يعني الدومين نفسه» / "@ means the domain itself"; for MX «الأولوية الأقل بتتجرّب الأول» / "Lower priority is tried first". Counter «{n} من 50» / "{n} of 50".
+  - Empty state (only locked rows): «مفيش سجلات خاصة بيك لسه — ضيف MX للإيميل أو TXT للتحقق» / "No records of your own yet — add MX for email or TXT for verification".
+- **Transfer out dialog** (owner only): a warning «لما تاخد الكود، الدومين بيتفتح للنقل والتجديد التلقائي بيتقفل. المتجر هيفضل شغال على الدومين طول ما سجلات DNS زي ما هي» / "Taking the code unlocks the domain and turns auto-renew off. The store keeps working on the domain as long as its DNS records stay the same". Then a password field «كلمة السر» / "Password" and the button «إظهار كود النقل» / "Show transfer code".
+  - The result shows the code in a box with «نسخ» / "Copy", the note «احتفظ بالكود — إحنا مش بنحتفظ بنسخة منه» / "Keep this code — we don't keep a copy", and `note` underneath. Closing the dialog clears the code from memory.
+
+## 386. Delivery status for customer emails and SMS — UI: pending
+
+The dashboard can now show whether a customer email or SMS actually arrived. Brevo and Twilio report back: an email was delivered, bounced or marked as spam, or an SMS was not delivered. Addresses that bounced or complained go on the store's **email suppression list**. No email goes to them until the merchant lifts them, except account and security codes.
+
+### Endpoints
+- **GET `/api/v1/workspaces/:ws/email-suppressions`** — **`customers.view`**. Query: `email` (one address, any case), `reason` (`hard_bounce` | `complaint`), `limit` (1–100, default 50), `cursor`.
+```json
+{
+  "suppressions": [
+    { "id": "6f1c…", "email": "mona@example.com", "reason": "hard_bounce", "source": "brevo", "detail": "hard_bounce: 550 5.1.1 user unknown", "notificationLogId": "d7f0…", "createdAt": "2026-10-08T00:44:49.543Z" },
+    { "id": "9a22…", "email": "ali@example.com", "reason": "complaint", "source": "brevo", "detail": "spam", "notificationLogId": "8999…", "createdAt": "2026-10-08T00:44:49.600Z" }
+  ],
+  "next": null
+}
+```
+- **DELETE `/api/v1/workspaces/:ws/email-suppressions/:id`** — **`customers.manage`**. Lifts it; emails go to the address again. 404 when it is not there.
+```json
+{ "lifted": true, "suppression": { "id": "6f1c…", "email": "mona@example.com", "reason": "hard_bounce", "…": "…" } }
+```
+- **GET `/orders/:id/timeline`** — `message` events now carry `status`, which can be `sent`, `failed`, `delivered`, `bounced`, `complained`, `undelivered` or `suppressed`. They also carry `statusAt` and `statusReason`. There is also a new event type, `message_status`, at the time the provider reported it:
+```json
+{ "id": "message_status:d7f0…", "type": "message_status", "at": "2026-10-08T00:44:49.540Z", "actor": { "type": "system", "name": null },
+  "data": { "channel": "email", "status": "bounced", "reason": "hard_bounce: 550 5.1.1 user unknown", "subject": "تم استلام طلبك #1001", "messageId": "d7f0…" } }
+```
+- **GET `/customers/:id/timeline`** — new kind **`message_undelivered`** (also usable in `kinds=`):
+```json
+{ "kind": "message_undelivered", "at": "2026-10-08T00:44:49.540Z", "id": "d7f0…", "orderId": "adbf…", "orderNumber": "#1001",
+  "data": { "channel": "email", "status": "bounced", "reason": "hard_bounce: 550 …", "subject": "تم استلام طلبك #1001", "template": "order_email" } }
+```
+- **Bell**: new type `message.undelivered` (needs orders.view, in-app on, email off). Its `data` is `{ orderId, orderNumber, channel, status, notificationLogId }` and its link is `/orders/:id`. Add the type to the notification preferences list and to `notificationText.ts`.
+- Status webhooks (`/webhooks/email/brevo`, `/webhooks/sms/twilio`) are for the providers only; there's no UI for them.
+
+### Screens
+- **Order page → timeline**:
+  - Each message row gets a small status chip: «اتبعت» / "Sent", «وصل» / "Delivered", «مرتدّ» / "Bounced", «اتعلّم كمزعج» / "Marked as spam", «لم يصل» / "Not delivered", «لم يُرسل — العنوان موقوف» / "Not sent — address suppressed", «فشل الإرسال» / "Failed".
+  - `message_status` events are shown in red:
+    - «بريد الطلب ارتدّ — العنوان غير صالح» / "Email bounced — the address doesn't work"
+    - «رسالة SMS لم تصل» / "SMS not delivered"
+    - «العميل علّم البريد كرسالة مزعجة» / "The customer marked the email as spam"
+  - `reason` goes in a tooltip.
+- **Customer page → timeline**: the same red line for `message_undelivered`, with the order number as a link.
+- **Customer page → header**: when `GET /email-suppressions?email=<customer email>` returns a row, show a banner:
+  - Bounce: «الإيميلات مش بتتبعت للعنوان ده: ارتدّ» / "Emails to this address are stopped: it bounced"
+  - Complaint: «… العميل علّمها كمزعجة» / "… the customer marked them as spam"
+  - Button: «السماح بالإرسال تاني» / "Allow emails again" (customers.manage).
+  - Confirm: «متأكد؟ لو العنوان لسه غلط، الإيميل هيرتدّ تاني» / "Sure? If the address is still wrong, the email will bounce again".
+- **Customers → Email suppressions** (a tab or a settings page, «عناوين موقوفة» / "Suppressed emails"):
+  - Columns: «الإيميل» / "Email", «السبب» / "Reason" («ارتداد» / "Bounce", «شكوى مزعج» / "Spam complaint"), «التفاصيل» / "Detail", «التاريخ» / "Date".
+  - Filter by reason and search by email, and «تحميل المزيد» / "Load more" from `next`.
+  - Each row has a «رفع الإيقاف» / "Lift" action.
+  - Empty state: «مفيش عناوين موقوفة — كل إيميلاتك بتوصل» / "No suppressed addresses — your emails are getting through".
+  - Help text: «العنوان بيتوقف لما الإيميل يرتدّ نهائيًا أو العميل يعلّمه كمزعج. رموز الدخول والأمان بتتبعت دايمًا» / "An address is stopped when an email hard-bounces or the customer marks it as spam. Sign-in and security codes are always sent".
+- **Bell**:
+  - Bounce: «بريد الطلب {n} لم يصل للعميل» / "Order {n} email bounced"
+  - SMS: «رسالة الطلب {n} لم تصل للعميل» / "Order {n} SMS not delivered"
+  - Complaint: «العميل علّم بريد الطلب {n} كرسالة مزعجة» / "The customer marked the order {n} email as spam"
+- **Automation run detail**: an email step to a suppressed address fails with "Suppressed: hard_bounce" / "Suppressed: complaint". Show it as «العنوان موقوف (ارتداد/شكوى)» / "Address suppressed (bounce/complaint)".
+
+## 387. Tracking for manual and imported waybills — UI: pending
+
+Shipments the merchant creates by hand (any courier name plus a waybill) and the ones the tracking CSV import creates can now update themselves. When the store switches on a **tracking provider**, a background job reads each live manual shipment's waybill and moves its status: in transit, out for delivery, failed attempt, delivered or returned. Each checkpoint lands in the order timeline as a courier event. A delivered shipment fires `order.delivered` once, just like a courier booking. The status never moves backwards, and the job stops once the shipment is final. Courier-booked shipments are not affected.
+
+### Endpoints
+- **GET `/api/v1/workspaces/:ws/shipping/tracking-provider`** — **`shipping.manage`**.
+```json
+{
+  "trackingProvider": { "enabled": false, "provider": null },
+  "providers": [
+    { "code": "sandbox", "name": "Sandbox (test)", "sandbox": true, "available": true },
+    { "code": "aftership", "name": "AfterShip", "sandbox": false, "available": false }
+  ],
+  "polling": { "intervalMinutes": 60, "maxAgeDays": 45 }
+}
+```
+- **PUT `/api/v1/workspaces/:ws/shipping/tracking-provider`** — **`shipping.manage`**. Body: `{ "enabled": true, "provider": "sandbox" }`. `provider` is optional and keeps the current one when left out. The answer has the same shape as the GET.
+  - 422 `VALIDATION_ERROR` on `provider` when `enabled` is true with no provider, or the provider has `available: false` (AfterShip without the platform key).
+  - `enabled: false` keeps the provider, so switching it back on is one click.
+- **POST `/orders/:orderId/shipments/:shipmentId/sync`** (the existing "Refresh status" button; `orders.manage` or `shipping.manage`) now also works on a manual shipment when tracking is on:
+```json
+{ "shipment": { "id": "…", "status": "out_for_delivery", "trackingState": { "provider": "sandbox", "courier": "aramex", "lastCheckedAt": "2026-10-08T01:00:42.291Z", "lastCheckpointAt": "…", "lastStatus": "out_for_delivery", "failedWaybill": null, "…": "…" }, "trackingNextPollAt": "…", "trackingFailures": 0, "…": "…" },
+  "changed": true,
+  "carrierStatus": { "code": "OD", "value": "Out for delivery" },
+  "tracking": { "provider": "sandbox", "newCheckpoints": 1 } }
+```
+  - 409 `SHIPMENT_NOT_CARRIER_MANAGED`: as before, when tracking is off.
+  - 409 `SHIPMENT_NO_WAYBILL`: the shipment has no real waybill (none, or the import's `IMP-<order number>` placeholder).
+  - 502 `TRACKING_PROVIDER_FAILED`: the provider could not be read.
+- Shipments in **GET `/orders/:id`** / **`/orders/:id/shipments`** now carry `trackingState` (null until first read), `trackingNextPollAt` and `trackingFailures`. Ignore `trackingState.seen` and `ref`.
+- **GET `/orders/:id/timeline`**: each checkpoint is a `courier` event (`data.status`, `data.carrierStatusCode`, `data.description` = "message · location"), at the checkpoint's own time.
+
+### Screens
+- **Settings → Shipping → «تتبع الشحنات اليدوية» / "Tracking for manual shipments"** (a card under the default courier):
+  - Toggle: «حدّث حالة الشحنات اليدوية تلقائيًا» / "Update manual shipments automatically".
+  - Select «مزوّد التتبع» / "Tracking provider". Show the options from `providers`; disable the ones with `available: false` and add the hint «غير متاح على السيرفر ده» / "Not available on this server". Label the sandbox «تجريبي» / "Test".
+  - Help text: «بنقرا رقم البوليصة من المزوّد كل {intervalMinutes} دقيقة لحد ما الشحنة تتسلّم أو ترجع، ولمدة {maxAgeDays} يوم بحد أقصى. شحنات شركات الشحن المربوطة بتتحدّث لوحدها» / "We read each waybill from the provider every {intervalMinutes} minutes until it is delivered or returned, for up to {maxAgeDays} days. Shipments booked with a connected courier update on their own".
+  - Saved toast: «اتحفظ» / "Saved". On a 422, show the field error under the select.
+- **Order page → shipment card** (manual shipments with a waybill, when tracking is on):
+  - Show the existing «تحديث الحالة» / "Refresh status" button.
+  - A line «آخر تحديث من {provider}: {lastCheckedAt}» / "Last checked with {provider}: {lastCheckedAt}".
+  - When `trackingFailures > 0`: «مقدرناش نقرا الرقم ده — راجع رقم البوليصة» / "We couldn't read this number — check the waybill".
+  - After a sync with `changed: false`: «مفيش جديد» / "No new updates". With `newCheckpoints > 0`: «اتضاف {n} تحديث» / "{n} new updates".
+  - 409 `SHIPMENT_NO_WAYBILL`: «ضيف رقم البوليصة الأول» / "Add the waybill number first". 502: «مزوّد التتبع مش بيرد دلوقتي، جرّب تاني بعد شوية» / "The tracking provider isn't answering, try again later".
+- **Order timeline**: `courier` events from a manual shipment read the same as a courier's, e.g. «خرجت للتسليم — Nasr City» / "Out for delivery — Nasr City". A failed attempt is «محاولة تسليم فاشلة» / "Delivery attempt failed".
+
+## 388. The shopper confirms a cash-on-delivery order from a link — UI: pending
+
+For stores without the WhatsApp API: the store sends the order's **confirmation link** by SMS or email (an automation step or an order email with `{{confirm_link}}`), and the shopper confirms the order on the storefront with one tap. It is the same outcome as an agent's "confirmed": the order leaves the confirmation queue, and everything that follows a confirmation (webhooks, automations, auto-booking) runs as usual.
+
+### Settings — `/api/v1/workspaces/:ws/order-self-service` (`orders.manage`)
+- `GET` / `PUT` now carry `confirm: { enabled }` next to `cancel` and `address`:
+```json
+{ "cancel": { "enabled": false, "minutes": null }, "address": { "enabled": false, "minutes": null }, "confirm": { "enabled": true } }
+```
+- `confirm` is optional on PUT; left out, the current value is kept. 422 when `enabled` is not a boolean. Off by default.
+
+### Storefront — `/api/v1/store/:ws/orders/:orderId/self-service`
+- The link is `https://<store>/track?t=<tracking token>&confirm=1` — the tracking page with `confirm=1`. The page resolves the order from `t` as it already does, then calls the endpoints below with `token = t`.
+- `GET ?token=…` now also returns:
+```json
+{ "canConfirm": true, "confirmState": "available", "confirmedAt": null, "confirmAvailableAt": null, "canCancel": false, "canChangeAddress": false, "…": "…" }
+```
+  `confirmState`: `available` | `confirmed` | `review` (the store checks the order first) | `cancelled` | `shipped` | `closed` (not offered: setting off, not cash on delivery, or no longer waiting for confirmation). `confirmAvailableAt`: set while a funnel's offer window is still open — confirming works after that time.
+- `POST /confirm` `{ token }` → `200 { "confirmed": true, "orderNumber": "#1002", "confirmedAt": "…" }`. Confirming again returns the same answer.
+  - 404 `NOT_FOUND`: wrong or missing token.
+  - 409 `CONFIRM_NOT_OFFERED` (setting off / not COD), `CONFIRM_NEEDS_REVIEW` (flagged order), `ORDER_CANCELLED`, `CONFIRM_NOT_ALLOWED` (already on its way), `CONFIRM_NOT_YET` (offer window; `details.availableAt`). 429 from the tracking rate limit.
+
+### Screens
+- **Settings → Orders → self-service card**: a third toggle «العميل يقدر يأكّد طلب الدفع عند الاستلام من لينك» / "Customers can confirm cash-on-delivery orders from a link". Help: «ابعت المتغيّر {{confirm_link}} في رسالة SMS أو إيميل، والعميل يأكّد بضغطة من غير مكالمة» / "Put {{confirm_link}} in an SMS or email and the customer confirms with one tap, no call needed".
+- **Automation step editors (SMS, email, WhatsApp params) and order email editor**: add `confirm_link` to the variable picker — «لينك تأكيد الطلب» / "Order confirmation link" — with the hint «فاضي لو الخاصية مقفولة أو الطلب مش مستني تأكيد» / "Empty when the option is off or the order isn't waiting for confirmation". In the email button block it hides the button when empty (already handled server-side).
+- **Storefront tracking page with `confirm=1`** — a card above the order details, by `confirmState`:
+  - `available`: title «أكّد طلبك» / "Confirm your order"; text «طلب رقم {orderNumber} بإجمالي {total} — هيتدفع عند الاستلام» / "Order {orderNumber}, {total} — paid on delivery"; button «تأكيد الطلب» / "Confirm order". While `confirmAvailableAt` is in the future, disable the button with «ثواني وتقدر تأكّد طلبك» / "You can confirm your order in a moment".
+  - after a 200, and `confirmed`: «تم تأكيد طلبك، شكرًا لك! هنجهّزه ونبعتهولك» / "Your order is confirmed, thank you! We'll prepare and ship it".
+  - `review`: «هنراجع طلبك ونتواصل معاك لتأكيده» / "We'll review your order and contact you to confirm it".
+  - `cancelled`: «الطلب ده اتلغى» / "This order was cancelled".
+  - `shipped`: «طلبك في الطريق» / "Your order is on its way".
+  - `closed`: no card (the page shows the order as usual).
+  - 409 `CONFIRM_NOT_YET`: «لسه بنجهّز طلبك، جرّب تاني بعد دقايق» / "Your order is still being prepared, try again in a few minutes". 429: «محاولات كتير، جرّب بعد شوية» / "Too many tries, try again shortly".
+- **Confirmation queue / order page attempts**: an attempt with `channel: "customer_link"` has `agent: null` — show «العميل أكّد من اللينك» / "Customer confirmed from the link" instead of an agent's name.
+
+## 390. Sold-out products in store listings — UI: pending
+
+The merchant chooses what the store's product lists do with products nobody can buy right now: show them as usual, put them at the end, or hide them. It applies to the shop page, collection pages, search results and the search box's suggestions. A product counts as **available** when any of its variants can be bought: it has stock, the merchant allows selling past stock, stock is not tracked, or it takes pre-orders and is under its pre-order limit.
+
+### Settings — `PATCH /api/v1/workspaces/:ws` (`settings.storefront_catalog`)
+- New key `sold_out`: `"show"` (default) | `"last"` | `"hide"`, next to `sidebar_enabled`, `default_sort` and `filters`:
+```json
+{ "settings": { "storefront_catalog": { "sidebar_enabled": true, "default_sort": "newest", "sold_out": "last", "filters": [{ "key": "collections" }, { "key": "price" }] } } }
+```
+- Optional: a save that leaves it out keeps the stored value. 422 for any other value.
+- `GET /api/v1/store/:ws` → `store.catalog.sold_out` is always filled (`"show"` when never set).
+
+### Storefront — `GET /api/v1/store/:ws/products`
+- Every product now has `available: true | false` (also on `GET /store/:ws/products/:idOrSlug`).
+- `last`: sold-out products come after the available ones, each group in the chosen sort; `total` and facets are unchanged.
+- `hide`: sold-out products are left out, and `total` and every facet count (collections, tags, options, price range) only count what is shown.
+- `available=true` on any request hides them whatever the setting — for an "In stock only" switch in the filter sidebar.
+
+### Screens
+- **Settings → Store design → product listing (catalog card)**: a choice «المنتجات اللي خلصت» / "Sold-out products" with three options:
+  - «اعرضها عادي» / "Show them as usual"
+  - «اعرضها في الآخر» / "Show them at the end"
+  - «اخفيها» / "Hide them"
+  Help: «المنتج يعتبر متاح لو أي مقاس أو لون منه ينفع يتطلب: فيه مخزون، أو البيع بعد نفاد المخزون مسموح، أو بيتطلب طلب مسبق» / "A product counts as available if any of its variants can be ordered: it has stock, selling past stock is allowed, or it takes pre-orders".
+- **Storefront product cards** (shop, collection, search, suggestions): when `available` is false, a badge «نفدت الكمية» / "Sold out" on the picture and a muted price; the card still opens the product page.
+- **Storefront filter sidebar**: a switch «المتاح بس» / "In stock only" that adds `available=true` (hidden when the store's setting is `hide`, since nothing sold out is shown anyway).
+- **Product page**: when `available` is false, the buy button reads «نفدت الكمية» / "Sold out" and is disabled.
+
+## 389. Stock movement history — UI: pending
+
+Every change to a variant's stock, newest first: restocks, adjustments, order reservations and releases, returns, purchase orders received, stock counts applied, lots, sheet bulk updates and the variant table — with where it came from and who did it. Read-only; `inventory.view`.
+
+### API — `/api/v1/workspaces/:ws/inventory`
+- `GET /:variantId/movements` — one variant; also returns `variantId` and `stock: { stockOnHand, reservedStock, availableStock }` (404 for a variant of another store).
+- `GET /movements` — the whole store; filters `variantId`, `productId`.
+- Both take `type` (one or a comma list of `restock, adjustment, reserve, release, commit, return_restock`), `locationId`, `from` / `to` (a store-calendar day `YYYY-MM-DD` — `to` includes its whole day — or an ISO timestamp), `limit` (1–200, default 50), `cursor`, `format=json|csv|xlsx`, `lang=en|ar` (file headers and words).
+```json
+{
+  "movements": [{
+    "id": "…", "at": "2026-10-08T01:21:36.000Z", "localTime": "2026-10-08 04:21:36",
+    "type": "release", "quantityDelta": 0, "reservedDelta": -2, "availableDelta": 2,
+    "variant": { "id": "…", "productId": "…", "productName": "Linen shirt", "sku": "LS-1", "optionValues": { "Size": "M" } },
+    "location": { "id": "…", "name": "Main shelf" },
+    "reason": null,
+    "source": { "type": "order", "id": "<orderId>", "orderNumber": "#1001", "event": "cancelled" },
+    "actor": { "type": "user", "id": "…", "name": "Demo Owner" }
+  }],
+  "nextCursor": "2026-10-08T01:21:36.123456Z|<id>",
+  "timezone": "Africa/Cairo"
+}
+```
+- `source.type`: `order` (with `orderNumber`, `event`: placed, upsell, edited, reconfirmed, reopened, rejected, cancelled, payment_expired, customer_blocked, returned, reshipped), `purchase_order` (`number`), `stock_count` (`note`), `return` (`orderId`, `orderNumber`), `stock_lot` (`lotCode`), `location_adjustment`, `bulk_update`, `variant_table` (`id` = product), `manual`.
+- `actor.type`: `user` (`name`; null when the user was removed), `customer` (a storefront order), `system` (payment expiry, sweeps).
+- `location` is null when the store has no stock locations. No "quantity after": movements don't store it.
+- `nextCursor` null on the last page; 422 for a bad `cursor`, `type`, or `from` after `to`. Files: `stock-movements-YYYY-MM-DD.csv|xlsx`, at most 10,000 rows.
+
+### Screens
+- **Product page → each variant's stock cell / Inventory**: a «سجل حركة المخزون» / "Stock history" link opening a drawer with `GET /:variantId/movements`. Header shows on hand / reserved / available from `stock`.
+- **Inventory → "Stock movements" tab** («حركة المخزون») with `GET /movements`: filters for product, type, location, date range; «تصدير CSV» / "Export CSV" and «تصدير Excel» / "Export Excel" (pass `lang`).
+- Columns: «التاريخ» / "Date" (`localTime`), «النوع» / "Type", «المنتج» / "Product", «التغيير» / "Change" (`quantityDelta`, green/red; for reserve/release show `reservedDelta` as «محجوز +2» / "Reserved +2"), «المخزن» / "Location", «المصدر» / "Source", «السبب» / "Reason", «بواسطة» / "By".
+- Type labels: restock «إضافة مخزون» / "Restock", adjustment «تعديل» / "Adjustment", reserve «حجز» / "Reserved", release «فك حجز» / "Released", commit «خصم» / "Deducted", return_restock «إرجاع للمخزون» / "Return restock".
+- Source labels (link where there is a page): order «طلب {orderNumber} — {event}» / "Order {orderNumber} — {event}" → order page; purchase order «أمر شراء {number}» / "Purchase order {number}"; stock count «جرد» / "Stock count"; return «مرتجع طلب {orderNumber}» / "Return for order {orderNumber}"; lot «دفعة {lotCode}» / "Lot {lotCode}"; location_adjustment «تعديل مخزن» / "Location adjustment"; bulk_update «تحديث جماعي من ملف» / "Bulk update from a sheet"; variant_table «جدول النسخ» / "Variant table"; manual «يدوي» / "Manual".
+- Event words: placed «إنشاء» / "placed", upsell «عرض إضافي» / "upsell", edited «تعديل» / "edited", reconfirmed «إعادة تأكيد» / "reconfirmed", reopened «إعادة فتح» / "reopened", rejected «رفض» / "rejected", cancelled «إلغاء» / "cancelled", payment_expired «انتهاء مهلة الدفع» / "payment expired", customer_blocked «حظر العميل» / "customer blocked", returned «مرتجع» / "returned", reshipped «إعادة شحن» / "reshipped".
+- By: user name; `customer` «العميل» / "Customer"; `system` «النظام» / "System"; removed user «مستخدم محذوف» / "Deleted user".
+- Empty: «مفيش حركة مخزون في الفترة دي» / "No stock movements in this period". "Load more" with `nextCursor`.
+
+## 391. Create the ready-made WhatsApp templates on WhatsApp from ZIMOS — UI: pending
+
+On each ready-made automation that sends WhatsApp (Automations → ready-made), a «إنشاء على واتساب» / "Create on WhatsApp" button: ZIMOS submits the automation's message templates to the store's own WhatsApp Business account (Arabic, plus English when the store offers English), keeps the automation off while Meta reviews them, and switches it on by itself once they are approved. Permission `automations.manage`. Needs WhatsApp connected with the Business Account ID (or the `sandbox` number).
+
+### API — `/api/v1/workspaces/:ws/automations/templates/:key/whatsapp`
+- `POST` body (all optional): `{ "activateWhenApproved": true, "locale": "ar|en", "couponCode": "…", "languages": ["ar","en"] }` — `locale` / `couponCode` only matter when the call creates the rule (as `…/enable` takes them); `languages` overrides the default extra languages (`[]` = only each step's own language). 201 when something was submitted or the rule was created, 200 when nothing new (a second click).
+- `GET` — the same shape without `outcome` / `ruleCreated`; `status` is `null` before any submit (and `incomplete` when only some templates exist in the account).
+```json
+{
+  "templateKey": "order_confirmation",
+  "status": "pending",
+  "rule": { "id": "…", "name": "تأكيد الطلب عبر واتساب", "isActive": false, "templateKey": "order_confirmation", "activateWhenApproved": true },
+  "ruleCreated": true,
+  "templates": [
+    { "id": "…", "name": "order_confirmation", "language": "ar", "category": "UTILITY", "status": "PENDING", "rejectedReason": null, "bodyText": "مرحبًا {{1}}، …", "submittedAt": "…", "outcome": "submitted" },
+    { "id": "…", "name": "order_confirmation", "language": "en", "category": "UTILITY", "status": "PENDING", "rejectedReason": null, "bodyText": "Hi {{1}}, …", "submittedAt": "…", "outcome": "submitted" }
+  ]
+}
+```
+- `status` (over the templates the rule's steps send, in the step's language): `pending` | `approved` | `rejected`. Each template's own `status` is Meta's (`PENDING`, `APPROVED`, `REJECTED`, `PAUSED`, `DISABLED`, …) with `rejectedReason` (e.g. `INVALID_FORMAT`).
+- `outcome`: `submitted` (sent to Meta now), `existing` (the store already had it — nothing sent), `reused` (Meta said the name was taken, so the existing template in the account was linked; its text may be the merchant's own).
+- Errors: 422 `WHATSAPP_NOT_CONNECTED`, 422 `WHATSAPP_NO_BUSINESS_ACCOUNT`, 429 `WHATSAPP_RATE_LIMITED`, 422 `WHATSAPP_TEMPLATE_REJECTED` (Meta refused the content; `message` is Meta's words), 409 `WHATSAPP_TEMPLATE_NAME_TAKEN` (the name is being deleted in Meta), 422 `WHATSAPP_AUTH_FAILED`, 403 `APP_NOT_INSTALLED` (WhatsApp app off), 404 unknown key. Nothing is kept after an error.
+- The rule's `PATCH isActive` by hand cancels the automatic switch-on (`activateWhenApproved` becomes false).
+
+### Screens
+- **Ready-made automation card** with a WhatsApp step: button «إنشاء على واتساب» / "Create on WhatsApp"; a checkbox under it, on by default: «شغّل الأتمتة تلقائيًا بعد موافقة واتساب» / "Turn the automation on when WhatsApp approves" (`activateWhenApproved`). Show the template texts (`whatsappTemplates` from `GET /automations/templates`) before the click.
+- After the click / on load (`GET …/whatsapp`), a status badge:
+  - `pending` «قيد المراجعة من واتساب» / "In review by WhatsApp" — note «الأتمتة متوقفة حتى الموافقة» / "The automation is off until it is approved"; with `rule.activateWhenApproved`: «ستعمل تلقائيًا بعد الموافقة» / "It will turn on by itself once approved".
+  - `approved` «تمت الموافقة» / "Approved" — the rule's on/off switch as usual.
+  - `rejected` «مرفوض» / "Rejected" — «سبب Meta: {rejectedReason}» / "Meta's reason: {rejectedReason}" per template, and «عدّل القالب في WhatsApp Manager ثم اضغط مزامنة القوالب» / "Edit the template in WhatsApp Manager, then press Sync templates" (`POST /whatsapp/templates/sync`).
+  - `null` — just the button.
+- A table of `templates`: name, language («العربية» / "Arabic", «الإنجليزية» / "English"), status badge (PENDING «قيد المراجعة» / "In review", APPROVED «مقبول» / "Approved", REJECTED «مرفوض» / "Rejected", PAUSED «موقوف مؤقتًا» / "Paused", DISABLED «معطّل» / "Disabled"), and for `reused` the note «قالب موجود بالفعل في حسابك — النص قد يختلف» / "Already in your account — its text may differ".
+- Errors: 429 «واتساب تحد من الطلبات الآن، حاول بعد قليل» / "WhatsApp is limiting requests, try again shortly"; 422 `WHATSAPP_TEMPLATE_REJECTED` shows Meta's message; `WHATSAPP_NO_BUSINESS_ACCOUNT` links to the WhatsApp settings.
+- Bell type `whatsapp.template` (`data.event`): `rejected` (`name`, `language`, `reason`, `ruleId`) and `activated` (`ruleId`, `templateKey`); link `/automations`. Title/body arrive in the teammate's language; in notification preferences call it «قوالب واتساب» / "WhatsApp templates" (on in the bell and by email by default).
+
+## 392. Real web push (VAPID) — UI: pending
+
+The server can now send real browser push (Web Push with VAPID) once the owner sets the keys; until then it stays on the sandbox (development) or sends nothing (production). Endpoints are unchanged except the two notes below and the new push option on "Notify me when back in stock".
+
+### Dashboard (`/api/v1/me/push`)
+- `GET /config` → `{ push: { available, provider, publicKey } }`. With `provider: "webpush"`, subscribe through the service worker: `registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: <publicKey as Uint8Array from base64url> })`, then `POST /devices` with `{ platform: "web", token: JSON.stringify(subscription) }` (the whole `PushSubscription` JSON: endpoint + keys). Keep the `sandbox:…` token only when `provider === "sandbox"`.
+- `POST /devices` may now answer 422 `INVALID_PUSH_SUBSCRIPTION` (not a subscription, or the endpoint is not a browser push service): «تعذّر تفعيل الإشعارات على المتصفح ده» / "Couldn't turn on notifications in this browser".
+- When `publicKey` changes from the one the browser subscribed with (keys rotated), unsubscribe and subscribe again with the new key, then `POST /devices` again.
+- The service worker keeps showing `{ title, body, link }` from the push data (it may also carry `type`) and opens `link` on tap.
+
+### Store (`/api/v1/store/:workspaceId`)
+- `GET /push-config` → `{ push: { available, publicKey } }` (available only with the store's app on and a push provider).
+- Thank-you page "Notify me" (order updates): unchanged, but `token` must be `JSON.stringify(subscription)`; 422 `INVALID_PUSH_SUBSCRIPTION` as above.
+- **New**: on a sold-out variant's "Notify me when it's back", when `push.available`, offer «نبّهني على المتصفح» / "Notify me in this browser" beside email/phone: subscribe as above and `POST /stock-alerts` with `{ variantId, pushToken: JSON.stringify(subscription), locale }` (exactly one of `email`, `phone`, `pushToken`). 201 `{ subscribed: true, channel: "push" }`; 409 `PUSH_UNAVAILABLE` (hide the option), 422 `INVALID_PUSH_SUBSCRIPTION`, 409 `IN_STOCK`, 429 as before. Success text: «هنبعتلك إشعار أول ما يرجع» / "We'll notify you here as soon as it's back". The push is sent once (title «رجع متاح!» / "Back in stock", link = the product page); nothing else is ever pushed from it.
+
+## 393. Google Sheets with a real Google account — UI: pending (small)
+
+The Google Sheets page (`/apps/google-sheets`, API `/api/v1/workspaces/:workspaceId/integrations/google-sheets`) can now connect a real Google account once the owner sets `GOOGLE_SHEETS_PROVIDER=google` and its keys. Until then `GET /` answers `adapter.available: false` (keep the "not available yet" state) and the routes 503 `SHEETS_UNAVAILABLE`.
+
+### Connect
+- "Connect Google" → `POST /authorize` `{ redirectUri }` → `{ url }` → `window.location.assign(url)` (a full-page redirect to Google, not a popup or fetch). With the `google` adapter Google always sends the merchant back to `GOOGLE_SHEETS_REDIRECT_URI`, which the owner sets to this page (`https://<dashboard>/apps/google-sheets`); `redirectUri` is still sent (the sandbox uses it).
+- On load, when the URL has `?code=&state=`: `POST /account` `{ code, state }`, then remove them from the URL (`history.replaceState`) whatever the answer, so a reload does not post the used code again.
+- When the URL has `?error=access_denied` (the merchant pressed Cancel on Google): «تم إلغاء الربط مع Google» / "Google connection cancelled"; any other `error`: «Google رفض الربط، حاول مرة أخرى» / "Google refused the connection, try again". Clear the URL as above.
+- Errors from `POST /account`: 400 `SHEETS_STATE_INVALID` «انتهت صلاحية تسجيل الدخول أو كان لمتجر آخر — حاول مرة أخرى» / "The Google sign-in expired or was for another store — try again"; 400 `SHEETS_AUTH_FAILED` «تسجيل الدخول مع Google لم يكتمل — حاول مرة أخرى» / "The Google sign-in didn't complete — try again"; 400 `SHEETS_SCOPE_MISSING` «لازم توافق على صلاحية ملفات Google Drive علشان نكتب في الشيت» / "Allow the Google Drive files permission so we can write to your sheet" with the Connect button again.
+- Before the redirect, a short note: «هنطلب صلاحية على الملفات اللي ZIMOS بيعملها بس — مش على كل ملفاتك» / "ZIMOS only gets access to the spreadsheets it creates — not your other files".
+
+### Account state
+- `account` is now `{ connected, email, reconnect }`. `reconnect: true` (Google took the access away: revoked, password change, or a test app's 7-day token) → a warning banner «Google وقف صلاحية ZIMOS على الشيتات — اربط الحساب تاني» / "Google removed ZIMOS's access to your sheets — connect the account again" with the email and the Connect button. Connecting again resumes the stopped sheets.
+- Connection `status: "revoked"` rows read «متوقف — اربط Google تاني» / "Stopped — connect Google again"; `status: "error"` rows show `lastError` with «اختر شيت تاني أو احذف الاتصال» / "Pick another sheet or remove it".
+
+### New sheet
+- "Use an existing spreadsheet" now takes a pasted link (`https://docs.google.com/spreadsheets/d/<id>/…`) or the id in `spreadsheetId`; hint: «ZIMOS يقدر يستخدم الشيتات اللي عملها بنفسه بس» / "ZIMOS can only reuse spreadsheets it created". Errors: 404 `SHEETS_NOT_FOUND` (its `message`), 403 `SHEETS_PERMISSION_DENIED` «الحساب ده مايقدرش يعدّل الشيت ده» / "This account can't edit that spreadsheet".
+- `spreadsheetUrl` is now a real Google Sheets link: show «افتح في Google Sheets» / "Open in Google Sheets" (new tab).
+- `GET /connections/:id/rows` works with Google too (preview). It may answer 429 `SHEETS_UNREACHABLE` «Google طالب نستنى شوية — جرّب بعد دقيقة» / "Google asked us to slow down — try again in a minute", or 403 `SHEETS_ACCESS_REVOKED` (show the reconnect banner).
+
+## 394. Subscription renewals held by the store's side — UI: pending (small)
+
+A renewal that failed for the store's reason (gateway keys refused or not connected, gateway not answering, product sold out / archived, store suspended or out of balance, plan limit) is now *held*: the customer is not told, no attempt counts, it is retried every 6 hours and lapses after 14 days. API `/api/v1/workspaces/:workspaceId/subscriptions`.
+
+### Subscriptions list
+- Each subscription has `renewalHold`: `null`, or `{ cause, reason, since, tries, lapsesAt, orderId, outcomeUnknown }`. Show a warning badge «التجديد متوقف من جهة المتجر» / "Renewal on hold (store side)" beside the status, with the cause in words and «ينتهي يوم {lapsesAt}» / "Lapses on {lapsesAt}":
+  - `gateway_connection` «بوابة الدفع رفضت المفاتيح أو غير مربوطة» / "The payment gateway refused the keys or isn't connected" → link to Payments
+  - `gateway_unavailable` «بوابة الدفع لم ترد» / "The payment gateway didn't answer"; with `outcomeUnknown: true` add «في انتظار تأكيد البوابة للطلب» / "Waiting for the gateway to confirm the order" linking `orderId`
+  - `out_of_stock` «المنتج نفد» / "Out of stock" → product; `product_unavailable` «المنتج غير معروض للبيع» / "Product not for sale" → product
+  - `store_unavailable` «المتجر موقوف أو الاشتراك منتهٍ» / "Store suspended or plan lapsed" → Billing; `plan_limit` «تم بلوغ حد الباقة» / "Plan limit reached"; `wallet` «رصيد زيموس لا يكفي» / "Zimos balance too low" → Billing; `platform_error` «خطأ مؤقت لدينا» / "A temporary error on our side"
+- A subscription cancelled with `cancelReason: "renewal_on_hold"` reads «انتهى لأن التجديد ظل متوقفًا» / "Lapsed: its renewal stayed on hold".
+
+### Overview
+- New `onHold` count: a tile «تجديدات متوقفة» / "Renewals on hold" (warning colour when > 0) that filters the list to subscriptions with a `renewalHold`.
+
+### Notifications
+- New bell type `subscription.renewal_paused` (orders.manage; in-app and email on by default) with `data.event` `held` | `will_lapse` | `lapsed`; label in the preferences screen «تجديدات الاشتراكات المتوقفة» / "Subscription renewals on hold". The title/body come localized; the link goes to the page that fixes the cause.
+
+## 395. Sending domain on Brevo — UI: pending (small)
+
+The sending domain (item 173) now runs on Brevo in production; the sandbox is development-only. Same endpoints.
+
+- **GET `…/order-emails/sending-domain`** also answers `available` (boolean). `false` → instead of the form, «الإرسال من الدومين بتاعك مش متاح حاليًا» / "Sending from your own domain isn't available yet". PUT / verify answer 503 `EMAIL_DOMAIN_UNAVAILABLE` (same text) and 502 `EMAIL_DOMAIN_PROVIDER_UNREACHABLE` «خدمة الإيميل مردتش — جرّب بعد دقيقة» / "The email service did not answer — try again in a minute" (keep the form). A 422 on `domain` may now come from Brevo: show its message under the input.
+- New record `purpose` values (show a label in the table; `purpose` may also be `spf`/`dmarc` as before):
+  - `brevo_code` «كود التحقق من Brevo» / "Brevo verification code" (TXT on the domain itself — name = the domain, host "@")
+  - `dkim` may now be two CNAME rows (`brevo1._domainkey`, `brevo2._domainkey`)
+  - `ownership` «إثبات ملكية المتجر» / "Store ownership" (TXT on `_zimos-mail.<domain>`) — required; without it the domain stays pending even when Brevo says it is fine.
+  - On bought domains these appear in the DNS editor as `email_brevo_code` / `email_ownership` (same hint as the other `email_*` rows).
+- `sendingDomain.providerChanged: true` (a domain set up before the switch to Brevo): status reads `pending`, `records` is empty → show «اضغط تحقق علشان تاخد السجلات الجديدة» / "Press Verify to get the new records" with the Verify button; Verify returns the new records.
+
+## 396. Courier return pickups: status, cancel, and cancelling a return — UI: pending (small)
+
+Return pickups (item 372) now also work with Bosta and Mylerz (not J&T), report where the parcel is, and can be cancelled. A return can be cancelled too. API `/api/v1/workspaces/:workspaceId/returns`, `orders.manage`.
+
+### Changed
+- `return.pickup` has new fields: `status` (`requested` | `picked_up` | `in_transit` | `returned_to_merchant` | `failed` | `cancelled`), `carrierStatus` (`{ code, value }`, the courier's own words), `statusAt`, `history` (`[{ status, carrierCode, carrierValue, at, trigger }]`, newest last), `reference`, `labelUrl` (null today), `cancelledAt`, `cancelMode`. A pickup booked before this has no `status`: read it as `requested`.
+- Return `status` has a new value `cancelled` (also `?status=cancelled` on the list).
+- When the courier reports `returned_to_merchant`, an approved return becomes `received` by itself (not restocked: the Restock button stays until `restockedAt` is set).
+- `GET /carriers`: `capabilities` also has `returnPickupStatus` and `returnPickupCancel` (Bosta, Mylerz true; sandbox cancel only; J&T none).
+- Storefront tracking page `returns[].pickup` has `status` too.
+
+### New endpoints
+- **POST `/returns/:returnId/pickup/sync`** → 200 `{ "return": { … } }` — asks the courier now. 409 `RETURN_NO_PICKUP`, 409 `RETURN_PICKUP_MANUAL` (booked outside ZIMOS), 422 `CARRIER_NO_RETURN_PICKUP_STATUS`.
+- **DELETE `/returns/:returnId/pickup`** `{ "acknowledgeManualCancel"?: true }` → 200 `{ "return": { …, "pickup": { "status": "cancelled", … } } }`; the return stays approved and a new pickup can be booked.
+- **POST `/returns/:returnId/cancel`** `{ "note"?: "…", "acknowledgeManualCancel"?: true }` → 200 `{ "return": { "status": "cancelled", … } }`; a live pickup is cancelled at the courier first. An exchange's replacement order is not touched.
+- Errors: 409 `RETURN_PICKUP_COLLECTED` (the courier already has the parcel), 409 `RETURN_PICKUP_CANCEL_FAILED` (the courier refused; its `message` says why; nothing changed), 409 `RETURN_PICKUP_MANUAL_CANCEL_REQUIRED` (resend with `acknowledgeManualCancel: true` after cancelling in the courier's dashboard), 409 `RETURN_NOT_CANCELLABLE`, 422 `CARRIER_PERMISSION_DENIED` (Bosta key without Full Access).
+
+### Screens
+- Return card / queue: pickup status badge — requested «مستني المندوب» / "Waiting for courier", picked_up «المندوب استلم» / "Picked up", in_transit «في الطريق للمتجر» / "On its way back", returned_to_merchant «وصل المتجر» / "Back at the store", failed «فشل الاستلام» / "Pickup failed", cancelled «اتلغى» / "Cancelled"; show `carrierStatus.value` small under it. Button «تحديث الحالة» / "Refresh status" (sync) when the carrier has `returnPickupStatus`.
+- «إلغاء المندوب» / "Cancel pickup" while status is `requested` or `failed` (confirm: «هنلغي الاستلام عند شركة الشحن» / "We'll cancel the pickup with the courier"); after a cancel, show «احجز مندوب تاني» / "Book again".
+- A `failed` pickup (the courier cancelled, lost or could not collect it) is booked again the same way: «إلغاء المندوب» / "Cancel pickup" first (it now goes through even when the courier refuses because it already dropped the pickup), then «احجز مندوب تاني» / "Book again"; «إلغاء المرتجع» / "Cancel return" works on it too. Booking over it gives 409 `RETURN_PICKUP_EXISTS` with `details.pickupStatus: "failed"`: show «الاستلام ده فشل — الغيه الأول وبعدين احجز تاني» / "This pickup failed — cancel it first, then book again".
+- «إلغاء المرتجع» / "Cancel return" on requested/approved returns not restocked, with an optional note; status label «ملغي» / "Cancelled". On `RETURN_PICKUP_MANUAL_CANCEL_REQUIRED` show the message with a checkbox «لغيته بنفسي عند شركة الشحن» / "I cancelled it with the courier myself" and resend.
+- Error texts: `RETURN_PICKUP_COLLECTED` «المندوب استلم الشحنة بالفعل وهي راجعة — اعمل ريستوك لما توصل» / "The courier already has the parcel — restock it when it arrives".
+- Storefront tracking page: under the pickup line, the status in the shopper's words (same labels).
+
+## 397. Profit report: ZIMOS fees include the wallet's per-order fees — UI: pending (small)
+
+GET `/profit/pnl` (unchanged path and permission). `actual.zimosFees` / `projected.zimosFees` now hold, per order, the prepaid wallet's net fee (charged − given back + charged again) for orders the store paid through its balance, else the plan percentages as before. Returned orders can now carry a ZIMOS fee.
+
+### Changed
+- New top-level `zimosPerOrderFee`: `{ amount, currency }` (minor units, wallet currency) when the store pays per order now, else `null`. The projection counts it for open orders that have no wallet charge yet.
+- Next to the ZIMOS fees line, a hint: when `zimosPerOrderFee` is set «رسوم ZIMOS لكل أوردر من رصيدك المدفوع مقدمًا» / "ZIMOS fee per order, from your prepaid balance"; otherwise keep today's percentage hint from `zimosFeeBp`.
+
+## 400. Merchant images up to 10 MB; shoppers' photos up to 5 MB — UI: pending (small)
+
+The media library (`POST /api/v1/workspaces/:ws/media`, multipart `file`) takes images (JPEG, PNG, WebP, GIF) up to **10 MB** — product pictures, page-builder images, logos and favicons all go through it. Videos stay at 30 MB and GLB models at 15 MB. The server still re-encodes every image without its metadata and brings anything wider or taller than 4096 px down to 4096 px (GIFs are kept as sent).
+
+Shoppers' uploads — product-field photos and transfer receipts (`POST /store/:ws/uploads`) and manual-payment proofs (`POST /store/:ws/orders/:orderId/manual-payment/proof`) — now take up to **5 MB** (was 15 MB), refused before processing. The store's billing payment screenshot (item 334) is unchanged at 8 MB.
+
+### Changed
+- 413 `FILE_TOO_LARGE` now names the limit and carries `details: { kind, maxBytes, maxMb }`, `kind` = `image` | `video` | `model` | `file` (media library, before the type is known: 30 MB) | `photo` (shopper routes). Check the size in the browser first with these numbers: media images 10 MB, shopper photos 5 MB.
+  - Media image: "The image is larger than 10 MB" / «الصورة أكبر من 10 ميجابايت.»
+  - Media, any file over the widest limit: "The file is larger than 30 MB" / «الملف أكبر من 30 ميجابايت.»
+  - Video / 3D model: "The video is larger than 30 MB" / «الفيديو أكبر من 30 ميجابايت.»; "The 3D model is larger than 15 MB" / «المجسّم ثلاثي الأبعاد أكبر من 15 ميجابايت.»
+  - Shopper photo, receipt or proof: "The photo is larger than 5 MB" / «الصورة أكبر من 5 ميجابايت.»
+  - The Arabic (and French) text comes back as `message` when the request sends `Accept-Language: ar` or `X-Store-Locale: ar` (English in `messageEn`).
+- New 422 `IMAGE_DIMENSIONS_TOO_LARGE` `details: { maxMegapixels: 60 }` (media and shopper routes): "The image is larger than 60 megapixels" / «أبعاد الصورة أكبر من 60 ميجابكسل. صغّرها وحاول مرة أخرى.» (was `IMAGE_UNREADABLE`).
+
+### Screens
+- Media picker / product images / builder image field: hint «حتى 10 ميجابايت للصورة» / "Images up to 10 MB".
+- Storefront photo field, receipt and proof upload: hint «حتى 5 ميجابايت» / "Up to 5 MB"; refuse a bigger file before sending with the 413 text above.
+
+## 401. Starter template gallery: usage count, sort and filters — UI: pending (small)
+
+The starter templates (`GET /api/v1/templates`, public, no auth) now carry a usage count and take a sort and filters. A funnel can be created from a funnel or landing template.
+
+### Changed
+- **GET `/templates`** query (all optional): `kind` = `store` | `funnel` | `landing` (the tab, as before); `category` (exact value from `categories`); `price` = `free` | `paid` (the template's `isFree` flag); `rtl` = `true` | `false`; `language` = `ar` | `en` | `fr` (a template has a direction, not a language: `ar` → right to left, `en`/`fr` → left to right); `sort` = `name` (default, A→Z as before) | `newest` | `most_used`. An unknown `sort` or `price` → 422.
+- Response is now `{ templates: [card], categories: ["coffee", "fashion", …] }`. `categories` lists every category on the current tab, whatever the other filters, so the chips stay put. Each card adds `usesCount` (the websites and funnels made from it, not counting the trash) and `createdAt`.
+- **GET `/templates/:id`** also returns `usesCount`.
+- **POST `/workspaces/:ws/funnels`** takes `templateVersionId` (a funnel or landing card's `templateVersionId`) → 201 `{ funnel, steps }`: the template's first page becomes the `landing` step (key `home`) and the others generic pages (`custom`, key from the page path, e.g. `about`); no links are drawn, so the map's issues list says what to connect. A store template → 422 `TEMPLATE_KIND_MISMATCH`; a version that is gone or switched off → 404. The funnel keeps `sourceTemplateVersionId`. Websites already took `templateVersionId` on `POST /workspaces/:ws/websites`.
+- Platform console: `GET /admin/templates` rows and `GET /admin/templates/:id` add `usesCount`; each version in the detail adds `funnelCount` next to `websiteCount`. Deleting a template a funnel was built from is refused like a website's (409 `TEMPLATE_IN_USE`).
+
+### Screens
+- Gallery card: «اتستخدم {n} مرة» / "Used {n} times" (hide at 0, or «جديد» / "New").
+- Sort menu «ترتيب حسب» / "Sort by": «الاسم» / "Name", «الأحدث» / "Newest", «الأكثر استخدامًا» / "Most used".
+- Filters: «التصنيف» / "Category" (chips from `categories`, first chip «الكل» / "All"); «السعر» / "Price": «الكل» / "All", «مجاني» / "Free", «مدفوع» / "Paid"; «اللغة» / "Language": «الكل» / "All", «عربي» / "Arabic", «إنجليزي» / "English". Empty result: «مفيش قوالب بالفلاتر دي» / "No templates match these filters" with «امسح الفلاتر» / "Clear filters".
+- Funnel wizard step 1: pick a funnel/landing card → send its `templateVersionId` with step 3's name and link; open the editor on the returned `steps`. On 422 `TEMPLATE_KIND_MISMATCH`: «القالب ده للمتجر، اختار قالب فانل أو صفحة هبوط» / "This is a store template — pick a funnel or landing template".
+- Platform console templates table: a «الاستخدام» / "Uses" column from `usesCount`; version list: «مواقع» / "Websites" and «فانلز» / "Funnels" counts.
+
+## 405 and 408. Console: who a two-step reset may target, and a system.manage permission — UI: pending (small)
+
+No new screen; two console buttons answer differently.
+
+### Changed
+- **POST `/admin/users/:userId/two-factor/reset`** (still `support.manage`) follows the same target rules as suspend / delete: 409 `CANNOT_ACT_ON_SELF` "You cannot do this to your own account."; 403 `CREATOR_REQUIRED` "Only a creator can act on a creator's account."; 403 `ADMINS_MANAGE_REQUIRED` "Only an admin who manages platform users can act on a console account." (the user has a `platformRole` and you lack `admins.manage`); 404 `NOT_FOUND`.
+- New platform permission **`system.manage`** (in `GET /admin/roles` → `permissions`, and in the admin role's default set). **POST `/admin/system/queues/jobs/:jobId/retry`** now needs it (was `system.view`); without it 403 `FORBIDDEN`. An id that is not a job is now 404 `NOT_FOUND` (was a 500).
+
+### Screens
+- Console → Users → a user: hide «إعادة ضبط التحقق بخطوتين» / "Reset two-step sign-in" on your own account, on a creator's account unless you are a creator, and on any console account unless you hold `admins.manage` (same rule as the suspend / delete buttons).
+- Console → Platform users → permission checklist: label `system.manage` «إدارة النظام (إعادة تشغيل المهام)» / "Manage the system (retry jobs)", grouped next to `system.view`.
+- Console → System → Queues: show the «إعادة المحاولة» / "Retry" button only with `system.manage`.

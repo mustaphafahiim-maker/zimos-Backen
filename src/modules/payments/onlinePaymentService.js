@@ -15,6 +15,7 @@ const platformBlocklist = require('../risk/platformBlocklistService');
 const gateways = require('./gateways');
 const gatewayRuntime = require('./gatewayRuntime');
 const methodsService = require('./paymentMethodsService');
+const wallet = require('../billing/walletService');
 
 /**
  * Online (gateway) payments for storefront orders.
@@ -70,6 +71,38 @@ const methodsService = require('./paymentMethodsService');
 const PAID_STATES = ['paid', 'partially_paid', 'refunded', 'partially_refunded'];
 const OPEN_ATTEMPT = 'initialized';
 const EXPIRED_REASON = 'payment_expired';
+
+/**
+ * Cancels the order's open attempts (but `keepId`) and, once that commits, closes them at the gateway (item 300).
+ * `gatewayOnly`: only card / wallet attempts; a bank-transfer receipt waiting for review stays open (item 357 review).
+ */
+async function cancelOpenAttempts(order, transaction, keepId = null, { gatewayOnly = false } = {}) {
+  const where = {
+    orderId: order.id,
+    status: OPEN_ATTEMPT,
+    ...(keepId ? { id: { [Op.ne]: keepId } } : {}),
+    ...(gatewayOnly ? { providerCode: gateways.listAdapters().map((a) => a.code) } : {}),
+  };
+  // Only rows still open when the update runs are cancelled and closed (item 319): one that just turned
+  // failed or paid is left as it is.
+  const [, cancelled] = await db.Payment.update({ status: 'cancelled' }, { where, transaction, returning: true });
+  const list = (cancelled || []).map((p) => ({ id: p.id, providerCode: p.providerCode, providerOrderId: p.providerOrderId }));
+  if (list.length) afterCommitDetached(transaction, () => gatewayRuntime.closeAttempts(order.workspaceId, list));
+}
+
+/**
+ * Runs `fn` once the transaction commits without making commit() wait on it (item 319): Sequelize awaits an
+ * afterCommit hook's promise, and a gateway call has no place on the shopper's path.
+ */
+function afterCommitDetached(transaction, fn) {
+  transaction.afterCommit(() => {
+    setImmediate(() => {
+      Promise.resolve()
+        .then(fn)
+        .catch((err) => logger.warn('[payments] after-commit task failed', { reason: err.message }));
+    });
+  });
+}
 const BLOCKED_REASON = 'customer_blocked';
 // How often a shopper's status check may ask the gateway about one attempt.
 const INQUIRY_THROTTLE_MS = 5000;
@@ -100,6 +133,10 @@ function tokenMatches(order, token) {
   const b = Buffer.from(order.paymentTokenHash);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+
+// An order paid with one of the store's InstaPay / wallet methods (manualPayments, item 340): of the
+// bank-transfer orders, only those carry a payment token (ours with a receipt never do).
+const isStoreManualOrder = (order) => order.paymentMethod === 'bank_transfer' && Boolean(order.paymentTokenHash);
 
 function assertOnlineEnabled() {
   if (!env.payments.onlineEnabled) {
@@ -214,7 +251,10 @@ async function startAttempt(order, { provider, method, returnUrl: template }) {
       webhookUrl: ctx.account.webhookUrl,
       expiresInSeconds: Math.max(60, (new Date(expiresAt).getTime() - Date.now()) / 1000),
       storeName: workspace ? workspace.name : null,
-      locale: workspace ? workspace.defaultLocale : null,
+      // The gateway's page in the shopper's language (orders.locale, item 383), else the store's.
+      locale: order.locale || (workspace ? workspace.defaultLocale : null),
+      // Keep the card for later charges (savedMethods/README.md, item 380).
+      saveCard: await require('./savedMethods/consentedSave').wantsSave(order),
     });
     await attempt.update({
       providerOrderId: result.providerOrderId,
@@ -348,10 +388,7 @@ async function recordPaymentTransaction(account, tx) {
       if (!order.cancelledAt) {
         // What expiry does on the way out; an expired order has done it already.
         await releaseStock(order, transaction, 'order_customer_blocked');
-        await db.Payment.update(
-          { status: 'cancelled' },
-          { where: { orderId: order.id, status: OPEN_ATTEMPT, id: { [Op.ne]: payment.id } }, transaction }
-        );
+        await cancelOpenAttempts(order, transaction, payment.id);
       }
     } else if (order.cancelledAt) {
       if (order.cancellationReason === EXPIRED_REASON && (await reReserveStock(order, transaction))) {
@@ -438,8 +475,12 @@ async function recordPaymentTransaction(account, tx) {
 
     if (platformBlock) {
       await platformBlocklist.recordOrderBlocked(order, platformBlock, { on: 'payment', transaction });
+      // Cancelled for a blocklisted customer: the pay-per-order fee goes back (billing/walletService).
+      await wallet.reverseOrderFee(order, { reason: 'customer_blocked' }, transaction);
       return 'paid_blocked';
     }
+    // Reopened by a late payment: its fee, given back at expiry, is charged again.
+    if (reopened) await wallet.rechargeOrderFee(order, {}, transaction);
     return reopened ? 'paid_reopened' : 'paid';
   });
 
@@ -452,6 +493,8 @@ async function recordPaymentTransaction(account, tx) {
     // The shopper ticked "save my card" at checkout.
     await require('./savedMethods/consentedSave').afterPaid(order, context);
   }
+  // The gateway's fee, asked in the background — never on the capture's path (item 384).
+  if (String(outcome).startsWith('paid')) require('./ledger/paymentFees').fillSoon(attempt.id);
   return { outcome, ...ids };
 }
 
@@ -545,10 +588,12 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
     await releaseStock(locked, transaction, 'order_payment_expired');
     // A gift card or points held for it go back (heldTenders.js).
     await require('./heldTenders').release(locked.id, transaction, 'payment expired');
-    await db.Payment.update(
+    const [, lapsed] = await db.Payment.update(
       { status: 'expired' },
-      { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction }
+      { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction, returning: true }
     );
+    // The gateway's page stops taking payment too (items 300, 319): only the attempts this update expired.
+    if (lapsed && lapsed.length) afterCommitDetached(transaction, () => gatewayRuntime.closeAttempts(locked.workspaceId, lapsed.map((p) => ({ id: p.id, providerCode: p.providerCode, providerOrderId: p.providerOrderId }))));
     await locked.update({ cancelledAt: new Date(), cancellationReason: EXPIRED_REASON }, { transaction });
     await trackStage(locked.workspaceId, locked.id, { transaction, reason: EXPIRED_REASON });
     await recordAudit({
@@ -560,6 +605,8 @@ async function expireOrder(orderId, { skipLocked = false } = {}) {
       after: { cancelledAt: locked.cancelledAt, cancellationReason: EXPIRED_REASON },
       transaction,
     });
+    // The pay-per-order fee goes back to the store (billing/walletService).
+    await wallet.reverseOrderFee(locked, { reason: 'payment_expired' }, transaction);
     return 'expired';
   });
   // An order that was never paid is a lost order the merchant can win back (never throws).
@@ -624,7 +671,8 @@ async function describeForShopper(order, workspace, preview) {
   const status = shopperStatusOf(order);
   const offered = await methodsService.storefrontMethods(workspace, { preview, currency: order.currency });
   const online = offered.filter((m) => m.id !== methodsService.COD);
-  const awaiting = status === 'awaiting_payment';
+  // A store-manual order is paid by its screenshot, so this page offers it no retry and no switch.
+  const awaiting = status === 'awaiting_payment' && !isStoreManualOrder(order);
   const retriesLeft = Math.max(0, env.payments.maxAttemptsPerOrder - attempts.length);
   const canSwitchToCod = awaiting && offered.some((m) => m.id === methodsService.COD) && require('./codSwitchChecks').funnelAllowsCod(workspace, order);
 
@@ -758,7 +806,7 @@ async function retry(workspaceId, orderId, token, body, req) {
     if (count >= env.payments.maxAttemptsPerOrder) {
       throw new AppError('PAYMENT_RETRY_LIMIT', 'This order cannot start another payment. Choose cash on delivery or place a new order.', 409);
     }
-    await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
+    await cancelOpenAttempts(locked, transaction);
     // The retry gets a full window of its own; the attempt cap bounds how long
     // one order can hold its stock this way.
     const expiresAt = new Date(Date.now() + ttlMinutesFor(method.method) * 60 * 1000);
@@ -778,6 +826,9 @@ function assertAwaiting(order) {
   if (status === 'expired') throw new AppError('ORDER_PAYMENT_EXPIRED', 'The time to pay for this order has run out', 409);
   if (status === 'cancelled') throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
   if (status === 'cod') throw new AppError('ORDER_IS_COD', 'This order is already cash on delivery', 409);
+  // Paid by hand with one of the store's InstaPay / wallet methods: proven with a screenshot, never retried
+  // online nor switched (manualPayments, item 340).
+  if (isStoreManualOrder(order)) throw new AppError('ORDER_IS_MANUAL', 'This order is paid by transfer', 409);
   if (order.paymentExpiresAt && new Date(order.paymentExpiresAt) < new Date()) {
     throw new AppError('ORDER_PAYMENT_EXPIRED', 'The time to pay for this order has run out', 409);
   }
@@ -838,7 +889,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
     assertAwaiting(locked);
     const before = { paymentMethod: locked.paymentMethod };
 
-    await db.Payment.update({ status: 'cancelled' }, { where: { orderId: locked.id, status: OPEN_ATTEMPT }, transaction });
+    await cancelOpenAttempts(locked, transaction);
     // The online method's fee or discount comes off; cash on delivery's goes on.
     const repriced = await require('./paymentRulesService').repriceForMethod(locked, 'cod', transaction);
     const riskFlags = [...new Set([...(locked.riskFlags || []), ...codChecks.flags])];
@@ -882,6 +933,7 @@ async function switchToCod(workspaceId, orderId, token, req) {
 
 module.exports = {
   loadOrderForShopper,
+  cancelOpenAttempts,
   FLAGS,
   EXPIRED_REASON,
   BLOCKED_REASON,
@@ -900,4 +952,6 @@ module.exports = {
   switchToCod,
   shopperStatusOf,
   hashToken,
+  newPaymentToken,
+  tokenMatches,
 };

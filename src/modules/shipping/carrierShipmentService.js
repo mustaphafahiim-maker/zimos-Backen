@@ -13,6 +13,7 @@ const accounts = require('./carrierAccountService');
 const { resolveDropOff } = require('./carrierRegionMap');
 const { CarrierAuthError, CarrierPermissionError } = require('./carriers/carrierErrors');
 const { loadTiers } = require('./shippingPricing');
+const partial = require('./partialShipments');
 
 /**
  * Shipments booked through a merchant's connected courier account.
@@ -110,6 +111,17 @@ async function flagUnconfirmedCancel(shipment, result, { trigger, check = null, 
 const cancelsManually = (adapter) => Boolean(adapter && adapter.capabilities.cancel === 'manual');
 
 /**
+ * A carrier-booked shipment the courier could still act on ('created', or
+ * 'failed' — Bosta may re-attempt an exception) whose courier cancels
+ * through its API: cancelling it here must cancel it there too.
+ */
+function cancelsByApi(shipment) {
+  if (!['created', 'failed'].includes(shipment.status) || !isCarrierBooked(shipment)) return false;
+  const adapter = getAdapter(shipment.carrierCode);
+  return Boolean(adapter && adapter.capabilities.cancel === 'api');
+}
+
+/**
  * 409 CARRIER_MANUAL_CANCEL_REQUIRED: these shipments can only be cancelled
  * in the carrier's own dashboard. The request is repeated with
  * acknowledgeManualCancel: true once the merchant has done that.
@@ -184,6 +196,28 @@ async function assertNoActiveShipment(orderId, transaction) {
   }
 }
 
+/** A courier booking the courier could still act on: 'created', or 'failed' (Bosta may re-attempt). */
+const liveCarrierBooking = (shipment) => ['created', 'failed'].includes(shipment.status) && isCarrierBooked(shipment);
+
+/**
+ * 409 SHIPMENT_BOOKED: the order is booked with a courier that will collect
+ * the COD amount and deliver to the address it was given at booking. Its
+ * items, total, address or receiver can't change under it (item 352); the
+ * booking is cancelled first (PATCH the shipment to 'cancelled'), then the
+ * order is edited and booked again.
+ */
+async function assertNoCarrierBooking(orderId, transaction) {
+  const shipments = await db.Shipment.findAll({ where: { orderId, status: ['created', 'failed'] }, transaction });
+  const booked = shipments.find(liveCarrierBooking);
+  if (booked) {
+    throw new AppError('SHIPMENT_BOOKED', 'This order is booked with a courier. Cancel the courier booking before editing this order.', 409, {
+      shipmentId: booked.id,
+      carrierCode: booked.carrierCode,
+      waybillNumber: booked.waybillNumber,
+    });
+  }
+}
+
 /**
  * A shipment we booked through a carrier adapter — as opposed to a manual
  * row whose free-text carrierCode happens to name one. Only these are synced,
@@ -219,6 +253,8 @@ function assertConfirmedOrPaid(order) {
   if ((order.riskFlags || []).includes('test_payment')) {
     throw new AppError('ORDER_TEST_PAYMENT', 'This order was paid in test mode and cannot be shipped', 409);
   }
+  // A disputed or charged-back card payment (item 377): reviewed before it ships.
+  require('../payments/disputeService').assertNotDisputed(order);
 }
 
 function assertReadyToShip(order) {
@@ -344,7 +380,12 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       });
       if (!order) throw new NotFoundError('Order');
       assertReadyToShip(order);
-      await assertNoActiveShipment(order.id, transaction);
+      // The whole order, or the units in data.items when it goes as several parcels (item 375).
+      const plan = await partial.planShipment(order, data, transaction);
+      // A returned parcel that was restocked (item 354): its units must still be there before the
+      // courier is called. Read without locking; they are taken once the courier answers, below.
+      const returnedStock = require('../orders/returnedStock');
+      await returnedStock.assertReshipStock(workspaceId, order.id, transaction);
 
       const address = typed || (await resolveDropOff(adapter, index, workspaceId, order.shippingAddressSnapshot, data.carrierAddress, { transaction }));
 
@@ -352,14 +393,18 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
       const tier = await bookingTier(workspaceId, order, data.tierId, transaction);
       const pkg = adapter.resolvePackage ? adapter.resolvePackage(account.settings || {}, tier) : null;
 
-      const items = await db.OrderItem.findAll({ where: { orderId: order.id }, transaction });
+      const items = plan.items
+        ? plan.lines.map(({ item, quantity }) => ({ quantity, productNameSnapshot: item.productNameSnapshot }))
+        : await db.OrderItem.findAll({ where: { orderId: order.id }, transaction });
       const snapshot = order.shippingAddressSnapshot;
       booked = await accounts.withAuthHandling(account, () =>
         adapter.createShipment(credentials, {
           order,
           address: { ...address, firstLine: snapshot.addressLine, secondLine: snapshot.notes || null },
-          cod: codAmountFor(order),
-          goodsValue: Math.max(0, Number(order.subtotalAmount) - Number(order.discountAmount)),
+          cod: plan.items ? plan.codAmount : codAmountFor(order),
+          goodsValue: plan.items
+            ? Math.round(plan.lines.reduce((sum, { item, quantity }) => sum + partial.goodsValue(item, quantity), 0))
+            : Math.max(0, Number(order.subtotalAmount) - Number(order.discountAmount)),
           itemsCount: items.reduce((sum, item) => sum + item.quantity, 0),
           description: items.map((item) => `${item.quantity}x ${item.productNameSnapshot}`).join(', '),
           // The account's standing notes for the courier when the booking brings none.
@@ -370,6 +415,10 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
           webhookUrl: webhookUrlForShipment(account),
         })
       );
+
+      // Taken now, so the variant rows are not locked through the courier call. Sold out
+      // meanwhile: 409 INSUFFICIENT_STOCK, and the catch below cancels the booking.
+      await returnedStock.retakeForReship(workspaceId, order.id, req && req.user ? req.user.id : null, transaction);
 
       const shipment = await insertShipment(
         {
@@ -388,6 +437,8 @@ async function createCarrierShipment(workspaceId, orderId, data, req) {
             package: pkg ? { ...pkg, tierOverridden: Boolean(data.tierId) } : null,
           },
           status: 'created',
+          items: plan.items,
+          codAmount: plan.codAmount,
         },
         transaction
       );
@@ -569,6 +620,9 @@ async function findCarrierShipment(workspaceId, orderId, shipmentId) {
 
 /** POST /orders/:orderId/shipments/:shipmentId/sync */
 async function syncShipment(workspaceId, orderId, shipmentId) {
+  // A manual waybill, when the store follows those through a tracking provider (item 387).
+  const manual = await require('./trackingProviders/manualTracking').syncManualShipment(workspaceId, orderId, shipmentId);
+  if (manual) return manual;
   const shipment = await findCarrierShipment(workspaceId, orderId, shipmentId);
   const { adapter, account, credentials } = await accounts.loadConnection(workspaceId, shipment.carrierCode);
   const result = await accounts.withAuthHandling(account, () => adapter.getShipment(credentials, shipment.waybillNumber));
@@ -616,6 +670,54 @@ async function alreadySettledAtCarrier(adapter, account, credentials, shipment, 
 }
 
 /**
+ * Cancels one carrier-booked shipment at its courier (a carrier with a cancel
+ * API). A refusal for a delivery the courier already cancelled or terminated
+ * counts as done; any other refusal throws 409 CARRIER_CANCEL_FAILED (its
+ * message ends with `notDone`), or 422 CARRIER_PERMISSION_DENIED when the
+ * account may not call the cancel endpoint at all. Writes nothing here: the
+ * caller marks the shipment cancelled once this returns, in its transaction.
+ * Shared by the order cancellation below and PATCH .../shipments/:id
+ * (orderService.updateShipment).
+ *
+ * @returns {Promise<object>} the adapter
+ */
+async function cancelAtCarrier(workspaceId, shipment, { transaction = null, notDone }) {
+  const { adapter, account, credentials } = await accounts.loadConnection(workspaceId, shipment.carrierCode, {
+    transaction,
+  });
+  try {
+    await accounts.withAuthHandling(account, () =>
+      adapter.cancelShipment(credentials, shipment.waybillNumber, {
+        carrierShipmentId: shipment.carrierResponse ? shipment.carrierResponse.carrierShipmentId : null,
+      })
+    );
+  } catch (err) {
+    const check = await alreadySettledAtCarrier(adapter, account, credentials, shipment, err);
+    // Not a refusal of this cancel: the carrier does not let this account
+    // call its cancel endpoint at all (J&T). 422 CARRIER_PERMISSION_DENIED
+    // as it is; nothing is cancelled.
+    if (!check.settled && err instanceof CarrierPermissionError && err.details && err.details.endpoint) throw err;
+    if (!check.settled) {
+      throw new AppError(
+        'CARRIER_CANCEL_FAILED',
+        `${adapter.name} did not cancel shipment ${shipment.waybillNumber}: ${err.message} ${notDone}`,
+        409,
+        { shipmentId: shipment.id, carrierCode: adapter.code, carrierErrorCode: err.code || null }
+      );
+    }
+    logger.info('Carrier refused the cancel but the delivery is already cancelled there', {
+      workspaceId,
+      orderId: shipment.orderId,
+      carrierCode: adapter.code,
+      trackingNumber: shipment.waybillNumber,
+      via: check.via,
+      carrierStateCode: check.code ?? null,
+    });
+  }
+  return adapter;
+}
+
+/**
  * Called by orderService.cancelOrder (and a confirmation correction to
  * rejected) inside its transaction, before anything local changes. Cancels
  * every carrier-booked shipment the courier could still act on — 'created'
@@ -648,40 +750,13 @@ async function cancelCarrierShipmentsForOrder(workspaceId, orderId, transaction,
       await acknowledgeManualCancelOf(workspaceId, shipment, { transaction, req, trigger });
       continue;
     }
-    const { adapter, account, credentials } = await accounts.loadConnection(workspaceId, shipment.carrierCode, {
-      transaction,
-    });
-    try {
-      await accounts.withAuthHandling(account, () =>
-        adapter.cancelShipment(credentials, shipment.waybillNumber, {
-          carrierShipmentId: shipment.carrierResponse ? shipment.carrierResponse.carrierShipmentId : null,
-        })
-      );
-    } catch (err) {
-      const check = await alreadySettledAtCarrier(adapter, account, credentials, shipment, err);
-      // Not a refusal of this cancel: the carrier does not let this account
-      // call its cancel endpoint at all (J&T). 422 CARRIER_PERMISSION_DENIED
-      // as it is; the order is not cancelled.
-      if (!check.settled && err instanceof CarrierPermissionError && err.details && err.details.endpoint) throw err;
-      if (!check.settled) {
-        throw new AppError(
-          'CARRIER_CANCEL_FAILED',
-          `${adapter.name} did not cancel shipment ${shipment.waybillNumber}: ${err.message} The order was not cancelled.`,
-          409,
-          { shipmentId: shipment.id, carrierCode: adapter.code, carrierErrorCode: err.code || null }
-        );
-      }
-      logger.info('Carrier refused the cancel but the delivery is already cancelled there', {
-        workspaceId,
-        orderId,
-        carrierCode: adapter.code,
-        trackingNumber: shipment.waybillNumber,
-        via: check.via,
-        carrierStateCode: check.code ?? null,
-      });
-    }
+    const adapter = await cancelAtCarrier(workspaceId, shipment, { transaction, notDone: 'The order was not cancelled.' });
     const previousStatus = shipment.status;
-    await shipment.update({ status: 'cancelled', cancelMode: 'api', nextPollAt: null }, { transaction });
+    await markCancelled(workspaceId, shipment, { cancelMode: 'api', nextPollAt: null }, {
+      transaction,
+      req,
+      metadata: { source: 'merchant', trigger, carrierCode: shipment.carrierCode, cancelMode: 'api' },
+    });
     logger.info('Carrier shipment cancelled with the order', {
       workspaceId,
       orderId,
@@ -689,6 +764,42 @@ async function cancelCarrierShipmentsForOrder(workspaceId, orderId, transaction,
       trackingNumber: shipment.waybillNumber,
       previousStatus,
     });
+  }
+}
+
+/**
+ * Sets one shipment to 'cancelled' as part of an order cancellation, with
+ * its 'shipment.update' audit row, from which auditEventBridge records
+ * shipment.status_changed (webhooks, sheets). The order's stage is left to
+ * the cancellation itself, which records it once the order is cancelled.
+ */
+async function markCancelled(workspaceId, shipment, extra, { transaction, req, metadata }) {
+  const before = shipment.toJSON();
+  await shipment.update({ ...extra, status: 'cancelled' }, { transaction });
+  await recordAudit({
+    workspaceId,
+    actorUserId: req && req.user ? req.user.id : null,
+    action: 'shipment.update',
+    entityType: 'Shipment',
+    entityId: shipment.id,
+    before,
+    after: shipment.toJSON(),
+    metadata,
+    req,
+    transaction,
+  });
+}
+
+/**
+ * After cancelCarrierShipmentsForOrder: every shipment of the order still
+ * 'created' (a manual one, never collected) is cancelled too, each with its
+ * audit row and shipment.status_changed event. Used by
+ * orderService.cancelOrder and a confirmation correction to rejected.
+ */
+async function cancelUncollectedShipments(workspaceId, orderId, transaction, { req = null, trigger = 'order_cancel' } = {}) {
+  const shipments = await db.Shipment.findAll({ where: { workspaceId, orderId, status: 'created' }, transaction });
+  for (const shipment of shipments) {
+    await markCancelled(workspaceId, shipment, {}, { transaction, req, metadata: { source: 'merchant', trigger } });
   }
 }
 
@@ -725,6 +836,33 @@ function manualCancelUpdates(shipment, data, req) {
   return manualCancelFields(req && req.user ? req.user.id : null);
 }
 
+// Why a cancel by API did not happen: the courier can't be reached from this
+// store (not available, server key missing, not connected) or it refused
+// (rejected credentials, no cancel permission, any other refusal).
+const ACK_FALLBACK_CODES = ['NOT_FOUND', 'CARRIERS_NOT_CONFIGURED', 'CARRIER_NOT_CONNECTED', 'CARRIER_CANCEL_FAILED', 'CARRIER_PERMISSION_DENIED'];
+
+/**
+ * PATCH .../shipments/:id to 'cancelled' on a booking whose courier cancels
+ * through its API: the courier is asked, and the extra fields the update must
+ * write are returned. When it could not be asked or refused, the merchant can
+ * cancel it in the courier's own dashboard and repeat the request with
+ * acknowledgeManualCancel: the shipment is then marked cancelled as
+ * 'manual_ack' and checked again later, as for a courier without a cancel
+ * API. Without it the error is thrown with details.manualCancelAllowed.
+ */
+async function apiCancelUpdates(workspaceId, shipment, data, req, transaction) {
+  try {
+    await cancelAtCarrier(workspaceId, shipment, { transaction, notDone: 'The shipment was not cancelled.' });
+    return { cancelMode: 'api', nextPollAt: null };
+  } catch (err) {
+    if (!ACK_FALLBACK_CODES.includes(err.code)) throw err;
+    if (data.acknowledgeManualCancel) return manualCancelFields(req && req.user ? req.user.id : null);
+    const details = err.details && typeof err.details === 'object' && !Array.isArray(err.details) ? err.details : {};
+    err.details = { ...details, shipmentId: shipment.id, manualCancelAllowed: true };
+    throw err;
+  }
+}
+
 module.exports = {
   FINISHED_STATUSES,
   TERMINAL_STATUSES,
@@ -736,11 +874,19 @@ module.exports = {
   assertConfirmedOrPaid,
   shouldBookWithCarrier,
   assertNoActiveShipment,
+  assertNoCarrierBooking,
+  liveCarrierBooking,
   isCarrierBooked,
   createCarrierShipment,
   applyCarrierStatus,
   syncShipment,
   getShipmentLabel,
   cancelCarrierShipmentsForOrder,
+  cancelUncollectedShipments,
+  cancelAtCarrier,
+  cancelsByApi,
+  apiCancelUpdates,
   codAmountFor,
+  // A return pickup resolves the shopper's address the same way (returns/returnPickup.js).
+  resolveAddressSource,
 };

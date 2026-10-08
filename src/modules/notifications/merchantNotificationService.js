@@ -2,6 +2,7 @@
 
 const { Op } = require('sequelize');
 const db = require('../../db/models');
+const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
 const { NotFoundError } = require('../../core/errors/AppError');
 const { PERMISSIONS } = require('../../core/security/permissions');
@@ -21,11 +22,15 @@ const notify = require('./notify');
  * number to the teammate's verified phone (platformWhatsapp.js, its alert
  * template). WhatsApp is off for every type until the teammate turns it on.
  * A new channel is one more key in CHANNELS and one more branch in create().
+ *
+ * Store-wide notifications (no `userIds`) also go to the store's team
+ * channels — a Telegram group, Slack or Discord channel that asked for that
+ * type (teamChannels/, item 378).
  */
 
 const CHANNELS = ['inApp', 'email', 'push', 'whatsapp'];
 // Push (notifications/push) is on by default for what needs a quick look; off for the rest.
-const PUSH_ON = new Set(['order.new', 'order.suspicious', 'integration.failed', 'export.ready', 'shipping.batch_done', 'automation', 'plan.limit_reached']);
+const PUSH_ON = new Set(['order.new', 'order.suspicious', 'integration.failed', 'export.ready', 'shipping.batch_done', 'automation', 'plan.limit_reached', 'payment.disputed']);
 
 /**
  * type → the permission needed to receive it (null = every teammate) and
@@ -53,6 +58,14 @@ const TYPES = Object.freeze({
   'product.question': { permission: PERMISSIONS.PRODUCTS_MANAGE, defaults: { inApp: true, email: false } },
   // Stock lots about to expire (stockLots/, item 230).
   'stock.lot_expiring': { permission: PERMISSIONS.INVENTORY_VIEW, defaults: { inApp: true, email: true } },
+  // A card payment was disputed, or its dispute moved (payments/disputeService.js, item 377).
+  'payment.disputed': { permission: PERMISSIONS.REFUNDS_MANAGE, defaults: { inApp: true, email: true } },
+  // An order's email bounced or was marked as spam, or its SMS was not delivered (deliveryStatus/, item 386).
+  'message.undelivered': { permission: PERMISSIONS.ORDERS_VIEW, defaults: { inApp: true, email: false } },
+  // A WhatsApp template submitted from ZIMOS was rejected, or approved and its automation switched on (whatsapp/templateSubmission.js, item 391).
+  'whatsapp.template': { permission: PERMISSIONS.AUTOMATIONS_MANAGE, defaults: { inApp: true, email: true } },
+  // A subscription renewal held by the store's side — gateway keys, an outage, sold out, a suspended store (subscriptions/renewalHolds.js, item 394).
+  'subscription.renewal_paused': { permission: PERMISSIONS.ORDERS_MANAGE, defaults: { inApp: true, email: true } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 
@@ -109,6 +122,12 @@ async function create(workspaceId, { type, title, body = null, link = null, data
   try {
     const spec = TYPES[type];
     if (!spec) throw new Error(`unknown notification type "${type}"`);
+    if (!userIds) {
+      // Never holds up the caller (awaited under test); deliver() never throws.
+      // eslint-disable-next-line global-require
+      const toChannels = require('./teamChannels/teamChannelService').deliver(workspaceId, { type, title, body, link, localized, dedupeKey });
+      if (env.isTest) await toChannels;
+    }
 
     const where = { workspaceId, status: 'active', userId: userIds ? userIds : { [Op.ne]: null } };
     const memberships = await db.Membership.findAll({

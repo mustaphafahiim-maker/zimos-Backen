@@ -102,6 +102,8 @@ async function sync(workspaceId) {
     // Deleted in Meta: gone here too.
     await db.WhatsappTemplate.destroy({ where: { workspaceId, ...(seen.length ? { id: { [db.Sequelize.Op.notIn]: seen } } : {}) }, transaction });
   });
+  // Submitted templates: a rejection rings the bell, an approval switches its waiting rule on (templateSubmission.js).
+  await require('./templateSubmission').reconcile(workspaceId);
   return list(workspaceId);
 }
 
@@ -134,6 +136,7 @@ async function onStatusUpdate(workspaceId, value) {
     },
     { where }
   );
+  if (count > 0) await require('./templateSubmission').reconcile(workspaceId);
   return count > 0;
 }
 

@@ -1,5 +1,6 @@
 'use strict';
 
+const env = require('../../config/env');
 const db = require('../../db/models');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
@@ -24,7 +25,8 @@ const STAGE_TRANSITIONS = Object.freeze({
   awaiting_payment: ['ready_to_ship', 'pending_confirmation', 'cancelled'],
   pending_confirmation: ['ready_to_ship', 'needs_follow_up', 'cancelled'],
   needs_follow_up: ['pending_confirmation', 'ready_to_ship', 'cancelled'],
-  ready_to_ship: ['shipped', 'out_for_delivery', 'delivered', 'cancelled'],
+  // returned: a returned order's new shipment was cancelled before it got anywhere
+  ready_to_ship: ['shipped', 'out_for_delivery', 'delivered', 'returned', 'cancelled'],
   // back to ready_to_ship: the shipment was cancelled before it got anywhere
   shipped: ['out_for_delivery', 'delivered', 'delivery_failed', 'returned', 'ready_to_ship'],
   out_for_delivery: ['delivered', 'delivery_failed', 'returned'],
@@ -80,7 +82,8 @@ function assertTransition(from, to) {
  * last row (orderStatusHistory.sync). Called, in the caller's transaction, by
  * everything that changes an order's state — the three setters below, the
  * shipment lifecycle, cancellation, the online payment paths. `enforce`
- * refuses a move the table above does not allow.
+ * refuses a move the table above does not allow, unless ORDER_STATUS_GUARDS
+ * is "false" (env.orderStatusGuards, item 342).
  */
 async function trackStage(
   workspaceId,
@@ -94,8 +97,22 @@ async function trackStage(
     // PATCH /orders/:id/status carries the merchant's reason on the request,
     // so the row is written with it whichever setter records the move first.
     reason: reason || (req && req.stageChangeReason) || null,
-    guard: enforce ? assertTransition : null,
+    guard: enforce && env.orderStatusGuards ? assertTransition : null,
   });
+}
+
+/**
+ * trackStage's guard for a shipment about to be cancelled by hand, run before
+ * the courier is asked to cancel it (orderService.updateShipment): the stage
+ * the order will have once that shipment no longer counts, against the last
+ * one recorded. A refused move (409 INVALID_STATUS_TRANSITION) is then
+ * answered while the parcel is still live at the courier, as it is here.
+ */
+async function assertShipmentCancelMove(orderId, shipmentId, transaction) {
+  if (!env.orderStatusGuards) return;
+  const to = await statusHistory.stageOf(orderId, transaction, { withoutShipmentId: shipmentId });
+  const last = await statusHistory.lastRow(orderId, transaction);
+  if (to && last && last.toStatus !== to) assertTransition(last.toStatus, to);
 }
 
 /**
@@ -107,6 +124,8 @@ async function trackStage(
 async function setConfirmationState(workspaceId, orderId, state, req, transaction) {
   const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction });
   if (!order) throw new NotFoundError('Order');
+  // Paid by one of the store's InstaPay / wallet methods: not confirmed until its proof is approved (manualPayments, item 340).
+  if (state === 'confirmed') await require('../manualPayments/manualPaymentService').assertConfirmable(order, transaction);
   const before = order.confirmationState;
   await order.update({ confirmationState: state, confirmedAt: confirmedAtFor(order, state) }, { transaction });
   await recordAudit({
@@ -193,5 +212,6 @@ module.exports = {
   nextStages,
   canTransition,
   assertTransition,
+  assertShipmentCancelMove,
   trackStage,
 };

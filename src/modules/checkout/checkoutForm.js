@@ -112,6 +112,8 @@ const checkoutFormSettingsKeys = {
   auto_select_variant: Joi.boolean().allow(null).optional(),
   // 'on' asks for a billing address, "same as shipping" ticked by default (checkoutExtras.js).
   billing_address: Joi.string().valid('off', 'on').allow(null).optional(),
+  // The marketing-consent and terms boxes (checkoutConsent.js, item 374).
+  ...require('./checkoutConsent').settingsKeys(Joi),
 };
 
 /** What the checkout body may carry for the fields with no column of their own. */
@@ -209,6 +211,8 @@ function resolveCheckoutForm(workspace) {
     auto_select_region: bool('auto_select_region'),
     auto_select_variant: bool('auto_select_variant'),
     billing_address: stored.billing_address === 'on' ? 'on' : 'off',
+    // The marketing-consent and terms boxes (checkoutConsent.js, item 374).
+    consent: require('./checkoutConsent').resolveConsent(workspace),
   };
 }
 
@@ -271,6 +275,9 @@ function assertCheckoutForm(workspace, body) {
   if (!form.allow_discount_codes && !isBlank(body.discountCode)) {
     problems.push({ field: 'discountCode', message: '"discountCode" is not allowed' });
   }
+
+  // A required terms box left unticked (checkoutConsent.js, item 374).
+  problems.push(...require('./checkoutConsent').problems(form.consent, body));
 
   if (problems.length) throw new ValidationError(problems, 'Invalid body');
 }

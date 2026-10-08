@@ -5,6 +5,7 @@ const db = require('../../db/models');
 const logger = require('../../core/utils/logger');
 const { normalizePhone } = require('../../core/utils/phone');
 const planCheckout = require('./planCheckout');
+const { ConflictError } = require('../../core/errors/AppError');
 
 /**
  * A free trial (SPEC §18.1: "subscription … with an optional trial period").
@@ -12,7 +13,7 @@ const planCheckout = require('./planCheckout');
  * A subscription plan may have `trialDays`. At the store's checkout the
  * trial product's line is priced at nothing — the server-pinned price
  * orderService.priceLine already honours for product A/B tests
- * (catalog/productTests.js) — once per customer (phone) and product. The
+ * (catalog/productTests.js) — once per customer (phone) and product, for one unit on one line. The
  * order is still paid by card (planCheckout.js):
  *
  *  - anything else on it (shipping, other lines) is charged as usual, and the
@@ -29,6 +30,8 @@ const planCheckout = require('./planCheckout');
 // The price orderService.priceLine takes over the catalog's (catalog/productTests.js).
 const PINNED_PRICE = Symbol.for('zimos.productTestPrice');
 const SETUP_PREFIX = 'cardsetup_';
+// Marks a line pinTrialLines priced as a trial, for assertStillFree.
+const TRIAL_LINE = Symbol.for('zimos.trialLine');
 
 /** The trial days a just-paid order line started with, or 0. */
 function trialDaysOf(plan, item) {
@@ -41,20 +44,33 @@ async function periodAmount(item) {
   return variant ? Number(variant.priceAmount) * item.quantity : 0;
 }
 
-/** Products of `productIds` this phone already had a subscription to: no second trial. */
-async function usedTrials(workspaceId, contact, productIds) {
+/**
+ * Products of `productIds` this phone already took a trial of: a subscription to it, or a free line of
+ * it on an order still going ahead — placed and not yet paid (its subscription starts only once paid),
+ * so several open checkouts can't each take one. An unpaid order past its payment window is expiring.
+ */
+async function usedTrials(workspaceId, contact, productIds, transaction = null) {
   const phone = contact && contact.phone ? normalizePhone(contact.phone) : null;
   if (!phone) return new Set();
-  const customers = await db.Customer.findAll({ where: { workspaceId, phoneNormalized: phone }, attributes: ['id'] });
+  const customers = await db.Customer.findAll({ where: { workspaceId, phoneNormalized: phone }, attributes: ['id'], transaction });
   if (customers.length === 0) return new Set();
   const subs = await db.CustomerSubscription.findAll({
     where: { workspaceId, customerId: customers.map((c) => c.id), productId: productIds },
     attributes: ['productId'],
+    transaction,
   });
-  return new Set(subs.map((s) => s.productId));
+  const open = await db.sequelize.query(
+    `SELECT DISTINCT oi.product_id AS "productId" FROM order_items oi JOIN orders o ON o.id = oi.order_id
+      WHERE o.workspace_id = :ws AND o.customer_id IN (:customers) AND oi.product_id IN (:products)
+        AND oi.unit_price_amount = 0 AND oi.offer_id IS NULL AND oi.is_free_gift = false
+        AND o.cancelled_at IS NULL AND o.confirmation_state <> 'rejected'
+        AND (o.completed_at IS NOT NULL OR o.payment_expires_at IS NULL OR o.payment_expires_at > now())`,
+    { replacements: { ws: workspaceId, customers: customers.map((c) => c.id), products: productIds }, type: db.Sequelize.QueryTypes.SELECT, transaction }
+  );
+  return new Set([...subs.map((s) => s.productId), ...open.map((r) => r.productId)]);
 }
 
-/** The checkout's lines, a trial product's priced at nothing. */
+/** The checkout's lines, one unit of a trial product priced at nothing (a single line of quantity 1). */
 async function pinTrialLines(workspaceId, items, contact) {
   const plain = items.filter((i) => i.variantId && !i.offerId);
   if (plain.length === 0) return items;
@@ -64,10 +80,31 @@ async function pinTrialLines(workspaceId, items, contact) {
   const trial = products.filter((p) => (planCheckout.publicPlan(p.billingPlan) || {}).trialDays).map((p) => p.id);
   if (trial.length === 0) return items;
   const used = await usedTrials(workspaceId, contact, trial);
+  // One unit on one line per product: a trial is a taste, not free stock. More
+  // units, or another line of the same product, are priced as usual, so
+  // trialDaysOf sees a paid line and it becomes an ordinary subscription.
+  const pinned = new Set();
   return items.map((item) => {
     const productId = !item.offerId && productOf.get(item.variantId);
-    return productId && trial.includes(productId) && !used.has(productId) ? { ...item, [PINNED_PRICE]: 0 } : item;
+    if (!productId || !trial.includes(productId) || used.has(productId) || pinned.has(productId)) return item;
+    if (Number(item.quantity || 1) !== 1) return item;
+    pinned.add(productId);
+    return { ...item, [PINNED_PRICE]: 0, [TRIAL_LINE]: productId };
   });
+}
+
+/**
+ * orderService.createOrder, under its lock on the shopper's phone: the trial lines are checked again, so
+ * two checkouts at once can't both take the trial. 409 TRIAL_ALREADY_TAKEN (checking out again prices
+ * the line as usual).
+ */
+async function assertStillFree(workspaceId, items, contact, transaction) {
+  const products = [...new Set(items.map((i) => i[TRIAL_LINE]).filter(Boolean))];
+  if (products.length === 0) return;
+  const used = await usedTrials(workspaceId, contact, products, transaction);
+  if (products.some((p) => used.has(p))) {
+    throw new ConflictError('This free trial was already taken with this phone number', 'TRIAL_ALREADY_TAKEN');
+  }
 }
 
 /**
@@ -149,4 +186,4 @@ async function finishOnReturn(order, attempts, query) {
   return true;
 }
 
-module.exports = { trialDaysOf, periodAmount, pinTrialLines, startInsteadOfPayment, finishOnReturn };
+module.exports = { trialDaysOf, periodAmount, pinTrialLines, assertStillFree, startInsteadOfPayment, finishOnReturn };

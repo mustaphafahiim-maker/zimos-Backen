@@ -28,7 +28,8 @@ const { defineAdapter } = require('./adapterContract');
  * 1007 is "User is not authorized!"; 403 / 1008 is a scope refusal.
  */
 
-const BASE_URL = 'https://app.bosta.co/api/v2';
+// BOSTA_BASE_URL points it at a local stand-in outside production (carrierHttp.baseUrlFor).
+const BASE_URL = carrierHttp.baseUrlFor('BOSTA_BASE_URL', 'https://app.bosta.co/api/v2');
 // Egypt's country id, from the address guide — the only country Bosta serves.
 const EGYPT_COUNTRY_ID = '60e4482c7cb7d4bc4849c4d5';
 // "The COD amount should be less than or equal 30000 EGP" (error 3007).
@@ -394,7 +395,7 @@ async function createShipment(creds, input) {
       ...(contact.alternatePhone ? { secondPhone: localPhone(contact.alternatePhone) } : {}),
       ...(contact.email ? { email: contact.email } : {}),
     },
-    businessReference: order.orderNumber,
+    businessReference: require('../../orders/orderNumbers').carrierReference(order),
     ...(notes ? { notes: String(notes).slice(0, 500) } : {}),
     ...(carrierSettings.businessLocationId ? { businessLocationId: carrierSettings.businessLocationId } : {}),
     ...(webhookUrl ? { webhookUrl } : {}),
@@ -500,6 +501,151 @@ function parseWebhook(req) {
   return { ref };
 }
 
+// --- return pickups (item 396) ------------------------------------------------
+
+// Order type 25 "Customer Return Pickup" (CRP): a courier collects a parcel
+// from the customer and brings it back to the business. The type code is
+// Bosta's own (bostaapp/bosta-nodejs, src/utils/deliveryTypes.js: CRP
+// { code: 25, value: 'Customer Return Pickup' }); it is created, read and
+// terminated through the same endpoints as a Deliver order above.
+//
+// UNVERIFIED (R1): docs.bosta.co could not be reached when this was built, so
+// the CRP body's field names are not from Bosta's API reference. They follow
+// a merchant integration measured against Bosta's live API (2026-09-10): the
+// customer's address goes in `pickupAddress` (on a CRP the warehouse side,
+// dropOffAddress, is filled from businessLocationId by Bosta; sending the
+// customer as dropOffAddress answers HTTP 500), the returning parcel in
+// `returnSpecs`, and no `specs` (nothing leaves the warehouse). Check them
+// against https://docs.bosta.co/api before switching this on for real stores.
+const DELIVERY_TYPE_CRP = 25;
+
+/**
+ * Bosta state code -> our return pickup status, for a CRP. From the same
+ * "Bosta States" table as STATE_MAP; 22 and 23 are documented as the
+ * CRP / Exchange states.
+ *
+ *   a status string   move the pickup there
+ *   null              documented, nothing about the parcel's position
+ *   (absent)          unknown for a CRP: keep the status, log a warning
+ */
+const RETURN_STATE_MAP = {
+  10: 'requested', //  Pickup requested
+  11: 'requested', //  Waiting for route
+  20: 'requested', //  Route Assigned
+  22: 'requested', //  Picking up from consignee
+  23: 'picked_up', //  Picked up from consignee
+  24: 'in_transit', // Received at warehouse
+  30: 'in_transit', // In transit between Hubs
+  // 41 "Picked up" on the way back to the business (UNVERIFIED R2).
+  41: 'in_transit',
+  // The CRP's end: the parcel is at the business. 45 "Delivered" on a CRP
+  // means delivered to the business (UNVERIFIED R2).
+  45: 'returned_to_merchant',
+  46: 'returned_to_merchant', // Returned to business
+  47: 'failed', //  Exception (the customer was not reached; Bosta may try again)
+  49: 'failed', //  Canceled
+  100: 'failed', // Lost
+  101: 'failed', // Damaged
+  103: 'failed', // Awaiting your action
+  48: 'cancelled', // Terminated — what cancelReturnPickup asks for
+  102: null, // Investigation
+  104: null, // Archived
+  105: null, // On hold
+};
+
+/**
+ * POST /deliveries?apiVersion=1, type 25. Never retried. Nothing is collected
+ * in cash (cod 0): a refund is the merchant's, not the courier's. The
+ * original delivery's tracking number goes in the notes so the courier and
+ * Bosta's dashboard tie the pickup to it.
+ */
+async function createReturnPickup(creds, input) {
+  const { order, address, itemsCount, description, notes, carrierSettings = {}, webhookUrl, originalTrackingNumber } = input;
+  if (order.currency !== 'EGP') {
+    throw new AppError('CARRIER_CURRENCY_UNSUPPORTED', 'Bosta only works in EGP; this order is in another currency', 422);
+  }
+  if (!address.firstLine || address.firstLine.trim().length <= 5) {
+    throw new AppError('VALIDATION_ERROR', 'Validation failed', 422, [
+      { field: 'shippingAddress.addressLine', message: 'Bosta needs a street address longer than 5 characters' },
+    ]);
+  }
+  const contact = order.contactSnapshot || {};
+  const reference = `${require('../../orders/orderNumbers').carrierReference(order)}-R`;
+  const noteText = [originalTrackingNumber ? `Return of Bosta ${originalTrackingNumber}` : null, notes].filter(Boolean).join(' — ');
+  const body = {
+    type: DELIVERY_TYPE_CRP,
+    cod: 0,
+    returnSpecs: {
+      ...packageSpecs(resolvePackage(carrierSettings, null)),
+      packageDetails: { itemsCount: Math.max(1, Number(itemsCount) || 1), description: String(description || 'Return').slice(0, 250) },
+    },
+    pickupAddress: {
+      city: address.cityName,
+      districtId: address.districtId,
+      ...(address.zoneId ? { zoneId: address.zoneId } : {}),
+      firstLine: address.firstLine.trim(),
+      ...(address.secondLine ? { secondLine: address.secondLine } : {}),
+    },
+    receiver: {
+      ...splitName(contact.fullName),
+      phone: localPhone(contact.phone),
+      ...(contact.alternatePhone ? { secondPhone: localPhone(contact.alternatePhone) } : {}),
+      ...(contact.email ? { email: contact.email } : {}),
+    },
+    businessReference: reference,
+    ...(noteText ? { notes: noteText.slice(0, 500) } : {}),
+    ...(carrierSettings.businessLocationId ? { businessLocationId: carrierSettings.businessLocationId } : {}),
+    ...(webhookUrl ? { webhookUrl } : {}),
+  };
+  const data = await call(creds, {
+    method: 'POST',
+    path: '/deliveries?apiVersion=1',
+    body,
+    action: 'create',
+    timeoutMs: carrierHttp.CREATE_TIMEOUT_MS,
+  });
+  if (!data || data.trackingNumber == null) {
+    throw new CarrierError('Bosta accepted the return pickup but returned no tracking number');
+  }
+  return {
+    trackingNumber: String(data.trackingNumber),
+    carrierShipmentId: data._id || null,
+    reference,
+    trackingUrl: null,
+    labelUrl: null,
+    raw: pickDelivery(data),
+  };
+}
+
+/** GET /deliveries/business/{trackingNumber}, read as a CRP. */
+async function getReturnPickup(creds, trackingNumber) {
+  const data = await call(creds, { path: `/deliveries/business/${encodeURIComponent(trackingNumber)}`, retry: true });
+  const code = data && data.state ? data.state.code : undefined;
+  const n = Number(code);
+  const known = Object.prototype.hasOwnProperty.call(RETURN_STATE_MAP, n);
+  if (!known) {
+    logger.warn('Unmapped Bosta state for a return pickup — status left unchanged', {
+      trackingNumber: String(trackingNumber),
+      stateCode: code,
+      type: data && data.type,
+    });
+  }
+  return {
+    status: known ? RETURN_STATE_MAP[n] : null,
+    carrierStatus: {
+      code: code != null ? n : null,
+      value: (data && data.state && data.state.value) || STATE_NAMES[n] || null,
+      type: data && data.type ? data.type : null,
+    },
+    raw: pickDelivery(data),
+  };
+}
+
+/** DELETE /deliveries/business/{trackingNumber}/terminate, as for a delivery (Full Access key). */
+async function cancelReturnPickup(creds, trackingNumber) {
+  await cancelShipment(creds, trackingNumber);
+}
+
 /** A refused terminate is settled when Bosta already shows one of these. */
 function isCancelSettled(carrierStatus) {
   const code = carrierStatus ? carrierStatus.code : null;
@@ -526,6 +672,11 @@ module.exports = defineAdapter({
     addressLevels: ['city', 'district'],
     // Refused as a manual courier name even before the store connects Bosta.
     reserveNameWhenUnconnected: true,
+    // Item 396: a CRP (type 25), read back through the same webhook / sync,
+    // terminated like a delivery.
+    returnPickup: true,
+    returnPickupStatus: true,
+    returnPickupCancel: true,
   },
   credentialFields: [{ key: 'apiKey', label: 'API key', secret: true }],
   settingFields: [
@@ -547,7 +698,11 @@ module.exports = defineAdapter({
   isCancelSettled,
   getLabel,
   parseWebhook,
+  createReturnPickup,
+  getReturnPickup,
+  cancelReturnPickup,
   // Exposed for tests and the docs.
+  RETURN_STATE_MAP,
   STATE_MAP,
   STATE_NAMES,
   CANCEL_SETTLED_STATES,

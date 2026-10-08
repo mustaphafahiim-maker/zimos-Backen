@@ -661,7 +661,7 @@ async function createShipment(creds, input) {
     ...toCarrierAddress(address),
   };
   const now = new Date();
-  const txlogisticId = cut(`${order.orderNumber}-${now.getTime().toString(36).toUpperCase()}`, LIMITS.txlogisticId);
+  const txlogisticId = cut(`${require('../../orders/orderNumbers').carrierReference(order)}-${now.getTime().toString(36).toUpperCase()}`, LIMITS.txlogisticId);
   const itemName = cut(String(description || '').replace(/^\d+x\s*/, '') || 'Order', LIMITS.itemName);
 
   const payload = {

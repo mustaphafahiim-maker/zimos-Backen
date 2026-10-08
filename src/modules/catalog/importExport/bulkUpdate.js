@@ -123,7 +123,10 @@ async function plan(workspaceId, req) {
     for (const [col, key, clearable] of [['price', 'priceAmount', false], ['compare_at', 'compareAtAmount', true], ['cost', 'costAmount', false]]) {
       if (!r[col]) continue;
       const digits = require('../../currencies/fxService').minorDigits(v.currency || 'EGP');
-      const m = minor(r[col], digits);
+      // A number cell of an .xlsx is a number already (item 323): rounded to the currency's digits.
+      const numericCell = r.__numeric && (r.__numeric.has(col) || (col === 'compare_at' && r.__numeric.has('compare_at_price')));
+      const asNumber = Number(r[col]);
+      const m = numericCell ? (Number.isFinite(asNumber) && asNumber >= 0 ? Math.round(asNumber * 10 ** digits) : null) : minor(r[col], digits);
       if (m === null) { bad(`${col} must be an amount like 249.50 (at most ${digits} decimals)`); failed = true; break; }
       if (key === 'priceAmount' && m === 0) { bad('price cannot be 0'); failed = true; break; }
       const to = clearable && m === 0 ? null : m;
@@ -177,7 +180,7 @@ async function apply(req, res) {
         await db.sequelize.transaction(async (transaction) => {
           const locked = await inventory.lockVariant(c.variantId, workspaceId, transaction);
           const delta = c.stockChange != null ? c.stockChange : c.fields.stock.to - locked.stockOnHand;
-          if (delta) await require('../../purchasing').moveStock(workspaceId, c.variantId, delta, null, { type: 'adjustment', reason: 'Bulk update from a sheet', actorUserId: req.user.id }, transaction);
+          if (delta) await require('../../purchasing').moveStock(workspaceId, c.variantId, delta, null, { type: 'adjustment', reason: 'Bulk update from a sheet', referenceType: 'bulk_update', actorUserId: req.user.id }, transaction);
         });
       }
       const price = {};

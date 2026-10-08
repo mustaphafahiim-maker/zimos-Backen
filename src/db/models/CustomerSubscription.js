@@ -37,6 +37,8 @@ module.exports = (sequelize, DataTypes) => {
       portalToken: { type: DataTypes.STRING(64), allowNull: false, field: 'portal_token' },
       // A card update started from the portal (subscriptions/subscriptionCard.js).
       cardSetup: { type: DataTypes.JSONB, allowNull: true, field: 'card_setup' },
+      // A renewal held by the store's side, not the shopper's (subscriptions/renewalHolds.js, migration 529).
+      renewalHold: { type: DataTypes.JSONB, allowNull: true, field: 'renewal_hold' },
       cancelledAt: { type: DataTypes.DATE, allowNull: true, field: 'cancelled_at' },
       cancelReason: { type: DataTypes.STRING(300), allowNull: true, field: 'cancel_reason' },
     },

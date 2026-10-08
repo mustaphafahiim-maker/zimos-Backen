@@ -51,6 +51,9 @@ module.exports = {
         receiptUploadId: uuid.allow(null).optional(),
         senderReference: Joi.string().max(100).allow('', null).optional(),
       }).optional(),
+      // Or one of the store's InstaPay / wallet methods (manualPayments, item 340): 'bank_transfer'
+      // only, never with `transfer`; the screenshot is sent after the order is placed.
+      manualPaymentMethodId: Joi.when('paymentMethod', { is: 'bank_transfer', then: uuid.optional(), otherwise: Joi.forbidden() }),
       // Which gateway, when more than one offers the method. Optional.
       paymentProvider: Joi.string().max(50).optional(),
       // Where the gateway sends the shopper back to (online methods only).
@@ -59,6 +62,8 @@ module.exports = {
       // (payments/savedMethods/consentedSave.js). Online card payments only.
       saveCard: Joi.boolean().optional(),
       discountCode: Joi.string().max(100).optional(),
+      // Staff's manual discount (item 382) is for the dashboard only.
+      manualDiscount: Joi.forbidden(),
       // A gift card paying part or all of a cash-on-delivery order (giftCards, item 189).
       giftCardCode: Joi.string().trim().max(40).optional(),
       // Gift wrap / gift message (giftOptions, item 214).
@@ -75,6 +80,8 @@ module.exports = {
       useStoreCredit: Joi.boolean().optional(),
       // The shopper's cookie choice, kept on the order for purchase events (marketing/cookieConsent.js).
       trackingConsent: Joi.boolean().optional(),
+      // The marketing-consent and terms boxes the store shows (checkout/checkoutConsent.js, item 374).
+      ...require('./checkoutConsent').bodyKeys(Joi),
       // The shipping option the shopper picked (shipping/shippingOptions.js); absent = standard.
       shippingOption: Joi.string().max(40).optional(),
       funnelId: uuid.optional(),
@@ -92,6 +99,8 @@ module.exports = {
         variantId: uuid.required(),
         offerId: uuid.optional(),
         quantity: Joi.number().integer().min(1).default(1),
+        // Prices are the server's: staff price changes (orders/staffPricing.js, item 382) are refused here.
+        unitPrice: Joi.forbidden(),
         // Answers to the product's custom fields (see cartValidation.addItem).
         customizations: customizationsInputSchema.optional(),
       }).optional(),
@@ -136,6 +145,6 @@ module.exports = {
       // Answers to the purchase-form fields with no column of their own
       // (sa_national_address, custom_1…5) — checkout/checkoutForm.js.
       formFields: formFieldsBodySchema,
-    }),
+    }).oxor('transfer', 'manualPaymentMethodId'),
   },
 };

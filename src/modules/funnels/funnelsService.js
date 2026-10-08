@@ -5,6 +5,7 @@ const db = require('../../db/models');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { NotFoundError, ConflictError, ValidationError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { clientIp } = require('../../core/middleware/clientIp');
 const logger = require('../../core/utils/logger');
 const slugify = require('../../core/utils/slugify');
 const orderService = require('../orders/orderService');
@@ -16,10 +17,11 @@ const {
   OFFER_STEP_TYPES,
   EMPTY_TREE,
 } = require('./funnelGraph');
-const { conditionProblem, pickNextEdge } = require('./funnelRouting');
+const { conditionProblem, pickNextEdge, hasWhen, orderContext, whenReferenceProblems } = require('./funnelRouting');
 const { assertBumpOfferUsable, bumpProblem, presentBump, BUMP_STEP_TYPES } = require('../checkout/orderBump');
 const funnelOfferMerge = require('./funnelOfferMerge');
 const entitlements = require('../billing/entitlementsService');
+const templateUsage = require('../templates/templateUsage');
 
 const Op = db.Sequelize.Op;
 
@@ -53,7 +55,7 @@ async function ensureUniqueSubdomain(base) {
   let candidate = root;
   let n = 1;
   // subdomain is globally unique, so this is not workspace-scoped.
-  while (await db.Funnel.findOne({ where: { subdomain: candidate }, attributes: ['id'] })) {
+  while (await db.Funnel.findOne({ where: { subdomain: candidate }, attributes: ['id'], paranoid: false })) {
     candidate = `${root}-${++n}`;
   }
   return candidate;
@@ -133,7 +135,12 @@ async function createFunnel(workspaceId, data, req) {
   return db.sequelize.transaction(async (t) => {
     const id = crypto.randomUUID();
     await entitlements.recordFunnelCreation(workspaceId, id, 'create', { transaction: t });
-    const funnel = await scoped(db.Funnel, workspaceId).create({ id, name: data.name, subdomain, status: 'draft' }, { transaction: t });
+    const templateVersion = data.templateVersionId ? await templateUsage.funnelTemplateVersion(data.templateVersionId, t) : null;
+    const funnel = await scoped(db.Funnel, workspaceId).create(
+      { id, name: data.name, subdomain, status: 'draft', sourceTemplateVersionId: templateVersion ? templateVersion.id : null },
+      { transaction: t }
+    );
+    const steps = templateVersion ? await templateUsage.seedFunnelSteps(workspaceId, funnel.id, templateVersion, t) : [];
     await recordAudit({
       workspaceId,
       actorUserId: req.user.id,
@@ -141,6 +148,7 @@ async function createFunnel(workspaceId, data, req) {
       entityType: 'Funnel',
       entityId: funnel.id,
       after: funnel.toJSON(),
+      metadata: templateVersion ? { fromTemplateVersionId: templateVersion.id, stepsCopied: steps.length } : undefined,
       req,
       transaction: t,
     });
@@ -177,7 +185,8 @@ async function updateFunnel(workspaceId, funnelId, data, req) {
   if (data.name !== undefined) patch.name = data.name;
   // A new link: the old one stops answering (SPEC §9.7). Links are unique across stores.
   if (data.subdomain !== undefined && data.subdomain !== funnel.subdomain) {
-    const taken = await db.Funnel.findOne({ where: { subdomain: data.subdomain }, attributes: ['id'] });
+    // A trashed funnel keeps its link until it is purged (modules/trash).
+    const taken = await db.Funnel.findOne({ where: { subdomain: data.subdomain }, attributes: ['id'], paranoid: false });
     if (taken) throw new AppError('FUNNEL_SUBDOMAIN_TAKEN', 'This link is already used by another funnel', 409, [{ field: 'subdomain', message: 'This link is taken' }]);
     patch.subdomain = data.subdomain;
   }
@@ -295,8 +304,8 @@ async function duplicateFunnel(workspaceId, funnelId, data, req) {
 async function deleteFunnel(workspaceId, funnelId, req) {
   const funnel = await loadFunnel(workspaceId, funnelId);
   const before = funnel.toJSON();
-  // steps / edges / revisions / sessions cascade via FK.
-  await funnel.destroy();
+  // To the trash (modules/trash): steps, edges, revisions and sessions stay until it is purged.
+  const trashed = await require('../trash/trashService').moveToTrash(funnel, req);
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -304,9 +313,10 @@ async function deleteFunnel(workspaceId, funnelId, req) {
     entityType: 'Funnel',
     entityId: funnelId,
     before,
+    metadata: { trashed: true },
     req,
   });
-  return { deleted: true };
+  return { deleted: true, ...trashed };
 }
 
 // --- steps ------------------------------------------------------------
@@ -454,6 +464,7 @@ async function createEdge(workspaceId, funnelId, data, req) {
   }
   const condProblem = conditionProblem(data.condition);
   if (condProblem) problems.push({ field: 'condition', message: condProblem });
+  else problems.push(...(await whenReferenceProblems(workspaceId, [{ condition: data.condition }], { fieldOf: () => 'condition' })));
   if (problems.length) throw new ValidationError(problems, 'Invalid edge');
 
   const edge = await db.FunnelEdge.create({
@@ -503,6 +514,7 @@ async function updateEdge(workspaceId, funnelId, edgeId, data, req) {
   if (data.condition !== undefined) {
     const condProblem = conditionProblem(data.condition);
     if (condProblem) problems.push({ field: 'condition', message: condProblem });
+    else problems.push(...(await whenReferenceProblems(workspaceId, [{ condition: data.condition }], { fieldOf: () => 'condition' })));
     patch.condition = data.condition;
   }
   if (data.priority !== undefined) patch.priority = data.priority;
@@ -579,11 +591,9 @@ async function publishFunnel(workspaceId, funnelId, userId, note, req) {
     }
     const edges = toSnapshotEdges(edgeRows);
 
+    // Conditions are checked by validateGraph; the products a `when` names must be this store's.
     const problems = validateGraph(steps, edges, { requireContent: true });
-    edges.forEach((e, i) => {
-      const p = conditionProblem(e.condition);
-      if (p) problems.push({ field: `edges[${i}].condition`, message: p });
-    });
+    problems.push(...(await whenReferenceProblems(workspaceId, edges, { transaction: t })));
     for (const s of steps) {
       if (OFFER_STEP_TYPES.has(s.stepType) && s.offerId) {
         const offer = await db.Offer.findOne({
@@ -948,18 +958,19 @@ async function createFollowOnOrder(workspaceId, funnelId, step, session, req, tr
       items: [await require('../offers/offerVariantChoice').offerLineFor(offer, variantId, transaction)],
       contact: original.contactSnapshot,
       shippingAddress: original.shippingAddressSnapshot || undefined,
-      paymentMethod: card ? 'card' : 'cod',
+      paymentMethod: card ? require('../payments/savedMethods/consentedSave').methodOf(card) : 'cod',
       funnelId,
     },
-    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
+    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? clientIp(req) : null },
     // The buyer's own accepted add-on to the order they just placed: it
     // shares that order's customer and often its variant, so duplicate_order
     // would flag (or refuse) every upsell. The original order already went
-    // through the storefront rules.
+    // through the storefront rules. No second pay-per-order fee (billing/walletService).
     {
       transaction,
       skipFraudRules: true,
       source: 'upsell',
+      chargeFee: false,
       // Not a sale until the card is charged; left unpaid it expires like any online order.
       ...(card ? { awaitingPayment: oneClickHold() } : {}),
     }
@@ -1072,9 +1083,23 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
       }
     }
     if (outcome.type === 'completed_checkout' && outcome.orderId) {
-      const [n] = await db.Order.update(
+      // Only an order placed during this session, outside any other funnel and
+      // not already another session's, joins it: paths route on it (funnelRouting `when`).
+      const claimed = outcome.orderId !== session.orderId && (await db.FunnelSession.count({
+        where: { workspaceId, orderId: outcome.orderId, id: { [Op.ne]: session.id } },
+        transaction: t,
+      }));
+      const [n] = claimed ? [0] : await db.Order.update(
         { funnelId },
-        { where: { id: outcome.orderId, workspaceId }, transaction: t }
+        {
+          where: {
+            id: outcome.orderId,
+            workspaceId,
+            createdAt: { [Op.gte]: session.createdAt },
+            [Op.or]: [{ funnelId: null }, { funnelId }],
+          },
+          transaction: t,
+        }
       );
       if (n) {
         session.orderId = outcome.orderId;
@@ -1087,7 +1112,12 @@ async function advanceSession(workspaceId, funnelId, sessionId, body, req) {
     await require('./funnelTags').tagFromOutcome(workspaceId, currentStep, outcome, session, t);
 
     const outbound = edges.filter((e) => e.fromStepKey === session.currentStepKey);
-    const nextEdge = pickNextEdge(outbound, outcome);
+    // A path may branch on what this session's order holds, its total or how it
+    // was paid (funnelRouting `when`), read here from the database, not the client.
+    const ctx = hasWhen(outbound)
+      ? await orderContext(workspaceId, funnelId, session, { extraOrderIds: [followOn && followOn.order.id, accepted && accepted.followOn && accepted.followOn.id] }, t)
+      : {};
+    const nextEdge = pickNextEdge(outbound, outcome, ctx);
 
     session.path = [...session.path, session.currentStepKey];
     let result;

@@ -29,28 +29,89 @@ function storeOrigin(raw) {
     throw err('DROPSHIP_INVALID_CREDENTIALS', 422, 'The store address must start with https://');
   }
   if (url.username || url.password) throw err('DROPSHIP_INVALID_CREDENTIALS', 422, 'The store address must not contain a username or password');
+  // A public address only (item 309), as webhooks: no private IP, no internal name — the local http mock
+  // aside, outside production.
+  if (!(local && !env.isProduction)) {
+    try {
+      require('../../webhooks/webhookUrlGuard').checkUrl(url.origin, 'storeUrl');
+    } catch {
+      throw err('DROPSHIP_INVALID_CREDENTIALS', 422, 'The store address must be a public https address');
+    }
+  }
   return url.origin;
+}
+
+const MAX_ANSWER_BYTES = 5 * 1024 * 1024;
+
+/**
+ * One request to the merchant's store (item 309): resolved through the URL guard's lookup (a public
+ * name that points inside is refused too), no redirects, at most MAX_ANSWER_BYTES of answer.
+ * Resolves { status, json }.
+ */
+function send(method, url, { headers, body, timeoutMs }) {
+  const target = new URL(url);
+  const local = /^(127\.0\.0\.1|localhost)$/i.test(target.hostname) && !env.isProduction;
+  const client = target.protocol === 'https:' ? require('https') : require('http');
+  const payload = body ? JSON.stringify(body) : null;
+  return new Promise((resolveOuter, rejectOuter) => {
+    // One deadline for the whole exchange (item 318), beside the socket's idle timeout.
+    let deadline = null;
+    const resolve = (v) => { clearTimeout(deadline); resolveOuter(v); };
+    const reject = (e) => { clearTimeout(deadline); rejectOuter(e); };
+    // An IP written in the address is not looked up, so the lookup guard can't see it: checked here.
+    const host = target.hostname.replace(/^\[|\]$/g, '');
+    const guard = require('../../webhooks/webhookUrlGuard');
+    if (!local && require('net').isIP(host) && guard.isPrivateAddress(host) && !env.webhooks.allowPrivateUrls) {
+      reject(new guard.BlockedAddressError(host));
+      return;
+    }
+    const req = client.request(target, {
+      method,
+      headers: { accept: 'application/json', ...(payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {}), ...headers },
+      timeout: timeoutMs,
+      ...(local ? {} : { lookup: require('../../webhooks/webhookUrlGuard').guardedLookup }),
+    }, (res) => {
+      const chunks = [];
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > MAX_ANSWER_BYTES) {
+          req.destroy(Object.assign(new Error('answer too large'), { tooLarge: true }));
+          return;
+        }
+        chunks.push(c);
+      });
+      res.on('end', () => {
+        let json = null;
+        try {
+          // A UTF-8 BOM some WordPress plugins put first is dropped, as fetch's res.json() did (item 318).
+          let text = Buffer.concat(chunks).toString('utf8');
+          if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+          json = JSON.parse(text);
+        } catch {
+          json = null;
+        }
+        resolve({ status: res.statusCode, json });
+      });
+      res.on('error', reject);
+    });
+    deadline = setTimeout(() => req.destroy(Object.assign(new Error('timeout'), { name: 'TimeoutError' })), timeoutMs);
+    req.on('timeout', () => req.destroy(Object.assign(new Error('timeout'), { name: 'TimeoutError' })));
+    req.on('error', reject);
+    req.end(payload || undefined);
+  });
 }
 
 async function call(method, url, { headers = {}, body, timeoutMs = 15000 } = {}) {
   let res;
   try {
-    res = await fetch(url, {
-      method,
-      headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}), ...headers },
-      body: body ? JSON.stringify(body) : undefined,
-      redirect: 'error',
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    res = await send(method, url, { headers, body, timeoutMs });
   } catch (e) {
-    throw err('DROPSHIP_UNAVAILABLE', 502, `The store could not be reached (${e.name === 'TimeoutError' ? 'timeout' : 'network error'})`);
+    const why = e.name === 'TimeoutError' ? 'timeout' : e.tooLarge ? 'the answer was too large' : e.code === 'EWEBHOOKBLOCKED' ? 'not a public address' : 'network error';
+    throw err('DROPSHIP_UNAVAILABLE', 502, `The store could not be reached (${why})`);
   }
-  let json = null;
-  try {
-    json = await res.json();
-  } catch {
-    json = null;
-  }
+  res.ok = res.status >= 200 && res.status < 300;
+  const { json } = res;
   if (res.status === 401 || res.status === 403) throw err('DROPSHIP_INVALID_CREDENTIALS', 422, 'The store refused the credentials');
   if (res.status === 404) throw err('DROPSHIP_PRODUCT_NOT_FOUND', 404, 'Not found in the store');
   if (res.status === 422 || res.status === 400) {

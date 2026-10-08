@@ -117,14 +117,28 @@ async function transitionShipment(
     enforce: enforceStageGuard,
   });
 
-  const nextFulfillment = updates.status ? SHIPMENT_FULFILLMENT[updates.status] : null;
-  if (nextFulfillment) {
-    await setFulfillmentState(workspaceId, shipment.orderId, nextFulfillment, req, transaction);
+  // An order sent as several parcels (item 375) is fulfilled once every unit
+  // is delivered, and returned once everything that went out came back.
+  const split = updates.status ? await require('../shipping/partialShipments').splitFulfillment(shipment.orderId, transaction) : undefined;
+  let trigger = automationTrigger(before.status, updates.status);
+  if (split !== undefined) {
+    const order = await db.Order.findOne({ where: { id: shipment.orderId, workspaceId }, attributes: ['fulfillmentState'], transaction });
+    if (split && order && order.fulfillmentState !== split) {
+      await setFulfillmentState(workspaceId, shipment.orderId, split, req, transaction);
+    }
+    // order.delivered / order.returned mean the whole order (loyalty points,
+    // referral rewards, review requests): not one parcel of several.
+    if (trigger === 'order.delivered' && split !== 'fulfilled') trigger = null;
+    if (trigger === 'order.returned' && split !== 'returned') trigger = null;
+  } else {
+    const nextFulfillment = updates.status ? SHIPMENT_FULFILLMENT[updates.status] : null;
+    if (nextFulfillment) {
+      await setFulfillmentState(workspaceId, shipment.orderId, nextFulfillment, req, transaction);
+    }
   }
 
   // Customer notifications for shipment milestones (automations), only when
   // the status actually changes.
-  const trigger = automationTrigger(before.status, updates.status);
   if (trigger) {
     await require('../../core/outbox/outbox').record(transaction || null, trigger, {
       workspaceId,

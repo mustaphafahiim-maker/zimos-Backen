@@ -15,6 +15,8 @@ module.exports = (sequelize, DataTypes) => {
       workspaceId: { type: DataTypes.UUID, allowNull: false, field: 'workspace_id' },
       websiteId: { type: DataTypes.UUID, allowNull: true, field: 'website_id' },
       funnelId: { type: DataTypes.UUID, allowNull: true, field: 'funnel_id' },
+      // The funnel's name, kept when that funnel is purged from the trash (modules/trash).
+      funnelName: { type: DataTypes.STRING(200), allowNull: true, field: 'funnel_name' },
       customerId: { type: DataTypes.UUID, allowNull: false, field: 'customer_id' },
       orderNumber: { type: DataTypes.STRING(40), allowNull: false, field: 'order_number' },
 
@@ -61,6 +63,8 @@ module.exports = (sequelize, DataTypes) => {
       // Where the order ships from (migration 477, modules/stockLocations); null = the default location.
       stockLocationId: { type: DataTypes.UUID, allowNull: true, field: 'stock_location_id' },
       amountRefunded: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'amount_refunded' },
+      // The language the customer's messages go out in (migration 520, orders/orderLocale.js); null = the store's default.
+      locale: { type: DataTypes.STRING(10), allowNull: true },
 
       // Contact/address snapshot — never joined live against Customer for
       // display, since the customer's info can change after the order.
@@ -129,6 +133,8 @@ module.exports = (sequelize, DataTypes) => {
       checkoutFields: { type: DataTypes.JSONB, allowNull: true, field: 'checkout_fields' },
       // A billing address other than the shipping one (migration 453, checkout/checkoutExtras.js).
       billingAddressSnapshot: { type: DataTypes.JSONB, allowNull: true, field: 'billing_address_snapshot' },
+      // The checkout's marketing and terms boxes as the shopper answered them (migration 509, checkout/checkoutConsent.js).
+      consents: { type: DataTypes.JSONB, allowNull: true },
     },
     {
       tableName: 'orders',

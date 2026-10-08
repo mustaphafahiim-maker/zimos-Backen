@@ -25,7 +25,8 @@ async function primaryHostOf(workspaceId) {
   const hit = cache.get(workspaceId);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
   const domain = await db.Domain.findOne({
-    where: { workspaceId, isPrimary: true, status: USABLE, sslStatus: 'issued' },
+    // A domain the domains job suspended (its store, or its plan; item 341) is not the canonical one.
+    where: { workspaceId, isPrimary: true, status: USABLE, sslStatus: 'issued', suspendedAt: null },
     attributes: ['hostname'],
   });
   const value = domain ? domain.hostname : null;

@@ -42,13 +42,16 @@ typed the waybill of. Any `carrierCode` without an adapter behaves the same.
 | `bulkStatus` | `getShipments()` reads many in one call | `getShipments()` |
 | `addressLevels` | names of the courier's address levels, top first. `['city', 'district']` keeps the city/district API | `listCities()` or `listAddressTree()` for city/district; `listAddressTree()` otherwise |
 | `typedAddressNames` | a booking may send typed names when the courier refuses its address list | `typedAddress()` |
+| `returnPickup` | the courier collects a returned parcel from the shopper and brings it back (item 372) | `createReturnPickup()` |
+| `returnPickupStatus` | the pickup's state is read back from the courier (item 396) | `returnPickup` + `getReturnPickup()` |
+| `returnPickupCancel` | the pickup can be cancelled at the courier (item 396) | `returnPickup` + `cancelReturnPickup()` |
 
 A capability claimed without the function behind it throws at require time.
 
 ## Functions
 
 Every function gets the **decrypted** credentials first. Never log them.
-Amounts (`cod`, `goodsValue`) are in **our** minor units; the adapter converts.
+Amounts (`cod`, `goodsValue`) are in **our** minor units; the adapter converts. For a parcel that carries part of the order (item 375, `shipping/partialShipments.js`), `cod`, `goodsValue`, `itemsCount` and `description` describe that parcel only; read them from the input, never from `order`.
 
 | Function | Returns |
 | --- | --- |
@@ -65,9 +68,46 @@ Amounts (`cod`, `goodsValue`) are in **our** minor units; the adapter converts.
 | `parseWebhook(req)` | `{ ref, status?, carrierStatus? }` or `null` |
 | `verifyWebhook(req, { account, credentials })` (optional) | boolean |
 | `isSandbox(creds)` (optional) | the credentials point at the courier's own test environment |
+| `createReturnPickup(creds, { order, returnRequest, address, itemsCount, description, notes, carrierSettings, webhookUrl, originalTrackingNumber })` (`returnPickup`) | `{ trackingNumber, carrierShipmentId, reference?, trackingUrl?, labelUrl?, raw }` — a pickup at the order's address (`address` as for `createShipment`), nothing to collect in cash. `originalTrackingNumber` is the order's own delivery with this courier, or null. Stored on the return (`return_requests.pickup`), not as a shipment. Never retried |
+| `getReturnPickup(creds, trackingNumber)` (`returnPickupStatus`) | `{ status, carrierStatus, raw }` — `status` is a pickup status: `requested`, `picked_up`, `in_transit`, `returned_to_merchant`, `failed`, `cancelled`, or `null` for a state we cannot act on (log it) |
+| `getReturnPickups(creds, trackingNumbers)` (optional) | `Map(trackingNumber → getReturnPickup result)`, for the poller |
+| `cancelReturnPickup(creds, trackingNumber, { carrierShipmentId })` (`returnPickupCancel`) | resolves, or throws when refused |
 
 `address` for `createShipment` is `{ path: [{ id, name, nameAr, level, meta }], firstLine, secondLine }`,
 plus `cityId`, `cityName`, `districtId`, `zoneId` for city/district couriers.
+
+## Return pickups (items 372, 396)
+
+| Courier | Book | Status | Cancel | How |
+| --- | --- | --- | --- | --- |
+| Bosta | yes | webhook (per delivery, re-read from the API) + the merchant's sync; not polled | yes | `POST /deliveries?apiVersion=1` type 25 "Customer Return Pickup" (CRP): customer in `pickupAddress`, parcel in `returnSpecs`, cod 0, original tracking number in `notes`; `GET /deliveries/business/{tn}`; `DELETE …/{tn}/terminate` (Full Access key) |
+| Mylerz | yes | polled every 60 min (`GetPackageListStatus`) + sync | yes | `AddOrders` with `Service_Category: "RETURN"` (the official plugin's return order), PP / COD 0; `CancelPackage` by the return barcode |
+| J&T Express | **no** | — | — | no reverse / return order among the J&T Egypt open-platform endpoints this adapter was built from (`docs/carriers/jtexpress.md`). A booking answers 422 `CARRIER_NO_RETURN_PICKUP`; the merchant books it with J&T and records it as `manual` |
+| Sandbox | yes (`SBX-R-…`) | no (keeps nothing) | yes | local |
+
+Pickup statuses (`return_requests.pickup.status`): `requested` → `picked_up` → `in_transit` → `returned_to_merchant`, or `failed` / `cancelled`.
+`returned_to_merchant` and `cancelled` are final. When the courier reports `returned_to_merchant`
+an approved return becomes `received` (return.received, source `courier`); stock still comes back
+only with the restock step. A pickup the courier collected (`picked_up`, `in_transit`) cannot be
+cancelled, nor can its return. Mapping tables: `RETURN_STATE_MAP` in `bosta.js` and `mylerz.js`.
+
+Base URLs: outside production `BOSTA_BASE_URL` / `MYLERZ_BASE_URL` point an adapter at a local
+stand-in (`carrierHttp.baseUrlFor`); production always uses the courier's own host.
+
+### Go-live checklist (return pickups)
+
+1. Bosta: check the CRP body against https://docs.bosta.co/api (create delivery, type 25):
+   `pickupAddress`, `returnSpecs`, no `specs`, `cod: 0` (UNVERIFIED R1 in `bosta.js`: taken from a
+   merchant integration measured against Bosta's live API, docs.bosta.co was unreachable when this was built).
+2. Bosta: book one CRP from a test store, confirm in Bosta's dashboard that the courier goes to the
+   customer and brings the parcel to the pickup location, and that `GET /deliveries/business/{tn}`
+   shows states 22 → 23 → … → 46 (or 45; UNVERIFIED R2). Terminate one while it is still 10/20.
+3. Bosta: the per-delivery webhook needs a public https `APP_URL`; otherwise the merchant syncs.
+4. Mylerz: book one RETURN order and confirm the barcode's `Status` values along the way; add them to
+   `RETURN_STATE_MAP` in `mylerz.js` (only "Delivered, Thank you :-)" and "Rejected - reason to be
+   mentioned" are known today; anything else leaves the pickup `requested` and is logged).
+5. Mylerz: confirm `CancelPackage` cancels a return barcode before pickup (`IsChanged: true`).
+6. J&T: ask J&T Egypt whether the open platform has a reverse order; until then leave it off.
 
 ## Errors
 
@@ -89,6 +129,7 @@ The whole contract with no network, for building and testing features:
   platform's cities under each (`geo_regions`). North Coast towns sit under
   Alexandria or Matrouh, as on most real couriers' lists;
 - waybills are `SBX-` + 8 digits; no label (the store's own waybill PDF is used);
+- a return pickup (`createReturnPickup`) answers a waybill `SBX-R-` + 8 digits and keeps nothing;
 - the courier's side of a parcel lives on the shipment (`carrier_response.sandboxStatus`),
   starting at `created`; it can be cancelled while `created`;
 - it moves only when someone calls

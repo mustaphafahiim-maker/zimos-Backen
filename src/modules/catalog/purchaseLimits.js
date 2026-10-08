@@ -66,15 +66,19 @@ async function unitsByProduct(workspaceId, lines, transaction = null) {
  * shopper's phone, so two orders at once can't both pass maxPerCustomer. `excludeOrderId`: an order
  * whose lines are already in `lines` (an upsell joining it).
  */
-async function assertWithin(workspaceId, lines, contact, transaction = null, { excludeOrderId = null } = {}) {
+async function assertWithin(workspaceId, lines, contact, transaction = null, { excludeOrderId = null, onlyProductIds = null, perOrder = true } = {}) {
   const totals = await unitsByProduct(workspaceId, lines, transaction);
+  // onlyProductIds: just the products an upsell adds (item 321) — the order's other lines, a free gift
+  // among them, were checked when it was placed. perOrder false: a follow-on add-on order is its own
+  // order but not a purchase of its own, so only the per-customer limit applies.
+  if (onlyProductIds) for (const id of [...totals.keys()]) if (!onlyProductIds.includes(id)) totals.delete(id);
   if (!totals.size) return;
   const problems = [];
   let customer;
   for (const { product, quantity } of totals.values()) {
     const l = limitsOf(product);
-    if (l.min && quantity < l.min) problems.push({ field: 'items', message: `Order at least ${l.min} of "${product.name}"`, productId: product.id, min: l.min });
-    if (l.max && quantity > l.max) problems.push({ field: 'items', message: `At most ${l.max} of "${product.name}" per order`, productId: product.id, max: l.max });
+    if (perOrder && l.min && quantity < l.min) problems.push({ field: 'items', message: `Order at least ${l.min} of "${product.name}"`, productId: product.id, min: l.min });
+    if (perOrder && l.max && quantity > l.max) problems.push({ field: 'items', message: `At most ${l.max} of "${product.name}" per order`, productId: product.id, max: l.max });
     if (l.maxPerCustomer) {
       if (customer === undefined) {
         const phone = normalizePhone(contact && contact.phone);
@@ -148,4 +152,4 @@ router.put(
   })
 );
 
-module.exports = { router, assertWithin, assertCartMax, limitsOf };
+module.exports = { router, assertWithin, assertCartMax, limitsOf, unitsByProduct };

@@ -8,6 +8,7 @@ const secretBox = require('../../core/utils/secretBox');
 const { verifyPassword } = require('../../core/security/password');
 const { recordAudit } = require('../audit/auditService');
 const notify = require('../notifications/notify');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /**
  * Two-step sign-in (SPEC §17.2).
@@ -191,7 +192,7 @@ async function challengeIfNeeded(user, req, { locale = 'ar', newDevice = false }
   if (await isTrusted(user.id, req)) return null;
   const flag = mode !== (row && row.mode) ? { newDevice: true } : {};
 
-  const base = { userId: user.id, channel: mode, expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? req.ip : null };
+  const base = { userId: user.id, channel: mode, expiresAt: new Date(Date.now() + CODE_TTL_MS), ipAddress: req ? clientIp(req) : null };
   if (mode === 'totp') {
     const challenge = await db.LoginChallenge.create(base);
     return { twoFactorRequired: true, challengeToken: challenge.id, channel: 'totp' };
@@ -215,32 +216,108 @@ async function challengeIfNeeded(user, req, { locale = 'ar', newDevice = false }
 
 const invalid = () => new AuthenticationError('That code is not correct or has expired', 'INVALID_TWO_FACTOR_CODE');
 
+// Wrong second-step codes one account may get, over all its sign-ins (item 359):
+// each sign-in has its own 5 tries, but someone holding the password can sign in
+// again and again, so the account has its own budget too. An authenticator code
+// has 3 right answers (clock drift) in a million.
+const ACCOUNT_WRONG_LIMITS = [
+  { windowMs: 15 * 60 * 1000, max: 10 },
+  { windowMs: 24 * 60 * 60 * 1000, max: 30 },
+];
+const accountLocked = () => new AppError('TWO_FACTOR_LOCKED', 'Too many wrong codes for this account. Try again later, or reset your password.', 429);
+
+/**
+ * Counts one try on the challenge before the code is looked at, under a lock
+ * on the account, so parallel requests share the challenge's 5 tries and the
+ * account's budget (the read-then-increment let a burst through). Resolves
+ * the challenge's user id and code hash.
+ */
+async function countTry(challengeToken, userId) {
+  return db.sequelize.transaction(async (transaction) => {
+    await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `two-factor:${userId}` }, transaction });
+    // attempts holds wrong tries only: a right code takes its try back (below).
+    const [wrong] = await db.sequelize.query(
+      `SELECT COALESCE(SUM(attempts) FILTER (WHERE created_at > now() - make_interval(secs => :short)), 0)::int AS "short",
+              COALESCE(SUM(attempts), 0)::int AS "long"
+         FROM login_challenges
+        WHERE user_id = :userId AND channel <> 'wa_login' AND created_at > now() - make_interval(secs => :long)`,
+      {
+        replacements: { userId, short: ACCOUNT_WRONG_LIMITS[0].windowMs / 1000, long: ACCOUNT_WRONG_LIMITS[1].windowMs / 1000 },
+        type: db.Sequelize.QueryTypes.SELECT,
+        transaction,
+      }
+    );
+    if (wrong.short >= ACCOUNT_WRONG_LIMITS[0].max || wrong.long >= ACCOUNT_WRONG_LIMITS[1].max) throw accountLocked();
+    const [counted] = await db.sequelize.query(
+      `UPDATE login_challenges SET attempts = attempts + 1
+        WHERE id = :id AND channel <> 'wa_login' AND consumed_at IS NULL AND expires_at > now() AND attempts < :max
+        RETURNING user_id AS "userId", channel, code_hash AS "codeHash"`,
+      { replacements: { id: challengeToken, max: MAX_ATTEMPTS }, type: db.Sequelize.QueryTypes.SELECT, transaction }
+    );
+    return counted || null;
+  });
+}
+
+/**
+ * Closes the account's waiting sign-ins and forgets its wrong codes: a
+ * password reset proves the owner, and whoever had the old password is out
+ * (authService.resetPassword, resetPasswordSms). The wrong codes are forgotten
+ * at most once in 24 hours (users.two_factor_forgiven_at, migration 515), so
+ * resetting again and again (a swapped SIM, a read inbox) does not restart the
+ * budget: 60 wrong codes a day at most, however many resets.
+ */
+async function forgiveWrongCodes(userId, transaction) {
+  const since = new Date(Date.now() - ACCOUNT_WRONG_LIMITS[1].windowMs);
+  await db.LoginChallenge.update(
+    { consumedAt: db.sequelize.fn('COALESCE', db.sequelize.col('consumed_at'), db.sequelize.fn('now')) },
+    { where: { userId, consumedAt: null }, transaction }
+  );
+  // The row lock on the user makes two resets at once forgive only once.
+  const [forgiven] = await db.sequelize.query(
+    `UPDATE users SET two_factor_forgiven_at = now()
+      WHERE id = :userId AND (two_factor_forgiven_at IS NULL OR two_factor_forgiven_at <= :since)
+      RETURNING id`,
+    { replacements: { userId, since }, type: db.Sequelize.QueryTypes.SELECT, transaction }
+  );
+  if (!forgiven) return;
+  await db.LoginChallenge.update({ attempts: 0 }, { where: { userId, createdAt: { [db.Sequelize.Op.gt]: since } }, transaction });
+}
+
 /** The second step. Returns the user to sign in; sets the remember-me cookie when asked. */
 async function verifyChallenge({ challengeToken, code, rememberDevice }, req, res) {
-  const challenge = await db.LoginChallenge.findByPk(challengeToken);
+  const challenge = await db.LoginChallenge.findByPk(challengeToken, { attributes: ['id', 'userId', 'channel', 'attempts', 'consumedAt', 'expiresAt'] });
   if (!challenge || challenge.consumedAt || challenge.expiresAt < new Date()) throw invalid();
   // A WhatsApp sign-in code stands in for the password: never finished here, where backup codes work (whatsappLogin.js).
   if (challenge.channel === 'wa_login') throw invalid();
-  if (challenge.attempts >= MAX_ATTEMPTS) throw new AppError('TOO_MANY_ATTEMPTS', 'Too many wrong codes. Sign in again to get a new one.', 429);
 
-  const user = await db.User.findByPk(challenge.userId);
+  const counted = await countTry(challenge.id, challenge.userId);
+  if (!counted) {
+    const now = await db.LoginChallenge.findByPk(challenge.id, { attributes: ['attempts', 'consumedAt', 'expiresAt'] });
+    if (now && !now.consumedAt && now.expiresAt > new Date() && now.attempts >= MAX_ATTEMPTS) throw new AppError('TOO_MANY_ATTEMPTS', 'Too many wrong codes. Sign in again to get a new one.', 429);
+    throw invalid();
+  }
+
+  const user = await db.User.findByPk(counted.userId);
   if (!user || user.status !== 'active') throw invalid();
 
   let ok = false;
-  if (challenge.channel === 'totp') {
+  if (counted.channel === 'totp') {
     const row = await db.UserTwoFactor.findByPk(user.id);
     ok = Boolean(row && row.totpSecretSealed) && totpMatches(secretBox.open(row.totpSecretSealed), code);
   } else {
     const given = sha256(`${user.id}:${String(code || '').replace(/\s/g, '')}`);
-    ok = Boolean(challenge.codeHash) && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(challenge.codeHash));
+    ok = Boolean(counted.codeHash) && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(counted.codeHash));
   }
   // A backup code works in place of any channel's code (twoFactorRecovery.js).
   if (!ok) ok = await require('./twoFactorRecovery').useBackupCode(user, code, req);
-  if (!ok) {
-    await challenge.increment('attempts');
-    throw invalid();
-  }
-  await challenge.update({ consumedAt: new Date() });
+  if (!ok) throw invalid();
+  // One sign-in per challenge, even when two right answers arrive together; the
+  // right code's try is taken back, so attempts counts wrong codes only.
+  const [consumed] = await db.LoginChallenge.update(
+    { consumedAt: new Date(), attempts: db.sequelize.literal('GREATEST(attempts - 1, 0)') },
+    { where: { id: challenge.id, consumedAt: null } }
+  );
+  if (consumed !== 1) throw invalid();
 
   if (rememberDevice && res) {
     const raw = crypto.randomBytes(32).toString('hex');
@@ -261,4 +338,4 @@ async function forgetDevices(user, req) {
   return status(user);
 }
 
-module.exports = { status, enableEmail, enableWhatsapp, setupTotp, confirmTotp, disable, challengeIfNeeded, verifyChallenge, forgetDevices, totpAt, totpMatches, base32Encode };
+module.exports = { status, enableEmail, enableWhatsapp, setupTotp, confirmTotp, disable, challengeIfNeeded, verifyChallenge, forgiveWrongCodes, forgetDevices, totpAt, totpMatches, base32Encode };

@@ -5,8 +5,10 @@ const validate = require('../../core/middleware/validate');
 const { authenticate } = require('../../core/middleware/authenticate');
 const { resolveTenant } = require('../../core/middleware/tenantContext');
 const { requirePermission, requireAnyPermission } = require('../../core/middleware/rbac');
+const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { requirePlanLimit } = require('../billing/planLimits');
+const { requirePlanFeature } = require('../billing/planFeatureGate');
 const controller = require('./workspaceController');
 const schemas = require('./workspaceValidation');
 
@@ -35,12 +37,14 @@ router.patch(
 router.get('/:workspaceId/access', validate(schemas.listMembers), resolveTenant, controller.getAccess);
 
 // Taking a draft store live (billing/goLiveService): its plan's free trial, or
-// a plan that costs nothing. Whoever manages the store's billing.
+// a plan that costs nothing. Whoever manages the store's billing, with a
+// confirmed account (core/middleware/confirmedAccount).
 router.post(
   '/:workspaceId/start-trial',
-  validate(schemas.listMembers),
+  validate(schemas.startTrial),
   resolveTenant,
   requirePermission(PERMISSIONS.BILLING_MANAGE),
+  requireConfirmedAccount,
   controller.startTrial
 );
 router.post(
@@ -48,6 +52,7 @@ router.post(
   validate(schemas.listMembers),
   resolveTenant,
   requirePermission(PERMISSIONS.BILLING_MANAGE),
+  requireConfirmedAccount,
   controller.activateFreePlan
 );
 
@@ -87,6 +92,9 @@ router.post(
   validate(schemas.invite),
   resolveTenant,
   requirePermission(PERMISSIONS.USERS_MANAGE),
+  // A new invite needs staff_accounts while PLAN_FEATURE_ENFORCEMENT is on
+  // (billing/planFeatureGate); members already in, and their roles, are untouched.
+  requirePlanFeature('staff_accounts'),
   // The same seat limit as /team/invite (SPEC §17.4).
   requirePlanLimit('members'),
   controller.inviteMember

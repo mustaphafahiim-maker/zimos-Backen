@@ -27,12 +27,19 @@ const bi = (en, ar) => ({ en, ar });
 const credentialsSchema = Joi.object({
   signingSecret: Joi.string().trim().min(8).max(200).required(),
 });
-const settingsSchema = Joi.object({});
+// Test fees for the ledger (item 384, ./sandboxLedger.js): the merchant's own numbers, unset = no fee.
+const settingsSchema = Joi.object({
+  feeBasisPoints: Joi.number().integer().min(0).max(10000).allow(null),
+  feeFixedMinor: Joi.number().integer().min(0).max(100000000).allow(null),
+});
 
 const credentialFields = [
   { key: 'signingSecret', secret: true, label: bi('Signing secret (any 8+ characters)', 'مفتاح التوقيع (أي 8 أحرف أو أكثر)'), placeholder: 'sandbox-secret' },
 ];
-const settingFields = [];
+const settingFields = [
+  { key: 'feeBasisPoints', type: 'integer', label: bi('Test fee, in 1/100 of a percent (100 = 1%)', 'رسوم تجريبية بجزء من مئة من النسبة المئوية (100 = 1%)') },
+  { key: 'feeFixedMinor', type: 'integer', label: bi('Test fixed fee per payment, in the smallest unit (piastres, cents)', 'رسوم ثابتة تجريبية لكل دفعة بأصغر وحدة (قروش، سنتات)') },
+];
 const setupSteps = {
   en: [
     'This gateway is for testing only: no payment company is involved and no money moves.',
@@ -191,6 +198,10 @@ module.exports = {
   parseRedirect,
   // Saving a card with no payment, and its page (./sandboxCardSetup.js).
   ...require('./sandboxCardSetup'),
+  // Fees and payouts worked out from what ZIMOS holds (./sandboxLedger.js, item 384).
+  fetchFees: require('./sandboxLedger').fetchFees,
+  listPayouts: require('./sandboxLedger').listPayouts,
+  wantsPayoutCandidates: true,
   // For the hosted page.
   signPage,
   buildResult,

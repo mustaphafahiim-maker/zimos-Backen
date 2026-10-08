@@ -104,6 +104,8 @@ const settingsSchema = Joi.object({
   walletIntegrationId: integrationId.allow(null).optional(),
   valuIntegrationId: integrationId.allow(null).optional(),
   kioskIntegrationId: integrationId.allow(null).optional(),
+  // Saved cards (item 380): the MOTO integration Paymob adds for charges without the shopper.
+  motoIntegrationId: integrationId.allow(null).optional(),
 });
 
 const bi = (en, ar) => ({ en, ar });
@@ -140,6 +142,12 @@ const settingFields = [
     type: 'integer',
     label: bi('Kiosk (Aman / Masary) integration ID', 'رقم تكامل الدفع في الكشك — أمان / مصاري (Integration ID)'),
   },
+  {
+    // No checkout method: the integration saved cards are charged on (one-click offers, subscription renewals).
+    key: 'motoIntegrationId',
+    type: 'integer',
+    label: bi('Saved cards (MOTO) integration ID — optional', 'رقم تكامل الكروت المحفوظة (MOTO) — اختياري'),
+  },
 ];
 
 const setupSteps = {
@@ -149,6 +157,7 @@ const setupSteps = {
     'Open Developers → Payment integrations and copy the Integration ID of your card integration and, for each other way you accept (mobile wallets, valU, Kiosk), of its integration.',
     'For EACH of those integrations, click Edit and paste the webhook URL shown below into "Transaction processed callback". Leave "Transaction response callback" as it is — we send the shopper back ourselves.',
     'Paste everything here and connect. Start in test mode, place a test order from the store preview, then switch to live keys.',
+    'Optional — one-click offers and subscription renewals: ask Paymob to turn on card saving for your card integration and to add a MOTO integration, then paste the MOTO integration ID here.',
   ],
   ar: [
     'ادخل على لوحة تحكم Paymob ‏(accept.paymob.com).',
@@ -156,6 +165,7 @@ const setupSteps = {
     'من Developers ← Payment integrations انسخ رقم الـ Integration ID الخاص بالكروت، ولكل طريقة تانية بتقبلها (المحافظ الإلكترونية، valU، الكشك) انسخ رقم تكاملها.',
     'لكل تكامل منهم اضغط Edit والصق رابط الـ webhook اللي تحت في خانة "Transaction processed callback". سيب "Transaction response callback" زي ما هي — إحنا بنرجّع العميل للمتجر بنفسنا.',
     'الصق كل البيانات هنا واضغط ربط. ابدأ بمفاتيح التجربة، اعمل طلب تجريبي من معاينة المتجر، وبعدها بدّل لمفاتيح التشغيل.',
+    'اختياري — العروض بضغطة واحدة وتجديد الاشتراكات: اطلب من Paymob تفعيل حفظ الكروت على تكامل الكروت وإضافة تكامل MOTO، والصق رقم تكامل الـ MOTO هنا.',
   ],
 };
 
@@ -575,9 +585,153 @@ function parseRedirect(query, creds) {
   };
 }
 
+// --- Saved cards (../savedMethods/README.md, item 380) -------------------------
+//
+// Facts used, from Paymob's "Pay with saved cards" guides (card token, MIT) — the developer site could not be
+// opened from here, so they were checked through its search results; recheck against the sandbox before live:
+//
+//   Card token     with card saving on for the card integration, Unified Checkout offers "save card"; when the
+//                  shopper ticks it Paymob POSTs { type: 'TOKEN', obj: { id, token, masked_pan, merchant_id,
+//                  card_subtype, created_at, email, order_id, user_added } } to the processed-callback URL,
+//                  ?hmac= HMAC-SHA512 (hex, HMAC secret) over the values of card_subtype, created_at, email, id,
+//                  masked_pan, merchant_id, order_id, token — in that (alphabetical) order.
+//   Charge (MOTO)  an intention whose payment_methods is the MOTO integration id -> payment_keys[0].key, then
+//                  POST {base}/api/acceptance/payments/pay
+//                  { source: { identifier: <card token>, subtype: 'TOKEN' }, payment_token: <that key> }
+//                  -> the transaction (success / pending / data.message), sometimes wrapped as { obj }.
+//
+// The token is not asked for (tokenize returns null): it arrives on the TOKEN callback, which parseCardToken
+// reads and ../savedMethods/heldCardTokens.js holds sealed for the payment of the same Paymob order.
+// Paymob takes no idempotency header: the intention's special_reference is the charge's key, and before paying
+// the charge looks that reference up (transaction_inquiry by merchant_order_id), so a repeat answers what the
+// first one did instead of charging twice.
+
+const TOKEN_HMAC_FIELDS = ['card_subtype', 'created_at', 'email', 'id', 'masked_pan', 'merchant_id', 'order_id', 'token'];
+
+/** Saved cards can be charged only on a MOTO integration. */
+const savedCardsReady = (settings = {}) => Boolean(settings && settings.motoIntegrationId);
+
+/** The TOKEN callback: null for anything else. Never throws; the token is never logged. */
+function parseCardToken({ query, body }, creds) {
+  try {
+    if (!body || body.type !== 'TOKEN' || !body.obj || typeof body.obj !== 'object') return null;
+    const obj = body.obj;
+    const expected = hmacHex(creds.hmacSecret, concatSigned(TOKEN_HMAC_FIELDS.map((f) => obj[f])));
+    const valid = safeEqualHex(expected, query && typeof query.hmac === 'string' ? query.hmac : '') && Boolean(obj.token) && obj.order_id !== undefined;
+    const digits = String(obj.masked_pan || '').replace(/\D/g, '');
+    return {
+      valid,
+      providerOrderId: obj.order_id !== undefined && obj.order_id !== null ? String(obj.order_id) : null,
+      card: { token: String(obj.token || ''), brand: obj.card_subtype ? String(obj.card_subtype).slice(0, 30) : 'Card', last4: digits.length >= 4 ? digits.slice(-4) : null, expiresAt: null },
+    };
+  } catch {
+    return { valid: false, providerOrderId: null, card: null };
+  }
+}
+
+// The token arrives on its own callback (parseCardToken); there is nothing to ask Paymob for.
+async function tokenize() {
+  return null;
+}
+
+/** A Paymob transaction as the saved-card contract's answer. */
+function chargeAnswer(t) {
+  const n = normalizeTransaction(t);
+  const redirect = t.redirect_url || t.redirection_url || t.iframe_redirection_url || (t.data && t.data.redirect_url);
+  if (n.status === 'paid') return { status: 'paid', transactionId: n.transactionId };
+  if (n.status === 'pending') {
+    // A 3-D Secure page to send the shopper to: only they can finish it.
+    if (redirect || asBool(t.is_3d_secure)) return { status: 'needs_shopper', failureReason: 'The card issuer wants the shopper to confirm this payment', failureCode: 'authentication_required', transactionId: n.transactionId };
+    throw new GatewayError('Paymob has not finished this payment yet.');
+  }
+  return { status: 'failed', transactionId: n.transactionId, failureReason: n.failureReason || 'The card was declined', failureCode: t.txn_response_code ? String(t.txn_response_code) : null };
+}
+
+/** An earlier charge with the same key, if Paymob has one. */
+async function earlierCharge(creds, reference) {
+  const token = await authToken(creds);
+  let res;
+  try {
+    res = await gatewayHttp.request({
+      method: 'POST',
+      url: `${baseUrl()}/api/ecommerce/orders/transaction_inquiry`,
+      headers: { authorization: `Bearer ${token}` },
+      body: { merchant_order_id: reference },
+      retry: true,
+    });
+  } catch (err) {
+    throw new GatewayError(`Paymob could not be reached to check this payment (${err.message}).`);
+  }
+  if (res.status === 404 || (res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 403)) return null;
+  if (!res.ok) throw errorFor(res, creds, 'check this payment');
+  const json = res.json || {};
+  const list = (Array.isArray(json.transactions) ? json.transactions : [json]).filter((t) => t && t.id !== undefined && !asBool(t.is_refund) && !asBool(t.is_void));
+  return list.find((t) => asBool(t.success) && !asBool(t.pending)) || list[list.length - 1] || null;
+}
+
+/** Charges a saved card on the MOTO integration. */
+async function chargeSaved(creds, { token, amount, currency, reference, idempotencyKey, contact = {}, settings = {} }) {
+  if (!savedCardsReady(settings)) throw new GatewayRejectedError('This Paymob account has no MOTO integration for saved cards.');
+  const key = `zimos-${idempotencyKey || reference}`.slice(0, 100);
+  const before = await earlierCharge(creds, key);
+  if (before) return chargeAnswer(before);
+
+  const { first, last } = splitName(contact.fullName);
+  const email = contact.email || `no-email@${env.platformRootDomain}`;
+  const intention = await call(
+    creds,
+    {
+      method: 'POST',
+      url: `${baseUrl()}/v1/intention/`,
+      headers: { authorization: `Token ${creds.secretKey}` },
+      body: {
+        amount: Number(amount),
+        currency,
+        payment_methods: [Number(settings.motoIntegrationId)],
+        items: [{ name: 'Order', amount: Number(amount), description: 'Saved card payment', quantity: 1 }],
+        billing_data: {
+          first_name: first, last_name: last, phone_number: contact.phone || 'NA', email,
+          apartment: 'NA', floor: 'NA', street: 'NA', building: 'NA', city: 'NA', state: 'NA', country: 'EG', postal_code: 'NA',
+        },
+        customer: { first_name: first, last_name: last, email },
+        special_reference: key,
+        extras: { order_id: String(reference) },
+      },
+      timeoutMs: gatewayHttp.WRITE_TIMEOUT_MS,
+    },
+    'start this saved card payment'
+  );
+  const paymentKey = intention.json && Array.isArray(intention.json.payment_keys) && intention.json.payment_keys[0] && intention.json.payment_keys[0].key;
+  if (!paymentKey) throw new GatewayError('Paymob returned no payment key for the saved card payment.');
+
+  let res;
+  try {
+    res = await gatewayHttp.request({
+      method: 'POST',
+      url: `${baseUrl()}/api/acceptance/payments/pay`,
+      body: { source: { identifier: token, subtype: 'TOKEN' }, payment_token: paymentKey },
+      timeoutMs: gatewayHttp.WRITE_TIMEOUT_MS,
+    });
+  } catch (err) {
+    throw new GatewayError(`Paymob could not be reached to charge the saved card (${err.message}).`);
+  }
+  if (res.status === 401 || res.status === 403) throw new GatewayAuthError(name);
+  if (res.status >= 500 || !res.json) throw new GatewayError(`Paymob did not answer the saved card payment (HTTP ${res.status}).`);
+  if (!res.ok) return { status: 'failed', failureReason: sanitizeGatewayMessage(messageFrom(res), secretsOf(creds)) || 'Paymob refused the saved card' };
+  const t = res.json.obj && typeof res.json.obj === 'object' ? res.json.obj : res.json;
+  if (Number(t.amount_cents) && Number(t.amount_cents) !== Number(amount)) throw new GatewayError('Paymob answered for a different amount.');
+  return chargeAnswer(t);
+}
+
 module.exports = {
   code,
   name,
+  supportsTokenization: true,
+  savedCardsReady,
+  parseCardToken,
+  tokenize,
+  chargeSaved,
+  TOKEN_HMAC_FIELDS,
   methods: METHODS,
   currencies: CURRENCIES,
   credentialFields,

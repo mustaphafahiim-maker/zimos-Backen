@@ -10,7 +10,8 @@ const db = require('../../db/models');
  *   items[].imageUrl  the line's picture: its variant's image, else the
  *                     product's first one — read now, so a changed photo
  *                     shows; null when the product has none or is gone
- *   funnelName        the funnel the order came through (source "funnel")
+ *   funnelName        the funnel the order came through (source "funnel"),
+ *                     also once that funnel is in the trash or purged
  *   isNewCustomer     the list only: no earlier order from this customer
  *                     in the store
  *
@@ -71,7 +72,7 @@ async function decorateList(workspaceId, orders) {
   ]);
   for (const order of orders) {
     for (const item of order.items || []) item.imageUrl = imageOf(item);
-    order.funnelName = order.funnelId ? funnels.get(order.funnelId) || null : null;
+    order.funnelName = (order.funnelId && funnels.get(order.funnelId)) || order.funnelName || null;
     order.isNewCustomer = Boolean(order.customerId) && !returning.has(order.id);
   }
   return orders;
@@ -81,7 +82,7 @@ async function decorateList(workspaceId, orders) {
 async function decorateOne(workspaceId, order) {
   const [imageOf, funnels] = await Promise.all([lineImages(workspaceId, order.items || []), funnelNames(workspaceId, [order])]);
   for (const item of order.items || []) item.imageUrl = imageOf(item);
-  order.funnelName = order.funnelId ? funnels.get(order.funnelId) || null : null;
+  order.funnelName = (order.funnelId && funnels.get(order.funnelId)) || order.funnelName || null;
   return order;
 }
 

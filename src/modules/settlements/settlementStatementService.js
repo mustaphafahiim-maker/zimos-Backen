@@ -126,7 +126,7 @@ async function matchStatement(workspaceId, { csv, fileBase64, fileName, carrierC
               db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('tracking_code')), { [Op.in]: lowered }),
             ],
           },
-          attributes: ['id', 'orderId', 'carrierCode', 'waybillNumber', 'trackingCode', 'status'],
+          attributes: ['id', 'orderId', 'carrierCode', 'waybillNumber', 'trackingCode', 'status', 'items'],
         })
       : [],
     settlements.listUnsettled(workspaceId, { carrierCode }),
@@ -141,11 +141,15 @@ async function matchStatement(workspaceId, { csv, fileBase64, fileName, carrierC
     orderIds.length
       ? db.Order.findAll({ where: { workspaceId, id: orderIds }, attributes: ['id', 'orderNumber', 'contactSnapshot', 'totalAmount', 'amountPaid'] })
       : [],
-    orderIds.length ? db.CodSettlementLine.findAll({ where: { workspaceId, orderId: orderIds }, attributes: ['orderId'], raw: true }) : [],
+    orderIds.length ? db.CodSettlementLine.findAll({ where: { workspaceId, orderId: orderIds }, attributes: ['orderId', 'shipmentId'], raw: true }) : [],
   ]);
   const orderById = new Map(orders.map((o) => [o.id, o]));
-  const settled = new Set(settledLines.map((l) => l.orderId));
-  const due = new Map(unsettled.map((o) => [o.orderId, o]));
+  // A parcel of an order sent as several (item 375) is settled on its own;
+  // any other shipment stands for its whole order.
+  const unitOf = (u) => (u.partial ? `s:${u.shipmentId}` : `o:${u.orderId}`);
+  const shipmentUnit = (shipment) => unitOf({ partial: Array.isArray(shipment.items), shipmentId: shipment.id, orderId: shipment.orderId });
+  const settled = new Set(settledLines.flatMap((l) => [`o:${l.orderId}`, ...(l.shipmentId ? [`s:${l.shipmentId}`] : [])]));
+  const due = new Map(unsettled.map((o) => [unitOf(o), o]));
 
   const seenOrders = new Set();
   const lines = rows.map((r) => {
@@ -161,22 +165,25 @@ async function matchStatement(workspaceId, { csv, fileBase64, fileName, carrierC
       customerName: order ? (order.contactSnapshot || {}).fullName || null : null,
       shipmentStatus: shipment.status,
     };
-    if (seenOrders.has(shipment.orderId)) return { ...info, status: 'duplicate' };
-    seenOrders.add(shipment.orderId);
-    if (settled.has(shipment.orderId)) return { ...info, status: 'already_settled' };
-    const open = due.get(shipment.orderId);
+    const unit = shipmentUnit(shipment);
+    if (seenOrders.has(unit)) return { ...info, status: 'duplicate' };
+    seenOrders.add(unit);
+    if (settled.has(unit)) return { ...info, status: 'already_settled' };
+    const open = due.get(unit);
     if (!open) return { ...info, status: 'not_settleable' };
     return {
       ...info,
+      shipmentId: open.shipmentId,
+      unit,
       dueAmount: open.dueAmount,
       differenceAmount: r.amount - open.dueAmount,
       status: r.amount === open.dueAmount ? 'ok' : 'amount_mismatch',
     };
   });
 
-  const inStatement = new Set(lines.filter((l) => l.orderId).map((l) => l.orderId));
+  const inStatement = new Set(lines.filter((l) => l.unit).map((l) => l.unit));
   const missing = unsettled
-    .filter((o) => !inStatement.has(o.orderId))
+    .filter((o) => !inStatement.has(unitOf(o)))
     .map((o) => ({
       orderId: o.orderId, orderNumber: o.orderNumber, customerName: o.customerName, waybill: o.waybillNumber,
       carrierCode: o.carrierCode, deliveredAt: o.deliveredAt, dueAmount: o.dueAmount,
@@ -220,6 +227,7 @@ async function importStatement(workspaceId, body, req) {
     .filter((l) => l.status === 'ok' || l.status === 'amount_mismatch')
     .map((l) => ({
       orderId: l.orderId,
+      shipmentId: l.shipmentId,
       collectedAmount: Math.min(l.statementAmount, l.dueAmount),
       feeAmount: Math.min(l.feeAmount || 0, Math.min(l.statementAmount, l.dueAmount)),
     }));

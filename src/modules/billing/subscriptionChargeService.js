@@ -8,6 +8,7 @@ const referralCodes = require('../referrals/referralCodeService');
 const commissions = require('../referrals/commissionService');
 const { planPrice, addBillingPeriod } = require('./planPricing');
 const specialTerms = require('./specialTermsService');
+const manualPricing = require('./manualPricing');
 
 /**
  * Subscription charges: one billing_invoices row per charge, the first and
@@ -113,6 +114,32 @@ async function frozenPayable(frozen, transaction) {
 }
 
 /**
+ * The next charge of a subscription with no pending one: its plan, period
+ * and price, as createCharge writes it and quoteCharge shows it. 409 NO_PLAN
+ * or PLAN_IS_FREE. The special-terms price override is locked only with
+ * `lock` (createCharge, which uses one of its charges).
+ */
+async function nextChargeTerms(subscription, transaction, { now, lock = false }) {
+  const plan = subscription.planId ? await db.Plan.findByPk(subscription.planId, { transaction }) : null;
+  if (!plan) throw new ConflictError('This subscription has no plan to charge for.', 'NO_PLAN');
+  if (planPrice(plan, subscription.billingCycle) <= 0) {
+    throw new ConflictError('This plan is free, so there is nothing to charge.', 'PLAN_IS_FREE');
+  }
+
+  const lastPaid = await db.BillingInvoice.findOne({
+    where: { subscriptionId: subscription.id, status: 'paid' },
+    order: [['periodEnd', 'DESC']],
+    transaction,
+  });
+  const compEnd = await specialTerms.compCoveredUntil(subscription.id, transaction);
+  const coveredUntil = Math.max(lastPaid ? new Date(lastPaid.periodEnd).getTime() : 0, compEnd ? compEnd.getTime() : 0);
+  const periodStart = coveredUntil > now.getTime() ? new Date(coveredUntil) : now;
+  const override = await specialTerms.activePriceOverride(subscription.id, { transaction, lock });
+  const pricing = await priceCharge(subscription, plan, transaction, { override });
+  return { pricing, override, periodStart, periodEnd: addBillingPeriod(periodStart, subscription.billingCycle) };
+}
+
+/**
  * Prices the next period and writes it as a pending invoice. A subscription
  * already holding a pending invoice gets that one back (`created: false`):
  * one open charge at a time, which a unique index also enforces.
@@ -123,67 +150,81 @@ async function frozenPayable(frozen, transaction) {
  * special-terms price override prices the charge and uses up one of its
  * charges. With `req`, a created charge is audited: as a platform-level entry
  * for the console's action, in the workspace when `byMerchant` (the merchant
- * pressing Pay, see onlineBillingService).
+ * pressing Pay, see onlineBillingService, or sending a transfer's proof, see
+ * paymentProofService).
  */
-async function createCharge(workspaceId, { now = new Date(), req = null, byMerchant = false } = {}) {
-  return db.sequelize.transaction(async (transaction) => {
-    const subscription = await db.Subscription.findOne({
-      where: { workspaceId },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (!subscription) throw new NotFoundError('Subscription');
+async function createCharge(workspaceId, options = {}) {
+  return db.sequelize.transaction((transaction) => createChargeInTransaction(workspaceId, options, transaction));
+}
 
-    const pending = await db.BillingInvoice.findOne({
-      where: { subscriptionId: subscription.id, status: 'pending' },
-      transaction,
-    });
-    if (pending) return { invoice: pending, created: false };
+const manualPricingConflict = () =>
+  new ConflictError('This subscription is free or discounted by the platform, so it is not charged here.', 'MANUAL_PRICING');
 
-    const plan = subscription.planId ? await db.Plan.findByPk(subscription.planId, { transaction }) : null;
-    if (!plan) throw new ConflictError('This subscription has no plan to charge for.', 'NO_PLAN');
-    if (planPrice(plan, subscription.billingCycle) <= 0) {
-      throw new ConflictError('This plan is free, so there is nothing to charge.', 'PLAN_IS_FREE');
-    }
-
-    const lastPaid = await db.BillingInvoice.findOne({
-      where: { subscriptionId: subscription.id, status: 'paid' },
-      order: [['periodEnd', 'DESC']],
-      transaction,
-    });
-    const compEnd = await specialTerms.compCoveredUntil(subscription.id, transaction);
-    const coveredUntil = Math.max(lastPaid ? new Date(lastPaid.periodEnd).getTime() : 0, compEnd ? compEnd.getTime() : 0);
-    const periodStart = coveredUntil > now.getTime() ? new Date(coveredUntil) : now;
-    const override = await specialTerms.activePriceOverride(subscription.id, { transaction, lock: true });
-    const pricing = await priceCharge(subscription, plan, transaction, { override });
-    if (pricing.specialTermsId) await override.increment('chargesUsed', { by: 1, transaction });
-
-    const invoice = await db.BillingInvoice.create(
-      {
-        workspaceId,
-        subscriptionId: subscription.id,
-        ...pricing,
-        status: 'pending',
-        periodStart,
-        periodEnd: addBillingPeriod(periodStart, subscription.billingCycle),
-      },
-      { transaction }
-    );
-    if (req) {
-      await recordAudit({
-        workspaceId: byMerchant ? workspaceId : null,
-        actorUserId: req.user.id,
-        action: 'billing_invoice.create',
-        entityType: 'BillingInvoice',
-        entityId: invoice.id,
-        after: chargeAuditState(invoice),
-        metadata: { workspaceId },
-        req,
-        transaction,
-      });
-    }
-    return { invoice, created: true };
+/** createCharge inside the caller's transaction (a proof that writes its charge). */
+async function createChargeInTransaction(workspaceId, { now = new Date(), req = null, byMerchant = false } = {}, transaction) {
+  const subscription = await db.Subscription.findOne({
+    where: { workspaceId },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
   });
+  if (!subscription) throw new NotFoundError('Subscription');
+
+  const pending = await db.BillingInvoice.findOne({
+    where: { subscriptionId: subscription.id, status: 'pending' },
+    transaction,
+  });
+  if (pending) return { invoice: pending, created: false };
+  // A free or discounted manual subscription (billing/manualPricing) is never
+  // charged at the plan's price, also after its period ran out: the console
+  // sets it to paid again first.
+  if (manualPricing.isManuallyPriced(subscription)) throw manualPricingConflict();
+
+  const { pricing, override, periodStart, periodEnd } = await nextChargeTerms(subscription, transaction, { now, lock: true });
+  if (pricing.specialTermsId) await override.increment('chargesUsed', { by: 1, transaction });
+
+  const invoice = await db.BillingInvoice.create(
+    {
+      workspaceId,
+      subscriptionId: subscription.id,
+      ...pricing,
+      status: 'pending',
+      periodStart,
+      periodEnd,
+    },
+    { transaction }
+  );
+  if (req) {
+    await recordAudit({
+      workspaceId: byMerchant ? workspaceId : null,
+      actorUserId: req.user.id,
+      action: 'billing_invoice.create',
+      entityType: 'BillingInvoice',
+      entityId: invoice.id,
+      after: chargeAuditState(invoice),
+      metadata: { workspaceId },
+      req,
+      transaction,
+    });
+  }
+  return { invoice, created: true };
+}
+
+/**
+ * What createCharge would do now, writing nothing: the pending invoice if
+ * there is one (`{ pending }`), otherwise the next charge as it would be
+ * written (`{ quote }`: its price and period). Same errors as createCharge.
+ */
+async function quoteCharge(workspaceId, { now = new Date() } = {}) {
+  const subscription = await db.Subscription.findOne({ where: { workspaceId } });
+  if (!subscription) throw new NotFoundError('Subscription');
+  const pending = await db.BillingInvoice.findOne({ where: { subscriptionId: subscription.id, status: 'pending' } });
+  if (pending) return { pending };
+  // The same refusal as createCharge (item 336), so /invoices/open shows no
+  // charge at the plan's price and a proof for the next charge is refused
+  // before its screenshot is stored.
+  if (manualPricing.isManuallyPriced(subscription)) throw manualPricingConflict();
+  const { pricing, periodStart, periodEnd } = await nextChargeTerms(subscription, null, { now });
+  return { quote: { ...pricing, periodStart, periodEnd } };
 }
 
 function chargeAuditState(invoice) {
@@ -482,6 +523,8 @@ async function markChargeFailed(invoiceId, { reason } = {}) {
     await invoice.update({ status: 'failed', failureReason: reason ? String(reason).slice(0, 300) : null }, { transaction });
     const subscription = await db.Subscription.findByPk(invoice.subscriptionId, { transaction });
     if (subscription.status !== 'cancelled') await subscription.update({ status: 'past_due' }, { transaction });
+    // eslint-disable-next-line global-require
+    await require('../platformAdmin/platformNotificationService').paymentFailed(invoice, transaction);
     return { invoice, changed: true };
   });
 }
@@ -619,7 +662,7 @@ async function listCharges(workspaceId) {
   const plan = subscription.plan;
   const hasPending = invoices.some((i) => i.status === 'pending');
   let nextCharge = null;
-  if (plan && !hasPending && planPrice(plan, subscription.billingCycle) > 0) {
+  if (plan && !hasPending && !manualPricing.isManuallyPriced(subscription) && planPrice(plan, subscription.billingCycle) > 0) {
     const { referralCodeId, specialTermsId, ...pricing } = await priceCharge(subscription, plan);
     nextCharge = pricing;
   }
@@ -663,6 +706,8 @@ module.exports = {
   priceCharge,
   payableNow,
   createCharge,
+  createChargeInTransaction,
+  quoteCharge,
   settlePaid,
   markChargePaid,
   recordManualPayment,

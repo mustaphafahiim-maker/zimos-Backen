@@ -11,7 +11,7 @@ const { authLimiter } = require('../../core/middleware/rateLimiters');
 const { requirePlatformPermission } = require('../../core/middleware/platformAdminGuard');
 const { PLATFORM_PERMISSIONS } = require('../../core/security/platformPermissions');
 const { verifyPassword } = require('../../core/security/password');
-const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
+const { AppError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const notify = require('../notifications/notify');
 
@@ -97,28 +97,34 @@ async function useBackupCode(user, code, req) {
   });
 }
 
-/** The platform's reset, for a person who lost every way through the second step. */
+/**
+ * The platform's reset, for a person who lost every way through the second step.
+ * Who may be reset follows the console's other account actions
+ * (platformAdmin/userModerationService.lockTarget): never your own account, a
+ * creator's only by a creator, another console account only with admins.manage.
+ */
 async function adminReset(userId, req) {
-  const user = await db.User.findByPk(userId);
-  if (!user) throw new NotFoundError('User');
-  const row = await db.UserTwoFactor.findByPk(userId);
-  const before = row ? row.mode : 'off';
-  await db.sequelize.transaction(async (transaction) => {
+  const { lockTarget } = require('../platformAdmin/userModerationService');
+  const { user, before } = await db.sequelize.transaction(async (transaction) => {
+    const target = await lockTarget(userId, req, transaction, { permission: PLATFORM_PERMISSIONS.SUPPORT_MANAGE });
+    const row = await db.UserTwoFactor.findByPk(target.id, { transaction, lock: transaction.LOCK.UPDATE });
+    const previous = row ? row.mode : 'off';
     if (row) {
       await row.update({ mode: 'off', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: null, backupCodes: [], backupCodesCreatedAt: null }, { transaction });
     }
-    await db.TrustedDevice.destroy({ where: { userId }, transaction });
-    await db.Session.update({ revokedAt: new Date() }, { where: { userId, revokedAt: null }, transaction });
+    await db.TrustedDevice.destroy({ where: { userId: target.id }, transaction });
+    await db.Session.update({ revokedAt: new Date() }, { where: { userId: target.id, revokedAt: null }, transaction });
     await recordAudit({
       actorUserId: req.user.id,
       action: 'admin.user_two_factor_reset',
       entityType: 'User',
-      entityId: userId,
-      before: { mode: before },
+      entityId: target.id,
+      before: { mode: previous },
       after: { mode: 'off' },
       req,
       transaction,
     });
+    return { user: target, before: previous };
   });
   await securityEmail(user, 'two_factor_reset');
   return { mode: 'off', previousMode: before };

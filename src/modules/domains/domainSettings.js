@@ -1,17 +1,21 @@
 'use strict';
 
-const dns = require('dns');
 const { Router } = require('express');
 const Joi = require('joi');
 const asyncHandler = require('express-async-handler');
+const { Op } = require('sequelize');
 const db = require('../../db/models');
 const env = require('../../config/env');
+const logger = require('../../core/utils/logger');
 const validate = require('../../core/middleware/validate');
 const { NotFoundError, ConflictError, AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { getCertificateProvider, CertificateProviderError } = require('./certificates');
+const { getCertificateProvider, certificateProviderConfigured, CertificateProviderError } = require('./certificates');
 const primaryHost = require('./primaryHost');
 const rootDomains = require('./rootDomains');
+const rules = require('./domainRules');
+const { lookupTxt, lookupCname, lookupA } = require('./dnsVerifier');
+const { domainDnsCheckLimiter } = require('../../core/middleware/rateLimiters');
 
 /**
  * What the domains screen needs beyond add / verify / delete (domainsService):
@@ -20,18 +24,26 @@ const rootDomains = require('./rootDomains');
  * propagation check, and the public host lookup the storefront's proxy uses.
  */
 
-const SSL_STATUSES = ['none', 'pending', 'issued', 'failed'];
-const TXT_PREFIX = 'zimos-verify=';
+// moved: the provider saw the merchant's DNS stop pointing at us (item 341).
+const SSL_STATUSES = ['none', 'pending', 'issued', 'failed', 'moved'];
 const USABLE = ['verified', 'active'];
+// A domain the domains job suspended for the plan (domainJobs.js) is not served at all; one
+// suspended with its store still answers, so the store's own "unavailable" page (423) shows there.
+const SERVED = { [Op.or]: [{ suspendedAt: null }, { suspendedReason: { [Op.ne]: 'plan' } }] };
 
-/** Where a merchant points their domain: the store's own platform subdomain. */
-const cnameTargetFor = (workspace) => `${workspace.slug}.${env.platformRootDomain}`;
+/**
+ * Where a merchant points their domain: the one fixed host when
+ * CUSTOM_DOMAIN_CNAME_TARGET is set, else the store's own platform subdomain.
+ */
+const cnameTargetFor = (workspace) => rules.cnameTarget(workspace);
 
 /** The counterpart (www / root) as the dashboard shows it, or null when the domain has none. */
 function presentCounterpart(domain, target) {
   const hostname = rootDomains.counterpartOf(domain.hostname);
   if (!hostname) return null;
   const c = domain.counterpart || null;
+  // Subdomains only (CUSTOM_DOMAINS_SUBDOMAINS_ONLY): a root is never pointed here, so none is offered.
+  if (rules.subdomainsOnly() && !(c && c.redirect)) return null;
   const routing = c && c.redirect ? rootDomains.routingFor(hostname, target, 'redirect') : { records: [], alternatives: [] };
   return {
     hostname,
@@ -58,13 +70,30 @@ function present(domain, workspace, funnel) {
     sslStatus: SSL_STATUSES.includes(domain.sslStatus) ? domain.sslStatus : 'none',
     sslProvider: domain.sslProvider || null,
     sslCheckedAt: domain.sslCheckedAt || null,
+    // The provider's reason when the certificate failed or moved (item 341).
+    sslDetail: domain.sslDetail || null,
+    // Set by the domains job: store_suspended | plan (domainJobs.js).
+    suspended: Boolean(domain.suspendedAt),
+    suspendedReason: domain.suspendedReason || null,
+    // An unverified domain expires then (CUSTOM_DOMAINS_PENDING_TTL_DAYS); null = never.
+    verifyBy:
+      domain.status === 'pending_verification' && rules.pendingTtlMs()
+        ? new Date(new Date(domain.createdAt).getTime() + rules.pendingTtlMs()).toISOString()
+        : null,
     homeFunnel: funnel ? { id: funnel.id, name: funnel.name, status: funnel.status } : null,
     redirectToPrimary: domain.redirectToPrimary !== false,
     isRoot: rootDomains.isRoot(domain.hostname),
-    // The records the merchant creates at their DNS provider: the TXT, the
+    // The records the merchant creates at their DNS provider: the TXT (on
+    // _zimos-verify.<host>, item 341: nothing may sit beside a CNAME), the
     // routing ones, and the counterpart's when it is sent here.
     records: [
-      { type: 'TXT', name: domain.hostname, value: TXT_PREFIX + domain.verificationToken, ttl: 300, purpose: 'verification' },
+      {
+        type: 'TXT',
+        name: rules.verificationName(domain.hostname),
+        value: rules.verificationValue(domain),
+        ttl: 300,
+        purpose: 'verification',
+      },
       ...routing.records,
       ...(counterpart ? counterpart.records : []),
     ],
@@ -94,6 +123,10 @@ async function listDomains(workspaceId) {
   return {
     domains: domains.map((d) => present(d, workspace, funnels.get(d.homeFunnelId))),
     cnameTarget: cnameTargetFor(workspace),
+    // The deployment's rules (item 341): null = no limit of our own / never expires.
+    subdomainsOnly: rules.subdomainsOnly(),
+    maxPerStore: env.customDomains.maxPerStore || null,
+    pendingTtlDays: env.customDomains.pendingTtlDays || null,
     certificateProvider: (() => {
       try {
         return getCertificateProvider().code;
@@ -117,14 +150,87 @@ function providerFailure(err) {
   return err;
 }
 
-/**
- * Asks the provider for a certificate (first time) or where the request
- * stands. A domain that is not verified yet has nothing to certify.
- */
 /** The store's canonical host may have changed: forget the remembered one and the store's cached info. */
 function canonicalChanged(workspaceId) {
   primaryHost.forget(workspaceId);
   require('../storefront/storefrontCache').invalidate(workspaceId);
+}
+
+/**
+ * Asks the provider for the certificate (the first time) or where it stands,
+ * and stores the answer on the row; then the same for the counterpart sent
+ * here. Only ever for a verified domain: the provider hears of a hostname
+ * after our TXT proved the merchant controls it. Throws
+ * CertificateProviderError. The merchant's button, the verification and the
+ * domains job (domainJobs.js) all come through here (item 341, Ziad's b600e71).
+ */
+async function refreshCertificate(domain) {
+  if (!USABLE.includes(domain.status)) {
+    throw new ConflictError('Verify the domain before requesting its certificate', 'DOMAIN_NOT_VERIFIED');
+  }
+  const provider = getCertificateProvider();
+  const first = domain.sslStatus === 'none' || !domain.sslProviderRef;
+  let result;
+  try {
+    result = first
+      ? await provider.requestCertificate({ hostname: domain.hostname })
+      : await provider.getStatus({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
+  } catch (err) {
+    // A first request that failed is recorded: the job's batch moves on to the
+    // others, the merchant sees why, and the 72 hours also cover a request the
+    // provider keeps refusing (domainJobs.js).
+    if (first) {
+      await domain.update({
+        sslCheckedAt: new Date(),
+        sslDetail: (err instanceof CertificateProviderError ? err.message : 'The certificate provider could not be reached').slice(0, 300),
+        sslRequestedAt: domain.sslRequestedAt || new Date(),
+      });
+    }
+    throw err;
+  }
+  if (first && result.providerRef) await keepProviderRef(provider.code, result.providerRef);
+  const sslStatus = SSL_STATUSES.includes(result.status) ? result.status : 'pending';
+  const now = new Date();
+  await domain.update({
+    sslStatus,
+    sslProvider: provider.code,
+    sslProviderRef: result.providerRef || domain.sslProviderRef,
+    sslCheckedAt: now,
+    sslDetail: result.detail ? String(result.detail).slice(0, 300) : null,
+    // The job's 72 hours count from the request (migration 505).
+    sslRequestedAt: first ? now : domain.sslRequestedAt || now,
+    // A verified domain with a certificate is fully live.
+    status: sslStatus === 'issued' ? 'active' : domain.status,
+  });
+  const counterpartDetail = await syncCounterpartCertificate(domain, provider);
+  return { ...result, counterpartDetail };
+}
+
+/**
+ * A hostname claimed again at the provider can come back with the id of a
+ * deletion still queued for retry (Cloudflare answers a duplicate with the
+ * existing custom hostname): that deletion must not remove it now.
+ */
+async function keepProviderRef(provider, providerRef) {
+  await db.DomainProviderDeletion.destroy({ where: { provider, providerRef: String(providerRef) } });
+}
+
+/**
+ * Right after verification: ask for the certificate when a provider is set.
+ * A failure here does not undo the verification; the domains job asks again
+ * for every verified domain that has no certificate yet.
+ */
+async function requestAfterVerify(domain) {
+  if (!certificateProviderConfigured()) return;
+  try {
+    await refreshCertificate(domain);
+    canonicalChanged(domain.workspaceId);
+  } catch (err) {
+    logger.warn('domains: certificate request after verification failed; the job retries', {
+      domainId: domain.id,
+      error: err.message,
+    });
+  }
 }
 
 async function syncCertificate(workspaceId, domainId, req) {
@@ -134,26 +240,12 @@ async function syncCertificate(workspaceId, domainId, req) {
   }
   const before = { sslStatus: domain.sslStatus, status: domain.status };
   let result;
-  let provider;
   try {
-    provider = getCertificateProvider();
-    result =
-      domain.sslStatus === 'none' || !domain.sslProviderRef
-        ? await provider.requestCertificate({ hostname: domain.hostname })
-        : await provider.getStatus({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
+    result = await refreshCertificate(domain);
   } catch (err) {
     throw providerFailure(err);
   }
-
-  await domain.update({
-    sslStatus: SSL_STATUSES.includes(result.status) ? result.status : 'pending',
-    sslProvider: provider.code,
-    sslProviderRef: result.providerRef || domain.sslProviderRef,
-    sslCheckedAt: new Date(),
-    // A verified domain with a certificate is fully live.
-    status: result.status === 'issued' ? 'active' : domain.status,
-  });
-  const counterpartDetail = await syncCounterpartCertificate(domain, provider);
+  const { counterpartDetail } = result;
   await recordAudit({
     workspaceId,
     actorUserId: req.user.id,
@@ -178,10 +270,11 @@ async function syncCounterpartCertificate(domain, provider) {
   const hostname = rootDomains.counterpartOf(domain.hostname);
   if (!c || !c.redirect || !hostname) return null;
   try {
-    const result =
-      c.sslStatus === 'none' || !c.sslProviderRef
-        ? await provider.requestCertificate({ hostname })
-        : await provider.getStatus({ hostname, providerRef: c.sslProviderRef });
+    const firstRequest = c.sslStatus === 'none' || !c.sslProviderRef;
+    const result = firstRequest
+      ? await provider.requestCertificate({ hostname })
+      : await provider.getStatus({ hostname, providerRef: c.sslProviderRef });
+    if (firstRequest && result.providerRef) await keepProviderRef(provider.code, result.providerRef);
     await domain.update({
       counterpart: {
         ...c,
@@ -203,8 +296,9 @@ async function revokeCounterpart(domain) {
   if (!c || !hostname || !c.sslProviderRef) return;
   try {
     await getCertificateProvider().revoke({ hostname, providerRef: c.sslProviderRef });
-  } catch {
-    /* nothing to keep either way */
+  } catch (err) {
+    // Kept for the retry job, as for the domain itself (item 341).
+    await rememberDeletion({ workspaceId: domain.workspaceId, hostname, sslProvider: domain.sslProvider, sslProviderRef: c.sslProviderRef }, err);
   }
 }
 
@@ -228,6 +322,8 @@ async function updateDomain(workspaceId, domainId, patch, req) {
     if (patch.redirectCounterpart !== undefined) {
       const other = rootDomains.counterpartOf(domain.hostname);
       if (!other) throw new AppError('NO_COUNTERPART', 'Only a root domain or its www has a counterpart to send here', 422);
+      // Subdomains only (item 341): a root cannot be pointed here, so it cannot be sent on either.
+      if (patch.redirectCounterpart && rules.subdomainsOnly()) throw rules.apexRefusal(rootDomains.isRoot(other) ? other : domain.hostname);
       if (patch.redirectCounterpart) {
         const taken = await db.Domain.count({ where: { hostname: other, status: USABLE }, transaction });
         if (taken) throw new ConflictError(`${other} is connected as a domain of its own`, 'COUNTERPART_CONNECTED');
@@ -287,16 +383,26 @@ const bare = (host) => String(host || '').toLowerCase().replace(/\.$/, '');
 async function checkDns(workspaceId, domainId) {
   const domain = await loadDomain(workspaceId, domainId);
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'slug'] });
-  const expectedTxt = TXT_PREFIX + domain.verificationToken;
+  const txtName = rules.verificationName(domain.hostname);
+  const expectedTxt = rules.verificationValue(domain);
   const expectedCname = cnameTargetFor(workspace);
 
-  const txt = await dns.promises.resolveTxt(domain.hostname).then(flatten, () => []);
-  const cname = await dns.promises.resolveCname(domain.hostname).then((list) => list.map(bare), () => []);
+  // Public resolvers (dnsVerifier.js), so an internal name never answers.
+  const txt = await lookupTxt(txtName).then(flatten, () => []);
+  // Domains added before item 341 had the TXT on the host itself: it still verifies.
+  const legacyTxt = txt.includes(expectedTxt) ? [] : await lookupTxt(domain.hostname).then(flatten, () => []);
+  const cname = await lookupCname(domain.hostname).then((list) => list.map(bare), () => []);
   const other = domain.counterpart && domain.counterpart.redirect ? rootDomains.counterpartOf(domain.hostname) : null;
 
   return {
     hostname: domain.hostname,
-    txt: { expected: expectedTxt, found: txt.includes(expectedTxt), values: txt.slice(0, 10) },
+    txt: {
+      name: txtName,
+      expected: expectedTxt,
+      found: txt.includes(expectedTxt) || legacyTxt.includes(expectedTxt),
+      values: txt.slice(0, 10),
+      foundOnHost: legacyTxt.includes(expectedTxt),
+    },
     cname: { expected: expectedCname, found: cname.includes(bare(expectedCname)), values: cname.slice(0, 10) },
     // The routing record, whichever kind this host takes (a root's A / ALIAS, a subdomain's CNAME).
     routing: await routingCheck(domain.hostname, expectedCname),
@@ -312,11 +418,11 @@ async function checkDns(workspaceId, domainId) {
  */
 async function routingCheck(hostname, target) {
   if (!rootDomains.isRoot(hostname)) {
-    const values = await dns.promises.resolveCname(hostname).then((list) => list.map(bare), () => []);
+    const values = await lookupCname(hostname).then((list) => list.map(bare), () => []);
     return { kind: 'CNAME', expected: [target], found: values.includes(bare(target)), values: values.slice(0, 10) };
   }
-  const values = await dns.promises.resolve4(hostname).then((list) => list, () => []);
-  const targetIps = await dns.promises.resolve4(target).then((list) => list, () => []);
+  const values = await lookupA(hostname).then((list) => list, () => []);
+  const targetIps = await lookupA(target).then((list) => list, () => []);
   const allowed = new Set([...rootDomains.apexIps(), ...targetIps]);
   const ips = rootDomains.apexIps();
   return {
@@ -327,14 +433,50 @@ async function routingCheck(hostname, target) {
   };
 }
 
-/** Tells the provider a removed domain's certificate is no longer wanted. Never throws. */
+/**
+ * Tells the provider a removed domain's hostname (and its counterpart's) is
+ * no longer wanted. The domain row goes either way, so this never throws: a
+ * failure is kept as a DomainProviderDeletion row the domains job retries
+ * (domainJobs.js), so the hostname is not left behind at the provider.
+ */
 async function revokeCertificate(domain) {
   await revokeCounterpart(domain);
-  if (!domain || domain.sslStatus === 'none' || !domain.sslProviderRef) return;
+  if (!domain || !domain.sslProviderRef) return;
   try {
     await getCertificateProvider().revoke({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
+  } catch (err) {
+    await rememberDeletion(domain, err);
+  }
+}
+
+const RETRY_AFTER_MS = 5 * 60 * 1000;
+
+/** One hostname still to remove at the provider (migration 212). Never throws. */
+async function rememberDeletion(domain, err) {
+  let current = null;
+  try {
+    current = getCertificateProvider().code;
   } catch {
-    /* the row is going away either way */
+    current = null;
+  }
+  const fields = {
+    workspaceId: domain.workspaceId || null,
+    hostname: domain.hostname,
+    provider: domain.sslProvider || current || 'unknown',
+    providerRef: domain.sslProviderRef,
+  };
+  const lastError = String((err && err.message) || 'unknown error').slice(0, 500);
+  try {
+    const [row, created] = await db.DomainProviderDeletion.findOrCreate({
+      where: { provider: fields.provider, providerRef: fields.providerRef },
+      defaults: { ...fields, attempts: 1, lastError, nextAttemptAt: new Date(Date.now() + RETRY_AFTER_MS) },
+    });
+    if (!created) {
+      await row.update({ attempts: row.attempts + 1, lastError, nextAttemptAt: new Date(Date.now() + RETRY_AFTER_MS) });
+    }
+    logger.warn('domains: provider deletion failed; kept for the retry job', { hostname: domain.hostname, error: lastError });
+  } catch (saveErr) {
+    logger.error('domains: provider deletion failed and could not be kept', { hostname: domain.hostname, error: saveErr.message });
   }
 }
 
@@ -346,7 +488,8 @@ async function revokeCertificate(domain) {
 async function resolveHost(rawHost) {
   const host = bare(String(rawHost || '').split(':')[0]);
   if (!host) throw new NotFoundError('Host');
-  const domain = await db.Domain.findOne({ where: { hostname: host, status: USABLE } });
+  // A domain suspended for its plan is not served (domainJobs.js, item 341).
+  const domain = await db.Domain.findOne({ where: { hostname: host, status: USABLE, ...SERVED } });
   if (!domain) {
     // www / the root of a domain that has it sent there (rootDomains.js): the proxy redirects.
     const sentTo = await counterpartTarget(host);
@@ -402,7 +545,7 @@ async function resolveHost(rawHost) {
 async function counterpartTarget(host) {
   const of = rootDomains.counterpartOf(host);
   if (!of) return null;
-  const domain = await db.Domain.findOne({ where: { hostname: of, status: USABLE } });
+  const domain = await db.Domain.findOne({ where: { hostname: of, status: USABLE, ...SERVED } });
   if (!domain || !domain.counterpart || !domain.counterpart.redirect) return null;
   const workspace = await db.Workspace.findOne({ where: { id: domain.workspaceId, status: ['active', 'suspended'] }, attributes: ['id', 'slug'] });
   if (!workspace) return null;
@@ -460,6 +603,7 @@ function mountStaffRoutes(router) {
   );
   router.get(
     '/:domainId/dns-check',
+    domainDnsCheckLimiter,
     validate(schemas.one),
     asyncHandler(async (req, res) => res.json({ dns: await checkDns(req.tenant.workspaceId, req.params.domainId) }))
   );
@@ -481,6 +625,10 @@ module.exports = {
   listDomains,
   updateDomain,
   syncCertificate,
+  refreshCertificate,
+  requestAfterVerify,
+  rememberDeletion,
+  cnameTargetFor,
   checkDns,
   revokeCertificate,
   resolveHost,

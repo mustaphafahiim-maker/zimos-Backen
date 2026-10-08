@@ -193,6 +193,8 @@ async function bulkUpdateVariants(workspaceId, productId, rows, req) {
               type: 'adjustment',
               quantityDelta: delta,
               reason: 'Variant table edit',
+              referenceType: 'variant_table',
+              referenceId: product.id,
               actorUserId: req.user.id,
             },
             { transaction: t }

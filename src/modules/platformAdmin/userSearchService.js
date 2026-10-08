@@ -4,6 +4,7 @@ const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const { NotFoundError } = require('../../core/errors/AppError');
 const access = require('../workspaces/workspaceAccessService');
+const siteTraffic = require('../siteAnalytics/siteTrafficService');
 
 /**
  * The platform console's user search (GET /admin/users?q=). One box finds an
@@ -19,6 +20,10 @@ const access = require('../workspaces/workspaceAccessService');
  * a page at a time, with its stores (role and subscription state) and which
  * of them matched. Every value is a bind parameter. The trigram indexes of
  * migration 124 carry the "contains" matches.
+ *
+ * Deleted accounts (deleted_at set, platformAdmin/userModerationService) are
+ * left out of the list and its count unless includeDeleted=true; one is still
+ * opened by its id (GET /admin/users/:userId).
  *
  * Who may search: the platform permission the store list uses
  * (workspaces.view — creators and admins). An agent has never had it and still
@@ -60,18 +65,24 @@ const USER_MATCH = `(
   OR ($idPrefix::text IS NOT NULL AND u.id::text LIKE $idPrefix)
 )`;
 
-async function matchingIds({ q, limit, offset }) {
+// Keeps deleted accounts out of the list unless they were asked for.
+const LISTED = '($includeDeleted::boolean OR u.deleted_at IS NULL)';
+
+async function matchingIds({ q, limit, offset, includeDeleted }) {
   const terms = termsFor(q);
   if (!terms) {
-    const [{ total }] = await db.sequelize.query('SELECT COUNT(*)::int AS total FROM users', { type: QueryTypes.SELECT });
+    const [{ total }] = await db.sequelize.query(`SELECT COUNT(*)::int AS total FROM users u WHERE ${LISTED}`, {
+      bind: { includeDeleted },
+      type: QueryTypes.SELECT,
+    });
     const rows = await db.sequelize.query(
-      'SELECT id FROM users ORDER BY created_at DESC, id DESC LIMIT $limit OFFSET $offset',
-      { bind: { limit, offset }, type: QueryTypes.SELECT }
+      `SELECT u.id FROM users u WHERE ${LISTED} ORDER BY u.created_at DESC, u.id DESC LIMIT $limit OFFSET $offset`,
+      { bind: { limit, offset, includeDeleted }, type: QueryTypes.SELECT }
     );
     return { total, ids: rows.map((r) => r.id), matchedWorkspaces: new Set() };
   }
 
-  const bind = { ...terms, limit, offset };
+  const bind = { ...terms, limit, offset, includeDeleted };
   const matched = `
     SELECT u.id FROM users u WHERE ${USER_MATCH}
     UNION
@@ -79,12 +90,12 @@ async function matchingIds({ q, limit, offset }) {
     UNION
     SELECT m.user_id FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
      WHERE m.user_id IS NOT NULL AND ${WORKSPACE_MATCH}`;
-  const [{ total }] = await db.sequelize.query(`SELECT COUNT(*)::int AS total FROM (${matched}) x`, {
-    bind,
-    type: QueryTypes.SELECT,
-  });
+  const [{ total }] = await db.sequelize.query(
+    `SELECT COUNT(*)::int AS total FROM users u JOIN (${matched}) x ON x.id = u.id WHERE ${LISTED}`,
+    { bind, type: QueryTypes.SELECT }
+  );
   const rows = await db.sequelize.query(
-    `SELECT u.id FROM users u JOIN (${matched}) x ON x.id = u.id
+    `SELECT u.id FROM users u JOIN (${matched}) x ON x.id = u.id WHERE ${LISTED}
       ORDER BY u.created_at DESC, u.id DESC LIMIT $limit OFFSET $offset`,
     { bind, type: QueryTypes.SELECT }
   );
@@ -126,24 +137,27 @@ async function storesFor(userIds, matchedWorkspaces) {
   });
   const now = new Date();
   const byUser = new Map(userIds.map((id) => [id, []]));
-  const row = (w, role) => ({
+  const row = (w, role, owner) => ({
     id: w.id,
     name: w.name,
     slug: w.slug,
     status: w.status,
     role,
+    // The owner of record (workspaces.owner_user_id), whose stores deleting the
+    // account suspends; a member kept on the Owner role has role 'owner' but not this.
+    owner,
     matched: matchedWorkspaces.has(w.id),
     subscription: subscriptionSummary(w.subscription, now),
   });
-  for (const w of owned) byUser.get(w.ownerUserId).push(row(w, 'owner'));
+  for (const w of owned) byUser.get(w.ownerUserId).push(row(w, 'owner', true));
   for (const m of memberships) {
     if (!m.workspace || m.workspace.ownerUserId === m.userId) continue;
-    byUser.get(m.userId).push(row(m.workspace, m.role ? m.role.key : 'member'));
+    byUser.get(m.userId).push(row(m.workspace, m.role ? m.role.key : 'member', false));
   }
   return byUser;
 }
 
-const USER_ATTRIBUTES = ['id', 'username', 'fullName', 'email', 'status', 'platformRole', 'createdAt', 'lastLoginAt', 'emailVerifiedAt'];
+const USER_ATTRIBUTES = ['id', 'username', 'fullName', 'email', 'status', 'platformRole', 'createdAt', 'lastLoginAt', 'emailVerifiedAt', 'deletedAt'];
 
 function toRow(user, stores) {
   return {
@@ -156,15 +170,21 @@ function toRow(user, stores) {
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
     emailVerified: Boolean(user.emailVerifiedAt),
+    deleted: Boolean(user.deletedAt),
     workspaces: stores || [],
   };
 }
 
-/** GET /admin/users?q=&page=&limit= */
-async function searchUsers({ q = '', page = 1, limit = 25 } = {}) {
+/** GET /admin/users?q=&page=&limit=&includeDeleted= */
+async function searchUsers({ q = '', page = 1, limit = 25, includeDeleted = false } = {}) {
   const size = Math.min(Math.max(Number(limit) || 25, 1), MAX_LIMIT);
   const pageNo = Math.max(Number(page) || 1, 1);
-  const { total, ids, matchedWorkspaces } = await matchingIds({ q, limit: size, offset: (pageNo - 1) * size });
+  const { total, ids, matchedWorkspaces } = await matchingIds({
+    q,
+    limit: size,
+    offset: (pageNo - 1) * size,
+    includeDeleted: includeDeleted === true,
+  });
   const users = ids.length ? await db.User.findAll({ where: { id: ids }, attributes: USER_ATTRIBUTES }) : [];
   const byId = new Map(users.map((u) => [u.id, u]));
   const stores = await storesFor(ids, matchedWorkspaces);
@@ -179,7 +199,7 @@ async function searchUsers({ q = '', page = 1, limit = 25 } = {}) {
 
 /** GET /admin/users/:userId */
 async function getUser(userId) {
-  const user = await db.User.findByPk(userId, { attributes: [...USER_ATTRIBUTES, 'phone', 'usernameChangedAt'] });
+  const user = await db.User.findByPk(userId, { attributes: [...USER_ATTRIBUTES, 'phone', 'usernameChangedAt', 'suspendedAt', 'suspendedReason'] });
   if (!user) throw new NotFoundError('User');
   const stores = await storesFor([user.id], new Set());
   // The second step, for support (auth/twoFactorRecovery.js resets it).
@@ -188,7 +208,12 @@ async function getUser(userId) {
     ...toRow(user, stores.get(user.id)),
     phone: user.phone,
     usernameChangedAt: user.usernameChangedAt,
+    suspendedAt: user.suspendedAt,
+    suspendedReason: user.suspendedReason,
+    deletedAt: user.deletedAt,
     twoFactor: { mode: twoFactor ? twoFactor.mode : 'off', enabledAt: twoFactor ? twoFactor.enabledAt : null },
+    // Where the account came from on the marketing site, or null (item 339).
+    acquisition: await siteTraffic.acquisitionFor(user.id),
   };
 }
 

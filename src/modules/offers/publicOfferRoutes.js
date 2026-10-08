@@ -110,6 +110,8 @@ router.get(
 );
 router.post(
   '/newsletter/subscribe',
+  // A contact with marketing consent per call: a few a minute per IP (item 363).
+  require('../../core/middleware/rateLimiters').newsletterSignupLimiter,
   validate({ params: Joi.object({ workspaceId }), body: engagement.schemas.subscribe }),
   asyncHandler(async (req, res) => res.status(201).json(await engagement.subscribe(req.publicWorkspace, req.body)))
 );
@@ -130,7 +132,9 @@ router.post(
       funnelId: uuid.optional(),
     }),
   }),
-  asyncHandler(async (req, res) =>
+  asyncHandler(async (req, res) => {
+    // A funnel-limited code previews only in a published funnel that sells these items (item 355).
+    await require('../funnels/funnelCheckout').assertSells(ws(req), req.body.funnelId, req.body.items);
     res.json({
       coupon: await require('../discounts/couponExtras').previewCode(
         ws(req),
@@ -139,8 +143,8 @@ router.post(
         require('../catalog/productTests').visitorOf(req),
         req.body.funnelId || null
       ),
-    })
-  )
+    });
+  })
 );
 
 module.exports = router;

@@ -15,7 +15,7 @@ function required(name, fallback) {
 
 // Production must not start on a secret anyone can read in this repository
 // (SPEC §3.4): the three keys below have to be set, at least 32 characters
-// long, and not one of the placeholders from .env.example / docker-compose.
+// long, and not one of the placeholders older copies of .env.example carried.
 // Uploads must go to R2 — the local disk of a container is lost on redeploy —
 // unless ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true says the disk is a real volume.
 function assertProductionConfig() {
@@ -51,6 +51,83 @@ if (storefrontProxySecret && storefrontProxySecret.length < 32) {
   throw new Error('STOREFRONT_PROXY_SECRET must be at least 32 characters (generate one with `openssl rand -hex 32`)');
 }
 
+// The client IP behind Cloudflare (core/middleware/clientIp.js; item 329,
+// Ziad's 973fc8e). Both switches are off unless set to exactly "true", and
+// always off under NODE_ENV=test. With TRUST_EDGE_CLIENT_IP on, a header name
+// that isn't ours to choose or a secret under 32 characters refuses to start:
+// a weak secret would let anyone who guesses it choose their own IP. The
+// reserved names are his list plus the request headers our own code reads
+// (the edge header is removed from req.headers once checked).
+const RESERVED_EDGE_HEADERS = new Set([
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'x-request-id',
+  'x-storefront-secret',
+  'x-storefront-client-ip',
+  'x-cart-token',
+  'x-visitor-id',
+  'x-shopper-token',
+  'x-store-preview',
+  'x-store-locale',
+  'x-store-gate',
+  'x-payment-token',
+  'x-student-token',
+  'x-affiliate-token',
+  'x-funnel-id',
+  'x-workspace-id',
+  'x-api-key',
+  'x-zimos-app',
+  'x-zimos-token-mode',
+  'x-signature',
+  'x-kashier-signature',
+  'x-hub-signature-256',
+  'x-zimos-signature',
+  'x-vercel-ip-country',
+  'x-vercel-ip-country-region',
+  'x-vercel-ip-city',
+]);
+const trustEdgeClientIp = process.env.NODE_ENV !== 'test' && process.env.TRUST_EDGE_CLIENT_IP === 'true';
+const edgeSecretHeader = (process.env.EDGE_SECRET_HEADER || '').trim().toLowerCase();
+const edgeSecret = (process.env.EDGE_SECRET || '').trim();
+if (trustEdgeClientIp) {
+  if (!/^x-[a-z0-9-]+$/.test(edgeSecretHeader) || RESERVED_EDGE_HEADERS.has(edgeSecretHeader)) {
+    throw new Error(
+      'EDGE_SECRET_HEADER must name the header Cloudflare adds: "x-" then letters, digits or dashes, and not a header the app already reads (TRUST_EDGE_CLIENT_IP is on)'
+    );
+  }
+  if (edgeSecret.length < 32) {
+    throw new Error('EDGE_SECRET must be at least 32 characters while TRUST_EDGE_CLIENT_IP is on (generate one with `openssl rand -hex 32`)');
+  }
+}
+
+// No fallback secrets (item 328, Ziad's d7ee605): the secrets the app cannot
+// run without come from the environment (.env locally) and from nowhere else,
+// in every environment, test included. Missing: refuse to start. Production's
+// length and placeholder rules stay in assertProductionConfig above. The
+// errors name the variable, never its value.
+//   JWT_ACCESS_SECRET  signs access tokens and keys every HMAC derived from it
+//                      (preview tokens, sign-up codes, shoppers' photo links
+//                      while UPLOAD_URL_SECRET is unset)
+//   DB_PASSWORD        or the password inside DATABASE_URL. Not held to 32
+//                      characters: the database issues it, we don't.
+const GENERATE_SECRET = `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`;
+const setItIn = process.env.NODE_ENV === 'production' ? 'the environment' : '.env (see .env.example)';
+const isBlank = (value) => typeof value !== 'string' || value.trim() === '';
+const jwtAccessSecret = process.env.JWT_ACCESS_SECRET;
+const dbPassword = (dbUrl && dbUrl.password) || process.env.DB_PASSWORD;
+const secretProblems = [];
+if (isBlank(jwtAccessSecret)) {
+  secretProblems.push(`JWT_ACCESS_SECRET is not set: set it in ${setItIn}. Generate one with: ${GENERATE_SECRET}`);
+}
+if (isBlank(dbPassword)) {
+  secretProblems.push(`DB_PASSWORD is not set: set it in ${setItIn}, or give DATABASE_URL a password`);
+}
+if (secretProblems.length > 0) {
+  throw new Error(`Refusing to start (NODE_ENV=${process.env.NODE_ENV || 'development'}):\n  - ${secretProblems.join('\n  - ')}`);
+}
+
 // A comma-separated env var as a list of lower-cased, trimmed entries. Unset
 // uses the fallback; set but empty is an empty list. Under NODE_ENV=test the
 // fallback always wins, so a dev .env can't change what the suite sees.
@@ -60,6 +137,42 @@ function csvList(raw, fallback) {
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+}
+
+// A whole number of 1 or more from the environment (item 331, Ziad's a77791e).
+// Unset or blank uses the fallback; anything else refuses to start, naming the
+// variable, so a typo cannot quietly switch a limit off. Under NODE_ENV=test
+// the fallback always wins, so a dev .env can't change what the suite sees.
+function positiveInt(name, fallback) {
+  const raw = process.env[name];
+  if (process.env.NODE_ENV === 'test' || isBlank(raw)) return fallback;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new Error(`${name} must be a whole number of 1 or more (unset, it is ${fallback})`);
+  }
+  return Number(value);
+}
+
+// The same for a limit that may be left unset (item 341): unset or blank = none (null).
+function optionalPositiveInt(name) {
+  const raw = process.env[name];
+  if (process.env.NODE_ENV === 'test' || isBlank(raw)) return null;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new Error(`${name} must be a whole number of 1 or more, or unset for none`);
+  }
+  return Number(value);
+}
+
+// A public endpoint's switch (item 331). Ziad's rule: only the exact value
+// "true" opens it. Where our frontend uses the endpoint today the default
+// (unset or blank) stays open, and any value but "true" closes it. Under
+// NODE_ENV=test the default always wins; a test that needs the other state
+// sets it on the env object at runtime.
+function publicSwitch(name, defaultOpen) {
+  const raw = process.env[name];
+  if (process.env.NODE_ENV === 'test' || isBlank(raw)) return defaultOpen;
+  return raw === 'true';
 }
 
 const env = {
@@ -81,15 +194,18 @@ const env = {
         ? process.env.DB_NAME_TEST || 'zimos_test'
         : (dbUrl && dbUrl.name) || required('DB_NAME', 'zimos_dev'),
     user: (dbUrl && dbUrl.user) || process.env.DB_USER || 'postgres',
-    password: (dbUrl && dbUrl.password) || process.env.DB_PASSWORD || 'postgres',
+    password: dbPassword,
     ssl: dbUrl ? dbUrl.ssl || process.env.DB_SSL === 'true' : process.env.DB_SSL === 'true',
     poolMax: parseInt(process.env.DB_POOL_MAX || '10', 10),
     poolMin: parseInt(process.env.DB_POOL_MIN || '0', 10),
   },
 
+  // Refresh tokens are random strings stored hashed (core/security/tokens.js):
+  // nothing signs with JWT_REFRESH_SECRET. Production still requires it
+  // (assertProductionConfig, SPEC §3.4); it has no fallback here either.
   jwt: {
-    accessSecret: required('JWT_ACCESS_SECRET', 'dev_only_access_secret_change_me_32chars'),
-    refreshSecret: required('JWT_REFRESH_SECRET', 'dev_only_refresh_secret_change_me_32chars'),
+    accessSecret: jwtAccessSecret,
+    refreshSecret: process.env.JWT_REFRESH_SECRET || '',
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },
@@ -119,8 +235,12 @@ const env = {
     redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:4000/api/v1/auth/google/callback',
   },
 
-  // Where the Google callback sends the browser (with tokens in the query).
+  // Where the Google callback sends the browser (with tokens in the query),
+  // and the base of the links emailed to merchants (password reset, …).
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  // Whether FRONTEND_URL was set at all: in production the localhost default
+  // would email a link nobody can open, so password reset refuses without it.
+  frontendUrlConfigured: Boolean((process.env.FRONTEND_URL || '').trim()),
 
   cors: {
     origins: (process.env.CORS_ORIGINS || 'http://localhost:3000')
@@ -133,6 +253,11 @@ const env = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     authMax: parseInt(process.env.AUTH_RATE_LIMIT_MAX || '10', 10),
+    // Sign-in, sign-up, password reset and resend-verification, per IP alone,
+    // on top of authLimiter (whose key includes the email the caller sends,
+    // so a new email meant a new allowance). Sign-in counts failed attempts only.
+    authIpMax: parseInt(process.env.AUTH_IP_RATE_LIMIT_MAX || '50', 10),
+    authIpWindowMs: parseInt(process.env.AUTH_IP_RATE_LIMIT_WINDOW_MS || String(15 * 60 * 1000), 10),
     // Public storefront API only (see core/middleware/rateLimiters.js). Each
     // shopper still gets `max`; these are the ceilings per connecting IP — for
     // everyone sharing one IP (NAT, rotating cart tokens), and for our own
@@ -160,6 +285,66 @@ const env = {
     // on top of the per-address and per-account limits kept in the database
     // (otp/verificationCodeService).
     verifyMinuteMax: parseInt(process.env.VERIFY_RATE_LIMIT_PER_MINUTE || '10', 10),
+    // Password reset requests (POST /auth/password-reset/request), per IP per
+    // hour — on top of the per-account limit kept in the database (authService).
+    passwordResetHourMax: parseInt(process.env.PASSWORD_RESET_RATE_LIMIT_PER_HOUR || '10', 10),
+  },
+
+  // The 6-digit codes' ceilings per IP (otp/verificationCodeService), counted
+  // in the database over every code sent from one IP: at sign-up, at sign-in
+  // while unconfirmed, by the resend button, and to confirm a signed-in
+  // account's email. The limits per address and per account, the wait
+  // between two codes and the wrong guesses allowed are constants there.
+  verificationCodes: {
+    ipPerHour: positiveInt('VERIFICATION_CODES_PER_IP_PER_HOUR', 20),
+    ipPerDay: positiveInt('VERIFICATION_CODES_PER_IP_PER_DAY', 50),
+    smsPerIpPerDay: positiveInt('VERIFICATION_SMS_PER_IP_PER_DAY', 5),
+  },
+
+  // Public endpoints that can be closed until their identity checks are
+  // stronger (item 331, Ziad's b0ae907 and c9a87db).
+  //   reviews.publicSubmissionEnabled  POST /store/:id/products/:productId/reviews.
+  //                                    Ours proves the purchase with the order
+  //                                    number and its phone, and the storefront's
+  //                                    review form uses it, so unset keeps it
+  //                                    open; any value but "true" closes it
+  //                                    (the same 404 for every request).
+  //   passwordReset.smsEnabled         POST /auth/password-reset/sms/request and
+  //                                    /confirm. No screen uses them; closed
+  //                                    unless exactly "true", as in his.
+  reviews: {
+    publicSubmissionEnabled: publicSwitch('REVIEWS_PUBLIC_SUBMISSION_ENABLED', true),
+  },
+  passwordReset: {
+    smsEnabled: publicSwitch('PASSWORD_RESET_SMS_ENABLED', false),
+  },
+
+  // Account settings (auth/accountService; item 332, Ziad's 7c061ba).
+  // Changing the phone number by an SMS code to the new number is off unless
+  // exactly "true": off, a request is answered the same way and nothing is
+  // sent or changed. Our own /auth/verify-phone is not affected.
+  account: {
+    phoneChangeEnabled: publicSwitch('PHONE_CHANGE_ENABLED', false),
+  },
+
+  // Plan features as a gate (billing/planFeatureGate; item 333, Ziad's
+  // b005b3f): adding or buying a custom domain, inviting a team member and
+  // the web analytics are refused (403 PLAN_FEATURE_REQUIRED) for a store
+  // whose features (plan + console overrides) lack the key. Off unless
+  // exactly "true"; off, nothing is refused for a missing feature, as before.
+  // Under NODE_ENV=test it starts off whatever the .env says; a test that
+  // needs it sets it here.
+  planFeatures: {
+    enforcement: process.env.NODE_ENV !== 'test' && process.env.PLAN_FEATURE_ENFORCEMENT === 'true',
+  },
+
+  // The prepaid balance and the pay-per-order plan (billing/walletService;
+  // item 335, Ziad's 6c2e7cc). Off unless exactly "true"; off charges no
+  // order fee, offers no plan with a fee and takes no top-up, as before it
+  // existed. Under NODE_ENV=test it starts off whatever the .env says; a
+  // test that needs it sets it here.
+  wallet: {
+    enabled: process.env.NODE_ENV !== 'test' && process.env.WALLET_ENABLED === 'true',
   },
 
   // How the backend recognises our own Next.js storefront server. The secret is
@@ -173,6 +358,16 @@ const env = {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+  },
+
+  // Where the client IP comes from (core/middleware/clientIp.js): req.ip, or
+  // with trustEdge, CF-Connecting-IP on a request that carries Cloudflare's
+  // secret header. `debug` logs what each layer said, for every request.
+  clientIp: {
+    debug: process.env.NODE_ENV !== 'test' && process.env.CLIENT_IP_DEBUG === 'true',
+    trustEdge: trustEdgeClientIp,
+    edgeHeader: edgeSecretHeader,
+    edgeSecret,
   },
 
   // Under NODE_ENV=test email and SMS are pinned to `console` (as storage is
@@ -194,6 +389,8 @@ const env = {
       apiKey: process.env.BREVO_API_KEY || '',
       fromAddress: process.env.EMAIL_FROM_ADDRESS || '',
       fromName: process.env.EMAIL_FROM_NAME || 'Zimos',
+      // The secret Brevo's status webhook carries (Bearer token, basic-auth password or ?token=), item 386.
+      webhookToken: (process.env.BREVO_WEBHOOK_TOKEN || '').trim(),
     },
     // Twilio SMS (only used when SMS_PROVIDER=twilio).
     twilio: {
@@ -201,6 +398,12 @@ const env = {
       authToken: process.env.TWILIO_AUTH_TOKEN || '',
       fromNumber: process.env.TWILIO_FROM_NUMBER || '',
     },
+    // Delivery status (notifications/deliveryStatus, item 386): this API's public origin, for the
+    // statusCallback put on each Twilio SMS (none when unset); the console provider's simulated statuses
+    // (never in production); the per-provider rate limit on the status webhooks.
+    webhookBaseUrl: (process.env.NOTIFICATIONS_WEBHOOK_BASE_URL || '').trim().replace(/\/+$/, ''),
+    simulateStatus: process.env.NODE_ENV !== 'production' && process.env.NOTIFICATION_STATUS_SIMULATION === 'true',
+    statusWebhookRateLimitMax: parseInt(process.env.DELIVERY_WEBHOOK_RATE_LIMIT_MAX || '3000', 10),
   },
 
   // Uploaded-image storage. `local` (default) writes to public/uploads and is
@@ -229,11 +432,21 @@ const env = {
     },
   },
 
+  // Merchant uploads to the media library — product, page-builder, logo and
+  // favicon pictures (item 400, SPEC §7.1). An image may be this large when
+  // sent (10 MB, MEDIA_IMAGE_MAX_MB to change it); it is still re-encoded and
+  // brought down to imageProcessing's MERCHANT_MAX_DIMENSION before storing.
+  media: {
+    imageMaxBytes: positiveInt('MEDIA_IMAGE_MAX_MB', 10) * 1024 * 1024,
+  },
+
   // Photos shoppers attach to an order through a product's custom fields
   // (POST /store/:workspaceId/uploads). See modules/customerUploads.
   customerUploads: {
-    // Refused before any processing above this (413).
-    maxRawBytes: 15 * 1024 * 1024,
+    // Refused while it streams in, before any processing, above this (413):
+    // 5 MB (SPEC §11.3), CUSTOMER_UPLOAD_MAX_MB to change it (item 400). The
+    // same cap covers a manual-payment proof and a transfer receipt.
+    maxRawBytes: positiveInt('CUSTOMER_UPLOAD_MAX_MB', 5) * 1024 * 1024,
     // Photos one visitor may have waiting for an order at once.
     maxPendingPerVisitor: parseInt(process.env.CUSTOMER_UPLOAD_MAX_PENDING || '10', 10),
     // A photo no order took is deleted after this long.
@@ -361,12 +574,21 @@ const env = {
   //   requireSubscription  a new store starts as a draft: it can be built but
   //                        not published or sell until a trial or a paid
   //                        subscription starts.
+  // Two more, from Ziad's sign-up (spec-gaps item 330), off the same way:
+  //   confirmByCode        (SIGNUP_CONFIRM_BY_CODE) with requireVerification
+  //                        off, a new account is active and signed in at once
+  //                        and confirms its email with an emailed code instead
+  //                        of the link; an account still pending is let in at
+  //                        its next sign-in. Off: pending + link, as before.
+  //   requirePhone         (REQUIRE_PHONE_AT_SIGNUP) sign-up needs a phone.
   // Under NODE_ENV=test they start off whatever the .env says; a test that
   // needs one sets it on this object at runtime.
   signup: {
     requirePlan: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_PLAN_AT_SIGNUP === 'true',
     requireVerification: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_SIGNUP_VERIFICATION === 'true',
     requireSubscription: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_SUBSCRIPTION_TO_GO_LIVE === 'true',
+    confirmByCode: process.env.NODE_ENV !== 'test' && process.env.SIGNUP_CONFIRM_BY_CODE === 'true',
+    requirePhone: process.env.NODE_ENV !== 'test' && process.env.REQUIRE_PHONE_AT_SIGNUP === 'true',
     // Draft stores one person may hold while none of their stores is live.
     draftStoresPerUser: Math.max(1, parseInt(process.env.DRAFT_STORES_PER_USER || '1', 10) || 1),
     // Country calling codes a verification SMS may go to (digits, no "+").
@@ -388,6 +610,13 @@ const env = {
     lockTtlMinutes: Math.max(1, parseInt(process.env.CONFIRMATION_LOCK_TTL_MINUTES || '15', 10) || 15),
   },
 
+  // A shipment status set by hand that would move the order to a stage the
+  // table in orders/orderStateService.js does not allow is refused with 409
+  // (item 342). On unless ORDER_STATUS_GUARDS is exactly "false" (Ziad's
+  // default): then it is recorded in the history like any other move.
+  // PATCH /orders/:id/status checks the table either way.
+  orderStatusGuards: (process.env.ORDER_STATUS_GUARDS || '').trim() !== 'false',
+
   // Background work (core/queue, core/outbox, src/worker.js). The queue runs on
   // PostgreSQL unless REDIS_URL is set, then on BullMQ. While inProcess is on,
   // the API process is its own worker — nothing else to deploy; turn it off
@@ -398,6 +627,10 @@ const env = {
     inProcess: process.env.NODE_ENV !== 'test' && process.env.WORKER_IN_PROCESS !== 'false',
     pollMs: Math.max(250, parseInt(process.env.QUEUE_POLL_MS || '1000', 10) || 1000),
     concurrency: Math.max(1, parseInt(process.env.QUEUE_CONCURRENCY || '10', 10) || 10),
+    // A running job renews its lock while it runs (Postgres driver); one whose
+    // lock is older than this had its worker stop and is handed out again,
+    // or failed when it may not run twice (item 365).
+    staleLockMs: Math.max(10000, parseInt(process.env.QUEUE_STALE_LOCK_MS || '600000', 10) || 600000),
   },
 
   // Outbound webhooks to merchants' own systems (modules/webhooks).
@@ -450,6 +683,65 @@ const env = {
   // Accepted: cloudflare, vercel, cloudfront.
   analytics: {
     geoHeaders: csvList(process.env.ANALYTICS_GEO_HEADERS, ''),
+  },
+
+  // Anonymous visits to the marketing site (siteAnalytics/, item 339, Ziad's
+  // 3864272), shown in the console. Off unless exactly "true": POST
+  // /public/site-events then answers 404 like an unknown path and sign-up
+  // ignores siteSessionId. Under NODE_ENV=test it starts off; a test flips it
+  // on this object. Origins is the CORS allowlist for that endpoint only
+  // (e.g. https://zimos.co, no trailing slash); any other origin is refused.
+  siteAnalytics: {
+    enabled: publicSwitch('SITE_ANALYTICS_ENABLED', false),
+    origins: csvList(process.env.SITE_ANALYTICS_ORIGINS, ''),
+  },
+
+  // Merchant custom domains (modules/domains; item 341, Ziad's 08d23b2,
+  // d051b79, b600e71, 045801f). Each knob keeps our behaviour by default and
+  // gives his deployment its own:
+  //  - enabled (CUSTOM_DOMAINS_ENABLED): unset = open, as before; any value
+  //    but "true" closes every dashboard route under /workspaces/:id/domains
+  //    (404 like an unknown path) and the domains jobs but the provider
+  //    deletion retry. Verified domains keep resolving either way.
+  //  - subdomainsOnly (CUSTOM_DOMAINS_SUBDOMAINS_ONLY): only exactly "true"
+  //    refuses a root domain (400 APEX_NOT_SUPPORTED) for connecting and
+  //    buying, and sends no www / root counterpart.
+  //  - cnameTarget (CUSTOM_DOMAIN_CNAME_TARGET): set, the one host every
+  //    domain points at (the Cloudflare for SaaS entry); unset, each store's
+  //    own <slug>.<PLATFORM_ROOT_DOMAIN>, as before.
+  //  - maxPerStore (CUSTOM_DOMAINS_MAX_PER_STORE): set, the most domains one
+  //    store may hold, verified or not; unset, only the plan's limit.
+  //  - pendingTtlDays (CUSTOM_DOMAINS_PENDING_TTL_DAYS): set, an unverified
+  //    domain expires after that many days (verify refuses, the job removes
+  //    it); unset, it waits for its TXT however long it takes, as before.
+  //  - resolvers (DOMAIN_VERIFY_RESOLVERS): the public DNS servers that
+  //    verification and the DNS check ask; unset or blank = 1.1.1.1,8.8.8.8,
+  //    "system" = this server's own resolver.
+  // Under NODE_ENV=test each takes its default; a test sets them here.
+  customDomains: {
+    enabled: publicSwitch('CUSTOM_DOMAINS_ENABLED', true),
+    subdomainsOnly: process.env.NODE_ENV !== 'test' && process.env.CUSTOM_DOMAINS_SUBDOMAINS_ONLY === 'true',
+    cnameTarget:
+      process.env.NODE_ENV === 'test'
+        ? ''
+        : String(process.env.CUSTOM_DOMAIN_CNAME_TARGET || '')
+            .trim()
+            .toLowerCase()
+            .replace(/\.$/, ''),
+    maxPerStore: optionalPositiveInt('CUSTOM_DOMAINS_MAX_PER_STORE'),
+    pendingTtlDays: optionalPositiveInt('CUSTOM_DOMAINS_PENDING_TTL_DAYS'),
+    resolvers:
+      String(process.env.DOMAIN_VERIFY_RESOLVERS || '').trim().toLowerCase() === 'system' && process.env.NODE_ENV !== 'test'
+        ? []
+        : csvList(isBlank(process.env.DOMAIN_VERIFY_RESOLVERS) ? undefined : process.env.DOMAIN_VERIFY_RESOLVERS, '1.1.1.1,8.8.8.8'),
+    // Cloudflare for SaaS custom hostnames (domains/certificates/cloudflare.js,
+    // CERTIFICATE_PROVIDER=cloudflare). The token needs Zone > SSL and
+    // Certificates: Edit on that zone only. Empty under NODE_ENV=test, so a
+    // dev .env never reaches the suite; a test sets them here.
+    cloudflare: {
+      apiToken: process.env.NODE_ENV === 'test' ? '' : (process.env.CLOUDFLARE_API_TOKEN || '').trim(),
+      zoneId: process.env.NODE_ENV === 'test' ? '' : (process.env.CLOUDFLARE_ZONE_ID || '').trim(),
+    },
   },
 };
 

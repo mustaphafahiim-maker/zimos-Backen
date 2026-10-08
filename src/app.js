@@ -7,8 +7,9 @@ const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
 const env = require('./config/env');
 const requestId = require('./core/middleware/requestId');
+const { resolveClientIp, clientIp } = require('./core/middleware/clientIp');
 const { corsPolicy } = require('./core/middleware/cors');
-const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter } = require('./core/middleware/rateLimiters');
+const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter, deliveryWebhookLimiter } = require('./core/middleware/rateLimiters');
 const { errorHandler, notFoundHandler } = require('./core/middleware/errorHandler');
 const { hostResolver } = require('./core/middleware/hostResolver');
 const logger = require('./core/utils/logger');
@@ -49,6 +50,7 @@ const billingRoutes = require('./modules/billing/billingRoutes');
 const publicPlansRoutes = require('./modules/billing/publicPlansRoutes');
 const workspaceBillingRoutes = require('./modules/billing/workspaceBillingRoutes');
 const adminRoutes = require('./modules/billing/adminRoutes');
+const paymentAdminRoutes = require('./modules/billing/paymentAdminRoutes');
 const platformAdminRoutes = require('./modules/platformAdmin/platformAdminRoutes');
 const domainsRoutes = require('./modules/domains/domainsRoutes');
 const mediaRoutes = require('./modules/media/mediaRoutes');
@@ -63,6 +65,7 @@ const onlinePaymentRoutes = require('./modules/payments/onlinePaymentRoutes');
 const paymentWebhookRoutes = require('./modules/payments/paymentWebhookRoutes');
 const analyticsRoutes = require('./modules/analytics/analyticsRoutes');
 const eventsPublicRoutes = require('./modules/analytics/eventsPublicRoutes');
+const siteEventsRoutes = require('./modules/siteAnalytics/siteEventsRoutes');
 const auditRoutes = require('./modules/audit/auditRoutes');
 const invoiceRoutes = require('./modules/invoices/invoiceRoutes');
 const whatsappRoutes = require('./modules/whatsapp/whatsappRoutes');
@@ -89,15 +92,21 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 app.use(requestId);
+// The client IP, once, before the request log and the rate limits read it.
+app.use(resolveClientIp);
 // Error messages in Arabic or French when the request asks (core/errors/errorMessages.js).
 app.use(require('./core/errors/errorMessages').translateErrors);
 app.use(helmet());
-// Any origin for the public /api/v1/store API, the CORS_ORIGINS allowlist
-// everywhere else (see core/middleware/cors.js).
+// Any origin for the public /api/v1/store API, SITE_ANALYTICS_ORIGINS for the
+// marketing site's beacon, the CORS_ORIGINS allowlist everywhere else (see
+// core/middleware/cors.js).
 app.use(corsPolicy);
 // Storefront analytics beacons get their own, much smaller, body limit. Mounted
 // before the API-wide parser below, which then skips the already-read body.
 app.use(`/api/${env.apiVersion}/store/:workspaceId/events`, eventsPublicRoutes.eventsBodyParser);
+// The marketing site's anonymous beacon reads its own 2kb body and has its own
+// per-IP limit; off, the path answers 404 (siteAnalytics/, item 339).
+app.use(siteEventsRoutes.PATH, siteEventsRoutes);
 // `verify` keeps the exact bytes Express parsed so webhook signatures can be
 // checked against what the gateway actually signed — a re-serialised req.body
 // would differ by key order or whitespace and never match. See
@@ -117,7 +126,7 @@ if (!env.isTest) {
   app.use((req, res, next) => {
     // Gateway callbacks carry their signature in the query string (?hmac=):
     // it never reaches a log line.
-    logger.info(`${req.method} ${redactUrl(req.originalUrl)}`, { requestId: req.id, ip: req.ip });
+    logger.info(`${req.method} ${redactUrl(req.originalUrl)}`, { requestId: req.id, ip: clientIp(req) });
     next();
   });
 }
@@ -129,6 +138,8 @@ app.use(`/api/${env.apiVersion}/store`, storefrontLimiter);
 // webhook token, not per IP (see rateLimiters.js).
 app.use(`/api/${env.apiVersion}/webhooks/carriers`, carrierWebhookLimiter);
 app.use(`/api/${env.apiVersion}/webhooks/payments`, paymentWebhookLimiter);
+// Email and SMS delivery status from Brevo / Twilio (item 386): per provider.
+app.use([`/api/${env.apiVersion}/webhooks/email`, `/api/${env.apiVersion}/webhooks/sms`], deliveryWebhookLimiter);
 app.use(generalLimiter);
 
 // --- Health / readiness -----------------------------------------------
@@ -159,6 +170,8 @@ v1.use('/me/push', require('./modules/notifications/push/pushService').router);
 v1.use('/me/referrals', require('./modules/referrals/merchantReferrals').me);
 // Help center, Telegram and tutorial links for the dashboard (platformAdmin/educationLinks.js).
 v1.use('/me/education', require('./modules/platformAdmin/educationLinks').me);
+// Team invites sent to the signed-in person's email: list, accept, decline (item 358).
+v1.use('/me/invites', require('./modules/workspaces/myInvites').router);
 // The signed-in person's name and picture (before /auth, which has no such route).
 v1.use('/auth/me/profile', require('./modules/auth/profileRoutes'));
 // Changing the sign-in email, confirmed from the new address (auth/emailChange.js).
@@ -181,8 +194,12 @@ v1.use('/workspaces/:workspaceId/inventory', inventoryRoutes);
 v1.use('/workspaces/:workspaceId/customer-merge', require('./modules/customers/customerMerge').router);
 // Transfer a store to another owner (storeTransfer, item 252).
 v1.use('/workspaces/:workspaceId/ownership-transfer', require('./modules/storeTransfer').router);
+// The new owner accepts or declines (item 379).
+v1.use('/me/ownership-offers', require('./modules/storeTransfer').me);
 // Customer timeline (customerTimeline, item 250).
 v1.use('/workspaces/:workspaceId/customers/:customerId/timeline', require('./modules/customerTimeline').router);
+// The store's email suppression list: addresses that bounced or complained (item 386).
+v1.use('/workspaces/:workspaceId/email-suppressions', require('./modules/notifications/deliveryStatus/suppressionRoutes'));
 v1.use('/workspaces/:workspaceId/customers', customerRoutes);
 // Contacts from a CSV / Excel sheet (item 187), ahead of /contacts/:customerId.
 v1.use('/workspaces/:workspaceId/contacts/import', require('./modules/contacts/contactImport').router);
@@ -219,6 +236,8 @@ v1.use('/workspaces/:workspaceId/shipping', shippingRoutes);
 v1.use('/workspaces/:workspaceId/tax-rates', taxRoutes);
 v1.use('/workspaces/:workspaceId/websites', pagesRoutes);
 v1.use('/workspaces/:workspaceId/funnels', funnelsRoutes);
+// Deleted funnels, websites and pages: list, restore, delete for good (trash/trashService.js).
+v1.use('/workspaces/:workspaceId/trash', require('./modules/trash/trashRoutes'));
 v1.use('/workspaces/:workspaceId/domains', domainsRoutes);
 // Code customizations: the merchant's own HTML/CSS/JS slots (website.publish).
 v1.use('/workspaces/:workspaceId/custom-code', require('./modules/customCode/customCodeRoutes').router);
@@ -248,7 +267,11 @@ v1.use('/workspaces/:workspaceId/automations', automationRoutes);
 v1.use('/workspaces/:workspaceId/settlements', settlementRoutes);
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/manual-transfers', require('./modules/payments/manualTransferRoutes'));
+// The store's InstaPay / wallet methods and the shoppers' screenshot proofs (manualPayments, item 340).
+v1.use('/workspaces/:workspaceId/manual-payments', require('./modules/manualPayments/manualPaymentRoutes'));
 v1.use('/workspaces/:workspaceId/payment-rules', require('./modules/payments/paymentRulesRoutes'));
+// Card disputes and chargebacks reported by Stripe and PayPal (item 377).
+v1.use('/workspaces/:workspaceId/payment-disputes', require('./modules/payments/disputeRoutes'));
 v1.use('/workspaces/:workspaceId/currencies', require('./modules/currencies/currencyRoutes'));
 v1.use('/workspaces/:workspaceId/saved-payment-methods', require('./modules/payments/savedMethods/savedMethodRoutes'));
 v1.use('/workspaces/:workspaceId/server-pixels', appGate.requireAppForChanges('tracking_pixels'), serverPixelsRoutes.staff);
@@ -332,6 +355,8 @@ v1.use('/workspaces/:workspaceId/post-purchase-survey', require('./modules/postP
 v1.use('/workspaces/:workspaceId/rfm', require('./modules/rfm').router);
 v1.use('/workspaces/:workspaceId/store-reports', require('./modules/storeReports').router);
 v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
+// Short sequential order numbers: prefix, suffix, start (spec-gaps item 381).
+v1.use('/workspaces/:workspaceId/order-numbers', require('./modules/orders/orderNumbers').router);
 // VIP tiers (spec-gaps item 218).
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
 // B2B quote requests (spec-gaps item 219).
@@ -349,6 +374,8 @@ v1.use('/workspaces/:workspaceId/email-marketing', require('./modules/emailMarke
 v1.use('/workspaces/:workspaceId/team', require('./modules/team/teamRoutes'));
 v1.use('/workspaces/:workspaceId/support-access', require('./modules/supportAccess/supportAccess').router);
 v1.use('/workspaces/:workspaceId/notifications', merchantNotificationRoutes);
+// Alerts to a Telegram group, Slack or Discord channel (item 378).
+v1.use('/workspaces/:workspaceId/team-channels', require('./modules/notifications/teamChannels/teamChannelRoutes'));
 // The store as an app for shoppers: its home-screen name, icon and colour (website.publish).
 v1.use('/workspaces/:workspaceId/store-app', require('./modules/storefront/storeApp').router);
 v1.use('/workspaces/:workspaceId/tracking-pixels', appGate.requireAppForChanges('tracking_pixels'), trackingPixelRoutes);
@@ -371,6 +398,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
+// Email and SMS delivery status — public; Brevo's secret token / Twilio's signature prove the sender (item 386).
+v1.use('/webhooks', require('./modules/notifications/deliveryStatus/webhookRoutes').router);
 // The sandbox gateway's hosted payment page — only where that gateway is registered.
 if (require('./modules/payments/gateways').isGateway('sandbox')) v1.use('/sandbox-pay', require('./modules/payments/sandboxPayRoutes'));
 // The sandbox courier's "advance the parcel" endpoint — only where that courier is registered.
@@ -378,6 +407,8 @@ if (require('./modules/shipping/carriers').getAdapter('sandbox')) v1.use('/dev/s
 // Presigned-upload stand-ins for local disk (media/storage/sandboxRoutes.js) — never in production.
 if (env.storage.provider === 'local' && !env.isProduction) v1.use('/storage-sandbox', require('./modules/media/storage/sandboxRoutes'));
 v1.use('/admin', adminRoutes);
+// Payment methods and transfer proofs (billing/paymentAdminRoutes).
+v1.use('/admin', paymentAdminRoutes);
 // Plans, subscriptions, feature flags and announcements. Shares the /admin
 // mount with adminRoutes above, which owns /workspaces and /dashboard.
 v1.use('/admin', platformAdminRoutes);
@@ -460,6 +491,9 @@ v1.use('/store/:workspaceId/cart', cartRoutes);
 // The signed, short-lived link to a shopper's photo that staff open from an
 // order (customerUploads/uploadLinks.js). The signature is the credential.
 v1.get('/customer-uploads/:uploadId', require('./modules/customerUploads/customerUploadController').readSigned);
+// The signed, short-lived link to a payment proof's screenshot that a
+// platform admin opens (billing/proofLinks.js). The signature is the credential.
+v1.get('/payment-proofs/:proofId/image', require('./modules/billing/paymentController').readProofImage);
 
 app.use(`/api/${env.apiVersion}`, v1);
 

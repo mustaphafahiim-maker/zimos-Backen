@@ -3,6 +3,7 @@
 const db = require('../../db/models');
 const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { clientIp } = require('../../core/middleware/clientIp');
 const orderService = require('../orders/orderService');
 const { OFFER_STEP_TYPES } = require('./funnelGraph');
 
@@ -277,7 +278,8 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req, variantI
     return { merged: publicOrder(order, order.items), addedItemId: item.id };
   }
 
-  // Too late to join it: its own order, as before, without a second shipping fee.
+  // Too late to join it: its own order, as before, without a second shipping
+  // fee or a second pay-per-order fee (billing/walletService).
   const { order: followOn } = await orderService.createOrder(
     workspaceId,
     {
@@ -287,8 +289,8 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req, variantI
       paymentMethod: 'cod',
       funnelId,
     },
-    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? req.ip : null },
-    { transaction, skipFraudRules: true, shippingOverride: { amount: 0 }, source: 'upsell' }
+    { user: null, headers: req && req.headers ? req.headers : {}, ip: req ? clientIp(req) : null },
+    { transaction, skipFraudRules: true, shippingOverride: { amount: 0 }, source: 'upsell', chargeFee: false }
   );
   await db.Order.update({ linkedFromOrderId: order.id }, { where: { id: followOn.id, workspaceId }, transaction });
   await db.FunnelOfferAcceptance.create(

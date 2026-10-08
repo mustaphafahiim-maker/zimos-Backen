@@ -14,7 +14,8 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { storefrontPostLimiters } = require('../../core/middleware/rateLimiters');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
  * Product questions and answers (spec-gaps item 212).
@@ -96,10 +97,10 @@ store.get('/', resolvePublicWorkspace, validate({ params: sp, query: Joi.object(
 }));
 store.post(
   '/',
-  trackingLimiter,
+  storefrontPostLimiters.productQuestion,
   resolvePublicWorkspace,
   validate({ params: sp, body: Joi.object({ question: Joi.string().trim().min(5).max(1000).required(), name: Joi.string().trim().max(120).allow('', null), email: Joi.string().trim().email().max(255).allow('', null), locale: Joi.string().valid('ar', 'en', 'fr') }) }),
-  asyncHandler(async (req, res) => res.status(201).json(await ask(req.publicWorkspace, req.params.productId, req.body, req.ip)))
+  asyncHandler(async (req, res) => res.status(201).json(await ask(req.publicWorkspace, req.params.productId, req.body, clientIp(req))))
 );
 
 // Mounted at /api/v1/workspaces/:workspaceId/product-questions.

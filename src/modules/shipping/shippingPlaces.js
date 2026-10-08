@@ -6,7 +6,8 @@ const { governorateCode } = require('./governorates');
 /**
  * The places a store prices shipping by (SPEC §12.1 "cities table"): the
  * platform's list (geo_regions, geo/geoRegions.js) — Egypt's 27 governorates
- * plus North Coast, Saudi Arabia's 13 regions — for the store's country.
+ * plus North Coast, Saudi Arabia's 13 regions, and the divisions of the other
+ * countries a store sells in (migration 532) — for the store's country.
  *
  *   shipping_governorate_rates  { <place code>: amount }, any country's place
  *                               (the key keeps its old name: Egypt's codes
@@ -60,7 +61,7 @@ async function placesFor(country) {
 async function unknownCodes(codes, field) {
   if (!codes.length) return [];
   const known = new Set();
-  for (const country of ['EG', 'SA']) for (const p of await placesFor(country)) known.add(p.code);
+  for (const country of await require('../geo/geoRegions').countries()) for (const p of await placesFor(country)) known.add(p.code);
   return codes.filter((c) => !known.has(c)).map((c) => ({ field, message: `"${c}" is not a place of the platform's list` }));
 }
 

@@ -16,16 +16,21 @@ const Joi = require('joi');
  *   { key: 'options' }                every product option in use (Size, Color…)
  *   { key: 'option', name: 'Size' }   one product option by name
  * A store that has saved nothing gets DEFAULT_CATALOG_SETTINGS.
+ *
+ * sold_out: what the listing, search and collection pages do with products
+ * that cannot be bought — 'show' (default), 'last' or 'hide' (./soldOut.js).
  */
 
 // featured / best_selling: the builder's product list sources (productSearch.js), also a shop's possible default.
 const CATALOG_SORTS = ['newest', 'price_asc', 'price_desc', 'name', 'position', 'featured', 'best_selling'];
 const FILTER_KEYS = ['collections', 'price', 'tags', 'options', 'option'];
 const MAX_FILTERS = 30;
+const { SOLD_OUT_MODES, DEFAULT_SOLD_OUT } = require('./soldOut');
 
 const DEFAULT_CATALOG_SETTINGS = Object.freeze({
   sidebar_enabled: true,
   default_sort: 'newest',
+  sold_out: DEFAULT_SOLD_OUT,
   filters: Object.freeze([{ key: 'collections' }, { key: 'price' }, { key: 'options' }, { key: 'tags' }]),
 });
 
@@ -37,12 +42,19 @@ const filterSchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).when('key', { is: 'option', then: Joi.required(), otherwise: Joi.forbidden() }),
 });
 
-/** The PATCH shape. Every key must be given explicitly; the object replaces what was stored. */
+/**
+ * The PATCH shape. Every key must be given explicitly; the object replaces
+ * what was stored — except sold_out, which a form that leaves it out keeps
+ * (keepSoldOut).
+ */
 const catalogSettingsSchema = Joi.object({
   sidebar_enabled: Joi.boolean().required(),
   default_sort: Joi.string()
     .valid(...CATALOG_SORTS)
     .required(),
+  sold_out: Joi.string()
+    .valid(...SOLD_OUT_MODES)
+    .optional(),
   filters: Joi.array()
     .items(filterSchema)
     .max(MAX_FILTERS)
@@ -62,11 +74,19 @@ function resolveCatalogSettings(settings) {
     {
       sidebar_enabled: stored.sidebar_enabled ?? DEFAULT_CATALOG_SETTINGS.sidebar_enabled,
       default_sort: stored.default_sort ?? DEFAULT_CATALOG_SETTINGS.default_sort,
+      sold_out: stored.sold_out ?? DEFAULT_CATALOG_SETTINGS.sold_out,
       filters: stored.filters ?? DEFAULT_CATALOG_SETTINGS.filters,
     },
     { stripUnknown: true }
   );
   return error ? clone(DEFAULT_CATALOG_SETTINGS) : value;
+}
+
+/** A saved catalog without sold_out keeps the one stored before (null resets). */
+function keepSoldOut(current, next) {
+  if (!next || typeof next !== 'object' || next.sold_out !== undefined) return next;
+  const before = current && typeof current === 'object' ? current.sold_out : undefined;
+  return before ? { ...next, sold_out: before } : next;
 }
 
 function clone(settings) {
@@ -78,4 +98,5 @@ module.exports = {
   DEFAULT_CATALOG_SETTINGS,
   catalogSettingsSchema,
   resolveCatalogSettings,
+  keepSoldOut,
 };

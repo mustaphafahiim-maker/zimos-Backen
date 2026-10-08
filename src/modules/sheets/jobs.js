@@ -35,6 +35,8 @@ module.exports = {
       queue: 'io',
       name: 'sheets.backfill',
       handle: (job) => sync().backfill(job),
+      // Skips rows the sheet already has: a run cut off by a restart is run again.
+      resumable: true,
     },
   ],
 };

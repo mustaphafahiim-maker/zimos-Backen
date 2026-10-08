@@ -6,6 +6,8 @@ const { withRetry } = require('../../core/utils/retry');
 // Adapter over Brevo's transactional email API — plain fetch, no SDK.
 // https://developers.brevo.com/reference/sendtransacemail
 const BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email';
+// BREVO_API_BASE points at a local stand-in, outside production only (as emailDomains/brevoDomainProvider.js).
+const apiBase = () => String((!env.isProduction && process.env.BREVO_API_BASE) || 'https://api.brevo.com').replace(/\/+$/, '');
 
 // 3 attempts: immediate, then ~1s, then ~3s. Zero delays under test.
 const RETRY_DELAYS = env.isTest ? [0, 0, 0] : [0, 1000, 3000];
@@ -28,7 +30,7 @@ function buildPayload({ to, subject, html, text, fromAddress, fromName, replyTo 
 async function sendOnce(payload, apiKey) {
   let res;
   try {
-    res = await fetch(BREVO_ENDPOINT, {
+    res = await fetch(`${apiBase()}/v3/smtp/email`, {
       method: 'POST',
       headers: {
         'api-key': apiKey,
@@ -79,7 +81,7 @@ async function probe({ timeoutMs = 5000 } = {}) {
   const { apiKey } = env.notifications.brevo;
   if (!apiKey) throw new Error('BREVO_API_KEY is not set');
 
-  const res = await fetch('https://api.brevo.com/v3/account', {
+  const res = await fetch(`${apiBase()}/v3/account`, {
     headers: { 'api-key': apiKey, accept: 'application/json' },
     signal: AbortSignal.timeout(timeoutMs),
   });

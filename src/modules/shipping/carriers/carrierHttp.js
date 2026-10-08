@@ -100,4 +100,14 @@ async function request({ method = 'GET', url, headers = {}, body, form, timeoutM
   }
 }
 
-module.exports = { request, CarrierUnreachableError, DEFAULT_TIMEOUT_MS, CREATE_TIMEOUT_MS };
+/**
+ * The carrier's base URL, or the one named by `envName` (e.g. BOSTA_BASE_URL)
+ * outside production — for a local stand-in of the carrier. Production always
+ * talks to the carrier's own host.
+ */
+function baseUrlFor(envName, fallback) {
+  const override = String(process.env[envName] || '').trim().replace(/\/+$/, '');
+  return override && !env.isProduction ? override : fallback;
+}
+
+module.exports = { request, baseUrlFor, CarrierUnreachableError, DEFAULT_TIMEOUT_MS, CREATE_TIMEOUT_MS };

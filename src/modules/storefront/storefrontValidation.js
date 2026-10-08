@@ -32,6 +32,8 @@ module.exports = {
       page: Joi.number().integer().min(1).max(1000).optional(),
       // Counts per collection, tag, option value and the price range.
       facets: Joi.boolean().optional(),
+      // Only products that can be bought now (storefront/soldOut.js, item 390).
+      available: Joi.boolean().optional(),
       limit: Joi.number().integer().min(1).max(100).default(24),
       cursor: uuid.optional(),
     }),
@@ -55,7 +57,8 @@ module.exports = {
     params: Joi.object({ workspaceId: workspaceIdParam }),
     query: Joi.object({
       phone: Joi.string().required().regex(/^[0-9]{10,15}$/),
-      number: Joi.string().required().trim().regex(/^[A-Za-z0-9-]{3,40}$/),
+      // As printed, # included: #1001, ZM-1001, ORD-… (orders/orderNumbers.js).
+      number: Joi.string().required().trim().regex(/^[A-Za-z0-9#-]{1,41}$/),
     }),
   },
   // Shipping price for the checkout form. `items` or an X-Cart-Token header,

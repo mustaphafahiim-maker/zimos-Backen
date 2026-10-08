@@ -12,6 +12,11 @@ module.exports = {
       events: ['order.confirmed', 'order.paid'],
       // eslint-disable-next-line global-require
       handle: (event) => require('./carrierBooking').autoBook(event),
+      // Cut off by a restart it may have booked already: not run again, the
+      // merchant is told to check (item 365).
+      once: true,
+      // eslint-disable-next-line global-require
+      onInterrupted: (event) => require('./carrierBooking').autoBookInterrupted(event),
     },
   ],
   processors: [
@@ -33,6 +38,14 @@ module.exports = {
       everyMs: 30 * MINUTE,
       // eslint-disable-next-line global-require
       handle: () => require('./carrierSyncService').syncDue(),
+    },
+    {
+      // Manual and imported waybills followed through the store's tracking
+      // provider (trackingProviders/manualTracking.js, item 387).
+      name: 'shipments.track_manual',
+      everyMs: 30 * MINUTE,
+      // eslint-disable-next-line global-require
+      handle: () => require('./trackingProviders/manualTracking').pollDue(),
     },
   ],
 };

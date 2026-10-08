@@ -16,6 +16,8 @@ const { resolveOrderBumpItem } = require('./orderBump');
 const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
 const productTests = require('../catalog/productTests');
 const logger = require('../../core/utils/logger');
+// The order without its risk, network and internal fields (item 361).
+const { shopperOrder } = require('./shopperOrder');
 
 /** Credits the order to the shopper's variant in its products' A/B tests; never fails the checkout. */
 async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
@@ -46,7 +48,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
   // eslint-disable-next-line no-unused-vars -- the billing keys are read by checkoutExtras, not by the order.
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, pickupLocationId, trackingConsent, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, transfer, manualPaymentMethodId, saveCard, pageTags, billingAddress, billingSameAsShipping, giftCardCode, loyaltyPoints, useStoreCredit, gift, deliverySlot, referralCode, pickupLocationId, trackingConsent, acceptsMarketing, acceptsTerms, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -66,7 +68,22 @@ const checkout = asyncHandler(async (req, res) => {
 
   // A manual transfer (the whole order, or a COD order's deposit) is checked
   // here, before any cart work; it is not an online (gateway) payment.
-  const manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
+  // Or one of the store's InstaPay / wallet methods (manualPayments, item 340): placed unpaid, the screenshot
+  // sent afterwards with the payment token this answer carries.
+  const storeManual = await require('../manualPayments/manualPaymentService').prepareCheckout(workspace, { paymentMethod: orderBody.paymentMethod, manualPaymentMethodId, funnelId: orderBody.funnelId });
+  // A COD order's deposit reads the phone's COD record, so its refusal (DEPOSIT_REQUIRED, or the deposit's
+  // transfer details) is given only to a checkout that is otherwise whole: at the end of createOrder, which
+  // then rolls the order back (item 362 review). A phone probe with no lines, no stock or no slot learns nothing.
+  let manualTransfer = null;
+  let depositRefusal = null;
+  if (!storeManual) {
+    try {
+      manualTransfer = await manualCheckout.prepare(workspace, { paymentMethod: orderBody.paymentMethod, transfer, contact: orderBody.contact }, req);
+    } catch (err) {
+      if (orderBody.paymentMethod !== 'cod') throw err;
+      depositRefusal = err;
+    }
+  }
   const isOnline = !['cod', 'bank_transfer', 'on_account'].includes(orderBody.paymentMethod);
   // Pay later on account (accountCredit/, item 229): the signed-in shopper is who the store approved.
   if (orderBody.paymentMethod === 'on_account') await require('../accountCredit').markCheckout(workspaceId, req.headers['x-shopper-token'], orderBody);
@@ -129,6 +146,9 @@ const checkout = asyncHandler(async (req, res) => {
       400
     );
   }
+  // A funnel's checkout prices the funnel's way (shipping, coupons, payment methods): the
+  // funnel must be a published one of this store that sells these lines (funnels/funnelCheckout.js, item 355).
+  await require('../funnels/funnelCheckout').assertSells(workspaceId, orderBody.funnelId, items);
 
   // The ticked order bump becomes one more line of this order, built by the
   // server from the configured offer (422 when it is not that offer).
@@ -218,6 +238,8 @@ const checkout = asyncHandler(async (req, res) => {
       // funnel_upsell_merge on): nobody confirms the order until the shopper
       // is past them, so an accepted offer can still join it.
       confirmationAvailableAt: await offerWindowEnd(workspace, orderBody.funnelId),
+      manualPayment: storeManual ? { method: storeManual.method, tokenHash: storeManual.token.hash } : null,
+      beforeCommit: depositRefusal ? () => Promise.reject(depositRefusal) : null,
     });
     // createOrder has committed by now (no outer transaction here), and this
     // never throws: a conversion failure is logged, and the shopper still gets
@@ -225,6 +247,8 @@ const checkout = asyncHandler(async (req, res) => {
     await saveCheckoutAnswers(order, workspace, formFields);
     await require('./checkoutExtras').apply(order, extras);
     await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
+    // The marketing-consent and terms boxes (checkoutConsent.js, item 374).
+    await require('./checkoutConsent').recordOnOrder(order, workspace, { acceptsMarketing, acceptsTerms });
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
     await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
@@ -240,7 +264,9 @@ const checkout = asyncHandler(async (req, res) => {
     const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
     const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
     if ((giftCard && giftCard.applied) || (points && points.applied) || (credit && credit.applied)) await order.reload();
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}), trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order) });
+    // The InstaPay / wallet details to pay to, and the token the proof is sent with (shown once, as an online payment's).
+    const storeManualPayment = storeManual ? { manualPayment: await require('../manualPayments/manualPaymentService').getForShopper(workspaceId, order.id, storeManual.token.token), paymentToken: storeManual.token.token } : {};
+    return res.status(201).json({ order: shopperOrder(order, orderItems), ...storeManualPayment, ...(transferPayment ? { transfer: transferPayment } : {}), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}), ...(pickup ? { pickup } : {}), trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -260,6 +286,8 @@ const checkout = asyncHandler(async (req, res) => {
   await saveCheckoutAnswers(order, workspace, formFields);
   await require('./checkoutExtras').apply(order, extras);
   await require('../marketing/cookieConsent').recordOnOrder(order, trackingConsent);
+  // The marketing-consent and terms boxes (checkoutConsent.js, item 374).
+  await require('./checkoutConsent').recordOnOrder(order, workspace, { acceptsMarketing, acceptsTerms });
   await require('../shipping/deliveryEstimates').recordOnOrder(workspace, order, req.body.shippingAddress);
   await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
@@ -282,7 +310,7 @@ const checkout = asyncHandler(async (req, res) => {
       const paidOrder = await require('../../db/models').Order.findByPk(order.id);
       const { coversOrder, ...card } = giftCard || {};
       return res.status(201).json({
-        order: { ...paidOrder.toJSON(), items: orderItems },
+        order: shopperOrder(paidOrder, orderItems),
         // The signed tracking token: the thank-you page's proof for the tracking page, self-service and the survey (postPurchaseSurvey, item 236).
         trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order),
         ...(giftCard ? { giftCard: { ...card, held: false } } : {}),
@@ -308,7 +336,7 @@ const checkout = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({
-    order: { ...order.toJSON(), items: orderItems },
+    order: shopperOrder(order, orderItems),
     trackingToken: require('../storefront/orderTrackingExtras').tokenFor(order),
     ...(pickup ? { pickup } : {}),
     payment: {

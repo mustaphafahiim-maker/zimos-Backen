@@ -7,6 +7,8 @@ const { AppError } = require('../../core/errors/AppError');
 const env = require('../../config/env');
 const usernameService = require('../users/usernameService');
 const signupPolicy = require('./signupPolicy');
+const accountService = require('./accountService');
+const { accountLimiter } = require('../../core/middleware/accountLimiter');
 
 const register = asyncHandler(async (req, res) => {
   const result = await authService.register(req.body, req);
@@ -56,6 +58,21 @@ const confirmVerificationCode = [
   }),
 ];
 
+// A signed-in account confirming its email (the dashboard's banner; spec-gaps item 330).
+const sendEmailCode = [
+  authenticate,
+  asyncHandler(async (req, res) => {
+    res.json(await authService.sendAccountCode(req.user, req.body, req));
+  }),
+];
+
+const confirmEmailCode = [
+  authenticate,
+  asyncHandler(async (req, res) => {
+    res.json(await authService.confirmAccountCode(req.user, req.body.code, req));
+  }),
+];
+
 // POST /auth/me/plan — the plan an account made through Google chooses.
 const choosePlan = [
   authenticate,
@@ -65,17 +82,29 @@ const choosePlan = [
   }),
 ];
 
+// The OAuth state ties the callback to the browser that started the sign-in (googleState.js).
 const googleRedirect = asyncHandler(async (req, res) => {
-  res.redirect(authService.getGoogleAuthUrl());
+  res.redirect(authService.getGoogleAuthUrl(require('./googleState').issue(res)));
 });
 
 const googleCallback = asyncHandler(async (req, res) => {
   const back = (params) => res.redirect(`${env.frontendUrl}/auth/callback?${new URLSearchParams(params).toString()}`);
 
+  const stateOk = require('./googleState').consume(req, res);
   if (req.query.error) return back({ error: req.query.error });
+  // Not started from this browser, or started over 10 minutes ago (item 347).
+  if (!stateOk) return back({ error: 'GOOGLE_STATE_MISMATCH' });
 
   try {
-    const { accessToken, refreshToken } = await authService.loginWithGoogle(req.query.code, req);
+    const result = await authService.loginWithGoogle(req.query.code, req);
+    // Two-step sign-in on: the dashboard asks for the code and finishes with
+    // POST /auth/two-factor/verify, as after a password sign-in.
+    if (result.twoFactorRequired) {
+      const params = {};
+      for (const [k, v] of Object.entries(result)) if (['string', 'boolean', 'number'].includes(typeof v)) params[k] = String(v);
+      return back(params);
+    }
+    const { accessToken, refreshToken } = result;
     // No token in the URL (history, logs, Referer): the refresh token goes
     // into the httpOnly cookie and the dashboard asks for an access token.
     if (env.authCookie.enabled) {
@@ -119,13 +148,21 @@ const listSessions = [
 // Google): the dashboard asks its owner to pick one, starting from this.
 // `needsPlan`: an account made through Google while a plan is required, that
 // has not chosen one — the dashboard asks for it before anything else.
+// `confirmed`: its email (or phone) is confirmed; until it is, starting a
+// trial and publishing are refused (core/middleware/confirmedAccount) and the
+// dashboard shows its banner.
+// `account`: what the account settings can offer (item 332) — a password to
+// confirm changes with (else a code to the current email), and whether the
+// phone can change by an SMS code (PHONE_CHANGE_ENABLED).
 const me = [
   authenticate,
   asyncHandler(async (req, res) => {
     const user = req.user.toSafeJSON();
     const needsPlan = await signupPolicy.needsPlan(req.user);
-    if (user.username) return res.json({ user, needsPlan });
-    return res.json({ user, needsPlan, suggestedUsername: await usernameService.suggestFor(user.email) });
+    const confirmed = signupPolicy.isVerified(req.user);
+    const account = { hasPassword: Boolean(req.user.passwordHash), phoneChange: env.account.phoneChangeEnabled === true };
+    if (user.username) return res.json({ user, needsPlan, confirmed, account });
+    return res.json({ user, needsPlan, confirmed, account, suggestedUsername: await usernameService.suggestFor(user.email) });
   }),
 ];
 
@@ -134,9 +171,61 @@ const usernameAvailable = asyncHandler(async (req, res) => {
   res.json(await usernameService.availability(req.query.u));
 });
 
+// --- Account settings (auth/accountService, item 332): always the signed-in account's own.
+
+const changeName = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    const user = await accountService.changeName(req.user, req.body.fullName, req);
+    res.json({ user: user.toSafeJSON() });
+  }),
+];
+
+const sendReauthCode = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json({ sent: true, ...(await accountService.sendReauthCode(req.user, req.body, req)) });
+  }),
+];
+
+const requestEmailChange = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json({ sent: true, ...(await accountService.requestEmailChange(req.user, req.body, req)) });
+  }),
+];
+
+const confirmEmailChange = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json(await accountService.confirmEmailChange(req.user, req.body.code, req));
+  }),
+];
+
+const requestPhoneChange = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json({ sent: true, ...(await accountService.requestPhoneChange(req.user, req.body, req)) });
+  }),
+];
+
+const confirmPhoneChange = [
+  authenticate,
+  accountLimiter,
+  asyncHandler(async (req, res) => {
+    res.json(await accountService.confirmPhoneChange(req.user, req.body.code, req));
+  }),
+];
+
 // PATCH /auth/me/username — the first choice, or a change (once per 30 days).
 const changeUsername = [
   authenticate,
+  accountLimiter,
   asyncHandler(async (req, res) => {
     const user = await usernameService.changeUsername(req.user.id, req.body.username, req);
     res.json({ user: user.toSafeJSON() });
@@ -144,12 +233,12 @@ const changeUsername = [
 ];
 
 const requestPasswordReset = asyncHandler(async (req, res) => {
-  const result = await authService.requestPasswordReset(req.body.email);
+  const result = await authService.requestPasswordReset(req.body.email, { locale: req.body.locale });
   res.json(result);
 });
 
 const resetPassword = asyncHandler(async (req, res) => {
-  const result = await authService.resetPassword(req.body.token, req.body.newPassword);
+  const result = await authService.resetPassword(req.body.token, req.body.newPassword, req);
   res.json(result);
 });
 
@@ -169,6 +258,21 @@ const confirmPhoneVerification = [
   }),
 ];
 
+// Password reset by SMS stays closed unless PASSWORD_RESET_SMS_ENABLED is
+// "true" (env.passwordReset; item 331, Ziad's c9a87db): no screen uses it,
+// and an SMS code is the only check. Closed, the request answers success for
+// any number and sends nothing, as it does for a number with no account; the
+// confirmation answers as a wrong code does.
+function smsResetRequestGate(req, res, next) {
+  if (env.passwordReset.smsEnabled) return next();
+  return res.json({ success: true });
+}
+
+function smsResetConfirmGate(req, res, next) {
+  if (env.passwordReset.smsEnabled) return next();
+  return next(new AppError('INVALID_CODE', 'That code is not valid', 422));
+}
+
 const requestPasswordResetSms = asyncHandler(async (req, res) => {
   const result = await authService.requestPasswordResetSms(req.body.phone);
   res.json(result);
@@ -184,6 +288,8 @@ module.exports = {
   signupOptions,
   sendVerificationCode,
   confirmVerificationCode,
+  sendEmailCode,
+  confirmEmailCode,
   choosePlan,
   verifyEmail,
   resendVerification,
@@ -197,10 +303,18 @@ module.exports = {
   me,
   usernameAvailable,
   changeUsername,
+  changeName,
+  sendReauthCode,
+  requestEmailChange,
+  confirmEmailChange,
+  requestPhoneChange,
+  confirmPhoneChange,
   requestPasswordReset,
   resetPassword,
   requestPhoneVerification,
   confirmPhoneVerification,
+  smsResetRequestGate,
+  smsResetConfirmGate,
   requestPasswordResetSms,
   resetPasswordSms,
 };

@@ -7,6 +7,7 @@ const { normalizePhone } = require('../../core/utils/phone');
 const { scoped } = require('../../core/utils/scopedRepository');
 const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { clientIp: clientIpOf } = require('../../core/middleware/clientIp');
 
 /**
  * Form submissions (SPEC §18.4, "Contact Form Data"): every submit of a page
@@ -171,7 +172,7 @@ async function submit(workspaceId, body, req) {
         data: await require('./formFiles').attach(prepared, transaction),
         tags,
         marketingConsent: consent,
-        ipAddress: req.ip || null,
+        ipAddress: clientIpOf(req) || null,
       },
       { transaction }
     );

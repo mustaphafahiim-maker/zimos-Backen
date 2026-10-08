@@ -29,6 +29,36 @@ ${arabicHtml}<p dir="ltr" style="font-size:13px;color:#6b7280;margin:0">${SPAM_F
 const escapeHtml = (value) =>
   String(value).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
+/** A code email in the account's language, like signup_code: no link anywhere (item 332). */
+function codeEmail(data, copy) {
+  const code = String(data.code || '');
+  const minutes = Number(data.minutes) || 10;
+  const codeHtml = `<p dir="ltr" style="font-size:30px;font-weight:700;letter-spacing:8px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</p>`;
+  if (data.locale === 'en') {
+    return {
+      subject: copy.en.subject,
+      ...wrap(
+        `<p>${copy.en.intro}</p>
+${codeHtml}
+<p>It is valid for ${minutes} minutes and works once.</p>
+<p style="color:#6b7280">If you didn't ask for this code, ignore this email: nothing changes without it.</p>`,
+        `${copy.en.intro} ${code}\n\nIt is valid for ${minutes} minutes and works once.\n\nIf you didn't ask for this code, ignore this email: nothing changes without it.`
+      ),
+    };
+  }
+  return {
+    subject: copy.ar.subject,
+    ...wrap(
+      `<p>${copy.ar.intro}</p>
+${codeHtml}
+<p>الرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.</p>
+<p style="color:#6b7280">إذا لم تطلب هذا الرمز فتجاهل هذه الرسالة: لن يتغير شيء من دونه.</p>`,
+      `${copy.ar.intro} ${code}\n\nالرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.\n\nإذا لم تطلب هذا الرمز فتجاهل هذه الرسالة: لن يتغير شيء من دونه.`,
+      { dir: 'rtl', arabicFooter: true }
+    ),
+  };
+}
+
 const link = (path, token) =>
   `${env.frontendUrl.replace(/\/$/, '')}${path}?token=${encodeURIComponent(token)}`;
 
@@ -47,7 +77,7 @@ const templates = {
           `<p>Your code to confirm your Zimos account:</p>
 ${codeHtml}
 <p>It is valid for ${minutes} minutes and works once.</p>
-<p style="color:#6b7280">If you didn't ask for this code, ignore this email. Nobody can use your account without it.</p>`,
+<p style="color:#6b7280">If you didn't ask for this code, ignore this email.</p>`,
           `Your code to confirm your Zimos account: ${code}\n\nIt is valid for ${minutes} minutes and works once.\n\nIf you didn't ask for this code, ignore this email.`
         ),
       };
@@ -58,9 +88,52 @@ ${codeHtml}
         `<p>رمز تأكيد حسابك في Zimos:</p>
 ${codeHtml}
 <p>الرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.</p>
-<p style="color:#6b7280">إذا لم تطلب هذا الرمز فتجاهل هذه الرسالة، فلا يمكن لأحد استخدام حسابك من دونه.</p>`,
+<p style="color:#6b7280">إذا لم تطلب هذا الرمز فتجاهل هذه الرسالة.</p>`,
         `رمز تأكيد حسابك في Zimos: ${code}\n\nالرمز صالح لمدة ${minutes} دقائق ولمرة واحدة فقط.\n\nإذا لم تطلب هذا الرمز فتجاهل هذه الرسالة.`,
         { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  // Account settings (auth/accountService, item 332): a code to the current
+  // email of an account with no password (made through Google), proving it is
+  // the owner before its email or phone changes; and a code to the new email.
+  // No link.
+  account_reauth_code(data = {}) {
+    return codeEmail(data, {
+      en: { subject: 'Your Zimos security code', intro: 'Your code to confirm a change to your Zimos account:' },
+      ar: { subject: 'رمز الأمان لحسابك في Zimos', intro: 'رمز تأكيد تعديل حسابك في Zimos:' },
+    });
+  },
+
+  email_change_code(data = {}) {
+    return codeEmail(data, {
+      en: { subject: 'Confirm your new email for Zimos', intro: 'Your code to make this the email of your Zimos account:' },
+      ar: { subject: 'تأكيد بريدك الإلكتروني الجديد في Zimos', intro: 'رمز اعتماد هذا البريد بريدًا لحسابك في Zimos:' },
+    });
+  },
+
+  // To the OLD address once the email has changed by a code (item 332; the
+  // link flow keeps `email_changed` below): Arabic and English together, no
+  // link at all (a link in a "your email changed" message is exactly what a
+  // phishing copy would carry), the new address masked.
+  email_changed_notice(data = {}) {
+    const to = escapeHtml(String(data.newEmailMasked || ''));
+    const when = escapeHtml(String(data.at || ''));
+    return {
+      subject: 'تم تغيير بريد حسابك في Zimos — Your Zimos email was changed',
+      ...wrap(
+        `<div dir="rtl">
+<p>تم تغيير البريد الإلكتروني لحسابك في Zimos إلى <span dir="ltr">${to}</span> (${when}). لم يعد هذا البريد يُستخدم لتسجيل الدخول.</p>
+<p>إذا لم تقم أنت بهذا التغيير، فتواصل مع دعم Zimos فورًا من صفحة الدعم في موقعنا، ولا تضغط أي رابط يصلك برسالة تدّعي ذلك.</p>
+</div>
+<hr style="border:none;border-top:1px solid #e5e5e5;margin:20px 0" />
+<div dir="ltr">
+<p>The email of your Zimos account was changed to ${to} (${when}). This address no longer signs you in.</p>
+<p>If you didn't make this change, contact Zimos support right away through the support page on our website. Don't click any link in a message claiming to fix it.</p>
+</div>`,
+        `تم تغيير البريد الإلكتروني لحسابك في Zimos إلى ${data.newEmailMasked || ''} (${data.at || ''}). لم يعد هذا البريد يُستخدم لتسجيل الدخول.\nإذا لم تقم أنت بهذا التغيير، فتواصل مع دعم Zimos فورًا من صفحة الدعم في موقعنا.\n\nThe email of your Zimos account was changed to ${data.newEmailMasked || ''} (${data.at || ''}). This address no longer signs you in.\nIf you didn't make this change, contact Zimos support right away through the support page on our website.`,
+        { arabicFooter: true }
       ),
     };
   },
@@ -146,17 +219,35 @@ ${codeHtml}
     };
   },
 
+  // The reset link (auth/authService.requestPasswordReset, item 331), in the
+  // language the request was made in, else the account's; Arabic unless en.
   password_reset(data = {}) {
     const url = link('/reset-password', data.token || '');
-    const name = data.fullName ? `Hi ${data.fullName},` : 'Hi,';
-    return {
-      subject: 'Reset your password',
-      ...wrap(
-        `<p>${name}</p>
-<p>We got a request to reset your password. This link is valid for one hour:</p>
+    const minutes = Number(data.minutes) || 30;
+    const fullName = data.fullName ? escapeHtml(data.fullName) : '';
+    if (data.locale === 'en') {
+      const name = fullName ? `Hi ${fullName},` : 'Hi,';
+      return {
+        subject: 'Reset your password',
+        ...wrap(
+          `<p>${name}</p>
+<p>We got a request to reset your Zimos password. This link is valid for ${minutes} minutes and works once:</p>
 <p><a href="${url}">Reset my password</a></p>
 <p>If you didn't ask for this, you can ignore this email — your password won't change.</p>`,
-        `${name}\n\nWe got a request to reset your password. This link is valid for one hour:\n${url}\n\nIf you didn't ask for this, you can ignore this email.`
+          `${name}\n\nWe got a request to reset your Zimos password. This link is valid for ${minutes} minutes and works once:\n${url}\n\nIf you didn't ask for this, you can ignore this email.`
+        ),
+      };
+    }
+    const name = fullName ? `مرحبًا ${fullName}،` : 'مرحبًا،';
+    return {
+      subject: 'إعادة تعيين كلمة المرور',
+      ...wrap(
+        `<p>${name}</p>
+<p>تلقّينا طلبًا لإعادة تعيين كلمة مرور حسابك في Zimos. هذا الرابط صالح لمدة ${minutes} دقيقة ولمرة واحدة فقط:</p>
+<p><a href="${url}">إعادة تعيين كلمة المرور</a></p>
+<p>إذا لم تطلب ذلك فتجاهل هذه الرسالة، ولن تتغير كلمة مرورك.</p>`,
+        `${name}\n\nتلقّينا طلبًا لإعادة تعيين كلمة مرور حسابك في Zimos. هذا الرابط صالح لمدة ${minutes} دقيقة ولمرة واحدة فقط:\n${url}\n\nإذا لم تطلب ذلك فتجاهل هذه الرسالة.`,
+        { dir: 'rtl', arabicFooter: true }
       ),
     };
   },
@@ -187,6 +278,18 @@ ${codeHtml}
         `<p>Hi,</p>
 <p>${from} has transferred <strong>${store}</strong> to you. You are now its owner: its plan, team and settings are yours to manage.</p>`,
         `Hi,\n\n${data.fromName || 'The previous owner'} has transferred ${data.workspaceName || 'a store'} to you. You are now its owner.`
+      ),
+    };
+  },
+  store_ownership_offered(data = {}) {
+    const store = escapeHtml(data.workspaceName || 'a store');
+    const from = escapeHtml(data.fromName || 'The owner');
+    return {
+      subject: `${data.fromName || 'The owner'} wants to give you ${data.workspaceName || 'a store'} on Zimos`,
+      ...wrap(
+        `<p>Hi,</p>
+<p>${from} wants to transfer <strong>${store}</strong> to you. If you accept, you become its owner and it counts toward your plan's stores. Open Zimos to accept or decline; the offer ends in 7 days.</p>`,
+        `Hi,\n\n${data.fromName || 'The owner'} wants to transfer ${data.workspaceName || 'a store'} to you. Open Zimos to accept or decline; the offer ends in 7 days.`
       ),
     };
   },
@@ -277,8 +380,12 @@ ${codeHtml}
     const logo = data.logoUrl && /^https?:\/\//.test(data.logoUrl) ? `<img src="${escapeHtml(data.logoUrl)}" alt="${store}" style="max-height:48px;max-width:180px" />` : `<strong style="font-size:18px">${store}</strong>`;
     // A marketing email (the abandoned cart) ends with its unsubscribe link (marketingUnsubscribe.js).
     const unsubscribe = data.unsubscribeUrl && /^https?:\/\//.test(data.unsubscribeUrl) ? String(data.unsubscribeUrl) : null;
+    // Written in Arabic unless the email is in another language (data.locale, item 383).
+    const rtl = !data.locale || data.locale === 'ar';
     const unsubscribeHtml = unsubscribe
-      ? `\n<p style="font-size:13px;color:#6b7280;margin:14px 0 0">لا تريد رسائل تسويقية من ${store}؟ <a href="${escapeHtml(unsubscribe)}" style="color:#6b7280">إلغاء الاشتراك</a></p>`
+      ? rtl
+        ? `\n<p style="font-size:13px;color:#6b7280;margin:14px 0 0">لا تريد رسائل تسويقية من ${store}؟ <a href="${escapeHtml(unsubscribe)}" style="color:#6b7280">إلغاء الاشتراك</a></p>`
+        : `\n<p style="font-size:13px;color:#6b7280;margin:14px 0 0">Don't want marketing emails from ${store}? <a href="${escapeHtml(unsubscribe)}" style="color:#6b7280">Unsubscribe</a></p>`
       : '';
     return {
       subject,
@@ -286,8 +393,8 @@ ${codeHtml}
         `<div style="border-top:4px solid ${color};padding-top:18px;margin-bottom:18px">${logo}</div>
 ${paragraphs}
 <p style="color:#6b7280;margin:18px 0 0">${store}</p>${unsubscribeHtml}`,
-        [data.bodyText || data.body, data.storeName, unsubscribe && `إلغاء الاشتراك من الرسائل التسويقية: ${unsubscribe}`].filter(Boolean).join('\n\n'),
-        { dir: 'rtl', arabicFooter: true }
+        [data.bodyText || data.body, data.storeName, unsubscribe && (rtl ? `إلغاء الاشتراك من الرسائل التسويقية: ${unsubscribe}` : `Unsubscribe from marketing emails: ${unsubscribe}`)].filter(Boolean).join('\n\n'),
+        rtl ? { dir: 'rtl', arabicFooter: true } : { dir: 'ltr' }
       ),
     };
   },

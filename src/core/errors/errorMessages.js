@@ -66,7 +66,15 @@ const MESSAGES = {
   ORDER_ALREADY_PAID: { ar: 'تم دفع هذا الطلب بالفعل.', fr: 'Cette commande est déjà payée.' },
   VISITOR_ID_REQUIRED: { ar: 'أعد تحميل الصفحة وحاول مرة أخرى.', fr: 'Rechargez la page et réessayez.' },
   UNSUPPORTED_MEDIA_TYPE: { ar: 'يُقبل فقط صور JPEG أو PNG أو WebP.', fr: 'Seules les photos JPEG, PNG ou WebP sont acceptées.' },
-  FILE_TOO_LARGE: { ar: 'الملف كبير جدًا.', fr: 'Le fichier est trop volumineux.' },
+  // With the limit when the error names one (details.kind / maxMb, item 400).
+  FILE_TOO_LARGE: {
+    ar: (d) => (d.maxMb ? `${{ image: 'الصورة', photo: 'الصورة', video: 'الفيديو', model: 'المجسّم ثلاثي الأبعاد' }[d.kind] || 'الملف'} أكبر من ${d.maxMb} ميجابايت.` : 'الملف كبير جدًا.'),
+    fr: (d) => (d.maxMb ? `${{ image: "L'image", photo: 'La photo', video: 'La vidéo', model: 'Le modèle 3D' }[d.kind] || 'Le fichier'} dépasse ${d.maxMb} Mo.` : 'Le fichier est trop volumineux.'),
+  },
+  IMAGE_DIMENSIONS_TOO_LARGE: {
+    ar: (d) => `أبعاد الصورة أكبر من ${d.maxMegapixels || 60} ميجابكسل. صغّرها وحاول مرة أخرى.`,
+    fr: (d) => `L'image dépasse ${d.maxMegapixels || 60} mégapixels. Réduisez-la et réessayez.`,
+  },
   NO_FILE: { ar: 'اختر ملفًا أولًا.', fr: "Choisissez d'abord un fichier." },
   TOO_MANY_PENDING_UPLOADS: { ar: 'صور كثيرة بانتظار الطلب. أكمل الطلب أو حاول لاحقًا.', fr: 'Trop de photos en attente. Finalisez la commande ou réessayez plus tard.' },
   IDEMPOTENCY_KEY_IN_PROGRESS: { ar: 'طلبك قيد التنفيذ، انتظر لحظة.', fr: 'Votre demande est en cours, patientez.' },
@@ -89,7 +97,9 @@ function translateErrors(req, res, next) {
   const json = res.json.bind(res);
   res.json = (body) => {
     const error = body && body.error;
-    const text = error && typeof error.code === 'string' && MESSAGES[error.code] && MESSAGES[error.code][lang];
+    const entry = error && typeof error.code === 'string' && MESSAGES[error.code] && MESSAGES[error.code][lang];
+    // An entry may be a function of the error's details (a limit it names).
+    const text = typeof entry === 'function' ? entry(error.details || {}) : entry;
     // The English original stays beside it: some codes (VALIDATION_ERROR) carry a specific English message.
     return json(text && text !== error.message ? { ...body, error: { ...error, message: text, messageEn: error.message } } : body);
   };

@@ -33,4 +33,20 @@ async function refund(workspaceId, payment, amount, { refundId = null } = {}) {
   return ctx.adapter.refund(ctx.credentials, { payment, amount, settings: ctx.settings, refundId });
 }
 
-module.exports = { contextFor, refund };
+/**
+ * After attempts were cancelled here (a retry, a switch to cash on delivery, a blocked shopper), the
+ * gateway stops taking payment for them where it can (item 300; Stripe expires the Checkout Session).
+ * Best effort: a payment that still lands is recorded as paid after cancel, as before.
+ */
+async function closeAttempts(workspaceId, attempts) {
+  for (const a of attempts || []) {
+    try {
+      const ctx = await module.exports.contextFor(workspaceId, a.providerCode);
+      if (ctx.adapter.cancelPayment && a.providerOrderId) await ctx.adapter.cancelPayment(ctx.credentials, { payment: a });
+    } catch (err) {
+      require('../../core/utils/logger').warn('[payments] could not close a cancelled attempt at the gateway', { workspaceId, paymentId: a.id, reason: err.message });
+    }
+  }
+}
+
+module.exports = { contextFor, refund, closeAttempts };

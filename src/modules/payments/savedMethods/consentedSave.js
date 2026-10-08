@@ -52,4 +52,28 @@ async function oneClickCardFor(original, transaction) {
   return saved && gateways.getAdapter(saved.providerCode) ? saved : null;
 }
 
-module.exports = { afterPaid, oneClickCardFor };
+/**
+ * Whether the card this order is about to be paid with should be kept (item
+ * 380): the shopper ticked "save my card", or the order holds a subscription
+ * or installment product (planCheckout). Passed to the gateway as
+ * createPayment's `saveCard`, so a gateway that must be told before the
+ * payment (Stripe's setup_future_usage, PayPal's vault) can ask for it.
+ * Never throws: when in doubt the card is not kept.
+ */
+async function wantsSave(order) {
+  try {
+    if (!order || !order.customerId) return false;
+    if ((order.completionContext || {}).saveCard === true) return true;
+    return await require('./heldCardTokens').planned(order);
+  } catch (err) {
+    return false;
+  }
+}
+
+/** The order payment method a charge to this saved method is: 'card', or 'paypal' for a vaulted PayPal. */
+function methodOf(saved) {
+  const adapter = saved && gateways.getAdapter(saved.providerCode);
+  return (adapter && adapter.savedMethod) || 'card';
+}
+
+module.exports = { afterPaid, oneClickCardFor, wantsSave, methodOf };

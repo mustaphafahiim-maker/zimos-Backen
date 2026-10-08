@@ -88,6 +88,18 @@ const { AppError, ValidationError } = require('../../../core/errors/AppError');
  *       The credentials point at the carrier's test environment, which ships
  *       nothing. Only stores in CARRIERS_BETA_WORKSPACES may connect such an
  *       account or book with it (assertSandboxAllowed).
+ *   createReturnPickup(creds, { order, returnRequest, address, itemsCount,
+ *                               description, notes, carrierSettings,
+ *                               webhookUrl, originalTrackingNumber })  (returnPickup)
+ *       -> { trackingNumber, carrierShipmentId, reference?, trackingUrl?,
+ *            labelUrl?, raw }: the courier collects a returned parcel at the
+ *       order's address (returns/returnPickup.js).
+ *   getReturnPickup(creds, trackingNumber)  (returnPickupStatus)
+ *       -> { status, carrierStatus, raw }; status is a pickup status
+ *       (requested | picked_up | in_transit | returned_to_merchant | failed |
+ *       cancelled) or null. getReturnPickups(creds, refs) -> Map, optional bulk.
+ *   cancelReturnPickup(creds, trackingNumber, { carrierShipmentId })
+ *       (returnPickupCancel) -> resolves, or throws when refused (item 396).
  */
 // Registering an adapter does not switch it on: only CARRIERS_ENABLED /
 // CARRIERS_BETA make it exist on a server (rollout below). Every carrier

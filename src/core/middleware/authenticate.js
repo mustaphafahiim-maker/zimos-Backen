@@ -31,10 +31,12 @@ const authenticate = asyncHandler(async (req, res, next) => {
   }
 
   // A session ended on another device (or by a password reset) stops its tokens at once.
+  // Suspending or deleting the account from the console (item 337) ends its
+  // sessions too; the status check below is the second lock.
   if (!(await sessionGate.isActive(payload.sid))) throw ended();
 
   const user = await db.User.findByPk(payload.sub);
-  if (!user || user.status !== 'active') {
+  if (!user || user.status !== 'active' || user.deletedAt) {
     throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');
   }
 
@@ -66,7 +68,7 @@ const authenticateAllowPending = asyncHandler(async (req, res, next) => {
   if (!(await sessionGate.isActive(payload.sid))) throw ended();
 
   const user = await db.User.findByPk(payload.sub);
-  if (!user || user.status === 'suspended') {
+  if (!user || user.status === 'suspended' || user.deletedAt) {
     throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');
   }
 
@@ -88,7 +90,7 @@ const optionalAuthenticate = asyncHandler(async (req, res, next) => {
   try {
     const payload = verifyAccessToken(token);
     const user = (await sessionGate.isActive(payload.sid)) ? await db.User.findByPk(payload.sub) : null;
-    if (user && user.status === 'active') {
+    if (user && user.status === 'active' && !user.deletedAt) {
       req.user = user;
       req.authTokenPayload = payload;
     }

@@ -78,8 +78,34 @@ async function createShipment(creds, input) {
     carrierShipmentId: null,
     trackingUrl: null,
     labelUrl: null,
-    raw: { sandbox: true, sandboxStatus: 'created', city: path[0] ? path[0].id : null, district: path[1] ? path[1].id : null, reference: order.orderNumber },
+    // What a real courier is told to collect and carry (item 375: a split parcel's own COD and units).
+    raw: { sandbox: true, sandboxStatus: 'created', city: path[0] ? path[0].id : null, district: path[1] ? path[1].id : null, reference: order.orderNumber, cod: input.cod, itemsCount: input.itemsCount },
   };
+}
+
+/**
+ * A return pickup (item 372): the courier collects the parcel from the
+ * shopper's address and brings it back to the store. The sandbox answers with
+ * a waybill like SBX-R-12345678 and keeps nothing; the return itself holds
+ * the booking (return_requests.pickup).
+ */
+async function createReturnPickup(creds, input) {
+  const { order, returnRequest, address } = input;
+  const path = address && Array.isArray(address.path) ? address.path : [];
+  return {
+    trackingNumber: `SBX-R-${crypto.randomInt(0, 1e8).toString().padStart(8, '0')}`,
+    carrierShipmentId: null,
+    trackingUrl: null,
+    raw: { sandbox: true, kind: 'return_pickup', city: path[0] ? path[0].id : null, district: path[1] ? path[1].id : null, reference: order.orderNumber, returnId: returnRequest ? returnRequest.id : null },
+  };
+}
+
+/**
+ * Cancelling a sandbox return pickup (item 396): the sandbox keeps nothing,
+ * so there is nothing to refuse — only an SBX-R- waybill is accepted.
+ */
+async function cancelReturnPickup(creds, trackingNumber) {
+  if (!/^SBX-R-\d{8}$/.test(String(trackingNumber))) throw new CarrierError(`The sandbox courier has no return pickup ${trackingNumber}`);
 }
 
 async function findShipment(trackingNumber) {
@@ -149,6 +175,8 @@ module.exports = defineAdapter({
     polling: true,
     bulkStatus: true,
     addressLevels: ['city', 'district'],
+    returnPickup: true,
+    returnPickupCancel: true,
   },
   pollIntervalMinutes: 5,
   credentialFields: [{ key: 'apiKey', label: 'Any key (8+ characters)', secret: true }],
@@ -162,6 +190,8 @@ module.exports = defineAdapter({
   getShipments,
   cancelShipment,
   isCancelSettled,
+  createReturnPickup,
+  cancelReturnPickup,
   // For the dev advance endpoint (../sandboxCarrierRoutes.js).
   PATH,
   ENDINGS,

@@ -25,7 +25,7 @@ const { calculateShippingAmount } = require('../shipping/shippingPricing');
 const { calculateTax } = require('../tax/taxService');
 const { completeOrderInTransaction } = require('./orderCompletion');
 const { recordAudit } = require('../audit/auditService');
-const { setConfirmationState, trackStage, nextStages } = require('./orderStateService');
+const { setConfirmationState, trackStage, nextStages, assertShipmentCancelMove } = require('./orderStateService');
 const { STAGES, STAGE_SQL, ORDERS_WITH_STAGE_FROM } = require('./orderStage');
 const { orderSort, orderByClause, afterAnchorClause, anchorValue } = require('./orderSort');
 const gateways = require('../payments/gateways');
@@ -41,6 +41,7 @@ const { applyOrderFilters } = require('./orderFilters');
 const { effectiveVariantPrice } = require('../catalog/productPage');
 const { applyBundleTiers } = require('../bundles/bundlePricing');
 const pixelMatching = require('../marketing/pixelMatching');
+const wallet = require('../billing/walletService');
 
 function generateOrderNumber() {
   const rand = crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -150,6 +151,13 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
   };
 }
 
+// Whether the order was placed with a free-shipping code (item 353): it ships free even when an offer
+// in it sets its own shipping price, also when a line joins later or its items are edited.
+function couponShipsFree(order) {
+  return Boolean(order.shippingSnapshot && order.shippingSnapshot.freeShippingGranted === true) &&
+    (order.discountsSnapshot || []).some((d) => d && d.kind !== 'bundle' && d.type === 'free_shipping');
+}
+
 // The product's shipping mode for shippingRules.productShipping: `units` is
 // how many units of it the line ships.
 function productShippingRule(product, units) {
@@ -234,6 +242,11 @@ async function recordRefusal(workspaceId, refusal, req) {
  * it as an online payment: the blocklist still refuses, any other rule set to
  * "block" only flags.
  *
+ * `chargeFee` (default true): the pay-per-order fee (billing/walletService,
+ * WALLET_ENABLED). False for an add-on placed as its own order (the funnel
+ * offer after its window, the funnel follow-on, the thank-you upsell after an
+ * online payment): one purchase split in two pays one fee (Ziad's Q14).
+ *
  * The platform blocklist (risk/platformBlocklistService) is not a fraud rule
  * and none of the above exempts an order from it: an active entry matching
  * the order's phone, email or shipping address refuses every order — storefront
@@ -252,9 +265,25 @@ async function createOrder(
     confirmationAvailableAt = null,
     shippingOverride = null,
     source = null,
+    chargeFee = true,
+    // { method, tokenHash }: a storefront order paid with one of the store's InstaPay / wallet
+    // methods (manualPayments, item 340) — unpaid, confirmed only once its proof is approved.
+    manualPayment = null,
+    // Last check inside the transaction, once nothing else refused the order; a throw rolls it back
+    // (the storefront COD deposit, checkout/checkoutController.js, item 362 review).
+    beforeCommit = null,
+    // A follow-on order's language (an exchange, a renewal, a converted lost order) — orderLocale.js, item 383.
+    locale: inheritedLocale = null,
   } = {}
 ) {
+  // A picked place names the address it prices (places/placePricing.alignAddress, item 314).
+  if (payload && payload.shippingAddress && payload.shippingAddress.placeId) {
+    payload = { ...payload, shippingAddress: await require('../places/placePricing').alignAddress(workspaceId, payload.shippingAddress, outerTransaction) };
+  }
   const { items, contact, shippingAddress, paymentMethod, discountCode, funnelId, websiteId, notes } = payload;
+  // Staff price changes (item 382): a teammate with orders.price_override only, never a shopper.
+  const staffPricing = require('./staffPricing');
+  staffPricing.assertAllowedFor(payload, req);
 
   if (!items || items.length === 0) {
     throw new ValidationError([{ field: 'items', message: 'At least one item is required' }]);
@@ -279,7 +308,10 @@ async function createOrder(
     if (!req.user && payload[Symbol.for('zimos.exactPrices')] !== true) {
       const limitPhone = normalizePhone(contact && contact.phone);
       if (limitPhone) await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `purchase-limits:${workspaceId}:${limitPhone}` }, transaction });
-      await require('../catalog/purchaseLimits').assertWithin(workspaceId, items.filter((i) => !i[Symbol.for('zimos.freeGift')]), contact, transaction);
+      // A follow-on add-on order (an upsell placed as its own order) counts toward the per-customer limit only (item 321).
+      await require('../catalog/purchaseLimits').assertWithin(workspaceId, items.filter((i) => !i[Symbol.for('zimos.freeGift')]), contact, transaction, { perOrder: orderSource !== 'upsell' });
+      // A free trial's line, once per phone, checked again under the same lock (subscriptions/trialCheckout.js).
+      await require('../subscriptions/trialCheckout').assertStillFree(workspaceId, items, contact, transaction);
     }
     const customer = await customerService.findOrCreateByPhone(workspaceId, contact, transaction);
 
@@ -382,9 +414,13 @@ async function createOrder(
       const isOrderBump = item.isOrderBump === true;
       const bumpFailure = (err) =>
         isOrderBump && (err instanceof NotFoundError || (err && err.code === 'INSUFFICIENT_STOCK')) ? orderBumpUnavailable() : err;
-      const line = await priceLine(workspaceId, item, transaction).catch((err) => {
-        throw bumpFailure(err);
-      });
+      // A custom line staff typed in has no variant and holds no stock; a catalogue line may carry staff's own price (item 382).
+      const line = staffPricing.isCustom(item)
+        ? staffPricing.customLine(item, req)
+        : await priceLine(workspaceId, item, transaction).catch((err) => {
+            throw bumpFailure(err);
+          });
+      if (!line.custom && staffPricing.hasUnitPrice(item)) staffPricing.overrideLine(line, item.unitPrice, req);
       line.isOrderBump = isOrderBump;
       // The shopper's answers to the product's custom fields, checked against
       // its current definition (catalog/customFields.js). Required fields are
@@ -423,6 +459,7 @@ async function createOrder(
       }
     }
 
+    await staffPricing.settleCurrency(workspaceId, pricedLines, transaction);
     // A funnel with a currency of its own takes orders in it only (funnels/funnelCurrency.js).
     await require('../funnels/funnelCurrency').assertOrderCurrency(workspaceId, funnelId, pricedLines[0] && pricedLines[0].currency, transaction);
 
@@ -433,7 +470,8 @@ async function createOrder(
     const exactPrices = payload[Symbol.for('zimos.exactPrices')] === true;
     // A click-and-collect place (clickAndCollect/, items 282–283): { locationId, name, address, isDefault }.
     const pickupPlace = payload[Symbol.for('zimos.pickup')] || null;
-    const bundleSnapshots = exactPrices ? [] : await applyBundleTiers(workspaceId, pricedLines, transaction);
+    // A line at staff's own price takes no tier on top (item 382).
+    const bundleSnapshots = exactPrices ? [] : await applyBundleTiers(workspaceId, pricedLines.filter((l) => !l.priceOverride), transaction);
     // A VIP tier with free shipping (vipTiers/, item 218) sets this on the checkout's payload: every line ships free.
     if (payload[Symbol.for('zimos.freeShipping')]) {
       for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
@@ -441,7 +479,7 @@ async function createOrder(
 
     const subtotal = add(...pricedLines.map((l) => l.lineTotalAmount));
     // A free gift's product doesn't meet a discount's product condition (item 276).
-    const productIds = pricedLines.filter((l) => !l.freeGift).map((l) => l.productId);
+    const productIds = pricedLines.filter((l) => !l.freeGift && l.productId).map((l) => l.productId);
     const totalQuantity = pricedLines.reduce((sum, l) => sum + l.quantity, 0);
     // `shippingOverride` (a funnel add-on placed as its own order after the
     // order it follows: the shopper pays shipping once) wins over any offer's.
@@ -454,6 +492,8 @@ async function createOrder(
       const evaluation = await discountService.evaluate(workspaceId, discountCode, {
         subtotal,
         productIds,
+        // A product- or collection-limited code works on its lines only (item 345).
+        lines: pricedLines,
         customerId: customer.id,
         funnelId,
         transaction,
@@ -465,12 +505,29 @@ async function createOrder(
     const couponExtras = require('../discounts/couponExtras');
     if (!discountCode && !exactPrices) {
       // No code typed: the store's best automatic discount, when one applies.
-      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
+      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, lines: pricedLines, customerId: customer.id, funnelId }, transaction);
       if (automatic) {
         discountAmount = automatic.amount;
         discountRecord = automatic.discount;
         discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
       }
+    }
+    // A limited code's uses held by orders still awaiting their online payment count too, under a lock
+    // on the code (item 366): a typed code that has none left is refused, an automatic one is dropped.
+    if (discountRecord && (discountRecord.usageLimit !== null || discountRecord.perCustomerLimit !== null)) {
+      const full = await discountService.roomFor(discountRecord.id, customer.id, transaction);
+      if (full && discountCode) throw full;
+      if (full) {
+        discountAmount = 0;
+        discountRecord = null;
+        discountsSnapshot = [];
+      }
+    }
+    // A free-shipping code (item 353): every line ships free, as a VIP tier's free shipping does,
+    // and the order keeps it when a line joins later or its items are edited (freeShippingGranted below).
+    const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping');
+    if (couponFreeShipping) {
+      for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
     }
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
@@ -479,6 +536,10 @@ async function createOrder(
     if (!req.user && !shippingOverride) await require('../dropship/supplierRules').assertMinimums(workspaceId, pricedLines, transaction);
     // Kept apart from the coupon: the bundle's saving is already in the line totals.
     discountsSnapshot = [...bundleSnapshots, ...discountsSnapshot];
+    // Staff's manual discount (item 382) on what the code left, as its own entry; orderDiscount is both.
+    const manualDiscount = staffPricing.manualEntry(payload.manualDiscount, subtotal - discountAmount, req);
+    if (manualDiscount) discountsSnapshot.push(manualDiscount);
+    const orderDiscount = discountAmount + (manualDiscount ? manualDiscount.amount : 0);
 
     // Always priced, even without an address (amount 0 then): the weight
     // and tier are stored on the order either way.
@@ -488,7 +549,8 @@ async function createOrder(
       address: shippingAddress || null,
       subtotal,
       totalQuantity,
-      offerShippingOverride,
+      // A free-shipping code beats an offer's own shipping price (item 353 review); an add-on's does not.
+      offerShippingOverride: couponFreeShipping && !shippingOverride ? null : offerShippingOverride,
       weightLines: pricedLines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
       productLines: pricedLines.map((l) => l.shippingRule),
       funnelId: payload.funnelId || null,
@@ -505,7 +567,8 @@ async function createOrder(
     let { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
-      lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+      // Taxed on what the shopper pays: the code's or automatic discount comes off first (item 356), then staff's (item 382).
+      lines: await staffPricing.taxableLines(pricedLines, discountAmount, discountRecord, manualDiscount ? manualDiscount.amount : 0, transaction),
       shippingAmount,
       transaction,
     });
@@ -513,8 +576,8 @@ async function createOrder(
     if (taxExempt) taxAmount = 0;
 
     // The payment method's own fee or discount (payments/paymentRulesService.js), as its own line.
-    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - discountAmount + shippingAmount, transaction, pricedLines[0].currency);
-    const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount + paymentAdjustment.amount;
+    const paymentAdjustment = await paymentRules.adjustmentForWorkspace(workspaceId, paymentMethod, subtotal - orderDiscount + shippingAmount, transaction, pricedLines[0].currency);
+    const totalAmount = subtotal - orderDiscount + shippingAmount + taxAmount + paymentAdjustment.amount;
     // Pay later on account: only an approved signed-in business customer, within their limit (accountCredit/, item 229).
     const onAccount = await require('../accountCredit').checkOrder(customer, paymentMethod, totalAmount, payload, req, transaction);
 
@@ -527,11 +590,14 @@ async function createOrder(
         websiteId: websiteId || null,
         funnelId: funnelId || null,
         customerId: customer.id,
-        orderNumber: generateOrderNumber(),
+        // The store's next short number (#1001…), taken under this transaction (orderNumbers.js, item 381).
+        orderNumber: await require('./orderNumbers').next(workspaceId, transaction),
+        // The language the customer's messages go out in (item 383).
+        locale: await require('./orderLocale').forNewOrder(workspaceId, payload, req, { inherited: inheritedLocale, transaction }),
         paymentMethod,
         currency: pricedLines[0].currency,
         subtotalAmount: subtotal,
-        discountAmount,
+        discountAmount: orderDiscount,
         shippingAmount,
         taxAmount,
         totalAmount,
@@ -562,8 +628,8 @@ async function createOrder(
         weightEstimated: shipping.weightEstimated,
         // With the option the shopper picked, when not the standard one.
         shippingSnapshot: { ...shippingSnapshot(shipping), ...(chosenShipping ? { option: chosenShipping.snapshot } : {}),
-          // Free shipping a VIP tier, a referral or a pickup gave: kept when a line joins later (item 277).
-          ...(payload[Symbol.for('zimos.freeShipping')] ? { freeShippingGranted: true } : {}),
+          // Free shipping a VIP tier, a referral, a pickup or a free-shipping code gave: kept when a line joins later (items 277, 353).
+          ...(payload[Symbol.for('zimos.freeShipping')] || couponFreeShipping ? { freeShippingGranted: true } : {}),
           // Set with the order, so the assignment job leaves a pickup where the shopper picked it (item 282).
           ...(pickupPlace ? { pickup: { locationId: pickupPlace.locationId, name: pickupPlace.name, address: pickupPlace.address } } : {}) },
         ...(pickupPlace && !pickupPlace.isDefault ? { stockLocationId: pickupPlace.locationId } : {}),
@@ -577,6 +643,8 @@ async function createOrder(
               },
             }
           : {}),
+        // The shopper's browser sends the transfer screenshot with this token (manualPayments).
+        ...(manualPayment ? { paymentTokenHash: manualPayment.tokenHash } : {}),
       },
       { transaction }
     );
@@ -607,6 +675,8 @@ async function createOrder(
             unitWeightGrams: shipping.lineWeights[index],
             customizations: line.customizations || null,
             isOrderBump: line.isOrderBump,
+            isFreeGift: line.freeGift === true,
+            priceOverride: line.priceOverride || null,
           },
           { transaction }
         )
@@ -615,7 +685,9 @@ async function createOrder(
       await attachUploads(line.customizations, orderItems[orderItems.length - 1].id, transaction);
     }
 
-    if (paymentMethod === 'cod') {
+    if (manualPayment) await require('../manualPayments/manualPaymentService').recordForOrder(order, manualPayment.method, transaction);
+    // A store-manual order waits in the queue too, flagged until its proof is approved (manualPayments).
+    if (paymentMethod === 'cod' || manualPayment) {
       // `confirmationAvailableAt`: a funnel order waits for the funnel's offer
       // window before anyone may confirm it (funnels/funnelOfferMerge.js).
       await db.ConfirmationTask.create(
@@ -639,6 +711,12 @@ async function createOrder(
       );
     }
 
+    // The pay-per-order fee, after Order.create and as this transaction's
+    // last lock (billing/walletService). Refused past the overdraft, which
+    // rolls the whole order back: 402 in the dashboard, 423 for a shopper.
+    // Once per order: the order's own ledger rows are read under the lock.
+    if (chargeFee) await wallet.chargeOrderFee(order, { staff: Boolean(req.user) }, transaction);
+
     await recordAudit({
       workspaceId,
       actorUserId: req.user ? req.user.id : null,
@@ -649,6 +727,11 @@ async function createOrder(
       req,
       transaction,
     });
+    // Staff's own prices and discount, against the catalogue's (item 382).
+    const priceAudit = staffPricing.auditOfCreate(pricedLines, manualDiscount);
+    if (priceAudit) {
+      await recordAudit({ workspaceId, actorUserId: req.user ? req.user.id : null, action: 'order.price_change', entityType: 'Order', entityId: order.id, ...priceAudit, req, transaction });
+    }
 
     // Merchant automations (WhatsApp templates) and server-side ad-platform
     // conversions run after commit and never fail the order. An order waiting
@@ -656,6 +739,7 @@ async function createOrder(
     // They hang off the order.created event in the outbox (see each module's jobs.js).
     await outbox.record(transaction, 'order.created', { workspaceId, orderId: order.id, awaitingPayment: Boolean(awaitingPayment), isTest: Boolean(isTest) });
 
+    if (beforeCommit) await beforeCommit(order, transaction);
     return { order, items: orderItems };
   };
 
@@ -670,7 +754,7 @@ async function createOrder(
   } catch (err) {
     if (err instanceof fraudRules.OrderRejectedError) await recordRefusal(workspaceId, err.refusal, req);
     // Nothing was saved; the shopper is sent a code and asked for it.
-    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone);
+    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone, { req });
     throw err;
   }
 }
@@ -693,6 +777,18 @@ async function createOrder(
  *
  * @returns {Promise<{ order, item, before }>} before: the totals it replaced
  */
+/**
+ * The discount an order was placed with when it has no redemption yet: an order still awaiting its
+ * online payment keeps its code in completionContext.discount until it is paid, and an automatic
+ * discount names itself in discountsSnapshot. Tax spreads it over the lines it covers (item 356 review).
+ */
+async function placedDiscount(order, transaction) {
+  const pending = order.completionContext && order.completionContext.discount;
+  const automatic = (order.discountsSnapshot || []).find((d) => d && d.kind !== 'bundle' && d.discountId);
+  const discountId = (pending && pending.discountId) || (automatic && automatic.discountId) || null;
+  return discountId ? db.Discount.findByPk(discountId, { transaction }) : null;
+}
+
 async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = false, actorUserId = null } = {}, transaction) {
   const before = {
     subtotalAmount: Number(order.subtotalAmount),
@@ -706,8 +802,11 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   const existing = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction });
   // An upsell the shopper takes counts toward the product's purchase limits with the order's own lines (item 313).
   if (isUpsell) {
+    const limits = require('../catalog/purchaseLimits');
     const lines = [...existing.map((i) => ({ variantId: i.variantId, offerId: i.offerId, quantity: i.quantity })), lineInput];
-    await require('../catalog/purchaseLimits').assertWithin(workspaceId, lines, order.contactSnapshot || {}, transaction, { excludeOrderId: order.id });
+    // Only the products the upsell adds (item 321), with the order's own lines of those products.
+    const added = [...(await limits.unitsByProduct(workspaceId, [lineInput], transaction)).keys()];
+    if (added.length) await limits.assertWithin(workspaceId, lines, order.contactSnapshot || {}, transaction, { excludeOrderId: order.id, onlyProductIds: added });
   }
   const newLine = await priceLine(workspaceId, lineInput, transaction);
   for (const consumed of newLine.consumedInventory) {
@@ -738,6 +837,10 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       : null;
     lines.push({
       productId: item.productId,
+      // A free gift (freeGifts/, item 276) never counts toward a discount, as in orderItemsEdit (item 353 review).
+      freeGift: item.isFreeGift !== null && item.isFreeGift !== undefined
+        ? item.isFreeGift === true
+        : !item.offerId && Number(item.unitPriceAmount) === 0 && Boolean(item.offerNameSnapshot),
       quantity: item.quantity,
       lineTotalAmount: Number(item.lineTotalAmount),
       shippingOverride: facts ? facts.shippingOverride : null,
@@ -764,17 +867,29 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
 
   // The code the order was placed with, on the new subtotal. It was checked
   // and redeemed when the order was placed and is not checked again.
-  let discountAmount = before.discountAmount;
+  // Staff's manual discount (item 382) is part of discountAmount; the code's share is worked out without it.
+  const staffPricing = require('./staffPricing');
+  const oldManual = staffPricing.manualOf(order);
+  let discountAmount = before.discountAmount - (oldManual ? Number(oldManual.amount) || 0 : 0);
   let discountsSnapshot = order.discountsSnapshot || [];
+  let redeemedDiscount = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
+    redeemedDiscount = discount;
     if (discount) {
-      discountAmount = discountService.amountFor(discount, subtotal);
+      discountAmount = await discountService.amountForLines(discount, lines, transaction);
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
       await redemption.update({ amountAllocated: discountAmount }, { transaction });
     }
+  } else {
+    redeemedDiscount = await placedDiscount(order, transaction);
   }
+  // …and stays, on what the code leaves of the new subtotal.
+  const manualDiscount = oldManual ? staffPricing.manualEntry(oldManual, Math.max(0, subtotal - discountAmount), null, oldManual) : null;
+  if (oldManual) discountsSnapshot = [...discountsSnapshot.filter((d) => !d || d.kind !== staffPricing.MANUAL), manualDiscount];
+  const couponAmount = discountAmount;
+  discountAmount += manualDiscount ? manualDiscount.amount : 0;
 
   const address = order.shippingAddressSnapshot || null;
   const shipping = await calculateShippingAmount(workspaceId, {
@@ -783,7 +898,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     address,
     subtotal,
     totalQuantity,
-    offerShippingOverride,
+    offerShippingOverride: couponShipsFree(order) ? null : offerShippingOverride,
     weightLines: lines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
     productLines: lines.map((l) => l.shippingRule),
     funnelId: order.funnelId || null,
@@ -797,7 +912,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   let { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
-    lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+    // Taxed after the order's discount, as createOrder taxes it (items 356, 382).
+    lines: await staffPricing.taxableLines(lines, couponAmount, redeemedDiscount, manualDiscount ? manualDiscount.amount : 0, transaction),
     shippingAmount,
     transaction,
   });
@@ -907,6 +1023,8 @@ async function getOrder(workspaceId, orderId) {
   json.checkoutFields = require('../checkout/checkoutExtras').presentCheckoutFields(json.checkoutFields);
   // Each line's product picture and the funnel's name (orderListDecor.js).
   await require('./orderListDecor').decorateOne(workspaceId, json);
+  // Paid by one of the store's InstaPay / wallet methods: the payer's number, the screenshot's signed link and the review (manualPayments).
+  if (order.paymentMethod === 'bank_transfer') json.manualPayment = await require('../manualPayments/manualPaymentService').presentForStaff(workspaceId, order.id);
   // A funnel offer the shopper took after this order had left its offer
   // window is an order of its own: both ends name the other.
   const linkedOrders = await db.Order.findAll({
@@ -927,6 +1045,8 @@ async function getOrder(workspaceId, orderId) {
     confirmationTask: await confirmationService.taskSummaryForOrder(workspaceId, order.id),
     linkedOrders: linkedOrders.map((o) => o.toJSON()),
     linkedFromOrder: linkedFrom ? linkedFrom.toJSON() : null,
+    // Staff's manual discount, shown apart from the code (item 382); also in discountsSnapshot as kind 'manual'.
+    manualDiscount: require('./staffPricing').manualOf(json),
   };
 }
 
@@ -1236,6 +1356,14 @@ async function riskCounts(workspaceId, { q, from, to, riskLevel, ...filters }) {
  * reason. Refused once a parcel has shipped — use a return after that.
  */
 async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false, notifyCustomer }, req) {
+  // The gateway is asked about an open card or wallet attempt first (best effort, as expiry does), so a payment
+  // that already went through is recorded before the cancel closes the attempt (item 357 review).
+  const known = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'cancelledAt'] });
+  if (known && !known.cancelledAt) {
+    await require('../payments/onlinePaymentService')
+      .inquireOpenAttempts(known.id)
+      .catch((err) => logger.warn('[orders] payment inquiry before cancel failed', { orderId, reason: err.message }));
+  }
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({
       where: { id: orderId, workspaceId },
@@ -1258,6 +1386,10 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       { workspaceId, orderId: order.id, referenceType: 'order_cancelled', actorUserId: req.user.id },
       transaction
     );
+    // An online payment still open for it is cancelled, and closed at the gateway once this commits (item 357):
+    // the shopper's page stops taking money for a cancelled order. Required here to avoid a load cycle. A bank-transfer
+    // receipt waiting for review stays open, so it can still be confirmed if the order is reopened.
+    await require('../payments/onlinePaymentService').cancelOpenAttempts(order, transaction, null, { gatewayOnly: true });
 
     // A shipment booked with a connected courier is cancelled there first. If
     // the courier refuses, this throws and the whole cancellation rolls back:
@@ -1271,10 +1403,7 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
     });
 
     // Cancel any shipment that was created but never collected.
-    await db.Shipment.update(
-      { status: 'cancelled' },
-      { where: { orderId: order.id, status: 'created' }, transaction }
-    );
+    await carrierShipmentService.cancelUncollectedShipments(workspaceId, order.id, transaction, { req, trigger: 'order_cancel' });
 
     // Close any confirmation task still in the queue for this order, recorded
     // as an order-page rejection so the queue's Done tab shows who and why.
@@ -1298,9 +1427,29 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       req,
       transaction,
     });
+    // The pay-per-order fee goes back to the store (the last lock taken
+    // here); nothing when a rejection already gave it back.
+    await wallet.reverseOrderFee(order, { reason: 'order_cancelled', actorUserId: req.user ? req.user.id : null }, transaction);
 
     return db.Order.findByPk(order.id, { include: [{ model: db.OrderItem, as: 'items' }], transaction });
   });
+}
+
+const blank = (v) => (v === undefined || v === null ? '' : String(v));
+const sameFields = (a, b, keys) => keys.every((k) => blank((a || {})[k]) === blank((b || {})[k]));
+// What a courier booking carries of the receiver: the address fields this endpoint sets
+// (orderValidation's address), and the name and phones.
+const COURIER_ADDRESS_FIELDS = ['country', 'province', 'city', 'area', 'addressLine', 'placeId', 'postalCode', 'notes'];
+const COURIER_CONTACT_FIELDS = ['fullName', 'phone', 'alternatePhone'];
+
+/** Whether an updateOrderLimited body changes what a courier was given at booking. */
+function receiverChanges(order, data) {
+  if (data.shippingAddress !== undefined && !sameFields(order.shippingAddressSnapshot, data.shippingAddress, COURIER_ADDRESS_FIELDS)) return true;
+  if (data.contact !== undefined) {
+    const next = { ...(order.contactSnapshot || {}), ...data.contact };
+    if (!sameFields(order.contactSnapshot, next, COURIER_CONTACT_FIELDS)) return true;
+  }
+  return false;
 }
 
 /**
@@ -1314,6 +1463,10 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
     if (!order) throw new NotFoundError('Order');
     if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
     await assertNotShipped(order, transaction);
+    // The courier delivers to the address and receiver it was given at booking (item 352):
+    // a real change to either waits for the booking to be cancelled. Notes, the email, or
+    // the same values sent again stay allowed.
+    if (receiverChanges(order, data)) await carrierShipmentService.assertNoCarrierBooking(order.id, transaction);
 
     const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes };
     const updates = {};
@@ -1363,7 +1516,10 @@ async function createShipment(workspaceId, orderId, data, req) {
     });
     if (!order) throw new NotFoundError('Order');
     carrierShipmentService.assertConfirmedOrPaid(order);
-    await carrierShipmentService.assertNoActiveShipment(order.id, transaction);
+    // The whole order (one active shipment), or the units in data.items when it goes as several parcels (item 375).
+    const plan = await require('../shipping/partialShipments').planShipment(order, data, transaction);
+    // A returned parcel that was restocked: its units are taken again (item 354).
+    await require('./returnedStock').retakeForReship(workspaceId, order.id, req.user ? req.user.id : null, transaction);
 
     const shipment = await insertShipment(
       {
@@ -1373,6 +1529,8 @@ async function createShipment(workspaceId, orderId, data, req) {
         waybillNumber: data.waybillNumber || null,
         trackingUrl: data.trackingUrl || null,
         status: 'created',
+        items: plan.items,
+        codAmount: plan.codAmount,
       },
       transaction
     );
@@ -1398,11 +1556,42 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
   return db.sequelize.transaction(async (transaction) => {
     const shipment = await db.Shipment.findOne({ where: { id: shipmentId, workspaceId, orderId }, transaction });
     if (!shipment) throw new NotFoundError('Shipment');
+    // A courier booking's waybill is the courier's own reference: its
+    // webhooks and polls find the shipment by it, so another number typed
+    // here (PATCH, "Shipped" by hand, the tracking import, the public API)
+    // would cut it off from every status update.
+    if (
+      data.waybillNumber !== undefined &&
+      data.waybillNumber !== shipment.waybillNumber &&
+      carrierShipmentService.isCarrierBooked(shipment)
+    ) {
+      throw new AppError('CARRIER_WAYBILL_LOCKED', 'The courier assigned this waybill; it cannot be changed', 422);
+    }
     // Cancelling a booking whose courier has no cancel API needs the
     // merchant's acknowledgeManualCancel; a final status stops polling.
     const extra = carrierShipmentService.manualCancelUpdates(shipment, data, req);
+    // A courier with a cancel API is asked first, before anything here
+    // changes: a refusal (409 CARRIER_CANCEL_FAILED) leaves the shipment as
+    // it was, instead of a parcel live at the courier that we call cancelled
+    // and whose COD we would then ignore. The stage guard runs before that,
+    // so a refused move never follows a cancel the courier already made.
+    // Not locked: the sandbox courier writes its own state onto this row.
+    if (data.status === 'cancelled' && carrierShipmentService.cancelsByApi(shipment)) {
+      await assertShipmentCancelMove(orderId, shipment.id, transaction);
+      Object.assign(extra, await carrierShipmentService.apiCancelUpdates(workspaceId, shipment, data, req, transaction));
+    }
     if (!extra.cancelMode && carrierShipmentService.TERMINAL_STATUSES.includes(data.status) && shipment.nextPollAt) {
       extra.nextPollAt = null;
+    }
+    // A returned or cancelled shipment set going again is the order sent again: if its
+    // returned parcel was restocked, the units are taken back first, as for a new shipment (item 354).
+    if (
+      data.status &&
+      carrierShipmentService.FINISHED_STATUSES.includes(shipment.status) &&
+      !carrierShipmentService.FINISHED_STATUSES.includes(data.status)
+    ) {
+      await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id'], transaction, lock: transaction.LOCK.UPDATE });
+      await require('./returnedStock').retakeForReship(workspaceId, orderId, req.user ? req.user.id : null, transaction);
     }
     // The stamps, fulfillment state and audit row live in shipmentLifecycle,
     // shared with the carrier status updates.
@@ -1419,6 +1608,7 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
 module.exports = {
   createOrder,
   addLineToOpenOrder,
+  placedDiscount,
   getOrder,
   getOrderRef,
   applySearchAndDates,
@@ -1428,6 +1618,7 @@ module.exports = {
   generateOrderNumber,
   generateTrackingCode,
   priceLine,
+  couponShipsFree,
   cancelOrder,
   updateOrderLimited,
   listShipments,

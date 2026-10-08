@@ -32,6 +32,12 @@ const PLATFORM_PERMISSIONS = Object.freeze({
   // Pricing a workspace's next charge and recording a payment against it by
   // hand (there is no subscription gateway yet). Added by migration 107.
   PAYMENTS_RECORD: 'payments.record',
+  // The ways merchants can pay (billing/paymentMethodService): turning one
+  // on or off and their order; and, separately, the number a manual one
+  // sends money to. Both are held through '*' only: no migration adds them
+  // to the admin role or to any admin, so a creator grants them by hand.
+  PAYMENT_METHODS_MANAGE: 'payment_methods.manage',
+  PAYMENT_METHODS_EDIT_NUMBERS: 'payment_methods.edit_numbers',
   PLANS_VIEW: 'plans.view',
   PLANS_MANAGE: 'plans.manage',
   TEMPLATES_VIEW: 'templates.view',
@@ -44,6 +50,8 @@ const PLATFORM_PERMISSIONS = Object.freeze({
   PROVIDERS_MANAGE: 'providers.manage',
   // System health, including the live re-check.
   SYSTEM_VIEW: 'system.view',
+  // Acting on the system: retrying a failed queue job (migration 549).
+  SYSTEM_MANAGE: 'system.manage',
   FEATURE_FLAGS_VIEW: 'feature_flags.view',
   FEATURE_FLAGS_MANAGE: 'feature_flags.manage',
   ANNOUNCEMENTS_VIEW: 'announcements.view',

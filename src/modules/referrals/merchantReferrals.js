@@ -136,17 +136,25 @@ me.post(
   asyncHandler(async (req, res) => {
     const code = await ownCode(req.user.id);
     if (!code) throw new NotFoundError('Referral code');
-    const open = await db.ReferralPayoutRequest.findOne({ where: { userId: req.user.id, status: 'requested' } });
-    if (open) throw new ConflictError('You already have a payout request waiting', 'PAYOUT_ALREADY_REQUESTED');
-    const owed = (await commissions.totalsFor({ agentId: req.user.id, codeId: code.id })).filter((t) => t.pending > 0);
-    if (owed.length === 0) throw new AppError('NOTHING_TO_PAY', 'There is nothing owed to you yet', 409);
-    const request = await db.ReferralPayoutRequest.create({
-      userId: req.user.id,
-      amounts: owed.map((t) => ({ currency: t.currency, amount: t.pending })),
-      method: req.body.method,
-      details: req.body.details,
+    await db.sequelize.transaction(async (transaction) => {
+      // One open request per person: two requests sent together queue on this lock, and the
+      // second then finds the first (item 410).
+      await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `referral-payout:${req.user.id}` }, transaction });
+      const open = await db.ReferralPayoutRequest.findOne({ where: { userId: req.user.id, status: 'requested' }, attributes: ['id'], transaction });
+      if (open) throw new ConflictError('You already have a payout request waiting', 'PAYOUT_ALREADY_REQUESTED');
+      const owed = (await commissions.totalsFor({ agentId: req.user.id, codeId: code.id })).filter((t) => t.pending > 0);
+      if (owed.length === 0) throw new AppError('NOTHING_TO_PAY', 'There is nothing owed to you yet', 409);
+      const request = await db.ReferralPayoutRequest.create(
+        {
+          userId: req.user.id,
+          amounts: owed.map((t) => ({ currency: t.currency, amount: t.pending })),
+          method: req.body.method,
+          details: req.body.details,
+        },
+        { transaction }
+      );
+      await recordAudit({ actorUserId: req.user.id, action: 'referral_payout.request', entityType: 'ReferralPayoutRequest', entityId: request.id, after: { amounts: request.amounts, method: request.method }, req, transaction });
     });
-    await recordAudit({ actorUserId: req.user.id, action: 'referral_payout.request', entityType: 'ReferralPayoutRequest', entityId: request.id, after: { amounts: request.amounts, method: request.method }, req });
     res.status(201).json(await overview(req.user));
   })
 );

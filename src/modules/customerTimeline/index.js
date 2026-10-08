@@ -19,13 +19,15 @@ const { NotFoundError, ValidationError } = require('../../core/errors/AppError')
  *   order_placed, order_shipped, order_delivered, order_cancelled,
  *   return_requested, refund, note, followup, review, question (asked from
  *   the customer's email), loyalty, store_credit, quote, privacy_request,
- *   referral (a friend they referred), form (a form they sent).
+ *   referral (a friend they referred), form (a form they sent),
+ *   message_undelivered (an email to them bounced or was marked as spam, an
+ *   SMS was not delivered — notification_logs, item 386).
  * Paged with a cursor (`next`), so new events at the top don't shift pages;
  * `kinds` narrows the feed.
  */
 
 const KINDS = ['order_placed', 'order_shipped', 'order_delivered', 'order_cancelled', 'return_requested', 'refund', 'note', 'followup',
-  'review', 'question', 'loyalty', 'store_credit', 'quote', 'privacy_request', 'referral', 'form'];
+  'review', 'question', 'loyalty', 'store_credit', 'quote', 'privacy_request', 'referral', 'form', 'message_undelivered'];
 
 // Each source: kind, at, id (text), order id/number when there is one, data.
 const SOURCES = {
@@ -79,6 +81,14 @@ const SOURCES = {
   form: `SELECT 'form', s.created_at, s.id::text, NULL::uuid, NULL,
       jsonb_build_object('form', s.form_name, 'page', s.page_path, 'message', s.message)
     FROM form_submissions s WHERE s.workspace_id = :ws AND s.customer_id = :c`,
+  // About one of their orders, or to their email address / phone number.
+  message_undelivered: `SELECT 'message_undelivered', l.status_at, l.id::text, l.order_id, o.order_number,
+      jsonb_build_object('channel', l.channel, 'status', l.status, 'reason', l.status_reason, 'subject', l.subject, 'template', l.template)
+    FROM notification_logs l LEFT JOIN orders o ON o.id = l.order_id AND o.workspace_id = :ws
+    WHERE l.workspace_id = :ws AND l.status IN ('bounced', 'complained', 'undelivered') AND l.status_at IS NOT NULL
+      AND (o.customer_id = :c
+        OR (l.channel = 'email' AND :email <> '' AND lower(l.recipient) = :email)
+        OR (l.channel = 'sms' AND :phone <> '' AND regexp_replace(l.recipient, '[^0-9]', '', 'g') = :phone))`,
 };
 
 const encode = (row) => Buffer.from(`${row.atKey}|${row.kind}|${row.id}`).toString('base64url');
@@ -98,7 +108,7 @@ async function timeline(workspaceId, customer, { kinds, limit, cursor }) {
       WHERE at IS NOT NULL ${after ? 'AND (at, kind, id) < (:cat::timestamptz, :ckind, :cid)' : ''}
       ORDER BY at DESC, kind DESC, id DESC
       LIMIT :lim`,
-    { replacements: { ws: workspaceId, c: customer.id, email: (customer.email || '').trim().toLowerCase(), lim: limit + 1, cat: after && after.at, ckind: after && after.kind, cid: after && after.id }, type: QueryTypes.SELECT }
+    { replacements: { ws: workspaceId, c: customer.id, email: (customer.email || '').trim().toLowerCase(), phone: String(customer.phoneNormalized || '').replace(/[^0-9]/g, ''), lim: limit + 1, cat: after && after.at, ckind: after && after.kind, cid: after && after.id }, type: QueryTypes.SELECT }
   );
   const more = rows.length > limit;
   const page = rows.slice(0, limit);
@@ -120,7 +130,7 @@ router.get('/', validate({
     cursor: Joi.string().max(300).optional(),
   }),
 }), asyncHandler(async (req, res) => {
-  const customer = await db.Customer.findOne({ where: { id: req.params.customerId, workspaceId: req.tenant.workspaceId }, attributes: ['id', 'email'] });
+  const customer = await db.Customer.findOne({ where: { id: req.params.customerId, workspaceId: req.tenant.workspaceId }, attributes: ['id', 'email', 'phoneNormalized'] });
   if (!customer) throw new NotFoundError('Customer');
   let { kinds } = req.query;
   if (typeof kinds === 'string') kinds = kinds.split(',').map((s) => s.trim()).filter(Boolean);

@@ -20,6 +20,7 @@ const charges = require('../billing/subscriptionChargeService');
 const billingService = require('../billing/billingService');
 const specialTerms = require('../billing/specialTermsService');
 const suspension = require('./workspaceSuspensionService');
+const moderation = require('./userModerationService');
 
 // Every handler here sits behind `authenticate` and the platform permission
 // its route names (platformAdminRoutes).
@@ -27,7 +28,8 @@ const suspension = require('./workspaceSuspensionService');
 
 // --- Plans ---------------------------------------------------------------
 const listPlans = asyncHandler(async (req, res) => {
-  res.json({ plans: await service.listPlans() });
+  // { plans, featureCatalog }
+  res.json(await service.listPlans());
 });
 
 const createPlan = asyncHandler(async (req, res) => {
@@ -320,6 +322,19 @@ const getUser = asyncHandler(async (req, res) => {
   res.json({ user: await userSearch.getUser(req.params.userId) });
 });
 
+// Suspend, unsuspend and soft-delete an account (userModerationService, item 337).
+const suspendUser = asyncHandler(async (req, res) => {
+  res.json({ user: await moderation.suspend(req.params.userId, req.body, req) });
+});
+
+const unsuspendUser = asyncHandler(async (req, res) => {
+  res.json({ user: await moderation.unsuspend(req.params.userId, req.body, req) });
+});
+
+const deleteUser = asyncHandler(async (req, res) => {
+  res.json({ user: await moderation.remove(req.params.userId, req.body, req) });
+});
+
 // 201 when the role was granted; 200 when the account already had that role.
 const grantAdmin = asyncHandler(async (req, res) => {
   const { admin, granted } = await adminUsers.grantAdmin(req.body, req);
@@ -439,6 +454,9 @@ module.exports = {
   listAdmins,
   searchUsers,
   getUser,
+  suspendUser,
+  unsuspendUser,
+  deleteUser,
   getManualSubscription,
   activateSubscription,
   changeSubscriptionPlan,

@@ -149,6 +149,10 @@ function parseXlsx(buffer) {
   const rows = [];
   for (const rowMatch of sheet.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)) {
     const row = [];
+    // Which cells were stored as numbers (item 323): a price computed by a formula is 249.49999999…, to be
+    // rounded, not refused like a typed "249.505". Not enumerable, so callers reading rows see plain arrays.
+    const numeric = new Set();
+    Object.defineProperty(row, 'numeric', { value: numeric, enumerable: false });
     for (const c of rowMatch[1].matchAll(/<c\s([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const attrs = c[1];
       const body = c[2] || '';
@@ -162,6 +166,7 @@ function parseXlsx(buffer) {
       const index = ref ? columnIndex(ref) : row.length;
       while (row.length < index) row.push('');
       row[index] = value;
+      if ((type === undefined || type === 'n') && raw !== undefined) numeric.add(index);
     }
     rows.push(row);
     if (rows.length > MAX_ROWS + 1) throw new SheetError(`The file has more than ${MAX_ROWS} rows`);
@@ -196,6 +201,8 @@ function readSheet(buffer, filename = '') {
     header.forEach((name, col) => {
       if (name) record[name] = String(cells[col] ?? '').trim();
     });
+    // The columns this row holds as numbers (xlsx only), by header name (item 323).
+    Object.defineProperty(record, '__numeric', { value: new Set(header.filter((name, col) => name && cells.numeric && cells.numeric.has(col))), enumerable: false });
     out.push(record);
   });
   return { header, rows: out };

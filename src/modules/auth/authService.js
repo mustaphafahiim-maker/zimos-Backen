@@ -1,6 +1,10 @@
 'use strict';
 
+const crypto = require('crypto');
+const { Op } = require('sequelize');
 const db = require('../../db/models');
+const env = require('../../config/env');
+const logger = require('../../core/utils/logger');
 const { hashPassword, verifyPassword } = require('../../core/security/password');
 const {
   signAccessToken,
@@ -10,6 +14,7 @@ const {
 } = require('../../core/security/tokens');
 const { AppError, AuthenticationError, ConflictError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { clientIp } = require('../../core/middleware/clientIp');
 const notify = require('../notifications/notify');
 const googleClient = require('./googleClient');
 const otpService = require('../otp/otpService');
@@ -17,11 +22,15 @@ const { normalizePhone } = require('../../core/utils/phone');
 const usernameService = require('../users/usernameService');
 const { isUsernameConflict } = require('../users/username');
 const signupPolicy = require('./signupPolicy');
+const siteTraffic = require('../siteAnalytics/siteTrafficService');
 const verificationCodes = require('../otp/verificationCodeService');
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
+const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes (item 331)
+// Reset emails one account may get; past them a request still answers the
+// same, it just sends nothing.
+const PASSWORD_RESET_LIMITS = Object.freeze({ perHour: 3, perDay: 10 });
 
 function issueTokenPair(user, req) {
   // The access token names its session, so ending the session ends it too (core/security/sessionGate.js).
@@ -39,7 +48,7 @@ async function createSession(user, req) {
     userId: user.id,
     refreshTokenHash: hash,
     userAgent: req ? req.headers['user-agent'] : null,
-    ipAddress: req ? req.ip : null,
+    ipAddress: req ? clientIp(req) : null,
     expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
   });
   return { raw, session };
@@ -73,18 +82,43 @@ async function createAccount({ email, passwordHash, fullName, phone, username, e
 }
 
 /**
- * Email/password sign-up. The plan, terms and code rules are
+ * The 6-digit code that confirms a new account's email, sent at sign-up while
+ * SIGNUP_CONFIRM_BY_CODE is on. The account is already signed in, so nothing
+ * here may fail the sign-up: no email provider, a sending limit reached or a
+ * provider error just means no code went out — the dashboard's banner offers
+ * to send one (POST /auth/me/email/send-code).
+ */
+async function sendSignupCode(user, { locale, req }) {
+  if (!verificationCodes.emailReady()) return { sent: false };
+  try {
+    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
+    return { sent: true, ...sent };
+  } catch (err) {
+    if (!(err instanceof AppError)) logger.error('Could not send the sign-up code', { userId: user.id, message: err.message });
+    return { sent: false };
+  }
+}
+
+/**
+ * Email/password sign-up. The plan, terms, phone and code rules are
  * auth/signupPolicy's; with every switch off this is the sign-up it always
  * was: the account is created pending, a confirmation link is emailed, and
  * tokens are returned.
+ *
+ * With sign-up codes on (REQUIRE_SIGNUP_VERIFICATION), no tokens until the
+ * code is typed back. With SIGNUP_CONFIRM_BY_CODE instead, the account is
+ * active and signed in at once, its email not confirmed yet: a code to
+ * confirm it is emailed (`emailCode` says whether it went), and until it is,
+ * starting a trial, publishing and the rest of core/middleware/confirmedAccount
+ * are refused.
  */
-async function register({ email, password, fullName, phone, username, planId, billingCycle, acceptTerms, locale }, req) {
+async function register({ email, password, fullName, phone, username, planId, billingCycle, acceptTerms, locale, siteSessionId }, req) {
   const existing = await db.User.findOne({ where: { email } });
   if (existing) {
     throw new ConflictError('An account with this email already exists', 'EMAIL_TAKEN');
   }
 
-  const extra = await signupPolicy.registrationFields({ email, planId, billingCycle, acceptTerms });
+  const extra = await signupPolicy.registrationFields({ email, phone, planId, billingCycle, acceptTerms });
   const verifying = signupPolicy.verificationRequired();
   if (verifying) {
     // Fail closed: a code nobody can receive would lock the account out.
@@ -93,16 +127,34 @@ async function register({ email, password, fullName, phone, username, planId, bi
     }
     // Checked before the account exists, so one address or IP cannot mint
     // accounts past the code limits.
-    await verificationCodes.assertCanSend({ channel: 'email', target: String(email).toLowerCase(), ip: req ? req.ip : null });
+    await verificationCodes.assertCanSend({ channel: 'email', target: String(email).toLowerCase(), ip: req ? clientIp(req) : null });
   }
 
+  const byCode = signupPolicy.confirmByCode();
   const passwordHash = await hashPassword(password);
-  const user = await createAccount({ email, passwordHash, fullName, phone, username, extra });
+  const user = await createAccount({
+    email,
+    passwordHash,
+    fullName,
+    phone,
+    username,
+    extra: byCode ? { ...extra, status: 'active' } : extra,
+  });
+  // The marketing-site session it came from (item 339). Never throws:
+  // analytics cannot fail a sign-up.
+  await siteTraffic.linkSignup(user.id, siteSessionId);
 
   if (verifying) {
     await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
-    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+    const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
     return signupPolicy.verificationResponse(user, sent);
+  }
+
+  if (byCode) {
+    await recordAudit({ actorUserId: user.id, action: 'user.register', entityType: 'User', entityId: user.id, req });
+    const emailCode = await sendSignupCode(user, { locale, req });
+    const tokens = await issueTokenPair(user, req);
+    return { user: user.toSafeJSON(), ...tokens, emailCode };
   }
 
   const rawToken = generateOpaqueToken();
@@ -145,7 +197,9 @@ async function verifyEmail(rawToken) {
     if (!user) {
       throw new AppError('INVALID_VERIFICATION_TOKEN', 'Verification token is invalid or expired', 400);
     }
-    await user.update({ status: 'active', emailVerifiedAt: new Date() }, { transaction: t });
+    // A suspended account's link confirms the address but never lifts the
+    // suspension (item 337): only the console's unsuspend does.
+    await user.update({ status: user.status === 'suspended' ? 'suspended' : 'active', emailVerifiedAt: new Date() }, { transaction: t });
     await record.update({ usedAt: new Date() }, { transaction: t });
     return user.toSafeJSON();
   });
@@ -180,13 +234,46 @@ async function resendVerificationEmail(email) {
   return { success: true };
 }
 
-async function login({ email, password, locale }, req) {
-  const user = await db.User.findOne({ where: { email } });
-  // Same error for "no such user" and "wrong password" — never reveal which
+/**
+ * The account a sign-in names: by email when what was typed has an "@" (a
+ * username never has one; users.email is case-insensitive), otherwise by
+ * username, which is stored lower-case.
+ */
+async function findForSignIn({ identifier, email }) {
+  const given = String(identifier || email || '').trim();
+  if (!given) return null;
+  if (given.includes('@')) return db.User.findOne({ where: { email: given } });
+  return db.User.findOne({
+    where: db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col('username')), given.toLowerCase()),
+  });
+}
+
+// Compared against when no account matches (or it has no password), so "no
+// such account" costs the same bcrypt work as "wrong password" and the timing
+// doesn't tell them apart.
+let dummyHash = null;
+const getDummyHash = () => {
+  if (!dummyHash) dummyHash = hashPassword(crypto.randomBytes(24).toString('hex'));
+  return dummyHash;
+};
+
+/**
+ * Password sign-in by email or username (`identifier`), or by `email` as the
+ * dashboard sends it today.
+ */
+async function login({ identifier, email, password, locale }, req) {
+  const user = await findForSignIn({ identifier, email });
+  // Same error for "no such account" and "wrong password" — never reveal which
   // one it was, to avoid account enumeration via the login endpoint.
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
-    throw new AuthenticationError('Invalid email or password', 'INVALID_CREDENTIALS');
+  let passwordOk = false;
+  if (user && user.passwordHash) passwordOk = await verifyPassword(password, user.passwordHash);
+  else await verifyPassword(password, await getDummyHash());
+  if (!passwordOk) {
+    throw new AuthenticationError(identifier ? 'Invalid sign-in details' : 'Invalid email or password', 'INVALID_CREDENTIALS');
   }
+  // Deleted from the console (item 337): its password is gone, so this is a
+  // second lock only.
+  if (user.deletedAt) throw new AuthenticationError('This account was deleted', 'ACCOUNT_DELETED');
   if (user.status === 'suspended') {
     throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
   }
@@ -198,13 +285,17 @@ async function login({ email, password, locale }, req) {
     if (!signupPolicy.isVerified(user)) {
       let sent = null;
       try {
-        sent = await verificationCodes.sendCode(user, 'email', { ip: req ? req.ip : null, locale, req });
+        sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
       } catch (err) {
         if (!(err instanceof AppError) || err.statusCode !== 429) throw err;
       }
       return signupPolicy.verificationResponse(user, sent);
     }
     if (user.status === 'pending_verification') await user.update({ status: 'active' });
+  } else if (signupPolicy.confirmByCode() && user.status === 'pending_verification') {
+    // An account from when sign-up waited on the emailed link is let in now,
+    // as a new one would be; the dashboard asks it to confirm its email.
+    await user.update({ status: 'active' });
   }
 
   // Two-step sign-in (twoFactorService.js): from a browser that is not
@@ -226,9 +317,65 @@ async function completeLogin(user, req) {
   return { user: user.toSafeJSON(), ...tokens };
 }
 
-/** URL to send the browser to for Google's consent screen. */
-function getGoogleAuthUrl() {
-  return googleClient.getAuthUrl();
+/**
+ * What a Google sign-in answers an account that may not sign in: the same as
+ * a password sign-in (login): ACCOUNT_DELETED for an account deleted from the
+ * console (item 337; its Google id is kept so this answer, not a new account,
+ * meets that Google account), ACCOUNT_SUSPENDED for a suspended one.
+ * users.status is an ENUM of active, pending_verification and suspended;
+ * anything else would be refused as not active, as authenticate and refresh
+ * refuse it.
+ */
+function assertMaySignIn(user) {
+  if (user.deletedAt) throw new AuthenticationError('This account was deleted', 'ACCOUNT_DELETED');
+  if (user.status === 'active' || user.status === 'pending_verification') return;
+  if (user.status === 'suspended') throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
+  throw new AuthenticationError('Account is not active', 'ACCOUNT_INACTIVE');
+}
+
+/**
+ * Google, which has verified the address, links to a password account that
+ * never confirmed its email or phone: that account may not be this person's
+ * (anyone can sign up with an address they don't own). So, in the link's
+ * transaction, its password goes, every session ends (and with it every
+ * access token: they name their session, core/security/sessionGate), its
+ * remembered browsers are forgotten, sign-ins waiting for a second step are
+ * closed and its two-step sign-in is turned off — from here on only the
+ * Google owner signs in. A change of its email still pending (by link, or by
+ * an account code: item 332) and its live account codes die too, or whoever
+ * asked for them could still move the account to an address of theirs.
+ * Returns what the audit row records.
+ */
+async function takeOverUnconfirmed(user, transaction) {
+  const now = new Date();
+  await user.update({ passwordHash: null }, { transaction });
+  const [sessionsRevoked] = await db.Session.update({ revokedAt: now }, { where: { userId: user.id, revokedAt: null }, transaction });
+  const devicesForgotten = await db.TrustedDevice.destroy({ where: { userId: user.id }, transaction });
+  const [challengesClosed] = await db.LoginChallenge.update({ consumedAt: now }, { where: { userId: user.id, consumedAt: null }, transaction });
+  const [twoFactorReset] = await db.UserTwoFactor.update(
+    { mode: 'off', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: null, backupCodes: [], backupCodesCreatedAt: null },
+    { where: { userId: user.id, mode: { [db.Sequelize.Op.ne]: 'off' } }, transaction }
+  );
+  const [emailChangesClosed] = await db.EmailChange.update({ usedAt: now }, { where: { userId: user.id, usedAt: null }, transaction });
+  const [accountCodesClosed] = await db.VerificationCode.update(
+    { supersededAt: now },
+    { where: { userId: user.id, purpose: verificationCodes.ACCOUNT_PURPOSES, consumedAt: null, supersededAt: null }, transaction }
+  );
+  return {
+    unconfirmedAccount: true,
+    passwordRemoved: true,
+    sessionsRevoked,
+    devicesForgotten,
+    challengesClosed,
+    twoFactorReset: twoFactorReset > 0,
+    emailChangesClosed,
+    accountCodesClosed,
+  };
+}
+
+/** URL to send the browser to for Google's consent screen; `state` from googleState.issue. */
+function getGoogleAuthUrl(state) {
+  return googleClient.getAuthUrl(state);
 }
 
 /**
@@ -236,9 +383,20 @@ function getGoogleAuthUrl() {
  * - known googleId  -> log that user in
  * - known email     -> link googleId to that account, then log in
  * - neither         -> create a new active, email-verified, passwordless user
+ * Linking and creating need an address Google itself verified. An account
+ * with two-step sign-in on answers its challenge, as a password sign-in does
+ * (POST /auth/two-factor/verify finishes it through completeLogin).
  */
 async function loginWithGoogle(code, req) {
-  const profile = await googleClient.fetchProfile(code);
+  // A code Google refuses (used, expired, forged) sends the browser back with
+  // an error instead of an error page.
+  let profile;
+  try {
+    profile = await googleClient.fetchProfile(code);
+  } catch (err) {
+    logger.warn('Google sign-in: the code exchange failed', { message: err.message });
+    throw new AuthenticationError('Google sign-in failed. Try again.', 'GOOGLE_LOGIN_FAILED');
+  }
   if (!profile.googleId || !profile.email) {
     throw new AuthenticationError('Google did not return a usable profile', 'GOOGLE_PROFILE_INCOMPLETE');
   }
@@ -246,13 +404,43 @@ async function loginWithGoogle(code, req) {
   let user = await db.User.findOne({ where: { googleId: profile.googleId } });
   let action = 'user.login.google';
 
+  // A Google account may carry an address Google never verified (item 347):
+  // it proves nothing about owning it, so it neither links to the account
+  // with that address nor makes a new one. A Google id already linked is
+  // refused too: before item 347 such an address linked by email, so the
+  // link itself proves nothing.
+  if (!profile.emailVerified) {
+    throw new AuthenticationError('Your Google account has no verified email', 'GOOGLE_EMAIL_UNVERIFIED');
+  }
+
+  let linkMetadata = null;
   if (!user) {
     const byEmail = await db.User.findOne({ where: { email: profile.email } });
     if (byEmail) {
+      // Only an active or a pending account is linked. Any other status
+      // (suspended) is left exactly as it is — no Google link, no password
+      // or session change — and refused as a password sign-in refuses it:
+      // signing in with Google must not lift a suspension.
+      assertMaySignIn(byEmail);
       // Google has already verified this email, so a still-`pending_verification`
       // password account gets activated here too — otherwise it stays stuck as
       // pending forever (Google login never goes through resend-verification).
-      await byEmail.update({ googleId: profile.googleId, status: 'active', emailVerifiedAt: new Date() });
+      // One that never confirmed its email is taken over
+      // (takeOverUnconfirmed); a confirmed account keeps its password. A
+      // confirmed phone does not count: whoever signed up with the address
+      // could have confirmed their own phone (spec-gaps item 330).
+      const unconfirmed = !byEmail.emailVerifiedAt;
+      await db.sequelize.transaction(async (transaction) => {
+        await byEmail.update(
+          {
+            googleId: profile.googleId,
+            ...(byEmail.status === 'pending_verification' ? { status: 'active' } : {}),
+            emailVerifiedAt: new Date(),
+          },
+          { transaction }
+        );
+        if (unconfirmed) linkMetadata = await takeOverUnconfirmed(byEmail, transaction);
+      });
       user = byEmail;
       action = 'user.link.google';
     } else {
@@ -270,12 +458,23 @@ async function loginWithGoogle(code, req) {
     }
   }
 
-  if (user.status === 'suspended') {
-    throw new AuthenticationError('This account has been suspended', 'ACCOUNT_SUSPENDED');
+  assertMaySignIn(user);
+
+  // Two-step sign-in (item 347): Google stands in for the password only. The
+  // account's own second step (authenticator, email or WhatsApp code) is
+  // still asked from a browser it does not remember; the new-device email
+  // code is not, since Google has just proved the address. A link or a new
+  // account is recorded now; the sign-in itself when the code is verified.
+  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req);
+  if (challenge) {
+    if (action !== 'user.login.google') {
+      await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, metadata: linkMetadata, req });
+    }
+    return challenge;
   }
 
   await user.update({ lastLoginAt: new Date() });
-  await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, req });
+  await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, metadata: linkMetadata, req });
 
   const tokens = await issueTokenPair(user, req);
   return { user: user.toSafeJSON(), ...tokens };
@@ -351,47 +550,171 @@ async function listSessions(userId) {
   }));
 }
 
-async function requestPasswordReset(email) {
-  const user = await db.User.findOne({ where: { email } });
-  // Always behave the same way whether the account exists or not, so this
-  // endpoint can't be used to enumerate registered emails.
-  if (user) {
-    const rawToken = generateOpaqueToken();
-    await db.VerificationToken.create({
-      userId: user.id,
-      type: 'password_reset',
-      tokenHash: hashToken(rawToken),
-      expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
-    });
-    await notify.email({
-      recipient: user.email,
-      template: 'password_reset',
-      data: { token: rawToken, fullName: user.fullName },
-    });
+// --- Password reset by email link (item 331, Ziad's 5a33487) -------------
+
+/**
+ * The password-reset link needs FRONTEND_URL in production (the localhost
+ * default would email a link nobody can open). Without it every request is
+ * refused alike, so the refusal says nothing about any address.
+ */
+function assertResetLinksConfigured() {
+  if (env.isProduction && !env.frontendUrlConfigured) {
+    logger.error('Password reset refused: FRONTEND_URL is not set, so the emailed link would not open');
+    throw new AppError('PASSWORD_RESET_UNAVAILABLE', 'Password reset is not available right now. Try again later.', 503);
   }
+}
+
+// Reset emails still being prepared or sent (see requestPasswordReset).
+const pendingResets = new Set();
+
+/** Resolves once every reset email started so far has been handled. For shutdown (server.js). */
+function settlePasswordResets() {
+  return Promise.all([...pendingResets]);
+}
+
+/**
+ * POST /auth/password-reset/request. Answers at once and the same way for
+ * every address — registered or not, with or without a password (a Google
+ * account gets a link that sets one), within its limit or past it — so
+ * neither the answer nor its timing tells which. The lookup, the limit and
+ * the email happen after the answer.
+ */
+function requestPasswordReset(email, { locale } = {}) {
+  assertResetLinksConfigured();
+  const job = sendPasswordResetLink(email, { locale })
+    .catch((err) => logger.error('Could not send a password reset link', { message: err.message }))
+    .finally(() => pendingResets.delete(job));
+  pendingResets.add(job);
   return { success: true };
 }
 
-async function resetPassword(rawToken, newPassword) {
-  const tokenHash = hashToken(rawToken);
-  const record = await db.VerificationToken.findOne({ where: { tokenHash, type: 'password_reset' } });
-  if (!record || record.usedAt || record.expiresAt < new Date()) {
-    throw new AppError('INVALID_RESET_TOKEN', 'Password reset token is invalid or expired', 400);
+/**
+ * Emails a reset link to the account with this email, if there is one and it
+ * is within its limit (3 an hour, 10 a day): a random 32-byte token, stored
+ * only as its SHA-256, valid PASSWORD_RESET_TTL_MS, used once. A new link
+ * replaces the account's earlier ones. The email is in the language the
+ * request names, else the account's dashboard language, else Arabic.
+ */
+async function sendPasswordResetLink(email, { locale } = {}) {
+  const user = await db.User.findOne({ where: { email } });
+  if (!user) return;
+
+  const rawToken = generateOpaqueToken();
+  // The account's row is locked, so its requests take turns: the limit and
+  // "a new link replaces the older ones" hold even for requests sent at the
+  // same moment (each is answered before its link is made).
+  const issued = await db.sequelize.transaction(async (transaction) => {
+    await db.User.findByPk(user.id, { attributes: ['id'], transaction, lock: transaction.LOCK.UPDATE });
+    const now = Date.now();
+    const since = (ms) => ({ userId: user.id, type: 'password_reset', createdAt: { [Op.gt]: new Date(now - ms) } });
+    const [lastHour, lastDay] = await Promise.all([
+      db.VerificationToken.count({ where: since(60 * 60 * 1000), transaction }),
+      db.VerificationToken.count({ where: since(24 * 60 * 60 * 1000), transaction }),
+    ]);
+    if (lastHour >= PASSWORD_RESET_LIMITS.perHour || lastDay >= PASSWORD_RESET_LIMITS.perDay) return false;
+    await db.VerificationToken.update(
+      { usedAt: new Date(now) },
+      { where: { userId: user.id, type: 'password_reset', usedAt: null }, transaction }
+    );
+    await db.VerificationToken.create(
+      {
+        userId: user.id,
+        type: 'password_reset',
+        tokenHash: hashToken(rawToken),
+        expiresAt: new Date(now + PASSWORD_RESET_TTL_MS),
+      },
+      { transaction }
+    );
+    return true;
+  });
+  if (!issued) {
+    logger.info('Password reset link not sent: the account reached its limit', { userId: user.id });
+    return;
   }
-  const user = await db.User.findByPk(record.userId);
-  if (!user) throw new AppError('INVALID_RESET_TOKEN', 'Password reset token is invalid or expired', 400);
+  const language = locale || user.locale;
+  await notify.email({
+    recipient: user.email,
+    template: 'password_reset',
+    data: { token: rawToken, fullName: user.fullName, minutes: PASSWORD_RESET_TTL_MS / 60000, locale: language === 'en' ? 'en' : 'ar' },
+  });
+}
 
-  await user.update({ passwordHash: await hashPassword(newPassword) });
-  await record.update({ usedAt: new Date() });
-  // A password reset is a strong signal the account may have been
-  // compromised — revoke every existing session so old refresh tokens
-  // (possibly in an attacker's hands) stop working immediately.
-  await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
-  // Two-step sign-in stays on; every browser asks for it again (twoFactorRecovery.js).
-  await db.TrustedDevice.destroy({ where: { userId: user.id } });
-  await recordAudit({ actorUserId: user.id, action: 'user.password_reset', entityType: 'User', entityId: user.id });
+function invalidResetToken() {
+  return new AppError('INVALID_RESET_TOKEN', 'Password reset token is invalid or expired', 400);
+}
 
-  return { success: true };
+/**
+ * POST /auth/password-reset/confirm. One transaction, the token row locked,
+ * so a link works once even when it is sent twice at the same moment. The
+ * password changes, every session ends (and with it every access token: they
+ * name their session, core/security/sessionGate), remembered browsers are
+ * forgotten (two-step sign-in stays on and asks again), sign-ins waiting for
+ * a second step are closed, and the account's other open reset links stop
+ * working, nor does a pending email change (by link or account code). The link reached the address's owner, so an email not confirmed
+ * yet counts as confirmed (and a pending account becomes active; a suspended
+ * one stays suspended); the audit row says so.
+ */
+async function resetPassword(rawToken, newPassword, req) {
+  const tokenHash = hashToken(rawToken);
+  const passwordHash = await hashPassword(newPassword);
+  return db.sequelize.transaction(async (transaction) => {
+    const record = await db.VerificationToken.findOne({
+      where: { tokenHash, type: 'password_reset' },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) throw invalidResetToken();
+    const user = await db.User.findByPk(record.userId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!user) throw invalidResetToken();
+
+    const now = new Date();
+    const confirmsEmail = !user.emailVerifiedAt;
+    await user.update(
+      {
+        passwordHash,
+        ...(confirmsEmail ? { emailVerifiedAt: now } : {}),
+        ...(user.status === 'pending_verification' ? { status: 'active' } : {}),
+      },
+      { transaction }
+    );
+    await db.VerificationToken.update(
+      { usedAt: now },
+      { where: { userId: user.id, type: 'password_reset', usedAt: null }, transaction }
+    );
+    // A password reset is a strong signal the account may have been
+    // compromised — revoke every existing session so old refresh tokens
+    // (possibly in an attacker's hands) stop working immediately.
+    const [sessionsRevoked] = await db.Session.update(
+      { revokedAt: now },
+      { where: { userId: user.id, revokedAt: null }, transaction }
+    );
+    // Two-step sign-in stays on; every browser asks for it again (twoFactorRecovery.js).
+    const devicesForgotten = await db.TrustedDevice.destroy({ where: { userId: user.id }, transaction });
+    // A sign-in that passed the old password and waits for its code ends here.
+    const [challengesClosed] = await db.LoginChallenge.update(
+      { consumedAt: now },
+      { where: { userId: user.id, consumedAt: null }, transaction }
+    );
+    // and the account's wrong second-step codes stop counting, once a day (item 359).
+    await require('./twoFactorService').forgiveWrongCodes(user.id, transaction);
+    // A change of the email still pending (by link: its confirm needs no
+    // session) and live account codes die too, as in takeOverUnconfirmed.
+    const [emailChangesClosed] = await db.EmailChange.update({ usedAt: now }, { where: { userId: user.id, usedAt: null }, transaction });
+    const [accountCodesClosed] = await db.VerificationCode.update(
+      { supersededAt: now },
+      { where: { userId: user.id, purpose: verificationCodes.ACCOUNT_PURPOSES, consumedAt: null, supersededAt: null }, transaction }
+    );
+    await recordAudit({
+      actorUserId: user.id,
+      action: 'user.password_reset',
+      entityType: 'User',
+      entityId: user.id,
+      metadata: { emailConfirmed: confirmsEmail, sessionsRevoked, devicesForgotten, challengesClosed, emailChangesClosed, accountCodesClosed },
+      req,
+      transaction,
+    });
+    return { success: true };
+  });
 }
 
 // --- Sign-up codes (REQUIRE_SIGNUP_VERIFICATION) -------------------------
@@ -405,21 +728,17 @@ function assertUnconfirmed(user) {
 /** POST /auth/verify/send — a new code by 'email' or 'sms' (the account's own phone). */
 async function sendVerificationCode(user, { channel = 'email', locale }, req) {
   assertUnconfirmed(user);
-  const sent = await verificationCodes.sendCode(user, channel, { ip: req ? req.ip : null, locale, req });
+  const sent = await verificationCodes.sendCode(user, channel, { ip: req ? clientIp(req) : null, locale, req });
   return { sent: true, ...sent };
 }
 
-/**
- * POST /auth/verify/confirm — the right code confirms the address it went to,
- * activates the account and signs it in at once.
- */
-async function confirmVerificationCode(user, code, req) {
-  assertUnconfirmed(user);
-  const { channel } = await verificationCodes.confirmCode(user, code, { req });
+/** The address a right code went to is confirmed, and the account active. */
+async function markConfirmed(user, channel, { signIn = false } = {}, req) {
   const now = new Date();
   await user.update({
-    status: 'active',
-    lastLoginAt: now,
+    // Never lifts a console suspension (item 337).
+    status: user.status === 'suspended' ? 'suspended' : 'active',
+    ...(signIn ? { lastLoginAt: now } : {}),
     ...(channel === 'sms' ? { phoneVerifiedAt: now, phone: normalizePhone(user.phone) || user.phone } : { emailVerifiedAt: now }),
   });
   await recordAudit({
@@ -430,8 +749,47 @@ async function confirmVerificationCode(user, code, req) {
     metadata: { channel },
     req,
   });
+}
+
+/**
+ * POST /auth/verify/confirm — the right code confirms the address it went to,
+ * activates the account and signs it in at once.
+ */
+async function confirmVerificationCode(user, code, req) {
+  assertUnconfirmed(user);
+  const { channel } = await verificationCodes.confirmCode(user, code, { req });
+  await markConfirmed(user, channel, { signIn: true }, req);
   const tokens = await issueTokenPair(user, req);
   return { user: user.toSafeJSON(), ...tokens };
+}
+
+// --- Confirming a signed-in account's email --------------------------------
+// An account signed in before confirming its email (SIGNUP_CONFIRM_BY_CODE,
+// or an older account) confirms it with the same codes, limits included, from
+// the dashboard's banner. An account confirmed by phone only may still confirm
+// its email here: being invited or given a console role needs the email
+// itself (spec-gaps item 330).
+
+function alreadyConfirmed() {
+  return new ConflictError('This account is already confirmed.', 'ALREADY_VERIFIED');
+}
+
+/** POST /auth/me/email/send-code */
+async function sendAccountCode(user, { locale } = {}, req) {
+  if (user.emailVerifiedAt) throw alreadyConfirmed();
+  if (!verificationCodes.emailReady()) {
+    throw new AppError('EMAIL_UNAVAILABLE', 'Codes cannot be sent by email right now. Try again later.', 503);
+  }
+  const sent = await verificationCodes.sendCode(user, 'email', { ip: req ? clientIp(req) : null, locale, req });
+  return { sent: true, ...sent };
+}
+
+/** POST /auth/me/email/confirm — no new tokens: the session goes on as it is. */
+async function confirmAccountCode(user, code, req) {
+  if (user.emailVerifiedAt) throw alreadyConfirmed();
+  const { channel } = await verificationCodes.confirmCode(user, code, { req });
+  await markConfirmed(user, channel, {}, req);
+  return { user: user.toSafeJSON(), confirmed: true };
 }
 
 // --- Phone verification (during/after registration) ----------------------
@@ -450,11 +808,23 @@ async function confirmPhoneVerification(user, phone, code, req) {
 
 // --- Password reset by SMS ------------------------------------------------
 
+// The account a reset code for this phone belongs to: only one that verified
+// the phone (item 368), so an unverified sign-up that typed the same number
+// can't hide the owner's account. Newest verification first, so the request
+// and the confirm always pick the same account.
+function findByVerifiedPhone(normalized) {
+  if (!normalized) return null;
+  return db.User.findOne({
+    where: { phone: normalized, phoneVerifiedAt: { [Op.ne]: null } },
+    order: [['phoneVerifiedAt', 'DESC']],
+  });
+}
+
 async function requestPasswordResetSms(phone) {
   const normalized = normalizePhone(phone);
-  const user = normalized ? await db.User.findOne({ where: { phone: normalized } }) : null;
+  const user = await findByVerifiedPhone(normalized);
   // Enumeration-safe: same response whether or not a verified phone matches.
-  if (user && user.phoneVerifiedAt) {
+  if (user) {
     await otpService.generateAndSendOtp(phone, 'password_reset');
   }
   return { success: true };
@@ -463,20 +833,26 @@ async function requestPasswordResetSms(phone) {
 async function resetPasswordSms(phone, code, newPassword) {
   await otpService.verifyOtp(phone, 'password_reset', code);
   const normalized = normalizePhone(phone);
-  const user = await db.User.findOne({ where: { phone: normalized } });
+  const user = await findByVerifiedPhone(normalized);
   if (!user) throw new AppError('INVALID_CODE', 'That code is not valid', 422);
 
   await user.update({ passwordHash: await hashPassword(newPassword) });
   await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
   await db.TrustedDevice.destroy({ where: { userId: user.id } });
+  // Sign-ins waiting for their second step end; wrong codes stop counting, once a day (item 359).
+  await require('./twoFactorService').forgiveWrongCodes(user.id);
   await recordAudit({ actorUserId: user.id, action: 'user.password_reset_sms', entityType: 'User', entityId: user.id });
   return { success: true };
 }
 
 module.exports = {
+  // A fresh access token and session for `user` (auth/accountService, after an email change).
+  issueTokenPair,
   register,
   sendVerificationCode,
   confirmVerificationCode,
+  sendAccountCode,
+  confirmAccountCode,
   verifyEmail,
   resendVerificationEmail,
   login,
@@ -488,6 +864,7 @@ module.exports = {
   revokeAllSessions,
   listSessions,
   requestPasswordReset,
+  settlePasswordResets,
   resetPassword,
   requestPhoneVerification,
   confirmPhoneVerification,

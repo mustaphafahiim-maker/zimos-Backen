@@ -114,7 +114,7 @@ can exceed the safe-integer range) — `money.js` coerces this on the way in.
 
 ```bash
 npm install
-cp .env.example .env        # edit JWT secrets etc. for anything beyond local dev
+cp .env.example .env        # then set JWT_ACCESS_SECRET and DB_PASSWORD: no defaults, the app won't start without them
 createdb zimos_dev
 createdb zimos_test  # only needed to run the test suite
 npm run migrate
@@ -162,9 +162,10 @@ front of the domain and handles the padlock. Merchant steps:
 1. **Add the domain in your dashboard** — `POST /api/v1/workspaces/:workspaceId/domains`
    with `{ "hostname": "ahmedstore.com" }`. You get back a TXT record to add.
 2. **Create a free Cloudflare account** and add your domain there.
-3. **Add the TXT record** we gave you (`zimos-verify=<token>` at the
-   domain root) in Cloudflare's DNS, plus an A/CNAME record pointing the domain
-   at this server.
+3. **Add the TXT record** we gave you (`zimos-verify=<token>` on the name
+   `_zimos-verify.<your domain>`; a domain added before that name was used may keep it
+   on the domain itself) in Cloudflare's DNS, plus an A/CNAME record pointing the
+   domain at this server.
 4. **Point your domain's nameservers to Cloudflare** (Cloudflare shows you the
    two nameservers; set them at your registrar).
 5. **Verify** — `POST /api/v1/workspaces/:workspaceId/domains/:domainId/verify`.
@@ -183,6 +184,12 @@ docker compose up --build
 Runs Postgres + the API, running migrations automatically on boot. Seed data
 is not applied automatically — run
 `docker compose exec api npx sequelize-cli db:seed:all` if you want it.
+`DB_PASSWORD`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` and
+`INTEGRATIONS_ENCRYPTION_KEY` come from your shell or from `.env` next to
+`docker-compose.yml`; compose refuses to start while one is missing, and the
+API (run with `NODE_ENV=production`) also refuses a JWT secret shorter than 32
+characters. An existing `zimos_pgdata` volume keeps the password it was
+created with.
 
 ### Tests
 
@@ -330,8 +337,10 @@ email/SMS).
 
 ## Environment variables
 
-See `.env.example` for the full list with comments. Nothing in it is a real
-credential.
+See `.env.example` for the full list with comments. It holds names only: no
+secret has a value there, and the code has no fallback for `JWT_ACCESS_SECRET`
+or `DB_PASSWORD` (or the password in `DATABASE_URL`) — the app and the
+migration CLI refuse to start, in every environment, until they are set.
 
 **Database:** local dev/test use the separate `DB_HOST` / `DB_PORT` /
 `DB_NAME` / `DB_USER` / `DB_PASSWORD` vars. A managed host (Railway, Heroku,
@@ -357,6 +366,33 @@ inline in the request (no queue yet); if every attempt fails the send is
 recorded in `notification_logs` as `failed` with its `attempts` count and
 the triggering request still succeeds. Same provider pattern for
 `PAYMENTS_DEFAULT_PROVIDER` (`src/modules/payments/providers/`).
+
+**Password reset by email** (`POST /api/v1/auth/password-reset/request`)
+answers at once and the same way for every address; the lookup, the limit and
+the email happen after the answer. The link is valid 30 minutes and works once,
+a newer one replaces the older; each account gets at most 3 an hour and 10 a
+day (silently), each IP `PASSWORD_RESET_RATE_LIMIT_PER_HOUR` (default 10).
+Confirming it ends every session and confirms an unconfirmed email. In
+production it needs `FRONTEND_URL` (503 `PASSWORD_RESET_UNAVAILABLE` without).
+
+**Switches for public endpoints:** `REVIEWS_PUBLIC_SUBMISSION_ENABLED` (the
+storefront's review form, proved by order number + phone) is open while unset
+and closed by any value but `true` — closed, it answers 404 to every request.
+`PASSWORD_RESET_SMS_ENABLED` (password reset by SMS code) is off unless set to
+exactly `true`; off, the SMS reset gives the same answer for any number
+without sending anything. `AUTH_IP_RATE_LIMIT_MAX` /
+`AUTH_IP_RATE_LIMIT_WINDOW_MS` (default 50 per 15 minutes) cap sign-in
+failures, sign-up, password reset and resend-verification per IP, on top of the
+per-email `AUTH_RATE_LIMIT_MAX`.
+The 6-digit sign-up and confirmation codes are capped per IP in the database
+(`src/modules/otp/verificationCodeService.js`), over every code sent from that
+IP: `VERIFICATION_CODES_PER_IP_PER_HOUR` (default 20),
+`VERIFICATION_CODES_PER_IP_PER_DAY` (default 50) and
+`VERIFICATION_SMS_PER_IP_PER_DAY` (default 5). Unset uses the default; a value
+that isn't a whole number of 1 or more refuses to start. Everyone behind one IP
+shares these, so raise them if the API sees one address for many people. The
+limits per address (5 an hour, 10 a day), per account (3 SMS a day), the
+60-second wait between two codes and the 5 wrong guesses stay fixed.
 
 ### Image storage
 
@@ -412,7 +448,8 @@ and 3 sends per phone per 10 minutes. Two flows use it: phone verification
 right after registration (`POST /api/v1/auth/verify-phone/request` +
 `/confirm`, accepted for a still-`pending_verification` account) and
 password reset by SMS (`POST /api/v1/auth/password-reset/sms/request` +
-`/confirm`, enumeration-safe, only for a verified phone).
+`/confirm`, enumeration-safe, only for a verified phone, and closed unless
+`PASSWORD_RESET_SMS_ENABLED=true`).
 
 ### Google OAuth login
 
@@ -466,5 +503,6 @@ real payment-retry scheduling.
 - A shipping carrier API (Bosta, Aramex, etc.) for `src/modules/shipping/`
   waybill creation (only rate *pricing* is implemented; carrier integration
   is a documented extension point, not yet built)
-- Production JWT secrets (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`) —
-  generate with e.g. `openssl rand -hex 32`
+- Production JWT secrets (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`), at
+  least 32 characters (the app refuses to start without them) — generate
+  with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`

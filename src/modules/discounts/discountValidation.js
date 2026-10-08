@@ -1,6 +1,13 @@
 'use strict';
 const Joi = require('joi');
 const uuid = Joi.string().uuid();
+// A buy_x_get_y discount (item 353): buy `buyQuantity` units, get `getQuantity` more at
+// `getDiscountBasisPoints` off (10000 = free, the default).
+const buyXGetYConfig = Joi.object({
+  buyQuantity: Joi.number().integer().min(1).max(1000).required(),
+  getQuantity: Joi.number().integer().min(1).max(1000).required(),
+  getDiscountBasisPoints: Joi.number().integer().min(1).max(10000).default(10000),
+});
 
 module.exports = {
   create: {
@@ -9,7 +16,7 @@ module.exports = {
       code: Joi.string().max(100).uppercase().optional(),
       type: Joi.string().valid('percentage', 'fixed', 'free_shipping', 'buy_x_get_y').required(),
       value: Joi.number().integer().min(0).optional(),
-      buyXGetYConfig: Joi.object().optional(),
+      buyXGetYConfig: buyXGetYConfig.when('type', { is: 'buy_x_get_y', then: Joi.required(), otherwise: Joi.optional() }),
       minimumSubtotal: Joi.number().integer().min(0).optional(),
       productRestrictions: Joi.array().items(uuid).default([]),
       collectionRestrictions: Joi.array().items(uuid).default([]),
@@ -35,7 +42,7 @@ module.exports = {
       code: Joi.string().max(100).uppercase().allow(null).optional(),
       type: Joi.string().valid('percentage', 'fixed', 'free_shipping', 'buy_x_get_y').optional(),
       value: Joi.number().integer().min(0).allow(null).optional(),
-      buyXGetYConfig: Joi.object().allow(null).optional(),
+      buyXGetYConfig: buyXGetYConfig.allow(null).optional(),
       minimumSubtotal: Joi.number().integer().min(0).allow(null).optional(),
       productRestrictions: Joi.array().items(uuid).optional(),
       collectionRestrictions: Joi.array().items(uuid).optional(),

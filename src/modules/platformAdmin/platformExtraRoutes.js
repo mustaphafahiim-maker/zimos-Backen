@@ -51,7 +51,8 @@ router.get(
 
 router.post(
   '/system/queues/jobs/:jobId/retry',
-  can(P.SYSTEM_VIEW),
+  // Re-runs the job's work (a webhook, an email, a charge step): more than looking.
+  can(P.SYSTEM_MANAGE),
   validate({ params: Joi.object({ jobId: Joi.string().max(200).required() }) }),
   asyncHandler(async (req, res) => {
     const retried = await queue.retryJob(req.params.jobId);

@@ -57,10 +57,41 @@ async function calculateTax(workspaceId, { country, region, lines, shippingAmoun
   return { taxAmount, pricesIncludeTax };
 }
 
+/**
+ * The lines calculateTax should tax: each line's total less its share of the
+ * order-level discount (a code or an automatic discount), so tax is charged on
+ * what the shopper pays, not the price before the discount (item 356).
+ * `lines` are priced lines ({ productId, lineTotalAmount, freeGift? }). The
+ * discount is spread in proportion over the lines it covers: a product- or
+ * collection-limited one over its covered lines only, any other over every
+ * line; a free gift never takes a share. Bundle savings are already in the
+ * line totals. Returns [{ productId, lineTotal }].
+ */
+async function taxableLines(lines, discountAmount, discount, transaction) {
+  const totals = lines.map((l) => Number(l.lineTotalAmount) || 0);
+  const amount = Math.max(0, Math.min(Number(discountAmount) || 0, totals.reduce((sum, t) => sum + t, 0)));
+  const out = lines.map((l, i) => ({ productId: l.productId, lineTotal: totals[i] }));
+  if (!amount) return out;
+  const discountService = require('../discounts/discountService');
+  const eligible = discount
+    ? await discountService.eligibleProducts(discount, lines.filter((l) => !l.freeGift).map((l) => l.productId), transaction)
+    : null;
+  const covers = (l) => !l.freeGift && (!eligible || eligible.has(l.productId));
+  let indexes = lines.map((l, i) => i).filter((i) => covers(lines[i]) && totals[i] > 0);
+  // A discount larger than its covered lines (or one whose lines are gone) is spread over the whole order.
+  if (indexes.reduce((sum, i) => sum + totals[i], 0) < amount) indexes = lines.map((l, i) => i).filter((i) => totals[i] > 0);
+  const { allocate } = require('../bundles/bundlePricing');
+  const shares = allocate(amount, indexes.map((i) => totals[i]));
+  indexes.forEach((i, k) => {
+    out[i].lineTotal = Math.max(0, totals[i] - shares[k]);
+  });
+  return out;
+}
+
 function matchesRegion(rate, country, region) {
   if (rate.country && rate.country !== country) return false;
   if (rate.region && rate.region !== region) return false;
   return true;
 }
 
-module.exports = { calculateTax };
+module.exports = { calculateTax, taxableLines };

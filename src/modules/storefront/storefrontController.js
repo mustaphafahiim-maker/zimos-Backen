@@ -43,7 +43,7 @@ const i18n = require('../translations/translations');
 const plain = (row) => (row && typeof row.toJSON === 'function' ? row.toJSON() : row);
 const listProducts = asyncHandler(async (req, res) => {
   const ws = req.tenant.workspaceId;
-  const result = await cache.cached(ws, `products?${cache.queryKey(req.query)}`, () => service.listProducts(ws, req.query));
+  const result = await cache.cached(ws, `products?${cache.queryKey(req.query)}`, () => service.listProducts(ws, req.query, { storeListing: true }));
   if (result && Array.isArray(result.products)) await i18n.localizeProducts(req, result.products);
   // A search's first page is logged (after the cache, so every search counts); the click comes back with its id (item 211).
   if (req.query.search) return res.json({ ...result, searchId: await require('../searchInsights').record(ws, req.query, result, req.headers['x-visitor-id']) });
@@ -93,6 +93,8 @@ const shippingQuote = asyncHandler(async (req, res) => {
     ({ items } = await cartService.toOrderItems(workspaceId, cart.id));
     testVisitor = cart.visitorId || testVisitor;
   }
+  // Only a published funnel's price, for what it sells (funnels/funnelCheckout.js, item 355).
+  await require('../funnels/funnelCheckout').assertSells(workspaceId, req.body.funnelId, items);
   const quote = await shippingQuoteService.quote(workspaceId, {
     country: req.body.country,
     region: req.body.governorate,

@@ -89,7 +89,11 @@ async function overview(workspaceId) {
   const connections = await db.SheetConnection.findAll({ where: { workspaceId }, order: [['createdAt', 'ASC']] });
   return {
     adapter: describeAdapter(),
-    account: integration && integration.status === 'connected' ? { connected: true, email: (integration.config || {}).account || null } : { connected: false, email: null },
+    // reconnect: Google took the access away (revoked, password change…) — the page offers "Connect again".
+    account:
+      integration && integration.status === 'connected'
+        ? { connected: true, email: (integration.config || {}).account || null, reconnect: false }
+        : { connected: false, email: integration ? (integration.config || {}).account || null : null, reconnect: Boolean(integration && integration.status === 'revoked') },
     connections: connections.map(present),
     lostColumns: sync.LOST_COLUMNS.map(({ key, en, ar }) => ({ key, label: { en, ar } })),
     leadColumns: sync.LEAD_COLUMNS.map(({ key, en, ar }) => ({ key, label: { en, ar } })),
@@ -100,7 +104,7 @@ async function overview(workspaceId) {
 async function connectAccount(workspaceId, { code, state }, req) {
   checkState(state, workspaceId, req.user.id);
   const adapter = getSheetsAdapter();
-  const { account, credentials } = await adapter.exchangeCode(code);
+  const { account, credentials } = await adapter.exchangeCode(code, { state });
   const values = { status: 'connected', config: { account, adapter: adapter.name }, secretsSealed: secretBox.seal(JSON.stringify(credentials)), lastVerifiedAt: new Date(), lastError: null };
   const existing = await db.WorkspaceIntegration.findOne({ where: { workspaceId, provider: PROVIDER } });
   if (existing) await existing.update(values);
@@ -112,6 +116,17 @@ async function connectAccount(workspaceId, { code, state }, req) {
 }
 
 async function disconnectAccount(workspaceId, req) {
+  // Google forgets the grant too (best effort; the tokens are dropped here either way).
+  const credentials = await sync.credentialsFor(workspaceId);
+  if (credentials) {
+    try {
+      const adapter = getSheetsAdapter();
+      const integration = await db.WorkspaceIntegration.findOne({ where: { workspaceId, provider: PROVIDER }, attributes: ['config'] });
+      if (adapter.revoke && (integration.config || {}).adapter === adapter.name) await adapter.revoke(credentials);
+    } catch {
+      // Unavailable adapter: nothing to tell Google.
+    }
+  }
   await db.WorkspaceIntegration.destroy({ where: { workspaceId, provider: PROVIDER } });
   await db.SheetConnection.update({ status: 'revoked', lastError: 'The Google account was disconnected' }, { where: { workspaceId, status: ['active', 'paused'] } });
   await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'sheets.account_disconnect', entityType: 'WorkspaceIntegration', req });
@@ -132,8 +147,10 @@ async function createConnection(workspaceId, body, req) {
   }
   checkColumns(body.dataType, body.columns);
   const adapter = getSheetsAdapter();
-  const sheet = body.spreadsheetId
-    ? await adapter.openSpreadsheet(credentials, { spreadsheetId: body.spreadsheetId, sheetName: body.sheetName })
+  // A pasted link (…/spreadsheets/d/<id>/edit) is reduced to its id.
+  const spreadsheetId = body.spreadsheetId ? (/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/.exec(body.spreadsheetId) || [])[1] || body.spreadsheetId : null;
+  const sheet = spreadsheetId
+    ? await adapter.openSpreadsheet(credentials, { spreadsheetId, sheetName: body.sheetName })
     : await adapter.createSpreadsheet(credentials, { title: body.name });
   const connection = await db.SheetConnection.create({
     workspaceId,
@@ -252,7 +269,7 @@ router.post(
     body: Joi.object({
       name: Joi.string().trim().min(1).max(80).required(),
       dataType: Joi.string().valid('orders', 'lost_orders', 'leads').required(),
-      spreadsheetId: Joi.string().trim().max(200).pattern(/^[A-Za-z0-9_-]+$/).optional(),
+      spreadsheetId: Joi.string().trim().max(500).pattern(/^(?:[A-Za-z0-9_-]+|https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]+(?:[/?#]\S*)?)$/).optional(),
       sheetName: Joi.string().trim().max(100).optional(),
       filter: filter.default({}),
       columns: Joi.array().items(column).min(1).max(60).required(),

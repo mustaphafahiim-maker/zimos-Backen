@@ -5,6 +5,7 @@ const asyncHandler = require('express-async-handler');
 const validate = require('../../core/middleware/validate');
 const { requirePermission } = require('../../core/middleware/rbac');
 const { requireCreationAllowed, requireLive } = require('../../core/middleware/subscriptionGuard');
+const { requireConfirmedAccount } = require('../../core/middleware/confirmedAccount');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const logger = require('../../core/utils/logger');
 const db = require('../../db/models');
@@ -78,7 +79,7 @@ const schema = {
 function guard(req, res, next) {
   const { action } = req.body;
   const chain = PUBLISHING.includes(action)
-    ? [requirePermission(PERMISSIONS.FUNNELS_PUBLISH), ...(NEEDS_LIVE.includes(action) ? [requireLive] : [])]
+    ? [requirePermission(PERMISSIONS.FUNNELS_PUBLISH), ...(NEEDS_LIVE.includes(action) ? [requireConfirmedAccount, requireLive] : [])]
     : [requirePermission(PERMISSIONS.FUNNELS_MANAGE), ...(action === 'duplicate' ? [requireCreationAllowed] : [])];
   const step = (i, err) => (err ? next(err) : i === chain.length ? next() : chain[i](req, res, (e) => step(i + 1, e)));
   step(0);

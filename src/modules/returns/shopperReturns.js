@@ -14,6 +14,7 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { REASON_CODES } = require('./returnService');
+const exchange = require('./returnExchange');
 
 /*
  * The shopper asks for a return themselves (spec-gaps item 186), from the
@@ -23,7 +24,9 @@ const { REASON_CODES } = require('./returnService');
  * rejects it and restocks as before.
  *
  * Store setting: settings.shopper_returns = { enabled, windowDays (1–365,
- * default 14), photoRequiredFor: [reason codes] }. Off by default. A return
+ * default 14), photoRequiredFor: [reason codes], exchanges (item 372: the
+ * shopper may ask for another size or colour of the same product instead of
+ * their money back; off by default) }. Off by default. A return
  * is possible once the order is delivered and until windowDays after; a line
  * can be returned up to what was ordered minus what other open returns
  * already ask for.
@@ -39,6 +42,7 @@ function settingsOf(workspace) {
     enabled: Boolean(s.enabled),
     windowDays: Number.isInteger(s.windowDays) ? s.windowDays : DEFAULT_WINDOW,
     photoRequiredFor: Array.isArray(s.photoRequiredFor) ? s.photoRequiredFor.filter((r) => REASON_CODES.includes(r)) : ['damaged', 'defective'],
+    exchanges: Boolean(s.exchanges),
   };
 }
 
@@ -69,7 +73,7 @@ async function eligibility(workspace, order) {
   const items = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC']] });
   const open = await db.ReturnRequest.findAll({ where: { orderId: order.id, workspaceId: workspace.id }, order: [['createdAt', 'DESC']] });
   const asked = new Map();
-  for (const r of open.filter((x) => x.status !== 'rejected')) for (const l of r.items || []) asked.set(l.orderItemId, (asked.get(l.orderItemId) || 0) + Number(l.quantity));
+  for (const r of open.filter((x) => x.status !== 'rejected' && x.status !== 'cancelled')) for (const l of r.items || []) asked.set(l.orderItemId, (asked.get(l.orderItemId) || 0) + Number(l.quantity));
   const at = await deliveredAt(order);
   const deadline = at ? new Date(new Date(at).getTime() + s.windowDays * 864e5) : null;
   let reason = null;
@@ -77,7 +81,13 @@ async function eligibility(workspace, order) {
   else if (order.cancelledAt) reason = 'cancelled';
   else if (!at) reason = 'not_delivered';
   else if (deadline < new Date()) reason = 'window_closed';
-  const lines = items.map((i) => ({ orderItemId: i.id, name: i.productNameSnapshot, variantOptions: i.variantOptionsSnapshot || null, quantity: i.quantity, returnable: Math.max(0, i.quantity - (asked.get(i.id) || 0)) }));
+  // Item 372: the other sizes or colours each line may be swapped for, when the store takes exchanges.
+  const options = s.exchanges ? await exchange.exchangeOptions(workspace.id, items) : new Map();
+  const lines = items.map((i) => ({ orderItemId: i.id, name: i.productNameSnapshot, variantOptions: i.variantOptionsSnapshot || null, quantity: i.quantity, returnable: Math.max(0, i.quantity - (asked.get(i.id) || 0)), ...(s.exchanges ? { exchangeOptions: options.get(i.id) || [] } : {}) }));
+  // What the shopper hears back (item 372): the decision, the store's note, the replacement order and the courier pickup.
+  const exchangeIds = open.map((r) => r.exchangeOrderId).filter(Boolean);
+  const exchangeOrders = exchangeIds.length ? await db.Order.findAll({ where: { id: exchangeIds, workspaceId: workspace.id }, attributes: ['id', 'orderNumber'] }) : [];
+  const numberOf = new Map(exchangeOrders.map((o) => [o.id, o.orderNumber]));
   if (!reason && !lines.some((l) => l.returnable > 0)) reason = 'already_requested';
   return {
     eligible: !reason,
@@ -86,12 +96,31 @@ async function eligibility(workspace, order) {
     windowDays: s.windowDays,
     reasons: REASON_CODES,
     photoRequiredFor: s.photoRequiredFor,
+    exchanges: s.exchanges,
     items: lines,
-    returns: open.map((r) => ({ id: r.id, status: r.status, reason: r.reason, items: r.items, source: r.source, createdAt: r.createdAt })),
+    returns: open.map((r) => shopperView(r, numberOf.get(r.exchangeOrderId) || null)),
   };
 }
 
-async function requestReturn(workspace, order, { reasonCode, reasonDetail, items, photoUploadIds = [] }, visitorId) {
+/** A return as its shopper sees it: never who decided, nor the store's internal fields. */
+function shopperView(r, exchangeOrderNumber = null) {
+  const p = r.pickup || null;
+  return {
+    id: r.id,
+    status: r.status,
+    reason: r.reason,
+    resolution: r.resolution || 'refund',
+    items: r.items,
+    source: r.source,
+    decisionNote: r.decisionNote || null,
+    decidedAt: r.decidedAt || null,
+    exchangeOrderNumber,
+    pickup: p ? { carrierCode: p.carrierCode, waybillNumber: p.waybillNumber, trackingUrl: p.trackingUrl || null, bookedAt: p.bookedAt, status: p.status || 'requested' } : null,
+    createdAt: r.createdAt,
+  };
+}
+
+async function requestReturn(workspace, order, { reasonCode, reasonDetail, items, photoUploadIds = [], resolution = 'refund' }, visitorId) {
   const s = settingsOf(workspace);
   const e = await eligibility(workspace, order);
   if (!e.eligible) {
@@ -121,18 +150,44 @@ async function requestReturn(workspace, order, { reasonCode, reasonDetail, items
     if (photos.length !== ids.length) problems.push({ field: 'photoUploadIds', message: 'A photo is missing or has expired — upload it again' });
   }
   if (s.photoRequiredFor.includes(reasonCode) && !ids.length) problems.push({ field: 'photoUploadIds', message: 'Add a photo of the problem' });
+  // An exchange (item 372): only where the store takes them, for another variant of the same product that is in stock.
+  if (resolution === 'exchange' && !s.exchanges) problems.push({ field: 'resolution', message: 'This store does not take exchanges — ask for a return' });
+  else {
+    const orderItems = await db.OrderItem.findAll({ where: { orderId: order.id } });
+    problems.push(...(await exchange.lineProblems(workspace.id, resolution, items, new Map(orderItems.map((oi) => [oi.id, oi])))));
+    if (resolution === 'exchange' && !problems.length) {
+      const opts = await exchange.exchangeOptions(workspace.id, orderItems);
+      items.forEach((line, i) => {
+        const opt = (opts.get(line.orderItemId) || []).find((o) => o.variantId === line.exchangeVariantId);
+        if (opt && !opt.inStock) problems.push({ field: `items.${i}.exchangeVariantId`, message: 'This size or colour is out of stock' });
+      });
+    }
+  }
   if (problems.length) throw new ValidationError(problems);
 
   const reason = reasonDetail ? `${reasonCode}: ${reasonDetail}`.slice(0, 300) : reasonCode;
   const ret = await db.sequelize.transaction(async (transaction) => {
-    const row = await db.ReturnRequest.create({ workspaceId: workspace.id, orderId: order.id, reason, status: 'requested', items, source: 'shopper', photoUploadIds: ids }, { transaction });
+    // Counted again under the order's lock (item 316): two requests at once queue here, and the second
+    // sees what the first asked for — the same pieces can't be asked back twice.
+    await db.Order.findOne({ where: { id: order.id, workspaceId: workspace.id }, attributes: ['id'], lock: transaction.LOCK.UPDATE, transaction });
+    const earlier = await db.ReturnRequest.findAll({ where: { orderId: order.id, workspaceId: workspace.id, status: { [Op.notIn]: ['rejected', 'cancelled'] } }, attributes: ['items'], transaction });
+    const asked = new Map();
+    for (const r of earlier) for (const l of r.items || []) asked.set(l.orderItemId, (asked.get(l.orderItemId) || 0) + Number(l.quantity));
+    const late = [];
+    items.forEach((line, i) => {
+      const l = byId.get(line.orderItemId);
+      const left = Math.max(0, l.quantity - (asked.get(line.orderItemId) || 0));
+      if (line.quantity > left) late.push({ field: `items.${i}.quantity`, message: left ? `At most ${left} can be returned` : 'A return was already asked for this' });
+    });
+    if (late.length) throw new ValidationError(late);
+    const row = await db.ReturnRequest.create({ workspaceId: workspace.id, orderId: order.id, reason, status: 'requested', items, source: 'shopper', photoUploadIds: ids, resolution }, { transaction });
     if (ids.length) await db.CustomerUpload.update({ status: 'attached', expiresAt: null }, { where: { id: ids, workspaceId: workspace.id }, transaction });
-    await recordAudit({ workspaceId: workspace.id, actorUserId: null, action: 'return.request_by_shopper', entityType: 'ReturnRequest', entityId: row.id, after: { orderId: order.id, reasonCode, items, photos: ids.length }, transaction });
+    await recordAudit({ workspaceId: workspace.id, actorUserId: null, action: 'return.request_by_shopper', entityType: 'ReturnRequest', entityId: row.id, after: { orderId: order.id, reasonCode, resolution, items, photos: ids.length }, transaction });
     // Webhooks, automations and the merchant's alerts can follow it.
-    await require('../../core/outbox/outbox').record(transaction, 'return.requested', { workspaceId: workspace.id, returnId: row.id, orderId: order.id, source: 'shopper' });
+    await require('../../core/outbox/outbox').record(transaction, 'return.requested', { workspaceId: workspace.id, returnId: row.id, orderId: order.id, source: 'shopper', resolution });
     return row;
   });
-  return { return: { id: ret.id, status: ret.status, reason: ret.reason, items: ret.items, source: ret.source, createdAt: ret.createdAt } };
+  return { return: shopperView(ret) };
 }
 
 /** Staff views of a return's photos: fresh signed links. */
@@ -166,8 +221,9 @@ store.post(
       ...which,
       reasonCode: Joi.string().valid(...REASON_CODES).required(),
       reasonDetail: Joi.string().trim().max(280).allow('', null),
-      items: Joi.array().items(Joi.object({ orderItemId: Joi.string().uuid().required(), quantity: Joi.number().integer().min(1).required() })).min(1).max(50).unique('orderItemId').required(),
+      items: Joi.array().items(Joi.object({ orderItemId: Joi.string().uuid().required(), quantity: Joi.number().integer().min(1).required(), exchangeVariantId: Joi.string().uuid().allow(null) })).min(1).max(50).unique('orderItemId').required(),
       photoUploadIds: Joi.array().items(Joi.string().uuid()).max(MAX_PHOTOS),
+      resolution: Joi.string().valid('refund', 'exchange').default('refund'),
     }).xor('token', 'orderId'),
   }),
   asyncHandler(async (req, res) => {
@@ -189,6 +245,7 @@ staff.put(
       enabled: Joi.boolean().required(),
       windowDays: Joi.number().integer().min(1).max(365),
       photoRequiredFor: Joi.array().items(Joi.string().valid(...REASON_CODES)).unique(),
+      exchanges: Joi.boolean(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -201,4 +258,4 @@ staff.put(
   })
 );
 
-module.exports = { store, staff, eligibility, settingsOf, withPhotos };
+module.exports = { store, staff, eligibility, settingsOf, withPhotos, requestReturn };

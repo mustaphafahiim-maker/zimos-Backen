@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../../db/models');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /**
  * The only function in the codebase that writes to audit_logs. No route
@@ -27,7 +28,7 @@ async function recordAudit({
       action,
       entityType,
       entityId: entityId ? String(entityId) : null,
-      ipAddress: req ? req.ip : null,
+      ipAddress: req ? clientIp(req) : null,
       userAgent: req ? req.headers['user-agent'] : null,
       beforeState: before,
       afterState: after,
@@ -38,6 +39,8 @@ async function recordAudit({
   // Some audited changes are also domain events (product.updated, order.paid…):
   // core/outbox/auditEventBridge.js records them in the same transaction.
   await require('../../core/outbox/auditEventBridge').onAudit({ workspaceId, action, entityType, entityId, before, after, metadata, transaction });
+  // Some are also console notifications (platformAdmin/platformNotificationService), in a savepoint; never throws.
+  await require('../platformAdmin/platformNotificationService').onAudit({ workspaceId, actorUserId, action, entityType, entityId, before, after, metadata, transaction });
   // A change the storefront shows drops the store's 60-second cache once it commits.
   require('../storefront/storefrontCache').onAudit({ workspaceId, entityType, transaction });
   return row;

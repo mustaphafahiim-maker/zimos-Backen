@@ -31,9 +31,12 @@ function install() {
   installed = true;
   db.Funnel.addHook('afterCreate', 'zimosWebhookTopics', (f, o) => record(o, 'funnel.created', { workspaceId: f.workspaceId, funnelId: f.id }));
   db.Funnel.addHook('afterUpdate', 'zimosWebhookTopics', (f, o) => record(o, 'funnel.updated', { workspaceId: f.workspaceId, funnelId: f.id }));
+  // Deleting moves a funnel to the trash (modules/trash): it stops serving then, so that is when
+  // funnel.deleted fires (trashed: true). Purging it later sends nothing more; a restore is an update.
   db.Funnel.addHook('afterDestroy', 'zimosWebhookTopics', (f, o) =>
-    record(o, 'funnel.deleted', { workspaceId: f.workspaceId, funnelId: f.id, name: f.name, subdomain: f.subdomain || null })
+    o && o.force ? null : record(o, 'funnel.deleted', { workspaceId: f.workspaceId, funnelId: f.id, name: f.name, subdomain: f.subdomain || null, trashed: true })
   );
+  db.Funnel.addHook('afterRestore', 'zimosWebhookTopics', (f, o) => record(o, 'funnel.updated', { workspaceId: f.workspaceId, funnelId: f.id }));
   const paid = (p, o) => record(o, 'payment.paid', { workspaceId: p.workspaceId, paymentId: p.id, orderId: p.orderId });
   db.Payment.addHook('afterCreate', 'zimosWebhookTopics', (p, o) => (p.status === 'captured' ? paid(p, o) : null));
   db.Payment.addHook('afterUpdate', 'zimosWebhookTopics', (p, o) =>

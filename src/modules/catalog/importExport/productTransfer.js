@@ -233,6 +233,13 @@ function fromSheet({ header, rows }) {
 /** GET of a small public JSON document: https only, public addresses only, no redirects. */
 function fetchPublicJson(url, { timeoutMs = 10000, maxBytes = 2 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
+    // An IP written in the address skips the lookup guard (Node doesn't resolve it): checked here (item 309).
+    try {
+      require('../../webhooks/webhookUrlGuard').checkUrl(url, 'url');
+    } catch {
+      reject(new Error('The store address must be a public https address'));
+      return;
+    }
     const req = https.get(
       url,
       { lookup: guardedLookup, timeout: timeoutMs, headers: { accept: 'application/json', 'user-agent': 'ZimosImporter/1.0' } },

@@ -64,6 +64,20 @@ const TEMPLATES = Object.freeze({
     subject: 'تم تفعيل اشتراكك في {{product_name}}',
     body: 'مرحبًا {{customer_name}}،\n\nشكرًا لاشتراكك في {{product_name}} من {{store_name}} ({{order_total}}).\n\nمن صفحة اشتراكك تقدر تتابعه، تغيّر البطاقة اللي بيتسحب منها، أو تلغيه في أي وقت:\n{{subscription_link}}',
   },
+  // Item 372: the answer to a return or exchange the customer asked for. On unless the store turns it
+  // off (`defaultOn`): it answers the customer's own request; "Don't tell the customer" skips it.
+  return_approved: {
+    event: 'return.approved',
+    defaultOn: true,
+    subject: 'تمت الموافقة على طلب الإرجاع لطلبك {{order_number}}',
+    body: 'مرحبًا {{customer_name}}،\n\nوافق {{store_name}} على طلب الإرجاع أو الاستبدال الخاص بطلبك رقم {{order_number}}.\n\nتابع التفاصيل والخطوة التالية من هنا:\n{{order_link}}',
+  },
+  return_rejected: {
+    event: 'return.rejected',
+    defaultOn: true,
+    subject: 'بخصوص طلب الإرجاع لطلبك {{order_number}}',
+    body: 'مرحبًا {{customer_name}}،\n\nللأسف لم يتمكن {{store_name}} من قبول طلب الإرجاع أو الاستبدال الخاص بطلبك رقم {{order_number}}.\n\nتجد السبب والتفاصيل هنا:\n{{order_link}}',
+  },
   digital_delivery: {
     event: 'order.digital_delivered',
     subject: 'منتجك الرقمي من {{store_name}} جاهز',
@@ -78,7 +92,7 @@ const context = () => require('../automations/automationContext');
 
 const SAMPLE_VARS = Object.freeze({
   customer_name: 'منى أحمد',
-  order_number: 'ORD-1042',
+  order_number: '#1042',
   order_total: '850 EGP',
   store_name: '',
   tracking_url: 'https://example.com/track/ZG123456789',
@@ -93,6 +107,7 @@ const SAMPLE_VARS = Object.freeze({
   coupon_code: '',
   review_link: 'https://example.com/products/linen-shirt#reviews',
   payment_link: 'https://example.com/pay/ORD-1042',
+  confirm_link: 'https://example.com/track?t=…&confirm=1',
   subscription_link: 'https://example.com/subscriptions/3f9a…',
 });
 
@@ -105,21 +120,54 @@ const SAMPLE_LINES = Object.freeze({
   totals: { shipping: '50 EGP', total: '850 EGP' },
 });
 
-function view(key, row) {
+function view(key, row, texts = null) {
   const base = TEMPLATES[key];
+  // The built-in text in the version's language (orderEmailLocales.js); Arabic by default.
+  const t = texts || base;
   return {
     key,
     event: base.event,
     // A template the store never touched is on only when it is on by default (defaultOn).
     isEnabled: row && row.isEnabled !== undefined ? Boolean(row.isEnabled) : Boolean(base.defaultOn),
-    subject: (row && row.subject) || base.subject,
-    body: (row && row.body) || base.body,
+    subject: (row && row.subject) || t.subject,
+    body: (row && row.body) || t.body,
     isCustomised: Boolean(row && (row.subject || row.body || row.blocks)),
     // The block designer's blocks (emailBlocks.js); null = the plain body is used.
     blocks: row && Array.isArray(row.blocks) && row.blocks.length ? row.blocks : null,
-    defaults: { subject: base.subject, body: base.body },
+    defaults: { subject: t.subject, body: t.body },
     updatedAt: row ? row.updatedAt : null,
   };
+}
+
+// Per language (item 383): orderEmailLocales.js says which text goes out.
+const locales = () => require('./orderEmailLocales');
+const { rowLocale } = require('./orderEmailLocales');
+
+/**
+ * The email `key` in `lang` ({ locale, defaultLocale } from orderEmailLocales):
+ * `def` is the default version (merged over its scopes), `loc` the language's
+ * own version or null. `version` says which one shows: 'default' (the default
+ * version itself), 'language' (the language's own), 'fallback' (none in that
+ * language yet: the changed default version, else the built-in text in that
+ * language). `textLocale` is the language the text is written in.
+ */
+function resolve(key, def, loc, lang) {
+  const own = locales().builtIn(TEMPLATES, key, lang.defaultLocale) || TEMPLATES[key];
+  const ownLocale = locales().builtIn(TEMPLATES, key, lang.defaultLocale) ? lang.defaultLocale : 'ar';
+  const defView = view(key, def, own);
+  if (!lang.locale) return { ...defView, locale: lang.defaultLocale, version: 'default', textLocale: defView.isCustomised ? lang.defaultLocale : ownLocale };
+  const texts = locales().builtIn(TEMPLATES, key, lang.locale);
+  if (!loc) {
+    const useBuiltIn = !defView.isCustomised && texts;
+    const shown = useBuiltIn ? view(key, def, texts) : defView;
+    return { ...shown, defaults: texts || shown.defaults, locale: lang.locale, version: 'fallback', textLocale: useBuiltIn ? lang.locale : defView.isCustomised ? lang.defaultLocale : ownLocale };
+  }
+  const v = view(
+    key,
+    { subject: loc.subject, body: loc.body, blocks: loc.blocks, updatedAt: loc.updatedAt, isEnabled: def ? def.isEnabled : undefined },
+    texts || { subject: defView.subject, body: defView.body }
+  );
+  return { ...v, locale: lang.locale, version: 'language', textLocale: lang.locale };
 }
 
 const assertKey = (key) => {
@@ -154,23 +202,35 @@ async function assertScope(workspaceId, scope = {}) {
   if (scope.websiteId && !(await db.Website.findOne({ where: { id: scope.websiteId, workspaceId }, attributes: ['id'] }))) throw new NotFoundError('Website');
 }
 
-/** One template in a scope: { current (merged view input), store row, scoped row }. */
+/** One template in a scope and language (scope.locale): { current (resolved view), store row, scoped row, lang }. */
 async function templateIn(workspaceId, key, scope) {
+  const lang = await locales().languageOf(workspaceId, scope && scope.locale);
   const sk = scopeKey(scope);
   const rows = await db.OrderEmailTemplate.findAll({ where: { workspaceId, key, scope: [...new Set(['', sk])] } });
-  const storeRow = rows.find((r) => r.scope === '') || null;
-  const scopedRow = sk ? rows.find((r) => r.scope === sk) || null : null;
-  return { current: view(key, merged(storeRow, scopedRow)), storeRow, scopedRow };
+  const at = (sc, loc) => rows.find((r) => r.scope === sc && rowLocale(r) === loc) || null;
+  const storeRow = at('', null);
+  const scopedRow = sk ? at(sk, null) : null;
+  const loc = lang.locale ? merged(at('', lang.locale), sk ? at(sk, lang.locale) : null) : null;
+  return { current: resolve(key, merged(storeRow, scopedRow), loc, lang), storeRow, scopedRow, lang };
 }
 
 async function list(workspaceId, scope = {}) {
   await assertScope(workspaceId, scope);
+  const lang = await locales().languageOf(workspaceId, scope.locale);
   const sk = scopeKey(scope);
   const rows = await db.OrderEmailTemplate.findAll({ where: { workspaceId, scope: [...new Set(['', sk])] } });
-  const pick = (key, sc) => rows.find((r) => r.key === key && r.scope === sc) || null;
+  const pick = (key, sc, loc = null) => rows.find((r) => r.key === key && r.scope === sc && rowLocale(r) === loc) || null;
+  const L = lang.locale;
   return {
     scope: sk || null,
-    templates: KEYS.map((key) => ({ ...view(key, merged(pick(key, ''), sk ? pick(key, sk) : null)), overridden: Boolean(sk && pick(key, sk)) })),
+    // The language shown (?locale=, the store's own by default) and the store's languages for the tabs (item 383).
+    locale: L || lang.defaultLocale,
+    defaultLocale: lang.defaultLocale,
+    languages: lang.languages,
+    templates: KEYS.map((key) => ({
+      ...resolve(key, merged(pick(key, ''), sk ? pick(key, sk) : null), L ? merged(pick(key, '', L), sk ? pick(key, sk, L) : null) : null, lang),
+      overridden: Boolean(sk && pick(key, sk, L)),
+    })),
     tokens: context().TOKENS,
   };
 }
@@ -178,33 +238,58 @@ async function list(workspaceId, scope = {}) {
 /** Removes a funnel's or website's override: that funnel or website uses the store's email again. */
 async function removeOverride(workspaceId, key, scope, req) {
   assertKey(key);
+  await assertScope(workspaceId, scope);
   const sk = scopeKey(scope);
-  if (!sk) throw new ValidationError([{ field: 'funnelId', message: 'Name the funnel or website whose override to remove' }], 'Invalid query');
-  const row = await db.OrderEmailTemplate.findOne({ where: { workspaceId, key, scope: sk } });
+  // ?locale= removes that language's version (item 383): the language gets the default version again.
+  const { locale } = await locales().languageOf(workspaceId, scope.locale);
+  if (!sk && !locale) throw new ValidationError([{ field: 'funnelId', message: 'Name the funnel or website whose override to remove, or the language whose version to remove' }], 'Invalid query');
+  const row = await db.OrderEmailTemplate.findOne({ where: { workspaceId, key, scope: sk, locale } });
   if (!row) throw new NotFoundError('OrderEmailTemplate');
   await row.destroy();
-  await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'order_email.override_remove', entityType: 'OrderEmailTemplate', entityId: row.id, req, after: { key, scope: sk } });
-  return (await templateIn(workspaceId, key, {})).current;
+  await recordAudit({
+    workspaceId,
+    actorUserId: req.user.id,
+    action: locale ? 'order_email.language_remove' : 'order_email.override_remove',
+    entityType: 'OrderEmailTemplate',
+    entityId: row.id,
+    req,
+    before: { subject: row.subject, body: row.body, hasBlocks: Boolean(row.blocks && row.blocks.length) },
+    after: { key, scope: sk, locale },
+  });
+  return (await templateIn(workspaceId, key, locale ? scope : {})).current;
 }
 
 /** `subject` / `body` null (or equal to the built-in text) go back to the built-in text. */
 async function update(workspaceId, key, patch, req, scope = {}) {
   assertKey(key);
   await assertScope(workspaceId, scope);
-  const base = TEMPLATES[key];
+  // ?locale= edits that language's version (item 383); the store's own language is the default version.
+  const { locale, defaultLocale } = await locales().languageOf(workspaceId, scope.locale);
+  // The built-in text a field equal to it goes back to; a language with none keeps whatever was typed.
+  const base = (locale ? locales().builtIn(TEMPLATES, key, locale) : locales().builtIn(TEMPLATES, key, defaultLocale) || TEMPLATES[key]) || {};
   const sk = scopeKey(scope);
   // A new override starts from the store's on/off.
-  const startOn = sk ? (await templateIn(workspaceId, key, {})).current.isEnabled : Boolean(base.defaultOn);
-  return db.sequelize.transaction(async (transaction) => {
-    const [row] = await db.OrderEmailTemplate.findOrCreate({ where: { workspaceId, key, scope: sk }, defaults: { workspaceId, key, scope: sk, isEnabled: startOn }, transaction });
+  const startOn = sk ? (await templateIn(workspaceId, key, {})).current.isEnabled : Boolean(TEMPLATES[key].defaultOn);
+  const textChange = ['subject', 'body', 'blocks'].some((f) => patch[f] !== undefined);
+  await db.sequelize.transaction(async (transaction) => {
+    // On/off lives on the default version: a language version only holds text.
+    if (locale && patch.isEnabled !== undefined) {
+      const [switchRow] = await db.OrderEmailTemplate.findOrCreate({ where: { workspaceId, key, scope: sk, locale: null }, defaults: { workspaceId, key, scope: sk, locale: null, isEnabled: startOn }, transaction });
+      const was = switchRow.isEnabled;
+      await switchRow.update({ isEnabled: patch.isEnabled }, { transaction });
+      await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'order_email.update', entityType: 'OrderEmailTemplate', entityId: switchRow.id, req, before: { isEnabled: was }, after: { key, scope: sk, isEnabled: switchRow.isEnabled }, transaction });
+      if (!textChange) return;
+    }
+    const [row] = await db.OrderEmailTemplate.findOrCreate({ where: { workspaceId, key, scope: sk, locale }, defaults: { workspaceId, key, scope: sk, locale, isEnabled: startOn }, transaction });
     const before = { isEnabled: row.isEnabled, customised: Boolean(row.subject || row.body) };
     const next = {};
-    if (patch.isEnabled !== undefined) next.isEnabled = patch.isEnabled;
+    if (patch.isEnabled !== undefined && !locale) next.isEnabled = patch.isEnabled;
     if (patch.subject !== undefined) next.subject = patch.subject && patch.subject !== base.subject ? patch.subject : null;
     if (patch.body !== undefined) next.body = patch.body && patch.body !== base.body ? patch.body : null;
     // On an override, `blocks: null` (or []) means its own plain body, kept as [] so the store's blocks do not come back.
     if (patch.blocks !== undefined) next.blocks = patch.blocks && patch.blocks.length ? patch.blocks : sk ? [] : null;
     await row.update(next, { transaction });
+    const after = { key, scope: sk, ...(locale ? { locale } : {}), isEnabled: row.isEnabled, customised: Boolean(row.subject || row.body) };
     await recordAudit({
       workspaceId,
       actorUserId: req.user.id,
@@ -213,13 +298,12 @@ async function update(workspaceId, key, patch, req, scope = {}) {
       entityId: row.id,
       req,
       before,
-      after: { key, scope: sk, isEnabled: row.isEnabled, customised: Boolean(row.subject || row.body) },
+      after,
       transaction,
     });
-    if (!sk) return view(key, row);
-    const storeRow = await db.OrderEmailTemplate.findOne({ where: { workspaceId, key, scope: '' }, transaction });
-    return { ...view(key, merged(storeRow, row)), overridden: true };
   });
+  const { current } = await templateIn(workspaceId, key, scope);
+  return sk ? { ...current, overridden: true } : current;
 }
 
 async function brandOf(workspaceId) {
@@ -231,11 +315,12 @@ async function brandOf(workspaceId) {
 /** What the email will look like, with sample values. `draft` previews unsaved text. */
 async function preview(workspaceId, key, draft = {}, scope = {}) {
   assertKey(key);
-  const { current } = await templateIn(workspaceId, key, scope);
+  const { current, lang } = await templateIn(workspaceId, key, scope);
   const brand = await brandOf(workspaceId);
   const blocks = draft.blocks !== undefined ? draft.blocks : current.blocks;
-  const data = composeData({ subject: draft.subject || current.subject, body: draft.body || current.body, blocks }, { ...SAMPLE_VARS, store_name: brand.storeName }, brand, SAMPLE_LINES);
-  const rendered = emailTemplates.render('order_email', data);
+  const sample = samplesFor(lang);
+  const data = composeData({ subject: draft.subject || current.subject, body: draft.body || current.body, blocks }, { ...sample.vars, store_name: brand.storeName }, brand, sample.lines);
+  const rendered = emailTemplates.render('order_email', { ...data, locale: draftLocale(draft, current, lang) });
   return { subject: rendered.subject, html: rendered.html, text: rendered.text };
 }
 
@@ -259,22 +344,33 @@ async function sendTest(workspaceId, key, { to, subject, body, blocks } = {}, re
   // And at most TEST_SENDS_PER_DAY a day per store.
   const sentToday = await db.AuditLog.count({ where: { workspaceId, action: 'order_email.test', createdAt: { [db.Sequelize.Op.gt]: new Date(Date.now() - 86400000) } } });
   if (sentToday >= TEST_SENDS_PER_DAY) throw new AppError('TOO_MANY_TEST_EMAILS', `At most ${TEST_SENDS_PER_DAY} test emails a day`, 429);
-  const { current, scopedRow, storeRow } = await templateIn(workspaceId, key, scope);
+  const { current, scopedRow, storeRow, lang } = await templateIn(workspaceId, key, scope);
   const row = scopedRow || storeRow;
   const brand = await brandOf(workspaceId);
+  const sample = samplesFor(lang);
   const result = await notify.email({
     recipient,
     template: 'order_email',
     workspaceId,
     data: {
-      ...composeData({ subject: subject || current.subject, body: body || current.body, blocks: blocks !== undefined ? blocks : current.blocks }, { ...SAMPLE_VARS, store_name: brand.storeName }, brand, SAMPLE_LINES),
+      ...composeData({ subject: subject || current.subject, body: body || current.body, blocks: blocks !== undefined ? blocks : current.blocks }, { ...sample.vars, store_name: brand.storeName }, brand, sample.lines),
+      locale: draftLocale({ subject, body, blocks }, current, lang),
       // The store's sender name and Reply-To (orderEmailSender.js).
       ...(await require('./orderEmailSender').senderFor(workspaceId)),
     },
   });
-  await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'order_email.test', entityType: 'OrderEmailTemplate', entityId: row ? row.id : null, req, after: { key, ok: result.status === 'sent' } });
+  await recordAudit({ workspaceId, actorUserId: req.user.id, action: 'order_email.test', entityType: 'OrderEmailTemplate', entityId: row ? row.id : null, req, after: { key, locale: current.locale, ok: result.status === 'sent' } });
   return { ok: result.status === 'sent', error: result.error || null, to: recipient };
 }
+
+/** Sample values in the version's language: English for English, Arabic otherwise. */
+function samplesFor(lang) {
+  const en = (lang.locale || lang.defaultLocale) === 'en';
+  return en ? { vars: { ...SAMPLE_VARS, ...locales().SAMPLE_VARS_EN }, lines: locales().SAMPLE_LINES_EN } : { vars: SAMPLE_VARS, lines: SAMPLE_LINES };
+}
+
+// The language a preview is written in: the version's, or the one being typed into.
+const draftLocale = (draft, current, lang) => (draft && (draft.subject || draft.body || draft.blocks) ? lang.locale || lang.defaultLocale : current.textLocale);
 
 function composeData({ subject, body, blocks }, vars, brand, table = null) {
   const { render } = context();
@@ -316,8 +412,8 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
     if (keys.length === 0 || payload.notifyCustomer === false) return [];
     const forced = payload.notifyCustomer === true;
     const stored = await db.OrderEmailTemplate.findAll({ where: { workspaceId, key: keys } });
-    // Nothing can be on anywhere (no row on, none on by default): nothing to load.
-    if (!forced && !stored.some((r) => r.isEnabled) && !keys.some((k) => TEMPLATES[k].defaultOn)) return [];
+    // Nothing can be on anywhere (no row on, none on by default): nothing to load. On/off is on the default versions.
+    if (!forced && !stored.some((r) => r.isEnabled && !rowLocale(r)) && !keys.some((k) => TEMPLATES[k].defaultOn)) return [];
     // A subscription event speaks about the subscription (its product, amount and page), not the order that started it.
     const subject = payload.subscriptionId
       ? await context().loadSubscriptionSubject(workspaceId, payload.subscriptionId)
@@ -334,11 +430,15 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
         ? { funnelId: (subject.session.attribution || {}).funnelId, websiteId: (subject.session.attribution || {}).websiteId }
         : {};
     const scopes = [origin.funnelId && `funnel:${origin.funnelId}`, origin.websiteId && `website:${origin.websiteId}`].filter(Boolean);
+    // The customer's language: the order's (or checkout's) version of the email, else the default (item 383).
+    const lang = await locales().sendingLanguage(workspaceId, await locales().localeOfSubject(subject));
+    const at = (key, sc, loc) => stored.find((r) => r.key === key && r.scope === sc && rowLocale(r) === loc) || null;
+    const languageVersion = (key) => (lang.locale ? merged(at(key, '', lang.locale), scopes.map((sc) => at(key, sc, lang.locale)).find(Boolean) || null) : null);
     // Forced: every template of the event. Otherwise the ones switched on — or never touched and on by default.
     const rows = keys
       .map((key) => {
-        const storeRow = stored.find((r) => r.key === key && r.scope === '') || null;
-        const scopedRow = scopes.map((sc) => stored.find((r) => r.key === key && r.scope === sc)).find(Boolean) || null;
+        const storeRow = at(key, '', null);
+        const scopedRow = scopes.map((sc) => at(key, sc, null)).find(Boolean) || null;
         const row = merged(storeRow, scopedRow);
         if (forced) return row || { key };
         if (row) return row.isEnabled ? row : null;
@@ -361,16 +461,16 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
     const brand = await brandOf(workspaceId);
     const results = [];
     for (const row of rows) {
-      const current = view(row.key, row);
+      const current = resolve(row.key, row, languageVersion(row.key), lang);
       const sent = await notify.email({
         recipient: subject.email,
         template: 'order_email',
         workspaceId,
         // Listed on the order's timeline (orderTimeline.js).
         orderId: payload.orderId || null,
-        data: { ...composeData(current, subject.vars, brand, tableOf(subject)), ...(await require('./orderEmailSender').senderFor(workspaceId)), unsubscribeUrl },
+        data: { ...composeData(current, subject.vars, brand, tableOf(subject)), ...(await require('./orderEmailSender').senderFor(workspaceId)), unsubscribeUrl, locale: current.textLocale },
       });
-      results.push({ key: row.key, status: sent.status });
+      results.push({ key: row.key, status: sent.status, locale: current.textLocale, version: current.version });
     }
     return results;
   } catch (err) {

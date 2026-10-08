@@ -13,7 +13,8 @@ const goLive = require('./goLiveService');
 const entitlements = require('./entitlementsService');
 const onlineBilling = require('./onlineBillingService');
 
-const { planFeatureKeys, featureDefinition } = require('./featureCatalog');
+const { availableFeatureKeys, isAvailableFeature } = require('./featureCatalog');
+const { isManuallyPriced } = require('./manualPricing');
 
 const Op = db.Sequelize.Op;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -82,9 +83,12 @@ const DEFAULT_PLANS = [
   // The annual price is always derived (billing/planPricing).
 ].map((p) => ({ ...p, yearlyPriceAmount: yearlyPriceFor(p.monthlyPriceAmount) }));
 
-/** The catalogue keys a plan lists (anything else in plans.features is dropped). */
+/**
+ * The catalogue keys a plan lists whose feature exists today (anything else in
+ * plans.features is dropped from what the merchant sees, not from the row).
+ */
 function publicFeatureKeys(features) {
-  return planFeatureKeys(features).filter((key) => featureDefinition(key));
+  return availableFeatureKeys(features);
 }
 
 /** Idempotently create the default plan set. Safe to call repeatedly. */
@@ -98,7 +102,8 @@ async function seedDefaultPlans() {
 /** The plan a brand-new workspace starts its trial on: cheapest active plan. */
 async function defaultPlan(transaction) {
   return db.Plan.findOne({
-    where: { isActive: true },
+    // Never the pay-per-order plan (no monthly price, a fee per order; billing/walletService).
+    where: { isActive: true, perOrderFeeAmount: 0 },
     order: [['monthlyPriceAmount', 'ASC']],
     ...(transaction ? { transaction } : {}),
   });
@@ -192,6 +197,9 @@ async function expireStaleTrials(now = new Date()) {
         status: ['trialing', 'active'],
         currentPeriodEnd: { [Op.lt]: now },
         externalSubscriptionId: { [Op.is]: null }, // no real paid subscription behind it
+        // A free or discounted one is left to billing.manual_pricing_sweep, which
+        // also stamps pricingExpiredAt and audits it (manualSubscriptionService).
+        pricingKind: 'paid',
       },
     }
   );
@@ -323,7 +331,9 @@ async function getWorkspaceBilling(workspaceId) {
   const plan = subscription.plan;
 
   let nextCharge = null;
-  if (plan && planPrice(plan, subscription.billingCycle) > 0) {
+  // None for a free or discounted manual subscription, which is never charged
+  // at the plan's price (billing/manualPricing; as the console's charge list).
+  if (plan && !isManuallyPriced(subscription) && planPrice(plan, subscription.billingCycle) > 0) {
     const { referralCodeId, specialTermsId, ...pricing } = await charges.priceCharge(subscription, plan);
     nextCharge = pricing;
   }
@@ -361,8 +371,9 @@ async function getWorkspaceBilling(workspaceId) {
       : null,
     nextCharge,
     // The store's features: its plan's, with any override a platform admin
-    // set for it (billing/entitlementsService — the one place they are worked out).
-    features: await entitlements.effectiveFeatures(workspaceId),
+    // set for it (billing/entitlementsService — the one place they are worked
+    // out), shown only for features that exist today, like the plan's own list.
+    features: (await entitlements.effectiveFeatures(workspaceId)).filter(isAvailableFeature),
     trialEndsAt: subscription.trialEndsAt,
     limits: await entitlements.getLimits(workspaceId),
     draft,

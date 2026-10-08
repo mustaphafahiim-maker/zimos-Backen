@@ -12,6 +12,7 @@ const carrierShipmentService = require('../shipping/carrierShipmentService');
 const orderStock = require('../inventory/orderStock');
 const { presentOrderItems } = require('../customerUploads/customerUploadService');
 const { QUEUE_DEFAULT_SORT, orderSort, orderByClause, afterAnchorClause, anchorValue } = require('../orders/orderSort');
+const wallet = require('../billing/walletService');
 
 /*
  * Task lifecycle
@@ -126,6 +127,12 @@ async function loadTasks(workspaceId, ids, transaction) {
   const tasks = ids.map((id) => byId.get(id)).filter(Boolean).map(serializeTask);
   // The agent confirms the customer's photos and texts on the call too.
   for (const task of tasks) if (task.order) await presentOrderItems(workspaceId, task.order.items);
+  // Paid by one of the store's InstaPay / wallet methods: the payer's number and screenshot, and whether it waits for review (manualPayments, item 340).
+  for (const task of tasks) {
+    if (task.order && task.order.paymentMethod === 'bank_transfer') {
+      task.order.manualPayment = await require('../manualPayments/manualPaymentService').presentForStaff(workspaceId, task.order.id, transaction);
+    }
+  }
   return tasks;
 }
 
@@ -388,6 +395,8 @@ async function applyOutcome(task, order, { outcome, notes, rejectionReason, sour
     // no permanent deduction since nothing shipped.
     await releaseOrderStock(workspaceId, order.id, 'order_rejected', req.user.id, transaction);
     await db.Customer.increment('totalRejectedOrders', { by: 1, where: { id: order.customerId }, transaction });
+    // The pay-per-order fee goes back to the store (billing/walletService).
+    await wallet.reverseOrderFee(order, { reason: 'order_rejected', actorUserId: req.user.id }, transaction);
   }
 }
 
@@ -452,7 +461,8 @@ async function confirmFromOrder(workspaceId, orderId, { notes, channel }, req) {
     const order = await db.Order.findOne({ where: { id: orderId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
     if (!order) throw new NotFoundError('Order');
     assertOrderOpen(order);
-    if (order.paymentMethod !== 'cod') {
+    // A store-manual order (manualPayments, item 340) waits in the queue too; it is confirmed once its proof is approved.
+    if (order.paymentMethod !== 'cod' && !(await require('../manualPayments/manualPaymentService').hasManualPayment(order, transaction))) {
       throw new AppError('ORDER_NOT_COD', 'Only cash-on-delivery orders are confirmed by phone', 409);
     }
     if (order.confirmationState === 'confirmed') {
@@ -548,7 +558,10 @@ async function correctOutcome(workspaceId, taskId, { outcome, reason, notes, ack
         req,
         trigger: 'confirmation_correction',
       });
-      await db.Shipment.update({ status: 'cancelled' }, { where: { orderId: order.id, status: 'created' }, transaction });
+      await carrierShipmentService.cancelUncollectedShipments(workspaceId, order.id, transaction, {
+        req,
+        trigger: 'confirmation_correction',
+      });
       await releaseOrderStock(workspaceId, order.id, 'order_rejected', req.user.id, transaction);
       await db.Customer.increment('totalRejectedOrders', { by: 1, where: { id: order.customerId }, transaction });
     } else {
@@ -589,6 +602,13 @@ async function correctOutcome(workspaceId, taskId, { outcome, reason, notes, ack
       req,
       transaction,
     });
+    // The pay-per-order fee follows the order: back to the store on a
+    // rejection, charged again when a rejection is corrected (billing/walletService). Last lock.
+    if (outcome === 'rejected') {
+      await wallet.reverseOrderFee(order, { reason: 'order_rejected', actorUserId: req.user.id }, transaction);
+    } else {
+      await wallet.rechargeOrderFee(order, { actorUserId: req.user.id }, transaction);
+    }
 
     return loadTask(workspaceId, task.id, transaction);
   });

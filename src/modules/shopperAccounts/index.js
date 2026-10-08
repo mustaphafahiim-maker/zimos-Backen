@@ -15,6 +15,7 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const auth = require('./shopperAuth');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
  * Shopper accounts (spec-gaps item 185): sign in with a code
@@ -220,7 +221,7 @@ store.post(
   validate({ params: storeParams, body: Joi.object({ ...who, locale: Joi.string().valid('ar', 'en', 'fr') }).xor('phone', 'email') }),
   asyncHandler(async (req, res) => {
     channelAllowed(req);
-    res.json(await auth.requestCode(req.publicWorkspace, req.body, { ip: req.ip, locale: req.body.locale }));
+    res.json(await auth.requestCode(req.publicWorkspace, req.body, { ip: clientIp(req), locale: req.body.locale }));
   })
 );
 store.post(
@@ -237,7 +238,7 @@ store.use(enabledOnly, signedIn);
 store.get('/me', validate({ params: storeParams }), asyncHandler(async (req, res) => res.json(await me(req.shopper))));
 // Verify an email (item 278): a code to it, then the code back.
 store.post('/email/code', validate({ params: storeParams, body: Joi.object({ email: email.required(), locale: Joi.string().valid('ar', 'en', 'fr') }) }), asyncHandler(async (req, res) => {
-  res.json(await auth.requestEmailLink(req.publicWorkspace, req.shopper, req.body, { ip: req.ip }));
+  res.json(await auth.requestEmailLink(req.publicWorkspace, req.shopper, req.body, { ip: clientIp(req) }));
 }));
 store.post('/email/verify', validate({ params: storeParams, body: Joi.object({ email: email.required(), code: Joi.string().pattern(/^\d{6}$/).required() }) }), asyncHandler(async (req, res) => {
   res.json(await me(await auth.verifyEmailLink(req.publicWorkspace, req.shopper, req.body)));

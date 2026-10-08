@@ -81,6 +81,85 @@ async function listTemplates(businessAccountId, token) {
   return out;
 }
 
+/**
+ * A template's components in the shape Meta documents for
+ * POST /{waba-id}/message_templates: an optional TEXT header, the BODY with
+ * {{1}}, {{2}}… and one sample value per placeholder (Meta refuses a body with
+ * variables and no example), an optional FOOTER, and QUICK_REPLY buttons.
+ */
+function buildComponents({ header, body, footer, buttons = [], examples = [] }) {
+  const components = [];
+  if (header) components.push({ type: 'HEADER', format: 'TEXT', text: String(header) });
+  const vars = [...String(body).matchAll(/\{\{\s*(\d+)\s*\}\}/g)].reduce((m, x) => Math.max(m, Number(x[1])), 0);
+  const samples = Array.from({ length: vars }, (_, i) => String(examples[i] === undefined || examples[i] === '' ? `example${i + 1}` : examples[i]));
+  components.push({ type: 'BODY', text: String(body), ...(vars ? { example: { body_text: [samples] } } : {}) });
+  if (footer) components.push({ type: 'FOOTER', text: String(footer) });
+  if (buttons.length) components.push({ type: 'BUTTONS', buttons: buttons.map((b) => (typeof b === 'string' ? { type: 'QUICK_REPLY', text: b } : b)) });
+  return components;
+}
+
+// Meta's codes for "too many calls" (app, account and WhatsApp Business account limits).
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80007, 80008, 130429]);
+// "Content in this language already exists" (name + language taken) and "is being deleted".
+const NAME_TAKEN_SUBCODES = new Set([2388024]);
+const NAME_DELETING_SUBCODES = new Set([2388023]);
+
+/**
+ * Submits a message template for Meta's review. Answers { id, status, category }
+ * (status is usually PENDING; Meta may approve or reject at once).
+ *
+ * Errors (AppError, Meta's own words in the message, never the token):
+ *   WHATSAPP_TEMPLATE_NAME_TAKEN    409  that name exists in that language (details.reusable = true)
+ *                                        or is still being deleted (reusable = false)
+ *   WHATSAPP_RATE_LIMITED           429  too many template calls; try again later
+ *   WHATSAPP_TEMPLATE_REJECTED      422  Meta refused the content (details.metaCode / metaSubcode)
+ *   WHATSAPP_AUTH_FAILED            422  the token cannot manage this account's templates
+ *   WHATSAPP_UNREACHABLE            502
+ */
+async function createTemplate({ wabaId, token, name, language, category, components }) {
+  let res;
+  try {
+    res = await fetch(`${base()}/${encodeURIComponent(wabaId)}/message_templates`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, language, category, components }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (err) {
+    throw new AppError('WHATSAPP_UNREACHABLE', `Could not reach WhatsApp: ${err.message}`, 502);
+  }
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    json = null;
+  }
+  if (res.ok && json && json.id) return { id: String(json.id), status: String(json.status || 'PENDING').toUpperCase(), category: json.category || category };
+  const e = (json && json.error) || {};
+  const code = Number(e.code);
+  const subcode = Number(e.error_subcode);
+  const said = e.error_user_msg || e.message || `WhatsApp API error ${res.status}`;
+  const details = { metaCode: Number.isFinite(code) ? code : null, metaSubcode: Number.isFinite(subcode) ? subcode : null, title: e.error_user_title || null };
+  if (res.status === 429 || RATE_LIMIT_CODES.has(code)) throw new AppError('WHATSAPP_RATE_LIMITED', `WhatsApp is limiting template requests, try again later: ${said}`, 429, details);
+  if (res.status === 401 || code === 190 || code === 10 || code === 200) throw new AppError('WHATSAPP_AUTH_FAILED', said, 422, details);
+  if (NAME_TAKEN_SUBCODES.has(subcode) || (code === 100 && /already exists/i.test(`${e.error_user_title || ''} ${e.error_user_msg || ''} ${e.message || ''}`))) {
+    throw new AppError('WHATSAPP_TEMPLATE_NAME_TAKEN', said, 409, { ...details, reusable: true });
+  }
+  if (NAME_DELETING_SUBCODES.has(subcode)) throw new AppError('WHATSAPP_TEMPLATE_NAME_TAKEN', said, 409, { ...details, reusable: false });
+  if (res.status >= 500) throw new AppError('WHATSAPP_API_ERROR', said, 502, details);
+  throw new AppError('WHATSAPP_TEMPLATE_REJECTED', said, 422, details);
+}
+
+/** The account's templates with this exact name (every language), in Meta's shape. */
+async function findTemplates(businessAccountId, token, name) {
+  const data = await call(
+    `/${encodeURIComponent(businessAccountId)}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,language,status,category,components,rejected_reason&limit=100`,
+    token
+  );
+  // Meta's name filter matches loosely; keep the exact name only.
+  return ((data && data.data) || []).filter((t) => t && t.name === name);
+}
+
 // A store connected with the phone number id `sandbox` talks to whatsappSandbox.js
 // (no network, refused in production) instead of Meta — same three calls.
 const sandbox = require('./whatsappSandbox');
@@ -92,4 +171,7 @@ module.exports = {
   sendTemplate: orSandbox(sendTemplate, sandbox.sendTemplate),
   // By business account, not phone number: whatsappTemplates.js picks the sandbox itself.
   listTemplates,
+  createTemplate,
+  findTemplates,
+  buildComponents,
 };

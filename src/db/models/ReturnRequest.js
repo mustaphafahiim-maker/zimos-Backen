@@ -9,7 +9,7 @@ module.exports = (sequelize, DataTypes) => {
       orderId: { type: DataTypes.UUID, allowNull: false, field: 'order_id' },
       reason: { type: DataTypes.STRING(300), allowNull: false },
       status: {
-        type: DataTypes.ENUM('requested', 'approved', 'rejected', 'received', 'refunded'),
+        type: DataTypes.ENUM('requested', 'approved', 'rejected', 'received', 'refunded', 'cancelled'), // cancelled: migration 530 (item 396)
         allowNull: false,
         defaultValue: 'requested',
       },
@@ -20,6 +20,13 @@ module.exports = (sequelize, DataTypes) => {
       // merchant | shopper (migration 462): a shopper opens one from the tracking page (shopperReturns.js).
       source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'merchant' },
       photoUploadIds: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'photo_upload_ids' },
+      // Migration 507 (item 372): refund | exchange (each item line then names its exchangeVariantId),
+      // the replacement order, the merchant's answer, and the courier booked to collect the parcel.
+      resolution: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'refund' },
+      exchangeOrderId: { type: DataTypes.UUID, allowNull: true, field: 'exchange_order_id' },
+      decisionNote: { type: DataTypes.STRING(500), allowNull: true, field: 'decision_note' },
+      decidedAt: { type: DataTypes.DATE, allowNull: true, field: 'decided_at' },
+      pickup: { type: DataTypes.JSONB, allowNull: true },
     },
     { tableName: 'return_requests', indexes: [{ fields: ['workspace_id'] }, { fields: ['order_id'] }] }
   );

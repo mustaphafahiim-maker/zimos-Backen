@@ -15,7 +15,8 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { storefrontPostLimiters } = require('../../core/middleware/rateLimiters');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
  * B2B quote requests (spec-gaps item 219).
@@ -83,7 +84,8 @@ async function request(workspace, body, req) {
   if ((await db.ProductVariant.count({ where: { id: ids, workspaceId: workspace.id }, include: [{ model: db.Product, as: 'product', where: { status: 'active' }, attributes: [] }] })) !== ids.length) {
     throw new ValidationError([{ field: 'lines', message: 'A product is not available' }]);
   }
-  if (req.ip && (await db.QuoteRequest.count({ where: { requestIp: req.ip, createdAt: { [Op.gt]: new Date(Date.now() - 3600e3) } } })) >= MAX_PER_IP_HOUR) {
+  const ip = clientIp(req);
+  if (ip && (await db.QuoteRequest.count({ where: { requestIp: ip, createdAt: { [Op.gt]: new Date(Date.now() - 3600e3) } } })) >= MAX_PER_IP_HOUR) {
     throw new AppError('TOO_MANY_REQUESTS', 'Too many quote requests — try again later', 429);
   }
   const shopper = req.headers['x-shopper-token'] ? await require('../shopperAccounts/shopperAuth').readToken(workspace.id, req.headers['x-shopper-token']) : null;
@@ -91,7 +93,7 @@ async function request(workspace, body, req) {
   const q = await db.sequelize.transaction(async (transaction) => db.QuoteRequest.create({
     workspaceId: workspace.id, number: await nextNumber(workspace.id, transaction), customerId: shopper ? shopper.id : null,
     contact: { fullName: body.contact.fullName, phone: body.contact.phone, email: body.contact.email ? body.contact.email.toLowerCase() : null, company: body.contact.company || null },
-    lines: body.lines, message: body.message || null, tokenHash: hash(token), requestIp: req.ip || null,
+    lines: body.lines, message: body.message || null, tokenHash: hash(token), requestIp: ip || null,
   }, { transaction }));
   await require('../notifications/merchantNotificationService').create(workspace.id, {
     type: 'quote.request', title: `طلب عرض سعر ${q.number}`, body: `${body.contact.fullName}${body.contact.company ? ` — ${body.contact.company}` : ''}: ${body.lines.length} منتج`, link: `/quotes/${q.id}`,
@@ -171,7 +173,7 @@ const sp = { workspaceId: Joi.string().required() };
 const qp = Joi.object({ ...sp, quoteId: Joi.string().uuid().required() });
 store.post(
   '/',
-  trackingLimiter,
+  storefrontPostLimiters.quoteRequest,
   resolvePublicWorkspace,
   validate({ params: Joi.object(sp), body: Joi.object({ contact: Joi.object({ fullName: Joi.string().trim().min(2).max(120).required(), phone: Joi.string().trim().min(6).max(32).required(), email: Joi.string().trim().email().max(255).allow('', null), company: Joi.string().trim().max(120).allow('', null) }).required(), lines: Joi.array().items(Joi.object({ variantId: Joi.string().uuid().required(), quantity: Joi.number().integer().min(1).max(100000).required(), note: Joi.string().trim().max(300).allow('', null) })).min(1).max(50).unique('variantId').required(), message: Joi.string().trim().max(2000).allow('', null) }) }),
   asyncHandler(async (req, res) => res.status(201).json(await request(req.publicWorkspace, req.body, req)))

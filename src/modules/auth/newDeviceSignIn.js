@@ -5,6 +5,7 @@ const env = require('../../config/env');
 const db = require('../../db/models');
 const logger = require('../../core/utils/logger');
 const notify = require('../notifications/notify');
+const { clientIp } = require('../../core/middleware/clientIp');
 
 /**
  * Signing in from a new device (SPEC §17.2).
@@ -79,7 +80,7 @@ async function alert(user, req) {
     .email({
       recipient: user.email,
       template: 'security_notice',
-      data: { kind: 'new_sign_in', device, ip: req.ip || null, at: new Date().toISOString(), locale: req.body && req.body.locale === 'en' ? 'en' : 'ar' },
+      data: { kind: 'new_sign_in', device, ip: clientIp(req) || null, at: new Date().toISOString(), locale: req.body && req.body.locale === 'en' ? 'en' : 'ar' },
     })
     .catch((err) => logger.warn(`[auth] new sign-in alert for ${user.id} failed: ${err.message}`));
 }

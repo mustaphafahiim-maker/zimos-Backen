@@ -35,7 +35,8 @@ const { defineAdapter } = require('./adapterContract');
 
 // Egypt's integration host, from the official plugin's readme. Mylerz
 // publishes no sandbox host (UNVERIFIED 1).
-const BASE_URL = 'https://integration.mylerz.net';
+// MYLERZ_BASE_URL points it at a local stand-in outside production (carrierHttp.baseUrlFor).
+const BASE_URL = carrierHttp.baseUrlFor('MYLERZ_BASE_URL', 'https://integration.mylerz.net');
 
 // PackageCodeRefDTO.Barcode: "Matching regular expression pattern: ^\d{14}$".
 const BARCODE = /^\d{14}$/;
@@ -387,7 +388,7 @@ async function createShipment(creds, input) {
   const body = [
     {
       Package_Serial: 1,
-      Reference: cut(order.orderNumber, LIMITS.reference),
+      Reference: cut(require('../../orders/orderNumbers').carrierReference(order), LIMITS.reference),
       Description: String(description || '').slice(0, 500) || 'Order',
       Service_Type: carrierSettings.serviceType || 'DTD',
       Service: carrierSettings.service || 'ND',
@@ -474,6 +475,127 @@ async function cancelShipment(creds, trackingNumber) {
   }
 }
 
+// --- return pickups (item 396) ----------------------------------------------------
+
+/**
+ * A return order, as the official plugin books one (mylerz.php,
+ * constructMylerzReturnOrder, "Return Order" since plugin 2.1.0): the same
+ * POST api/Orders/AddOrders with Service_Category "RETURN" and the
+ * customer's address — Mylerz collects the package there and brings it to
+ * the merchant. The plugin then reads its status (GetPackageListStatus) and
+ * cancels it (CancelPackage) by the return barcode, as below.
+ *
+ * Unlike the plugin, which sends the refunded amount as a negative COD, this
+ * collects and pays nothing (Payment_Type PP, COD_Value 0): the refund is the
+ * merchant's to make.
+ */
+async function createReturnPickup(creds, input) {
+  const { order, address, description, notes, carrierSettings = {}, originalTrackingNumber } = input;
+  if (order.currency !== 'EGP') {
+    throw new AppError('CARRIER_CURRENCY_UNSUPPORTED', 'Mylerz (Egypt) only works in EGP; this order is in another currency', 422);
+  }
+  const contact = order.contactSnapshot || {};
+  const reference = cut(`${require('../../orders/orderNumbers').carrierReference(order)}-R`, LIMITS.reference);
+  const special = [originalTrackingNumber ? `Return of Mylerz ${originalTrackingNumber}` : null, notes, address.secondLine].filter(Boolean).join(' — ');
+  const body = [
+    {
+      Package_Serial: 1,
+      Reference: reference,
+      Description: `Return: ${String(description || '').slice(0, 480)}`.trim() || 'Return',
+      Service_Type: carrierSettings.serviceType || 'DTD',
+      Service: carrierSettings.service || 'ND',
+      Service_Category: 'RETURN',
+      Payment_Type: 'PP',
+      COD_Value: '0',
+      Currency: 'EGP',
+      PickupDueDate: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      Pieces: [{ PieceNo: 1 }],
+      Customer_Name: cut(String(contact.fullName || '').trim() || 'Customer', LIMITS.name),
+      Mobile_No: localPhone(contact.phone, 'contact.phone'),
+      ...(contact.alternatePhone ? { Mobile_No2: localPhone(contact.alternatePhone, 'contact.alternatePhone') } : {}),
+      ...toCarrierAddress(address),
+      ...(special ? { Special_Notes: cut(special, LIMITS.notes) } : {}),
+      ...(carrierSettings.warehouseName ? { WarehouseName: carrierSettings.warehouseName } : {}),
+      Address_Category: 'H',
+    },
+  ];
+  const value = await call(creds, {
+    method: 'POST',
+    path: '/api/Orders/AddOrders',
+    body,
+    action: 'create',
+    timeoutMs: carrierHttp.CREATE_TIMEOUT_MS,
+  });
+  const packages = value && Array.isArray(value.Packages) ? value.Packages : [];
+  const created = packages[0];
+  if (!created || !created.BarCode) {
+    const refusal = (created && created.ErrorMessage) || (value && value.ErrorMessage);
+    const message = sanitizeCarrierMessage(refusal, secretsOf(creds));
+    throw new CarrierError(message ? `Mylerz: ${message}` : 'Mylerz accepted the return but returned no barcode');
+  }
+  return {
+    trackingNumber: String(created.BarCode),
+    carrierShipmentId: value.PickupOrderCode || null,
+    reference,
+    trackingUrl: null,
+    labelUrl: null,
+    raw: { ...pickPackage(created), pickupOrderCode: value.PickupOrderCode || null },
+  };
+}
+
+/**
+ * The plugin's two statuses, read for a return package: "Delivered" is the
+ * package handed to the merchant (UNVERIFIED R1 in docs/carriers/mylerz.md),
+ * "Rejected" the customer refusing to hand it over. Every other value is
+ * undocumented (UNVERIFIED 2): no change, logged.
+ */
+const RETURN_STATE_MAP = {
+  'Delivered, Thank you :-)': 'returned_to_merchant',
+  'Rejected - reason to be mentioned': 'failed',
+};
+
+function returnResultFrom(row) {
+  const text = row && row.Status != null ? String(row.Status).trim() : '';
+  const known = Object.prototype.hasOwnProperty.call(RETURN_STATE_MAP, text);
+  if (!known) {
+    logger.warn('Unmapped Mylerz status for a return pickup — status left unchanged', {
+      trackingNumber: String(row.BarCode),
+      status: row.Status,
+      statusId: row.StatusId,
+    });
+  }
+  const raw = pickStatus(row);
+  return {
+    status: known ? RETURN_STATE_MAP[text] : null,
+    carrierStatus: { code: raw.statusId != null ? raw.statusId : raw.status, value: raw.status || raw.statusName, phase: raw.phaseName },
+    raw,
+  };
+}
+
+/** POST api/packages/GetPackageListStatus with the return barcodes. */
+async function getReturnPickups(creds, trackingNumbers) {
+  const refs = trackingNumbers.map(String);
+  const data = await call(creds, { method: 'POST', path: '/api/packages/GetPackageListStatus', body: refs, retry: true });
+  const out = new Map();
+  for (const row of Array.isArray(data) ? data : []) {
+    if (!row || row.BarCode == null || row.ErrorMessage) continue;
+    const ref = String(row.BarCode);
+    if (refs.includes(ref)) out.set(ref, returnResultFrom(row));
+  }
+  return out;
+}
+
+async function getReturnPickup(creds, trackingNumber) {
+  const result = (await getReturnPickups(creds, [trackingNumber])).get(String(trackingNumber));
+  if (!result) throw new CarrierError(`Mylerz has no package ${trackingNumber} for this account`);
+  return result;
+}
+
+/** POST api/packages/CancelPackage for the return barcode, as for a delivery. */
+async function cancelReturnPickup(creds, trackingNumber) {
+  await cancelShipment(creds, trackingNumber);
+}
+
 function isCancelSettled(carrierStatus) {
   const value = carrierStatus ? carrierStatus.value : null;
   return value != null && CANCEL_SETTLED_STATES.includes(value);
@@ -505,6 +627,10 @@ module.exports = defineAdapter({
     bulkStatus: true,
     addressLevels: ['city', 'neighborhood'],
     reserveNameWhenUnconnected: false,
+    // Item 396: a RETURN order (the official plugin's), polled and cancelled by its barcode.
+    returnPickup: true,
+    returnPickupStatus: true,
+    returnPickupCancel: true,
   },
   pollIntervalMinutes: 60,
   credentialFields: [
@@ -529,8 +655,13 @@ module.exports = defineAdapter({
   cancelShipment,
   isCancelSettled,
   getLabel,
+  createReturnPickup,
+  getReturnPickup,
+  getReturnPickups,
+  cancelReturnPickup,
   // Exposed for tests and the docs.
   STATE_MAP,
+  RETURN_STATE_MAP,
   CANCEL_SETTLED_STATES,
   mapStatus,
   clearTokens,

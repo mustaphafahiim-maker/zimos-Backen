@@ -28,6 +28,8 @@ const PERMISSIONS = Object.freeze({
   ORDERS_VIEW: 'orders.view',
   ORDERS_MANAGE: 'orders.manage',
   ORDERS_CONFIRM: 'orders.confirm',
+  // Staff price changes on an order: a line at another price, a custom line, a manual discount (item 382).
+  ORDERS_PRICE_OVERRIDE: 'orders.price_override',
 
   CUSTOMERS_VIEW: 'customers.view',
   CUSTOMERS_MANAGE: 'customers.manage',
@@ -81,6 +83,7 @@ const SYSTEM_ROLES = Object.freeze({
       PERMISSIONS.FUNNELS_PUBLISH,
       PERMISSIONS.ORDERS_VIEW,
       PERMISSIONS.ORDERS_MANAGE,
+      PERMISSIONS.ORDERS_PRICE_OVERRIDE,
       PERMISSIONS.CUSTOMERS_VIEW,
       PERMISSIONS.CUSTOMERS_MANAGE,
       PERMISSIONS.FORM_SUBMISSIONS_VIEW,
@@ -160,7 +163,7 @@ const ACCESS_SECTIONS = Object.freeze([
   { key: 'shipping', permissions: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.SHIPPING_MANAGE] },
   { key: 'products', permissions: [PERMISSIONS.PRODUCTS_VIEW, PERMISSIONS.PRODUCTS_MANAGE, PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.INVENTORY_MANAGE] },
   { key: 'customers', permissions: [PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.CUSTOMERS_MANAGE, PERMISSIONS.FORM_SUBMISSIONS_VIEW] },
-  { key: 'discounts', permissions: [PERMISSIONS.DISCOUNTS_MANAGE] },
+  { key: 'discounts', permissions: [PERMISSIONS.DISCOUNTS_MANAGE, PERMISSIONS.ORDERS_PRICE_OVERRIDE] },
   { key: 'store', permissions: [PERMISSIONS.WEBSITE_EDIT, PERMISSIONS.WEBSITE_PUBLISH, PERMISSIONS.TEMPLATE_MANAGE, PERMISSIONS.DOMAIN_MANAGE] },
   { key: 'funnels', permissions: [PERMISSIONS.FUNNELS_MANAGE, PERMISSIONS.FUNNELS_PUBLISH] },
   { key: 'analytics', permissions: [PERMISSIONS.ANALYTICS_VIEW] },

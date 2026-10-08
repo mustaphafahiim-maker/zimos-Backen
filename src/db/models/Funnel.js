@@ -16,9 +16,14 @@ module.exports = (sequelize, DataTypes) => {
       draftUpdatedAt: { type: DataTypes.DATE, allowNull: true, field: 'draft_updated_at' },
       // { currency, faviconUrl, title, description } — funnels/geoRedirects.js.
       settings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      // The starter template version it was created from (migration 531, templates/templateUsage.js); NULL otherwise.
+      sourceTemplateVersionId: { type: DataTypes.UUID, allowNull: true, field: 'source_template_version_id' },
+      // The trash (modules/trash): paranoid, so a deleted row is skipped by every lookup until restored or purged.
+      deletedBy: { type: DataTypes.UUID, allowNull: true, field: 'deleted_by' },
     },
     {
       tableName: 'funnels',
+      paranoid: true,
       indexes: [{ fields: ['workspace_id'] }],
       // The auto-saved draft can be large: it is read only by the draft
       // endpoints (Funnel.unscoped()), never with a funnel list or detail.

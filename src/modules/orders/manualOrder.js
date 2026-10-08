@@ -45,6 +45,9 @@ async function preview(workspaceId, payload, req) {
         taxAmount: String(order.taxAmount),
         totalAmount: String(order.totalAmount),
         shippingSnapshot: order.shippingSnapshot,
+        // Staff's manual discount apart from the code (item 382); discountAmount is both together.
+        discountsSnapshot: order.discountsSnapshot,
+        manualDiscount: require('./staffPricing').manualOf(order),
         items: items.map((i) => ({
           variantId: i.variantId,
           offerId: i.offerId,
@@ -54,6 +57,9 @@ async function preview(workspaceId, payload, req) {
           quantity: i.quantity,
           unitPriceAmount: String(i.unitPriceAmount),
           lineTotalAmount: String(i.lineTotalAmount),
+          sku: i.skuSnapshot,
+          // A custom line, or a catalogue line at staff's price with the catalogue's to compare (item 382).
+          ...require('./staffPricing').presentLine(i),
         })),
       });
     });

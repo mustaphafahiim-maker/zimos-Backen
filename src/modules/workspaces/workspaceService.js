@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { Op } = require('sequelize');
 const {
   toWorkspaceSlug,
   suffixSlug,
@@ -215,6 +216,8 @@ function applyMerchantSettings(current, patch) {
   for (const key of MERCHANT_SETTINGS_KEYS) {
     if (!(key in patch)) continue;
     if (patch[key] === null) delete next[key];
+    // A catalog form that does not send sold_out keeps it (storefront/catalogSettings.js).
+    else if (key === 'storefront_catalog') next[key] = require('../storefront/catalogSettings').keepSoldOut(next[key], patch[key]);
     else next[key] = patch[key];
   }
   for (const key of MERCHANT_SETTINGS_OBJECT_KEYS) {
@@ -413,26 +416,64 @@ async function listWorkspacesForUser(userId) {
   }));
 }
 
-async function inviteMember({ workspaceId, email, roleId }, req) {
+/**
+ * Nobody hands out more access than they hold (spec-gaps item 346): a role
+ * with '*' (Owner) only by someone who holds '*', any other role only when
+ * the caller holds every permission in it. Checked for invites, role changes
+ * and new custom roles. The teammate's current role is checked only for
+ * Owner access (assertCanChangeHolder), so an Admin can neither make
+ * themselves Owner nor demote or remove one, but can still re-role or remove
+ * a Confirmation Agent or Accountant whose role holds a permission the Admin
+ * lacks.
+ */
+function assertCanGrant(rolePermissions, req) {
+  const permissions = rolePermissions || [];
+  if (permissions.includes('*')) {
+    const callerIsOwner = ((req.tenant.role && req.tenant.role.permissions) || []).includes('*');
+    if (!callerIsOwner) throw new AppError('ROLE_ABOVE_YOURS', 'Only an Owner can give, change or remove Owner access', 403);
+    return;
+  }
+  const beyond = [...new Set(permissions.filter((p) => !req.tenant.hasPermission(p)))];
+  if (beyond.length > 0) {
+    throw new AppError('ROLE_ABOVE_YOURS', `You cannot give or change access you do not have: ${beyond.join(', ')}`, 403, [
+      { field: 'permissions', message: `Not held by you: ${beyond.join(', ')}` },
+    ]);
+  }
+}
+
+/** Changing or removing a teammate: only their Owner access needs an Owner. */
+function assertCanChangeHolder(rolePermissions, req) {
+  if ((rolePermissions || []).includes('*')) assertCanGrant(rolePermissions, req);
+}
+
+async function inviteMember({ workspaceId, email: givenEmail, roleId }, req) {
   const role = await db.Role.findOne({ where: { id: roleId, workspaceId } });
   if (!role) throw new NotFoundError('Role');
+  assertCanGrant(role.permissions, req);
 
-  const user = await db.User.findOne({ where: { email } });
-
+  // Every invite waits for the person to accept it, whether or not they
+  // already have an account (spec-gaps item 358): nobody is put on a team
+  // without saying yes (handing a member the store is item 379). The
+  // answer is the same either way, so it does not tell the inviter whether
+  // the email has an account. The invitee accepts with an account whose
+  // confirmed email is this one (workspaces/myInvites, /me/invites),
+  // including one made later.
+  const email = String(givenEmail).trim().toLowerCase();
+  const lowerEmail = (column) => db.sequelize.where(db.sequelize.fn('lower', db.sequelize.col(column)), email);
+  const user = await db.User.findOne({ where: lowerEmail('email'), attributes: ['id'] });
   if (user) {
     const existing = await db.Membership.findOne({ where: { workspaceId, userId: user.id } });
     if (existing) throw new ConflictError('User is already a member of this workspace', 'ALREADY_MEMBER');
-  } else {
-    const pending = await db.Membership.findOne({ where: { workspaceId, invitedEmail: email } });
-    if (pending) throw new ConflictError('That email already has a pending invite', 'ALREADY_INVITED');
   }
+  const pending = await db.Membership.findOne({ where: { workspaceId, status: 'invited', [Op.and]: [lowerEmail('invited_email')] } });
+  if (pending) throw new ConflictError('That email already has a pending invite', 'ALREADY_INVITED');
 
   const membership = await db.Membership.create({
     workspaceId,
-    userId: user ? user.id : null,
+    userId: null,
     roleId,
-    status: user ? 'active' : 'invited',
-    invitedEmail: user ? null : email,
+    status: 'invited',
+    invitedEmail: email,
   });
 
   const workspace = await db.Workspace.findByPk(workspaceId);
@@ -497,11 +538,14 @@ async function resendInvite({ workspaceId, membershipId }, req) {
 }
 
 async function updateMemberRole({ workspaceId, membershipId, roleId }, req) {
-  const membership = await db.Membership.findOne({ where: { id: membershipId, workspaceId } });
+  const membership = await db.Membership.findOne({ where: { id: membershipId, workspaceId }, include: [{ model: db.Role, as: 'role' }] });
   if (!membership) throw new NotFoundError('Membership');
 
   const role = await db.Role.findOne({ where: { id: roleId, workspaceId } });
   if (!role) throw new NotFoundError('Role');
+  // Both ends: the teammate's current Owner access and the role they get.
+  assertCanChangeHolder(membership.role && membership.role.permissions, req);
+  assertCanGrant(role.permissions, req);
 
   const targetOwnerRole = await db.Role.findOne({ where: { workspaceId, key: 'owner' } });
   if (membership.roleId === targetOwnerRole.id && role.id !== targetOwnerRole.id) {
@@ -531,6 +575,7 @@ async function updateMemberRole({ workspaceId, membershipId, roleId }, req) {
 async function removeMember({ workspaceId, membershipId }, req) {
   const membership = await db.Membership.findOne({ where: { id: membershipId, workspaceId }, include: [{ model: db.Role, as: 'role' }] });
   if (!membership) throw new NotFoundError('Membership');
+  assertCanChangeHolder(membership.role.permissions, req);
 
   if (membership.role.key === 'owner') {
     const ownerCount = await db.Membership.count({
@@ -561,6 +606,7 @@ async function listRoles(workspaceId) {
 }
 
 async function createCustomRole({ workspaceId, name, key, permissions }, req) {
+  assertCanGrant(permissions, req);
   const role = await db.Role.create({ workspaceId, key, name, isSystem: false, permissions });
   await recordAudit({
     workspaceId,
@@ -587,4 +633,5 @@ module.exports = {
   removeMember,
   listRoles,
   createCustomRole,
+  assertCanGrant,
 };

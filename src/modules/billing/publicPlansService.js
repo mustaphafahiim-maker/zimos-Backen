@@ -4,7 +4,7 @@ const db = require('../../db/models');
 const env = require('../../config/env');
 const { AppError } = require('../../core/errors/AppError');
 const { planPrice } = require('./planPricing');
-const { planFeatureKeys, featureDefinition } = require('./featureCatalog');
+const { availableFeatureKeys } = require('./featureCatalog');
 
 /**
  * The plans offered to the public — on the marketing site's pricing page and
@@ -33,18 +33,32 @@ function serializePublicPlan(plan) {
     maxStores: plan.maxStores,
     maxFunnelsPerMonth: plan.maxFunnelsPerMonth,
     softOrderQuota: plan.softOrderQuota,
-    features: planFeatureKeys(plan.features).filter((key) => featureDefinition(key)),
+    // Only features that exist today (billing/featureCatalog `available`);
+    // whatever else plans.features holds stays stored, unshown.
+    features: availableFeatureKeys(plan.features),
   };
 }
 
+/**
+ * The one order plans are listed in — here, in the Subscription section
+ * (merchantPlansService) and in the console (platformAdminService): display
+ * order, then price, then name.
+ */
+const PLAN_ORDER = Object.freeze([
+  ['displayOrder', 'ASC'],
+  ['monthlyPriceAmount', 'ASC'],
+  ['name', 'ASC'],
+]);
+
+// A pay-per-order plan (a fee per order, nothing monthly) is never listed
+// with the others or chosen at sign-up: it is chosen from the Subscription
+// section, while WALLET_ENABLED is on (billing/walletService; item 335).
+const OFFERED = { isPublic: true, isActive: true, perOrderFeeAmount: 0 };
+
 async function loadOffered(transaction) {
   return db.Plan.findAll({
-    where: { isPublic: true, isActive: true },
-    order: [
-      ['displayOrder', 'ASC'],
-      ['monthlyPriceAmount', 'ASC'],
-      ['name', 'ASC'],
-    ],
+    where: OFFERED,
+    order: PLAN_ORDER,
     transaction,
   });
 }
@@ -63,13 +77,13 @@ function invalidate() {
 
 /** Whether any plan is offered right now (read fresh, never cached). */
 async function anyOffered(transaction) {
-  return (await db.Plan.count({ where: { isPublic: true, isActive: true }, transaction })) > 0;
+  return (await db.Plan.count({ where: OFFERED, transaction })) > 0;
 }
 
 /** The offered plan `planId`, or 422 PLAN_NOT_AVAILABLE (unknown, private or inactive). */
 async function findOfferedPlan(planId, transaction) {
   const plan = planId ? await db.Plan.findByPk(planId, { transaction }) : null;
-  if (!plan || !plan.isActive || !plan.isPublic) {
+  if (!plan || !plan.isActive || !plan.isPublic || Number(plan.perOrderFeeAmount) > 0) {
     throw new AppError('PLAN_NOT_AVAILABLE', 'This plan is not available', 422, [
       { field: 'planId', message: 'Choose one of the plans on offer' },
     ]);
@@ -77,4 +91,4 @@ async function findOfferedPlan(planId, transaction) {
   return plan;
 }
 
-module.exports = { listPublicPlans, invalidate, anyOffered, findOfferedPlan, serializePublicPlan };
+module.exports = { listPublicPlans, invalidate, anyOffered, findOfferedPlan, serializePublicPlan, PLAN_ORDER };

@@ -29,4 +29,13 @@ module.exports = {
       handle: (event) => require('./push/orderPush').sendForEvent(event),
     },
   ],
+  schedules: [
+    {
+      // Team channel delivery rows (teamChannels/, item 378) are kept 30 days.
+      name: 'team_channels.prune',
+      everyMs: 24 * 60 * 60 * 1000,
+      // eslint-disable-next-line global-require
+      handle: () => require('./teamChannels/teamChannelService').prune(),
+    },
+  ],
 };

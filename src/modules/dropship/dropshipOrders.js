@@ -41,6 +41,8 @@ const providers = require('./providers');
 const FINAL = ['delivered', 'returned', 'cancelled'];
 const FOLLOW_EVERY_MINUTES = 10;
 const FOLLOW_FOR_DAYS = 60;
+// A reference claimed while its order is being sent (dropshipService.pushOrder, item 318): nothing to ask the supplier yet.
+const PUSH_PENDING = 'pending';
 const AUTO_FORWARD = ['off', 'created', 'confirmed'];
 const integrationKey = (code) => `dropship:${code}`;
 
@@ -125,6 +127,7 @@ async function forOrder(workspaceId, orderId) {
 
 /** Asks the supplier where one forwarded order stands, and acts on a change. Never throws. */
 async function checkRef(ref) {
+  if (ref.externalOrderId === PUSH_PENDING) return { changed: false };
   const provider = providers.get(ref.provider);
   if (!provider || typeof provider.getOrderStatus !== 'function') return { changed: false };
   const row = await db.WorkspaceIntegration.findOne({ where: { workspaceId: ref.workspaceId, provider: integrationKey(ref.provider) } });
@@ -197,6 +200,7 @@ async function follow({ batch = 100 } = {}) {
   const refs = await db.DropshipOrderRef.findAll({
     where: {
       provider: followed,
+      externalOrderId: { [Op.ne]: PUSH_PENDING },
       pushedAt: { [Op.gt]: new Date(Date.now() - FOLLOW_FOR_DAYS * 24 * 60 * 60 * 1000) },
       [Op.and]: [
         { [Op.or]: [{ externalStatus: null }, { externalStatus: { [Op.notIn]: FINAL } }] },
@@ -300,4 +304,4 @@ const settingsSchema = Joi.object({
   enforceMinimum: Joi.boolean().optional(),
 }).min(1);
 
-module.exports = { AUTO_FORWARD, connectedRows, settingsOf, settingsSchema, linesFor, forOrder, checkRef, refreshOrder, follow, autoForward, updateSettings, router };
+module.exports = { AUTO_FORWARD, PUSH_PENDING, connectedRows, settingsOf, settingsSchema, linesFor, forOrder, checkRef, refreshOrder, follow, autoForward, updateSettings, router };

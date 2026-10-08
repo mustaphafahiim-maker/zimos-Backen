@@ -3,6 +3,20 @@
 const Joi = require('joi');
 const joiEmail = require('../../core/utils/joiEmail');
 const { usernameSchema } = require('../users/username');
+const { normalizePhone } = require('../../core/utils/phone');
+
+// The sign-up phone, stored the way every other phone is (core/utils/phone):
+// digits with the country code. What cannot be a mobile number is a
+// VALIDATION_ERROR on `phone`. Optional here: REQUIRE_PHONE_AT_SIGNUP makes it
+// required (auth/signupPolicy.registrationFields), read at request time.
+const signupPhone = Joi.string()
+  .trim()
+  .max(32)
+  .custom((value, helpers) => {
+    const phone = normalizePhone(value);
+    if (!phone || !/^\d{10,15}$/.test(phone)) return helpers.message('Enter a valid mobile number');
+    return phone;
+  });
 
 // Password strength is enforced here, server-side, so that a request hitting
 // the API directly (bypassing the frontend's own check) still can't set a weak
@@ -30,7 +44,7 @@ module.exports = {
       email: joiEmail().max(255).required(),
       password,
       fullName: Joi.string().min(2).max(200).required(),
-      phone: Joi.string().max(32).optional(),
+      phone: signupPhone.optional(),
       // The sign-up form requires it. Checked strictly when given; a client
       // that sends none (from before usernames) gets one made from the email.
       username: usernameSchema.optional(),
@@ -42,6 +56,9 @@ module.exports = {
       acceptTerms: Joi.boolean().optional(),
       // The language the sign-up code email and SMS are written in.
       locale: Joi.string().valid('ar', 'en').optional(),
+      // The marketing-site session the visitor came from (?sv= on the sign-up
+      // link), linked to the account while site analytics is on (item 339).
+      siteSessionId: Joi.string().pattern(/^[A-Za-z0-9-]{8,64}$/).optional(),
     }),
   },
   // POST /auth/me/plan — an account made through Google choosing its plan.
@@ -70,11 +87,45 @@ module.exports = {
   changeUsername: {
     body: Joi.object({ username: usernameSchema.required() }),
   },
-  login: {
+  // Account settings (auth/accountService, item 332). The rules themselves
+  // are the service's; these only bound the input.
+  changeName: {
+    body: Joi.object({ fullName: Joi.string().max(400).required() }),
+  },
+  accountCode: {
+    body: Joi.object({ locale: Joi.string().valid('ar', 'en').optional() }),
+  },
+  emailChange: {
     body: Joi.object({
-      email: joiEmail().max(255).required(),
+      newEmail: joiEmail().max(255).required(),
+      currentPassword: Joi.string().max(200).optional(),
+      reauthCode: Joi.string().trim().pattern(/^\d{6}$/).optional(),
+      locale: Joi.string().valid('ar', 'en').optional(),
+    }),
+  },
+  phoneChange: {
+    body: Joi.object({
+      newPhone: Joi.string().trim().max(32).required(),
+      currentPassword: Joi.string().max(200).optional(),
+      reauthCode: Joi.string().trim().pattern(/^\d{6}$/).optional(),
+      locale: Joi.string().valid('ar', 'en').optional(),
+    }),
+  },
+  login: {
+    // `identifier` is the email or the username, as typed. `email` is what
+    // clients from before usernames send (the dashboard today); one of the two
+    // is required.
+    body: Joi.object({
+      identifier: Joi.string().trim().min(1).max(255),
+      email: joiEmail().max(255),
       password: Joi.string().required(),
       // The language of a sign-up code sent to an account not confirmed yet.
+      locale: Joi.string().valid('ar', 'en').optional(),
+    }).or('identifier', 'email'),
+  },
+  // POST /auth/me/email/send-code — a code to confirm a signed-in account's email.
+  meEmailSend: {
+    body: Joi.object({
       locale: Joi.string().valid('ar', 'en').optional(),
     }),
   },
@@ -101,7 +152,11 @@ module.exports = {
     body: Joi.object({ refreshToken: Joi.string().required() }),
   },
   requestPasswordReset: {
-    body: Joi.object({ email: joiEmail().required() }),
+    body: Joi.object({
+      email: joiEmail().required(),
+      // The language of the reset email; unset, the account's dashboard language, else Arabic.
+      locale: Joi.string().valid('ar', 'en').optional(),
+    }),
   },
   resetPassword: {
     body: Joi.object({ token: Joi.string().required(), newPassword: password }),

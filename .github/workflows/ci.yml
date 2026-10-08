@@ -18,6 +18,11 @@ jobs:
     name: Syntax and load
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The app refuses to load without these (item 328) and CI has no .env.
+    # Throwaway values: this job never signs a token or connects to a database.
+    env:
+      JWT_ACCESS_SECRET: ci-only-${{ github.run_id }}-${{ github.run_attempt }}
+      DB_PASSWORD: ci-unused
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,6 +58,9 @@ jobs:
       DB_NAME: zimos_ci
       DB_USER: postgres
       DB_PASSWORD: postgres
+      # Migrations and seeders load config/env.js, which refuses to start
+      # without it (item 328). A throwaway value for this run's database.
+      JWT_ACCESS_SECRET: ci-only-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
