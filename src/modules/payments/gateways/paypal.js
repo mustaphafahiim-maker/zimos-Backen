@@ -54,6 +54,7 @@ const setupSteps = {
     'PayPal shows as an express button at checkout for orders in USD, EUR, GBP, CAD or AUD.',
     'Recommended: in the same app, under Webhooks, add the webhook URL below for Payment capture refunded and the Customer dispute events, so refunds made in PayPal and disputes reach ZIMOS.',
     'Optional — one-click offers: turn on Vault in the app\'s features, then tick "Keep the buyer\'s PayPal" here.',
+    'Optional — payouts: turn on Transaction search in the app\'s features, so your withdrawals to the bank show under Payouts.',
   ],
   ar: [
     'من developer.paypal.com افتح Apps & Credentials، اختار Sandbox (للتجربة) أو Live (للبيع)، واعمل App.',
@@ -61,6 +62,7 @@ const setupSteps = {
     'PayPal بيظهر كزرار دفع سريع في الطلبات بالدولار أو اليورو أو الجنيه الإسترليني أو الدولار الكندي أو الأسترالي.',
     'مهم: في نفس الـ App، من Webhooks، ضيف رابط الـ Webhook اللي تحت لأحداث Payment capture refunded وأحداث Customer dispute، عشان الاسترجاعات اللي بتتعمل من PayPal والنزاعات توصل لـ ZIMOS.',
     'اختياري — العروض بضغطة واحدة: فعّل Vault من مميزات الـ App، وبعدها علّم على "احفظ حساب PayPal للمشتري" هنا.',
+    'اختياري — التحويلات: فعّل Transaction search من مميزات الـ App، عشان سحوباتك للبنك تظهر في التحويلات.',
   ],
 };
 const helpLinks = [{ label: bi('PayPal apps & credentials', 'تطبيقات ومفاتيح PayPal'), url: 'https://developer.paypal.com/dashboard/applications' }];
@@ -467,4 +469,6 @@ module.exports = {
   refetchTransaction,
   parseWebhook,
   parseRedirect,
+  // Fees from the capture's seller_receivable_breakdown, payouts from Transaction Search (./paypalLedger.js, item 399).
+  ...require('./paypalLedger')({ call, token, captureOf }),
 };

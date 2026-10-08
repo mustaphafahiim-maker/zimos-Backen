@@ -256,11 +256,24 @@ amount, currency, processedAt }] }` — what ZIMOS holds for the account since `
 |---|---|---|
 | `sandbox` | the account's own test settings `feeBasisPoints` (1/100 %) of the amount + `feeFixedMinor`, never more than the amount; unset = no fee | one payout per UTC day and currency for days that are over, from `candidates`: the day's payments (less their fee) less its refunds, arriving two days later (`paid` once that date has come, `in_transit` before); a day that nets ≤ 0 pays nothing; id `sbxpo_<day>_<currency>_<signature>` — asking again gives the same payouts |
 | `stripe` | `GET /v1/payment_intents/:id?expand[]=latest_charge.balance_transaction` → the balance transaction's `fee` / `net` / `currency`; null until Stripe has made it | `GET /v1/payouts?created[gte]=` (pages of 100, at most 5), then `GET /v1/balance_transactions?payout=<po_…>&expand[]=data.source` (pages of 100, at most 20 per payout): `charge` / `payment` lines → their PaymentIntent, `refund` / `payment_refund` → their `re_…`, the payout's own line left out, the rest `other`. Stripe lists lines for automatic payouts only: a manual payout comes without lines |
-| `paymob`, `kashier`, `paypal` | not implemented | not implemented |
+| `paypal` (`paypalLedger.js`, item 399) | `GET /v2/payments/captures/:id` → `seller_receivable_breakdown`: `paypal_fee` / `net_amount` in the transaction's currency, or `paypal_fee_in_receivable_currency` / `receivable_amount` when the capture was credited in another currency and PayPal gives both; null while the capture is pending (PayPal gives no breakdown then) | `GET /v1/reporting/transactions` (Transaction Search; the app needs that feature on, else the sync answers "turn on Transaction search") with `transaction_type` T0400, T0401, T0402, T0403 (PayPal's T04 group, withdrawals from the PayPal balance), `fields=transaction_info`, windows of ≤ 31 days, 500 a page, at most 5 pages per code and window: amount and `fee_amount` as positive numbers, status S → `paid`, P → `in_transit`, D / V → `failed`, date = the day of `transaction_initiation_date`. No lines: a withdrawal comes out of the pooled balance and PayPal does not say which sales it carried, so PayPal payments keep no payout link |
+| `paymob` | not implemented | not implemented |
+| `kashier` | not implemented | not implemented |
 
-Paymob, Kashier and PayPal leave both out for now: their fee and settlement reports are not in the payment APIs
-these adapters use (Paymob's and Kashier's come as dashboard/statement exports; PayPal's are in the separate
-Transaction Search / Reporting APIs that need their own permission on the app). Their payments show in the ledger
-with the fee "not known yet". Adding them is writing the two functions above against those reports.
+Why the gaps (item 399, checked against what each gateway publishes):
+
+- **PayPal** gives no bank arrival date and no per-withdrawal breakdown, so its payouts are dated by the withdrawal
+  and carry no lines; a refund's fee is not read (no `fetchFees` for refunds in the contract).
+- **Paymob**: the transaction object of the inquiry the adapter already calls has `merchant_commission` and
+  `order.commission_fees` fields, but Paymob's docs neither define them nor show them filled (null in every
+  example), so reading them as Paymob's fee would be a guess. Paymob's "Payouts" API is its disbursement product
+  (sending money to wallets and banks), not the settlement of card payments to the merchant; no settlement API is
+  published. Both left out.
+- **Kashier**: its transaction API (`/v2/aggregator/transactions/:id`, the one the adapter calls) documents no
+  fee field. Kashier's docs mention a balance ledger (gross, fees, net per settlement record), but its endpoint and
+  answer could not be checked from here, so it is not built on.
+
+Their payments show in the ledger with the fee "not known yet". Adding one is writing the two functions above
+against an API the gateway documents.
 
 Stand-in for Stripe: `STRIPE_API_BASE` (outside production).
