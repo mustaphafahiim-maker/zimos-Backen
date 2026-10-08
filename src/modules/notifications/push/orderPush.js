@@ -113,7 +113,9 @@ router.post(
   }),
   asyncHandler(async (req, res) => {
     const ws = req.tenant.workspaceId;
-    if (!getProvider() || !storeAppOn(req.publicWorkspace)) throw new AppError('PUSH_UNAVAILABLE', 'This store does not send notifications', 409);
+    const provider = getProvider();
+    if (!provider || !storeAppOn(req.publicWorkspace)) throw new AppError('PUSH_UNAVAILABLE', 'This store does not send notifications', 409);
+    if (provider.checkToken) provider.checkToken(req.body.platform, req.body.token);
     const order = await db.Order.findOne({ where: { id: req.params.orderId, workspaceId: ws }, attributes: ['id', 'orderNumber'] });
     if (!order || order.orderNumber.toLowerCase() !== req.body.number.toLowerCase()) throw new NotFoundError('Order');
     const tokenHash = hash(req.body.token);

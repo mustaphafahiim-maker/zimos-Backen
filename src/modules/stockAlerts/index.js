@@ -19,9 +19,10 @@ const { clientIp } = require('../../core/middleware/clientIp');
 /*
  * Back-in-stock alerts (spec-gaps item 194).
  *
- * - A shopper leaves an email or phone on a sold-out variant (available ≤ 0
- *   and no overselling). One waiting alert per variant and address; at most
- *   20 alerts an hour from one IP.
+ * - A shopper leaves an email, phone or (item 392) their browser's push
+ *   subscription on a sold-out variant (available ≤ 0 and no overselling).
+ *   One waiting alert per variant and address; at most 20 alerts an hour
+ *   from one IP.
  * - When the variant's available stock goes from ≤ 0 to > 0 (a hook on the
  *   variant row, like product.low_stock), `variant.back_in_stock` is
  *   recorded; its consumer tells every waiting shopper once (email, or SMS)
@@ -61,13 +62,19 @@ install();
 
 // -------------------------------------------------------------- shopper --
 
-async function subscribe(workspace, { variantId, email, phone, locale }, ip) {
+async function subscribe(workspace, { variantId, email, phone, pushToken, locale }, ip) {
   const variant = await db.ProductVariant.findOne({ where: { id: variantId, workspaceId: workspace.id }, include: [{ model: db.Product, as: 'product', attributes: ['id', 'status'] }] });
   if (!variant || !variant.product || variant.product.status !== 'active') throw new NotFoundError('Product');
   if (variant.allowOverselling || availableOf(variant) > 0) throw new AppError('IN_STOCK', 'This product is in stock — you can order it now', 409);
   let channel;
   let target;
-  if (email) {
+  let push = null;
+  if (pushToken) {
+    // The browser itself (item 392): the store's app must be on and push available.
+    channel = 'push';
+    push = require('../notifications/push/stockAlertPush').prepare(workspace, pushToken);
+    target = push.target;
+  } else if (email) {
     channel = 'email';
     target = String(email).trim().toLowerCase();
   } else {
@@ -80,7 +87,7 @@ async function subscribe(workspace, { variantId, email, phone, locale }, ip) {
   }
   const existing = await db.StockAlert.findOne({ where: { variantId, target, status: 'waiting' } });
   if (!existing) {
-    await db.StockAlert.create({ workspaceId: workspace.id, productId: variant.productId, variantId, channel, target, locale: locale || null, requestIp: ip || null }).catch((err) => {
+    await db.StockAlert.create({ workspaceId: workspace.id, productId: variant.productId, variantId, channel, target, pushToken: push ? push.pushToken : null, locale: locale || null, requestIp: ip || null }).catch((err) => {
       if (err.name !== 'SequelizeUniqueConstraintError') throw err;
     });
   }
@@ -96,7 +103,7 @@ async function notify(event) {
   const variant = await db.ProductVariant.findOne({ where: { id: p.variantId, workspaceId }, include: [{ model: db.Product, as: 'product', attributes: ['id', 'name', 'slug', 'status'] }] });
   // Sold out again before we got here, or gone: the shoppers keep waiting.
   if (!variant || !variant.product || variant.product.status !== 'active' || availableOf(variant) <= 0) return null;
-  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name', 'slug', 'defaultLocale'] });
+  const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'name', 'slug', 'defaultLocale', 'settings'] });
   const origin = await require('../domains/primaryHost').storeOriginOf(workspace);
   const url = `${origin}/products/${encodeURIComponent(variant.product.slug || variant.product.id)}`;
   const options = variant.optionValues && Object.keys(variant.optionValues).length ? ` (${Object.values(variant.optionValues).join(' / ')})` : '';
@@ -107,6 +114,12 @@ async function notify(event) {
     if (!batch.length) break;
     for (const a of batch) {
       const lang = (a.locale || (workspace && workspace.defaultLocale)) === 'en' ? 'en' : 'ar';
+      if (a.channel === 'push') {
+        // Sent, failed or gone (404/410), the alert is done and its subscription dropped.
+        await require('../notifications/push/stockAlertPush').send(a, { workspace, lang, productName: name, url });
+        await a.update({ status: 'notified', notifiedAt: new Date(), pushToken: null });
+        continue;
+      }
       if (a.channel === 'email') {
         await send.email({ recipient: a.target, template: 'back_in_stock', data: { productName: name, url, storeName: workspace ? workspace.name : '', locale: lang }, workspaceId });
       } else {
@@ -146,7 +159,7 @@ store.post(
   resolvePublicWorkspace,
   validate({
     params: Joi.object({ workspaceId: Joi.string().required() }),
-    body: Joi.object({ variantId: Joi.string().uuid().required(), email: Joi.string().trim().email().max(255), phone: Joi.string().trim().min(6).max(32), locale: Joi.string().valid('ar', 'en', 'fr') }).xor('email', 'phone'),
+    body: Joi.object({ variantId: Joi.string().uuid().required(), email: Joi.string().trim().email().max(255), phone: Joi.string().trim().min(6).max(32), pushToken: Joi.string().min(8).max(4000), locale: Joi.string().valid('ar', 'en', 'fr') }).xor('email', 'phone', 'pushToken'),
   }),
   asyncHandler(async (req, res) => res.status(201).json(await subscribe(req.publicWorkspace, req.body, clientIp(req))))
 );

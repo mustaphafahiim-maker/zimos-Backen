@@ -15,6 +15,8 @@ module.exports = (sequelize, DataTypes) => {
       status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'waiting' },
       notifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'notified_at' },
       requestIp: { type: DataTypes.STRING(45), allowNull: true, field: 'request_ip' },
+      // channel `push`: the browser's subscription, cleared once sent (migration 528).
+      pushToken: { type: DataTypes.TEXT, allowNull: true, field: 'push_token' },
     },
     { tableName: 'stock_alerts' }
   );

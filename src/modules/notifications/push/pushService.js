@@ -79,6 +79,9 @@ router.post(
     }),
   }),
   asyncHandler(async (req, res) => {
+    // With real web push, a browser token must be a usable subscription (422 INVALID_PUSH_SUBSCRIPTION).
+    const provider = getProvider();
+    if (provider && provider.checkToken) provider.checkToken(req.body.platform, req.body.token);
     const device = await register(req.user.id, { ...req.body, userAgent: String(req.headers['user-agent'] || '').slice(0, 300) });
     res.status(201).json({ device: view(device) });
   })

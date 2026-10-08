@@ -4970,3 +4970,18 @@ On each ready-made automation that sends WhatsApp (Automations → ready-made), 
 - A table of `templates`: name, language («العربية» / "Arabic", «الإنجليزية» / "English"), status badge (PENDING «قيد المراجعة» / "In review", APPROVED «مقبول» / "Approved", REJECTED «مرفوض» / "Rejected", PAUSED «موقوف مؤقتًا» / "Paused", DISABLED «معطّل» / "Disabled"), and for `reused` the note «قالب موجود بالفعل في حسابك — النص قد يختلف» / "Already in your account — its text may differ".
 - Errors: 429 «واتساب تحد من الطلبات الآن، حاول بعد قليل» / "WhatsApp is limiting requests, try again shortly"; 422 `WHATSAPP_TEMPLATE_REJECTED` shows Meta's message; `WHATSAPP_NO_BUSINESS_ACCOUNT` links to the WhatsApp settings.
 - Bell type `whatsapp.template` (`data.event`): `rejected` (`name`, `language`, `reason`, `ruleId`) and `activated` (`ruleId`, `templateKey`); link `/automations`. Title/body arrive in the teammate's language; in notification preferences call it «قوالب واتساب» / "WhatsApp templates" (on in the bell and by email by default).
+
+## 392. Real web push (VAPID) — UI: pending
+
+The server can now send real browser push (Web Push with VAPID) once the owner sets the keys; until then it stays on the sandbox (development) or sends nothing (production). Endpoints are unchanged except the two notes below and the new push option on "Notify me when back in stock".
+
+### Dashboard (`/api/v1/me/push`)
+- `GET /config` → `{ push: { available, provider, publicKey } }`. With `provider: "webpush"`, subscribe through the service worker: `registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: <publicKey as Uint8Array from base64url> })`, then `POST /devices` with `{ platform: "web", token: JSON.stringify(subscription) }` (the whole `PushSubscription` JSON: endpoint + keys). Keep the `sandbox:…` token only when `provider === "sandbox"`.
+- `POST /devices` may now answer 422 `INVALID_PUSH_SUBSCRIPTION` (not a subscription, or the endpoint is not a browser push service): «تعذّر تفعيل الإشعارات على المتصفح ده» / "Couldn't turn on notifications in this browser".
+- When `publicKey` changes from the one the browser subscribed with (keys rotated), unsubscribe and subscribe again with the new key, then `POST /devices` again.
+- The service worker keeps showing `{ title, body, link }` from the push data (it may also carry `type`) and opens `link` on tap.
+
+### Store (`/api/v1/store/:workspaceId`)
+- `GET /push-config` → `{ push: { available, publicKey } }` (available only with the store's app on and a push provider).
+- Thank-you page "Notify me" (order updates): unchanged, but `token` must be `JSON.stringify(subscription)`; 422 `INVALID_PUSH_SUBSCRIPTION` as above.
+- **New**: on a sold-out variant's "Notify me when it's back", when `push.available`, offer «نبّهني على المتصفح» / "Notify me in this browser" beside email/phone: subscribe as above and `POST /stock-alerts` with `{ variantId, pushToken: JSON.stringify(subscription), locale }` (exactly one of `email`, `phone`, `pushToken`). 201 `{ subscribed: true, channel: "push" }`; 409 `PUSH_UNAVAILABLE` (hide the option), 422 `INVALID_PUSH_SUBSCRIPTION`, 409 `IN_STOCK`, 429 as before. Success text: «هنبعتلك إشعار أول ما يرجع» / "We'll notify you here as soon as it's back". The push is sent once (title «رجع متاح!» / "Back in stock", link = the product page); nothing else is ever pushed from it.
