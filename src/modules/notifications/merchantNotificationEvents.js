@@ -157,6 +157,18 @@ function walletCredit(workspaceId, { entryId, amount, currency, kind, reason }) 
   });
 }
 
+/** The subscription ended and the store moved to pay per order, paid from its balance. Once per change. */
+function walletFallback(workspaceId, { subscriptionId, fromPlan, fee }) {
+  return service.create(workspaceId, {
+    type: 'wallet.fallback',
+    title: 'انتهى اشتراكك، ومتجرك الآن على الدفع لكل طلب',
+    body: `انتهت خطة ${fromPlan}، فيستمر متجرك في البيع ويُخصم ${money(fee, 'EGP')} لكل طلب من رصيدك. يمكنك العودة إلى اشتراك في أي وقت.`,
+    link: '/subscription?tab=plans',
+    data: { fromPlan, fee, currency: 'EGP' },
+    dedupeKey: `wallet.fallback:${subscriptionId}:${today()}`,
+  });
+}
+
 const HANDLERS = { 'order.created': orderCreated };
 
 /** Fire-and-forget, like automationEngine.emit; awaited under test for the same reason. */
@@ -169,4 +181,4 @@ function emit(workspaceId, event, entityId) {
   return env.isTest ? work : undefined;
 }
 
-module.exports = { emit, orderCreated, integrationFailed, exportReady, walletLow, walletLimitReached, walletRefund, walletCredit };
+module.exports = { emit, orderCreated, integrationFailed, exportReady, walletLow, walletLimitReached, walletRefund, walletCredit, walletFallback };

@@ -33,6 +33,8 @@ const TYPES = [
   'user_suspended',
   // A merchant sent a suggestion (migration 219, modules/suggestions).
   'suggestion',
+  // A store whose subscription ended moved to pay per order (billing/walletFallbackService, migration 224).
+  'wallet_fallback',
 ];
 
 const PAGE_MAX = 50;

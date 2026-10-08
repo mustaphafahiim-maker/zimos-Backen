@@ -145,6 +145,44 @@ The same gateway layer as paying a charge online
   own money.
 - The billing summary's latest online payment counts charges only.
 
+## Falling back to pay per order (billing/walletFallbackService)
+
+The balance belongs to the merchant, never to a plan.
+
+**When it happens:** a paid subscription's period ends unrenewed. That
+covers the grace day running out, and a cancellation that takes effect at
+period end. If the balance can pay at least one order's fee, the store
+moves to the offered pay-per-order plan (`offeredFeePlan`) instead of going
+past due and then restricted.
+
+**What runs it:** the hourly billing job `billing.wallet_fallback`. The
+lifecycle itself is computed when read and has no job of its own, so this
+is the first run after the period ends.
+
+**Exactly as today when:**
+
+- `WALLET_ENABLED` is off;
+- no pay-per-order plan is on offer;
+- the balance is below one fee, or in debt;
+- a charge is still pending (the merchant may be paying the renewal);
+- the store is a draft or a trial;
+- the subscription is cancelled or suspended;
+- the subscription is priced by hand.
+
+**How it runs:**
+
+- Each store in its own transaction: the subscription is locked and
+  everything is checked again, then the wallet under its lock. A second run
+  changes nothing.
+- The free orders already used stay used.
+- The account is marked as having had its trial.
+- Audited (`subscription.wallet_fallback`).
+- Told in the merchant's bell (`wallet.fallback`) and the console's
+  notifications (`wallet_fallback`).
+
+The merchant can move back to a subscription at any time (`POST
+/billing/plan-move`).
+
 ## Refunds (migration 223)
 
 A merchant asks for unused balance back, and the console pays it out by hand.

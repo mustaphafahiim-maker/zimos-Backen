@@ -20,5 +20,14 @@ module.exports = {
       // eslint-disable-next-line global-require
       handle: () => require('./merchantPlansService').expirePendingMoves(),
     },
+    {
+      // A paid subscription that ended unrenewed, with a balance that covers
+      // one order's fee, moves to pay per order instead of lapsing
+      // (walletFallbackService.sweep; WALLET_ENABLED only).
+      name: 'billing.wallet_fallback',
+      everyMs: HOUR,
+      // eslint-disable-next-line global-require
+      handle: () => require('./walletFallbackService').sweep(),
+    },
   ],
 };
