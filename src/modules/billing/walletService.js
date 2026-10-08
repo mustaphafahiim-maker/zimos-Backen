@@ -350,6 +350,18 @@ async function creditTopup(proof, receivedAmount, actorUserId, transaction) {
   );
 }
 
+/**
+ * A card top-up the gateway's own API confirmed (onlineBillingService), once
+ * per attempt (topup:attempt:<id>). Not tied to WALLET_ENABLED: money that
+ * arrived is credited.
+ */
+async function creditGatewayTopup(attempt, amount, transaction) {
+  const wallet = await lockWallet(attempt.workspaceId, transaction);
+  const key = `topup:attempt:${attempt.id}`;
+  if (await db.WalletLedgerEntry.count({ where: { idempotencyKey: key }, transaction })) return null;
+  return writeEntry(wallet, { type: 'topup', delta: amount, note: `Card (${attempt.provider})`, key }, transaction);
+}
+
 // ------------------------------------------------------------- reading
 
 /**
@@ -633,6 +645,7 @@ module.exports = {
   reverseOrderFee,
   rechargeOrderFee,
   creditTopup,
+  creditGatewayTopup,
   orderFeeState,
   describe,
   describeWallet,

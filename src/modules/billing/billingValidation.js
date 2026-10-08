@@ -64,6 +64,16 @@ module.exports = {
       senderPhone: Joi.string().trim().min(6).max(32).required(),
     }),
   },
+  // A card top-up: the amount in minor units (the limits are walletService's),
+  // the gateway (a payment_methods code; Fawaterak when left out) and the
+  // checkout's language.
+  startOnlineTopup: {
+    body: Joi.object({
+      amount: Joi.number().integer().min(1).max(1e12).required(),
+      method: Joi.string().pattern(METHOD_CODE).optional(),
+      lang: Joi.string().valid('ar', 'en').default('ar'),
+    }),
+  },
   walletLedger: {
     query: Joi.object({
       page: Joi.number().integer().min(1).max(10000).default(1),

@@ -71,6 +71,25 @@ A transfer's proof, the same flow as paying an invoice
 
 There are no refunds and no promotional balance.
 
+### By card (migration 221)
+
+The same gateway layer as paying a charge online
+([billing-payment-methods.md](billing-payment-methods.md)), with an attempt of
+`purpose = 'topup'` and no charge:
+
+- **Starting it:** `POST /workspaces/:id/billing/wallet/topups/online
+  { amount, method?, lang }`. Only with `WALLET_ENABLED` on, for a store on
+  the pay-per-order plan (409 `WALLET_NOT_ON_PLAN` otherwise), within the
+  same limits as a transfer, through a gateway the merchant is offered.
+  Fawaterak stays behind `ONLINE_BILLING_ENABLED` and its keys.
+- **The credit:** when the gateway's own API says it is paid (a webhook, the
+  merchant's status read `GET /billing/payments/:id`, or the sweep), the
+  amount the attempt was for, once: `topup:attempt:<id>`. A payment of
+  another amount or currency is marked `mismatch` and credits nothing.
+- **Every paid attempt credits:** none supersedes another, since each is its
+  own money.
+- The billing summary's latest online payment counts charges only.
+
 ## The ledger
 
 - **`wallet_ledger_entries` is append-only.** A trigger refuses UPDATE and
@@ -124,5 +143,6 @@ nothing twice. Each is audited on the store.
 | `GET /workspaces/:id/billing/wallet` | balance, fee, orders left, this month in Cairo, limits |
 | `GET /workspaces/:id/billing/wallet/ledger?page&pageSize` | the entries, newest first |
 | `POST /workspaces/:id/billing/wallet/topups` | multipart: `requestedAmount`, `methodCode`, `senderPhone`, `file` |
+| `POST /workspaces/:id/billing/wallet/topups/online` | a card top-up's checkout: `amount`, `method`, `lang` |
 | `POST /workspaces/:id/billing/pay-per-order` | choose the plan (a confirmed account) |
 | `GET /admin/workspaces/:id/wallet` | the console's panel (`subscriptions.view`) |
