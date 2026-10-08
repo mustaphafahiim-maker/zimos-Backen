@@ -5118,3 +5118,9 @@ No new screen; two console buttons answer differently.
 - Console → Users → a user: hide «إعادة ضبط التحقق بخطوتين» / "Reset two-step sign-in" on your own account, on a creator's account unless you are a creator, and on any console account unless you hold `admins.manage` (same rule as the suspend / delete buttons).
 - Console → Platform users → permission checklist: label `system.manage` «إدارة النظام (إعادة تشغيل المهام)» / "Manage the system (retry jobs)", grouped next to `system.view`.
 - Console → System → Queues: show the «إعادة المحاولة» / "Retry" button only with `system.manage`.
+
+## Go-live pass — AI errors (UI: pending, small)
+
+The AI features (product writer, page builder, translate, policies, page review, ad creatives, store builder, WhatsApp reply, support bot, order check) now run on a real provider once the owner sets `ANTHROPIC_API_KEY`; without it production still answers 503 `AI_NOT_CONFIGURED` («الذكاء الاصطناعي مش متاح دلوقتي» / "AI isn't available right now").
+- New error **503 `AI_PROVIDER_UNAVAILABLE`**: the AI service is busy or didn't answer; queued jobs retry by themselves. Wording: «خدمة الذكاء الاصطناعي مشغولة — جرّب كمان شوية» / "The AI service is busy — try again in a moment".
+- **429 `AI_LIMIT_REACHED`** with `details.scope: "provider"` means the provider's own rate limit (no `limit`/`used` fields then): show the same "busy" wording, not the plan-limit wording.

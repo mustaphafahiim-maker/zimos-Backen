@@ -25,7 +25,12 @@ const logger = require('../../../core/utils/logger');
 const PROVIDER = 'pinterest';
 
 const base = () => process.env.PINTEREST_API_BASE || 'https://api.pinterest.com/v5';
-const mode = () => (process.env.PINTEREST_CAPI_MODE === 'live' ? 'live' : 'sandbox');
+// Live in production unless set to sandbox; sandbox elsewhere unless set to live (go-live: no silent sandbox).
+const mode = () => {
+  const set = String(process.env.PINTEREST_CAPI_MODE || '').trim();
+  if (set === 'live' || set === 'sandbox') return set;
+  return process.env.NODE_ENV === 'production' ? 'live' : 'sandbox';
+};
 
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value).trim().toLowerCase()).digest('hex');

@@ -25,7 +25,12 @@ const logger = require('../../../core/utils/logger');
  */
 const PROVIDER = 'x';
 const base = () => process.env.X_ADS_API_BASE || 'https://ads-api.x.com/12';
-const mode = () => (process.env.X_CAPI_MODE === 'live' ? 'live' : 'sandbox');
+// Live in production unless set to sandbox; sandbox elsewhere unless set to live (go-live: no silent sandbox).
+const mode = () => {
+  const set = String(process.env.X_CAPI_MODE || '').trim();
+  if (set === 'live' || set === 'sandbox') return set;
+  return process.env.NODE_ENV === 'production' ? 'live' : 'sandbox';
+};
 const sha256 = (v) => crypto.createHash('sha256').update(String(v).trim().toLowerCase()).digest('hex');
 const pct = (s) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 

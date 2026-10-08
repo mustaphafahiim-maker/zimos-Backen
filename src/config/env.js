@@ -31,6 +31,22 @@ function assertProductionConfig() {
   if (storage !== 'r2' && process.env.ALLOW_LOCAL_STORAGE_IN_PRODUCTION !== 'true') {
     problems.push('STORAGE_PROVIDER must be r2 in production (or set ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true for a persistent volume)');
   }
+  // Sign-up codes, password resets and order emails must really go out (go-live pass, docs/GO-LIVE.md).
+  const email = (process.env.EMAIL_PROVIDER || 'console').trim().toLowerCase();
+  if (email === 'console' && process.env.ALLOW_CONSOLE_EMAIL_IN_PRODUCTION !== 'true') {
+    problems.push('EMAIL_PROVIDER must be brevo in production (console only prints emails to the log)');
+  } else if (email === 'brevo' && !(process.env.BREVO_API_KEY || '').trim()) {
+    problems.push('EMAIL_PROVIDER=brevo needs BREVO_API_KEY');
+  }
+  // SMS and WhatsApp are optional for a launch, so they only warn.
+  const sms = (process.env.SMS_PROVIDER || 'console').trim().toLowerCase();
+  if (sms === 'console') console.warn('[config] SMS_PROVIDER is console in production: SMS codes and messages are only logged, not sent');
+  else if (sms === 'twilio' && !((process.env.TWILIO_ACCOUNT_SID || '').trim() && (process.env.TWILIO_AUTH_TOKEN || '').trim())) {
+    problems.push('SMS_PROVIDER=twilio needs TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN');
+  }
+  if ((process.env.WHATSAPP_PROVIDER || 'console').trim().toLowerCase() === 'console') {
+    console.warn("[config] WHATSAPP_PROVIDER is console in production: ZIMOS's own WhatsApp codes are only logged, not sent");
+  }
   if (problems.length > 0) {
     throw new Error(
       ['Refusing to start in production:', ...problems.map((p) => ` - ${p}`), 'Generate a secret with: openssl rand -hex 32'].join('\n')
