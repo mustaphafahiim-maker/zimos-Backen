@@ -13,6 +13,7 @@ const { toMajor } = require('./fawaterak/amounts');
 const { verifyWebhook } = require('./fawaterak/signature');
 const gateways = require('./gateways/registry');
 const paymentMethods = require('./paymentMethodService');
+const wallet = require('./walletService');
 
 /**
  * A merchant paying their subscription charge online, through a gateway of
@@ -43,6 +44,13 @@ const paymentMethods = require('./paymentMethodService');
  * A failed, cancelled or expired attempt changes only the attempt: never the
  * charge (no markChargeFailed) and never the subscription. Pressing Pay
  * again makes a new attempt.
+ *
+ * A card top-up of the prepaid balance (`startTopup`, migration 221) is an
+ * attempt with purpose 'topup' and no charge: the same webhooks, sweep and
+ * confirmation, and `settleConfirmed` credits the balance through
+ * walletService.creditGatewayTopup (topup:attempt:<id>) once instead of
+ * settling a charge. Every paid top-up attempt credits what it was for;
+ * none supersedes another.
  */
 
 const PROVIDER = 'fawaterak';
@@ -77,6 +85,9 @@ function unavailable() {
  */
 function returnUrl(attempt, result) {
   const base = env.frontendUrl.replace(/\/+$/, '');
+  if (attempt.purpose === 'topup') {
+    return `${base}/subscription?tab=usage&topup=${attempt.id}&workspace=${attempt.workspaceId}&result=${result}`;
+  }
   return `${base}/settings?payment=${attempt.id}&workspace=${attempt.workspaceId}&result=${result}`;
 }
 
@@ -100,6 +111,7 @@ function serializeForMerchant(attempt) {
   if (!attempt) return null;
   return {
     id: attempt.id,
+    purpose: attempt.purpose || 'invoice',
     status: attempt.status,
     amount: Number(attempt.amount),
     currency: attempt.currency,
@@ -195,13 +207,17 @@ async function startPayment(workspaceId, { lang, method } = {}, req) {
     return { attempt: created, reused: false };
   });
   if (reused) return { payment: serializeForMerchant(attempt), reused: true };
+  return { payment: await openCheckout(adapter, attempt, { plan: subscription.plan, billingCycle: subscription.billingCycle, lang }, req), reused: false };
+}
 
+/** The hosted checkout for a new attempt; an attempt with no checkout is marked error (502). */
+async function openCheckout(adapter, attempt, { plan, billingCycle, lang }, req) {
   let link;
   try {
     link = await adapter.createPayment({
       attempt,
-      plan: subscription.plan,
-      billingCycle: subscription.billingCycle,
+      plan,
+      billingCycle,
       user: req.user,
       lang,
       returnUrls: returnUrls(attempt),
@@ -223,8 +239,133 @@ async function startPayment(workspaceId, { lang, method } = {}, req) {
   // keeps that status (its link can still settle the charge if paid).
   await db.BillingPaymentAttempt.update({ status: 'open' }, { where: { id: attempt.id, status: 'created' } });
   await attempt.reload();
-  logger.info(`billing payment attempt ${attempt.id}: checkout created for invoice ${attempt.billingInvoiceId}`);
-  return { payment: serializeForMerchant(attempt), reused: false };
+  logger.info(
+    attempt.purpose === 'topup'
+      ? `billing payment attempt ${attempt.id}: checkout created for a top-up`
+      : `billing payment attempt ${attempt.id}: checkout created for invoice ${attempt.billingInvoiceId}`
+  );
+  return serializeForMerchant(attempt);
+}
+
+// ------------------------------------------------------------- top-ups
+
+/**
+ * POST /workspaces/:id/billing/wallet/topups/online { amount, method, lang } —
+ * a card top-up of the prepaid balance. WALLET_ENABLED and a store on the
+ * pay-per-order plan; the amount within walletService's top-up limits, in
+ * EGP; the gateway one the merchant is offered (as for Pay). A second press
+ * for the same amount within a minute gets the same checkout back.
+ */
+async function startTopup(workspaceId, { amount, lang, method } = {}, req) {
+  if (!wallet.enabled()) throw wallet.disabledError();
+  if (!(await wallet.termsDue(workspaceId))) {
+    throw new ConflictError('Topping up by card is for stores on the pay-per-order plan.', 'WALLET_NOT_ON_PLAN');
+  }
+  if (!Number.isSafeInteger(amount) || amount < wallet.MIN_TOPUP_AMOUNT || amount > wallet.MAX_TOPUP_AMOUNT) {
+    throw new AppError(
+      'TOPUP_AMOUNT_OUT_OF_RANGE',
+      `A top-up is between ${wallet.MIN_TOPUP_AMOUNT} and ${wallet.MAX_TOPUP_AMOUNT} (minor units).`,
+      422,
+      { min: wallet.MIN_TOPUP_AMOUNT, max: wallet.MAX_TOPUP_AMOUNT, currency: wallet.WALLET_CURRENCY }
+    );
+  }
+  const adapter = await startingGateway(method);
+  adapter.assertCanStart();
+  if (!adapter.currencies.includes(wallet.WALLET_CURRENCY)) throw currencyNotSupported(wallet.WALLET_CURRENCY, adapter);
+  const subscription = await db.Subscription.findOne({ where: { workspaceId }, attributes: ['id'] });
+  if (!subscription) throw new NotFoundError('Subscription');
+
+  const recent = await db.BillingPaymentAttempt.findOne({
+    where: {
+      workspaceId,
+      purpose: 'topup',
+      provider: adapter.code,
+      amount,
+      status: IN_PROGRESS,
+      createdAt: { [db.Sequelize.Op.gt]: new Date(now().getTime() - REPRESS_WINDOW_MS) },
+    },
+    order: [['createdAt', 'DESC']],
+  });
+  if (recent) {
+    if (recent.status === 'created') throw new ConflictError('A payment is being started. Try again in a moment.', 'PAYMENT_STARTING');
+    return { payment: serializeForMerchant(recent), reused: true };
+  }
+
+  const attempt = await db.sequelize.transaction(async (transaction) => {
+    const created = await db.BillingPaymentAttempt.create(
+      {
+        purpose: 'topup',
+        billingInvoiceId: null,
+        workspaceId,
+        subscriptionId: subscription.id,
+        provider: adapter.code,
+        status: 'created',
+        grossAmount: amount,
+        discountAmount: 0,
+        amount,
+        currency: wallet.WALLET_CURRENCY,
+        referralCodeId: null,
+        createdByUserId: req.user.id,
+      },
+      { transaction }
+    );
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: 'wallet.topup_start',
+      entityType: 'BillingPaymentAttempt',
+      entityId: created.id,
+      after: { amount, currency: wallet.WALLET_CURRENCY },
+      metadata: { purpose: 'topup', provider: adapter.code },
+      req,
+      transaction,
+    });
+    return created;
+  });
+  return { payment: await openCheckout(adapter, attempt, { plan: null, billingCycle: null, lang }, req), reused: false };
+}
+
+/** The store's latest card top-ups, newest first, for the Usage tab. */
+async function listTopups(workspaceId, { limit = 5 } = {}) {
+  const rows = await db.BillingPaymentAttempt.findAll({
+    where: { workspaceId, purpose: 'topup' },
+    order: [['createdAt', 'DESC']],
+    limit,
+  });
+  return rows.map(serializeForMerchant);
+}
+
+/**
+ * A confirmed top-up: the attempt locked, then the wallet (its last lock).
+ * Resolves { outcome, attempt }: paid | mismatch | already_settled. The
+ * credit is the amount the attempt was for, which the gateway's own answer
+ * must match exactly.
+ */
+async function settleTopup(attemptId, verification, { source }, transaction) {
+  const attempt = await db.BillingPaymentAttempt.findByPk(attemptId, { transaction, lock: transaction.LOCK.UPDATE });
+  if (SETTLED.includes(attempt.status)) return { outcome: 'already_settled', attempt };
+  const { fields, gatewayPaidAt } = verification;
+  const problems = [...verification.problems];
+  const audit = (action, extra = {}) =>
+    recordAudit({
+      workspaceId: attempt.workspaceId,
+      action,
+      entityType: 'BillingPaymentAttempt',
+      entityId: attempt.id,
+      after: { status: attempt.status, verifiedAmount: fields.verifiedAmount, verifiedCurrency: fields.verifiedCurrency },
+      metadata: { purpose: 'topup', provider: attempt.provider, providerTransactionId: fields.providerTransactionId, gatewayPaidAt, source, ...extra },
+      transaction,
+    });
+  if (problems.length > 0) {
+    await attempt.update({ status: 'mismatch', ...fields, failureReason: problems.join('; ').slice(0, 300) }, { transaction });
+    await audit('billing_payment.mismatch', { problems });
+    logger.error(`billing payment attempt ${attempt.id}: ${attempt.provider} reports a top-up paid, but ${problems.join('; ')}. Nothing was credited.`);
+    return { outcome: 'mismatch', attempt };
+  }
+  const entry = await wallet.creditGatewayTopup(attempt, Number(attempt.amount), transaction);
+  await attempt.update({ status: 'paid', ...fields }, { transaction });
+  await audit('wallet.gateway_topup', { ledgerEntryId: entry ? entry.id : null });
+  return { outcome: 'paid', attempt };
 }
 
 // ------------------------------------------------------- confirm and settle
@@ -261,7 +402,11 @@ function verifyPaid(attempt, payment) {
  */
 async function settleConfirmed(attemptId, verification, { source }) {
   return db.sequelize.transaction(async (transaction) => {
-    const { billingInvoiceId } = await db.BillingPaymentAttempt.findByPk(attemptId, { attributes: ['billingInvoiceId'], transaction });
+    const { billingInvoiceId, purpose } = await db.BillingPaymentAttempt.findByPk(attemptId, {
+      attributes: ['billingInvoiceId', 'purpose'],
+      transaction,
+    });
+    if (purpose === 'topup') return settleTopup(attemptId, verification, { source }, transaction);
     const invoice = await db.BillingInvoice.findByPk(billingInvoiceId, { transaction, lock: transaction.LOCK.UPDATE });
     const attempt = await db.BillingPaymentAttempt.findByPk(attemptId, { transaction, lock: transaction.LOCK.UPDATE });
     if (SETTLED.includes(attempt.status)) return { outcome: 'already_settled', attempt };
@@ -585,13 +730,15 @@ async function getPayment(workspaceId, attemptId) {
     }
     await attempt.reload();
   }
+  // A top-up has no charge: its own status says whether the balance was credited.
+  if (attempt.purpose === 'topup') return { payment: serializeForMerchant(attempt), chargeStatus: null };
   const invoice = await db.BillingInvoice.findByPk(attempt.billingInvoiceId, { attributes: ['id', 'status'] });
   return { payment: serializeForMerchant(attempt), chargeStatus: invoice.status };
 }
 
 /** For the merchant's billing summary: whether they can pay online, and their latest attempt. */
 async function onlinePaymentSummary(workspaceId, plan) {
-  const latest = await db.BillingPaymentAttempt.findOne({ where: { workspaceId }, order: [['createdAt', 'DESC']] });
+  const latest = await db.BillingPaymentAttempt.findOne({ where: { workspaceId, purpose: 'invoice' }, order: [['createdAt', 'DESC']] });
   return {
     enabled: Boolean(plan) && plan.currency === ONLINE_CURRENCY && fawaterakConfig.onlinePaymentEnabled(),
     currency: ONLINE_CURRENCY,
@@ -695,6 +842,8 @@ async function sweep({ limit = 50, at = now() } = {}) {
 }
 
 module.exports = {
+  startTopup,
+  listTopups,
   PROVIDER,
   ONLINE_CURRENCY,
   IN_PROGRESS,

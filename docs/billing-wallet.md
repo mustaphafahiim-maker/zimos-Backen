@@ -71,6 +71,25 @@ A transfer's proof, the same flow as paying an invoice
 
 There are no refunds and no promotional balance.
 
+### By card (migration 221)
+
+The same gateway layer as paying a charge online
+([billing-payment-methods.md](billing-payment-methods.md)), with an attempt of
+`purpose = 'topup'` and no charge:
+
+- **Starting it:** `POST /workspaces/:id/billing/wallet/topups/online
+  { amount, method?, lang }`. Only with `WALLET_ENABLED` on, for a store on
+  the pay-per-order plan (409 `WALLET_NOT_ON_PLAN` otherwise), within the
+  same limits as a transfer, through a gateway the merchant is offered.
+  Fawaterak stays behind `ONLINE_BILLING_ENABLED` and its keys.
+- **The credit:** when the gateway's own API says it is paid (a webhook, the
+  merchant's status read `GET /billing/payments/:id`, or the sweep), the
+  amount the attempt was for, once: `topup:attempt:<id>`. A payment of
+  another amount or currency is marked `mismatch` and credits nothing.
+- **Every paid attempt credits:** none supersedes another, since each is its
+  own money.
+- The billing summary's latest online payment counts charges only.
+
 ## The ledger
 
 - **`wallet_ledger_entries` is append-only.** A trigger refuses UPDATE and
@@ -83,6 +102,40 @@ There are no refunds and no promotional balance.
 - **What the trigger refuses:** a `DELETE FROM wallet_ledger_entries` aimed at
   rows of a store that still exists.
 
+## Free orders and the debt limit (migration 220)
+
+Two settings on a pay-per-order plan, in the console's plan editor. Their
+defaults keep everything above as it was.
+
+- **Free orders** (`plans.wallet_free_orders`, default 0): orders a store
+  places before any fee. Each one is an `order_fee` entry with `cash_delta`
+  0 and `free_orders_delta` -1, under the same key, so it's given back and
+  taken again like a fee. The console grants more to one store.
+- **Debt limit** (`plans.wallet_debt_limit_amount`, minor units, default
+  NULL):
+  - NULL: the fixed `OVERDRAFT_LIMIT` and the refusal above (402 / 423, the
+    store restricted).
+  - Set: the balance may go that far below zero. Past it, a new order gets
+    **422 `WALLET_LIMIT_REACHED`** (staff and shoppers alike, with no
+    balance in the shopper's answer) and the store stays open.
+  - The bell tells the team (`billing.manage`) when the balance runs low
+    (`wallet.low`) and when the limit is reached (`wallet.limit_reached`),
+    at most once a day each.
+- **A top-up clears a debt first**, because the balance is one signed number.
+
+`workspace_wallets.free_orders_used` and `free_orders_granted` are caches of
+the ledger like `cash_balance`. The check script compares them too.
+
+## The console's entries
+
+Each needs a reason and the dialog's own `requestId`, so a retry writes
+nothing twice. Each is audited on the store.
+
+| | Permission | Entry |
+|---|---|---|
+| `POST /admin/workspaces/:id/wallet/free-orders { count, reason, requestId }` | `subscriptions.manage` | `free_orders_grant:<requestId>` |
+| `POST /admin/workspaces/:id/wallet/adjustments { amount, reason, requestId }` | `payments.record` | `adjustment:<requestId>`, either way, not a top-up |
+
 ## Endpoints
 
 | | |
@@ -90,5 +143,6 @@ There are no refunds and no promotional balance.
 | `GET /workspaces/:id/billing/wallet` | balance, fee, orders left, this month in Cairo, limits |
 | `GET /workspaces/:id/billing/wallet/ledger?page&pageSize` | the entries, newest first |
 | `POST /workspaces/:id/billing/wallet/topups` | multipart: `requestedAmount`, `methodCode`, `senderPhone`, `file` |
+| `POST /workspaces/:id/billing/wallet/topups/online` | a card top-up's checkout: `amount`, `method`, `lang` |
 | `POST /workspaces/:id/billing/pay-per-order` | choose the plan (a confirmed account) |
 | `GET /admin/workspaces/:id/wallet` | the console's panel (`subscriptions.view`) |

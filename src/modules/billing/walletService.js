@@ -35,6 +35,22 @@ const shipmentLifecycle = require('../orders/shipmentLifecycle');
  * order_fee_recharge:<order>:<n> — and the state read from the order's own
  * entries make a repeated event change nothing, and charge → give back →
  * charge again work.
+ *
+ * Per plan (migration 220), every default keeping the above:
+ *   wallet_free_orders        orders placed free before any fee: an order_fee
+ *                             entry with cash 0 and free_orders_delta -1,
+ *                             given back and taken again like a fee. The
+ *                             console grants more per store
+ *                             (free_orders_grant:<requestId>).
+ *   wallet_debt_limit_amount  null: the fixed OVERDRAFT_LIMIT and the old
+ *                             refusal (402 staff, 423 and a restricted store
+ *                             for shoppers). Set: that limit, past it 422
+ *                             WALLET_LIMIT_REACHED with the store still open,
+ *                             and the team is told in the bell when the
+ *                             balance runs low and when the limit is reached.
+ * The console also corrects a balance by hand, with a reason
+ * (adjustment:<requestId>). A top-up clears a debt first because the balance
+ * is one signed number.
  */
 
 const WALLET_CURRENCY = 'EGP';
@@ -47,6 +63,9 @@ const MAX_OPEN_TOPUPS = 3;
 const LOW_BALANCE_ORDERS = 20;
 
 const FEE_TYPES = ['order_fee', 'order_fee_recharge'];
+// A console correction of a balance, either way (minor units).
+const MAX_ADJUSTMENT = 2000000; // EGP 20,000
+const MAX_FREE_ORDERS_GRANT = 1000;
 
 function enabled() {
   return env.wallet.enabled === true;
@@ -67,10 +86,47 @@ async function feeDue(workspaceId, transaction) {
 }
 
 async function feeForSubscription(subscription, transaction) {
+  const terms = await termsForSubscription(subscription, transaction);
+  return terms ? terms.fee : null;
+}
+
+/**
+ * A plan's wallet terms: the fee, its free orders and how far below zero the
+ * balance may go. `policy` 'overdraft' is the fixed OVERDRAFT_LIMIT and the
+ * old refusal; 'debt_limit' is the plan's own limit (422).
+ */
+function termsOf(plan) {
+  const debtLimit = plan.walletDebtLimitAmount === null || plan.walletDebtLimitAmount === undefined ? null : Number(plan.walletDebtLimitAmount);
+  return {
+    fee: Number(plan.perOrderFeeAmount),
+    freeOrders: Number(plan.walletFreeOrders || 0),
+    debtLimit,
+    limit: debtLimit === null ? OVERDRAFT_LIMIT : debtLimit,
+    policy: debtLimit === null ? 'overdraft' : 'debt_limit',
+  };
+}
+
+/** The terms of the store's plan while it pays a fee per order (active, fee > 0), else null. */
+async function termsForSubscription(subscription, transaction) {
   if (!subscription || subscription.status !== 'active' || !subscription.planId) return null;
-  const plan = await db.Plan.findByPk(subscription.planId, { attributes: ['id', 'perOrderFeeAmount'], transaction });
-  const fee = plan ? Number(plan.perOrderFeeAmount) : 0;
-  return fee > 0 ? fee : null;
+  const plan = await db.Plan.findByPk(subscription.planId, {
+    attributes: ['id', 'perOrderFeeAmount', 'walletFreeOrders', 'walletDebtLimitAmount'],
+    transaction,
+  });
+  return plan && Number(plan.perOrderFeeAmount) > 0 ? termsOf(plan) : null;
+}
+
+async function termsDue(workspaceId, transaction) {
+  const subscription = await db.Subscription.findOne({ where: { workspaceId }, attributes: ['id', 'status', 'planId'], transaction });
+  return termsForSubscription(subscription, transaction);
+}
+
+/** Free orders still to use: the plan's, plus the console's grants, less those used. */
+function freeLeft(wallet, terms) {
+  if (!terms) return 0;
+  const granted = wallet ? Number(wallet.freeOrdersGranted || 0) : 0;
+  const used = wallet ? Number(wallet.freeOrdersUsed || 0) : 0;
+  return Math.max(0, terms.freeOrders + granted - used);
 }
 
 /** The store's wallet row, made if missing, locked. The last lock of its transaction. */
@@ -88,15 +144,16 @@ async function lockWallet(workspaceId, transaction) {
 async function orderFeeState(orderId, transaction) {
   const rows = await db.WalletLedgerEntry.findAll({
     where: { orderId },
-    attributes: ['entryType', 'cashDelta'],
+    attributes: ['entryType', 'cashDelta', 'freeOrdersDelta'],
     order: [['createdAt', 'ASC']],
     transaction,
   });
-  const state = { charges: 0, fees: 0, recharges: 0, reversals: 0, lastCharge: 0 };
+  const state = { charges: 0, fees: 0, recharges: 0, reversals: 0, lastCharge: 0, lastFree: false };
   for (const row of rows) {
     if (FEE_TYPES.includes(row.entryType)) {
       state.charges += 1;
       state.lastCharge = -Number(row.cashDelta);
+      state.lastFree = Number(row.freeOrdersDelta) < 0;
       if (row.entryType === 'order_fee') state.fees += 1;
       else state.recharges += 1;
     } else if (row.entryType === 'order_fee_reversal') {
@@ -107,13 +164,18 @@ async function orderFeeState(orderId, transaction) {
   return state;
 }
 
-async function writeEntry(wallet, { type, delta, orderId = null, paymentProofId = null, actorUserId = null, note = null, key }, transaction) {
+async function writeEntry(
+  wallet,
+  { type, delta, freeDelta = 0, orderId = null, paymentProofId = null, actorUserId = null, note = null, key },
+  transaction
+) {
   const balanceAfter = Number(wallet.cashBalance) + delta;
   const entry = await db.WalletLedgerEntry.create(
     {
       workspaceId: wallet.workspaceId,
       entryType: type,
       cashDelta: delta,
+      freeOrdersDelta: freeDelta,
       balanceAfter,
       currency: wallet.currency,
       orderId,
@@ -128,6 +190,9 @@ async function writeEntry(wallet, { type, delta, orderId = null, paymentProofId 
     {
       cashBalance: balanceAfter,
       ...(type === 'topup' ? { totalToppedUp: Number(wallet.totalToppedUp) + delta } : {}),
+      // A grant adds to what the console gave; an order entry takes (or gives back) one.
+      ...(freeDelta && type === 'free_orders_grant' ? { freeOrdersGranted: Number(wallet.freeOrdersGranted) + freeDelta } : {}),
+      ...(freeDelta && type !== 'free_orders_grant' ? { freeOrdersUsed: Number(wallet.freeOrdersUsed) - freeDelta } : {}),
     },
     { transaction }
   );
@@ -140,7 +205,18 @@ async function hasShipped(order, transaction) {
   return (await db.Shipment.count({ where: { orderId: order.id, status: shipmentLifecycle.SHIPMENT_IN_MOTION }, transaction })) > 0;
 }
 
-async function balanceRefusal(workspaceId, { staff, balance, fee }) {
+async function balanceRefusal(workspaceId, { staff, balance, fee, terms }) {
+  if (terms && terms.policy === 'debt_limit') {
+    // The plan's own limit: the store stays open, only new orders wait for a top-up.
+    return new AppError(
+      'WALLET_LIMIT_REACHED',
+      staff
+        ? 'Your Zimos balance has reached its limit, so no new order can be taken. Top it up from Subscription, then try again.'
+        : 'This store cannot take new orders right now. Please try again later.',
+      422,
+      staff ? { balance, fee, limit: terms.limit, currency: WALLET_CURRENCY } : undefined
+    );
+  }
   if (staff) {
     return new AppError(
       'WALLET_BALANCE_TOO_LOW',
@@ -165,14 +241,47 @@ async function balanceRefusal(workspaceId, { staff, balance, fee }) {
  */
 async function chargeOrderFee(order, { staff = false } = {}, transaction) {
   if (!enabled()) return null;
-  const fee = await feeDue(order.workspaceId, transaction);
-  if (!fee) return null;
+  const terms = await termsDue(order.workspaceId, transaction);
+  if (!terms) return null;
+  const { fee } = terms;
   const wallet = await lockWallet(order.workspaceId, transaction);
   const state = await orderFeeState(order.id, transaction);
   if (state.charged) return null;
+  const key = `order_fee:${order.id}:${state.fees + 1}`;
+  // Free orders go first: no money moves, and the entry still names the order.
+  if (freeLeft(wallet, terms) > 0) {
+    const entry = await writeEntry(wallet, { type: 'order_fee', delta: 0, freeDelta: -1, orderId: order.id, note: 'Free order', key }, transaction);
+    tellAfterCommit(transaction, order.workspaceId, describeWallet(wallet, terms), terms);
+    return entry;
+  }
   const balance = Number(wallet.cashBalance);
-  if (balance - fee < -OVERDRAFT_LIMIT) throw await balanceRefusal(order.workspaceId, { staff, balance, fee });
-  return writeEntry(wallet, { type: 'order_fee', delta: -fee, orderId: order.id, key: `order_fee:${order.id}:${state.fees + 1}` }, transaction);
+  if (balance - fee < -terms.limit) {
+    if (terms.policy === 'debt_limit') await tell(order.workspaceId, describeWallet(wallet, terms));
+    throw await balanceRefusal(order.workspaceId, { staff, balance, fee, terms });
+  }
+  const entry = await writeEntry(wallet, { type: 'order_fee', delta: -fee, orderId: order.id, key }, transaction);
+  tellAfterCommit(transaction, order.workspaceId, describeWallet(wallet, terms), terms);
+  return entry;
+}
+
+// ------------------------------------------------- the team, in the bell
+
+/**
+ * On a plan with its own debt limit only: the bell says the balance is low
+ * (or below zero), or that the limit is reached. At most once a day each
+ * (the notification's dedupe key). merchantNotificationService logs its own
+ * failures and never throws.
+ */
+async function tell(workspaceId, described) {
+  const events = require('../notifications/merchantNotificationEvents');
+  if (described.phase === 'exhausted') return events.walletLimitReached(workspaceId, described);
+  if (described.phase === 'low' || described.phase === 'overdraft') return events.walletLow(workspaceId, described);
+  return null;
+}
+
+function tellAfterCommit(transaction, workspaceId, described, terms) {
+  if (terms.policy !== 'debt_limit' || described.phase === 'ok') return;
+  transaction.afterCommit(() => tell(workspaceId, described).catch(() => {}));
 }
 
 /**
@@ -191,6 +300,8 @@ async function reverseOrderFee(order, { reason = null, actorUserId = null } = {}
     {
       type: 'order_fee_reversal',
       delta: state.lastCharge,
+      // A free order given back is free to use again.
+      freeDelta: state.lastFree ? 1 : 0,
       orderId: order.id,
       actorUserId,
       note: reason,
@@ -217,6 +328,8 @@ async function rechargeOrderFee(order, { actorUserId = null } = {}, transaction)
     {
       type: 'order_fee_recharge',
       delta: -state.lastCharge,
+      // As it was charged: a free order takes a free order again.
+      freeDelta: state.lastFree ? -1 : 0,
       orderId: order.id,
       actorUserId,
       key: `order_fee_recharge:${order.id}:${state.recharges + 1}`,
@@ -237,6 +350,18 @@ async function creditTopup(proof, receivedAmount, actorUserId, transaction) {
   );
 }
 
+/**
+ * A card top-up the gateway's own API confirmed (onlineBillingService), once
+ * per attempt (topup:attempt:<id>). Not tied to WALLET_ENABLED: money that
+ * arrived is credited.
+ */
+async function creditGatewayTopup(attempt, amount, transaction) {
+  const wallet = await lockWallet(attempt.workspaceId, transaction);
+  const key = `topup:attempt:${attempt.id}`;
+  if (await db.WalletLedgerEntry.count({ where: { idempotencyKey: key }, transaction })) return null;
+  return writeEntry(wallet, { type: 'topup', delta: amount, note: `Card (${attempt.provider})`, key }, transaction);
+}
+
 // ------------------------------------------------------------- reading
 
 /**
@@ -244,14 +369,32 @@ async function creditTopup(proof, receivedAmount, actorUserId, transaction) {
  * LOW_BALANCE_ORDERS orders left before the overdraft), overdraft (at or
  * below zero) or exhausted (the next order is refused). Q18.
  */
-function describe(balance, fee) {
-  const ordersLeft = fee ? Math.max(0, Math.floor((balance + OVERDRAFT_LIMIT) / fee)) : null;
-  const ordersBeforeOverdraft = fee ? Math.max(0, Math.floor(balance / fee)) : null;
+function describe(balance, fee, { limit = OVERDRAFT_LIMIT, free = 0, policy = 'overdraft' } = {}) {
+  // Free orders still to use count as orders left and hold off the overdraft phases.
+  const ordersLeft = fee ? free + Math.max(0, Math.floor((balance + limit) / fee)) : null;
+  const ordersBeforeOverdraft = fee ? free + Math.max(0, Math.floor(balance / fee)) : null;
   let phase = 'ok';
-  if (fee && balance - fee < -OVERDRAFT_LIMIT) phase = 'exhausted';
-  else if (fee && balance <= 0) phase = 'overdraft';
+  if (fee && free === 0 && balance - fee < -limit) phase = 'exhausted';
+  else if (fee && free === 0 && balance <= 0) phase = 'overdraft';
   else if (fee && ordersBeforeOverdraft < LOW_BALANCE_ORDERS) phase = 'low';
-  return { phase, balance, fee, ordersLeft, ordersBeforeOverdraft, overdraft: OVERDRAFT_LIMIT, currency: WALLET_CURRENCY };
+  return {
+    phase,
+    balance,
+    fee,
+    ordersLeft,
+    ordersBeforeOverdraft,
+    overdraft: limit,
+    debt: Math.max(0, -balance),
+    freeOrdersLeft: free,
+    policy,
+    currency: WALLET_CURRENCY,
+  };
+}
+
+/** describe() for a wallet row (or none yet) on a plan's terms. */
+function describeWallet(wallet, terms) {
+  const balance = wallet ? Number(wallet.cashBalance) : 0;
+  return describe(balance, terms.fee, { limit: terms.limit, free: freeLeft(wallet, terms), policy: terms.policy });
 }
 
 /**
@@ -260,10 +403,13 @@ function describe(balance, fee) {
  */
 async function accessState(workspaceId, subscription) {
   if (!enabled()) return null;
-  const fee = await feeForSubscription(subscription);
-  if (!fee) return null;
-  const wallet = await db.WorkspaceWallet.findOne({ where: { workspaceId }, attributes: ['cashBalance'] });
-  return describe(wallet ? Number(wallet.cashBalance) : 0, fee);
+  const terms = await termsForSubscription(subscription);
+  if (!terms) return null;
+  const wallet = await db.WorkspaceWallet.findOne({
+    where: { workspaceId },
+    attributes: ['cashBalance', 'freeOrdersUsed', 'freeOrdersGranted'],
+  });
+  return describeWallet(wallet, terms);
 }
 
 /** This calendar month in Cairo: fees charged, net of those given back, and the orders behind them. */
@@ -284,15 +430,26 @@ async function monthUsage(workspaceId) {
 /** GET /workspaces/:id/billing/wallet — the Usage tab's balance. */
 async function summary(workspaceId) {
   const subscription = await db.Subscription.findOne({ where: { workspaceId }, attributes: ['id', 'status', 'planId'] });
-  const [fee, wallet] = await Promise.all([
-    feeForSubscription(subscription),
+  const [terms, wallet] = await Promise.all([
+    termsForSubscription(subscription),
     db.WorkspaceWallet.findOne({ where: { workspaceId } }),
   ]);
   const balance = wallet ? Number(wallet.cashBalance) : 0;
   return {
     enabled: enabled(),
-    ...describe(balance, fee),
-    onFeePlan: Boolean(fee),
+    ...(terms ? describeWallet(wallet, terms) : describe(balance, null)),
+    onFeePlan: Boolean(terms),
+    // The plan's free orders plus the console's grants, and how many were used.
+    freeOrders: {
+      allowance: terms ? terms.freeOrders : 0,
+      granted: wallet ? Number(wallet.freeOrdersGranted) : 0,
+      used: wallet ? Number(wallet.freeOrdersUsed) : 0,
+      left: freeLeft(wallet, terms),
+    },
+    debtLimit: terms ? terms.debtLimit : null,
+    // A wallet row exists (something was ever written): the dashboard keeps
+    // showing the balance to a store that left the plan.
+    hasEntries: Boolean(wallet),
     totalToppedUp: wallet ? Number(wallet.totalToppedUp) : 0,
     month: await monthUsage(workspaceId),
     limits: { minTopup: MIN_TOPUP_AMOUNT, maxTopup: MAX_TOPUP_AMOUNT, maxOpenTopups: MAX_OPEN_TOPUPS, lowOrders: LOW_BALANCE_ORDERS },
@@ -304,6 +461,7 @@ function serializeEntry(entry) {
     id: entry.id,
     type: entry.entryType,
     amount: Number(entry.cashDelta),
+    freeOrders: Number(entry.freeOrdersDelta || 0),
     balanceAfter: Number(entry.balanceAfter),
     currency: entry.currency,
     orderId: entry.orderId,
@@ -337,6 +495,62 @@ async function ledger(workspaceId, { page = 1, pageSize = 20 } = {}) {
     pageSize: size,
     total: count,
   };
+}
+
+// ------------------------------------------------------------ console
+
+/**
+ * One console entry for a store, once per requestId (the console makes one
+ * per dialog, so a double click or a retry writes nothing twice), audited
+ * with its reason. Resolves { entry, replayed }.
+ */
+async function consoleEntry(workspaceId, { type, key, write, audit }, req) {
+  if (!enabled()) throw disabledError();
+  return db.sequelize.transaction(async (transaction) => {
+    const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id'], transaction });
+    if (!workspace) throw new NotFoundError('Workspace');
+    const wallet = await lockWallet(workspaceId, transaction);
+    const existing = await db.WalletLedgerEntry.findOne({ where: { idempotencyKey: key }, transaction });
+    if (existing) {
+      if (existing.workspaceId !== workspaceId) {
+        throw new ConflictError('This request id was already used for another store.', 'REQUEST_ID_REUSED');
+      }
+      return { entry: serializeEntry(existing), replayed: true };
+    }
+    const before = { balance: Number(wallet.cashBalance), freeOrdersGranted: Number(wallet.freeOrdersGranted) };
+    const entry = await writeEntry(wallet, { ...write, type, actorUserId: req.user.id, key }, transaction);
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: audit,
+      entityType: 'WorkspaceWallet',
+      entityId: wallet.id,
+      before,
+      after: { balance: Number(wallet.cashBalance), freeOrdersGranted: Number(wallet.freeOrdersGranted) },
+      metadata: { ledgerEntryId: entry.id, amount: Number(entry.cashDelta), freeOrders: Number(entry.freeOrdersDelta), reason: entry.note },
+      req,
+      transaction,
+    });
+    return { entry: serializeEntry(entry), replayed: false };
+  });
+}
+
+/** POST /admin/workspaces/:id/wallet/free-orders { count, reason, requestId } — more free orders for one store. */
+async function grantFreeOrders(workspaceId, { count, reason, requestId }, req) {
+  return consoleEntry(
+    workspaceId,
+    { type: 'free_orders_grant', key: `free_orders_grant:${requestId}`, write: { delta: 0, freeDelta: count, note: reason }, audit: 'wallet.free_orders_grant' },
+    req
+  );
+}
+
+/** POST /admin/workspaces/:id/wallet/adjustments { amount, reason, requestId } — the balance corrected by hand, either way. */
+async function adjustBalance(workspaceId, { amount, reason, requestId }, req) {
+  return consoleEntry(
+    workspaceId,
+    { type: 'adjustment', key: `adjustment:${requestId}`, write: { delta: amount, note: reason }, audit: 'wallet.adjust' },
+    req
+  );
 }
 
 // ------------------------------------------------------- pay-per-order plan
@@ -420,19 +634,27 @@ module.exports = {
   OVERDRAFT_LIMIT,
   MAX_OPEN_TOPUPS,
   LOW_BALANCE_ORDERS,
+  MAX_ADJUSTMENT,
+  MAX_FREE_ORDERS_GRANT,
   enabled,
   disabledError,
   feeDue,
+  termsDue,
+  termsOf,
   chargeOrderFee,
   reverseOrderFee,
   rechargeOrderFee,
   creditTopup,
+  creditGatewayTopup,
   orderFeeState,
   describe,
+  describeWallet,
   accessState,
   summary,
   ledger,
   serializeEntry,
   offeredFeePlan,
   choosePayPerOrder,
+  grantFreeOrders,
+  adjustBalance,
 };

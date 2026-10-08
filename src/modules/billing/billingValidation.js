@@ -64,6 +64,16 @@ module.exports = {
       senderPhone: Joi.string().trim().min(6).max(32).required(),
     }),
   },
+  // A card top-up: the amount in minor units (the limits are walletService's),
+  // the gateway (a payment_methods code; Fawaterak when left out) and the
+  // checkout's language.
+  startOnlineTopup: {
+    body: Joi.object({
+      amount: Joi.number().integer().min(1).max(1e12).required(),
+      method: Joi.string().pattern(METHOD_CODE).optional(),
+      lang: Joi.string().valid('ar', 'en').default('ar'),
+    }),
+  },
   walletLedger: {
     query: Joi.object({
       page: Joi.number().integer().min(1).max(10000).default(1),
@@ -75,6 +85,25 @@ module.exports = {
     query: Joi.object({
       page: Joi.number().integer().min(1).max(10000).default(1),
       pageSize: Joi.number().integer().min(1).max(50).default(20),
+    }),
+  },
+  // The console's own wallet entries (walletService.grantFreeOrders,
+  // adjustBalance): always a reason, and the dialog's own requestId so a
+  // retry writes nothing twice. The limits match walletService.
+  adminGrantFreeOrders: {
+    params: Joi.object({ workspaceId: Joi.string().guid().required() }),
+    body: Joi.object({
+      count: Joi.number().integer().min(1).max(1000).required(),
+      reason: Joi.string().trim().min(3).max(500).required(),
+      requestId: Joi.string().guid().required(),
+    }),
+  },
+  adminAdjustWallet: {
+    params: Joi.object({ workspaceId: Joi.string().guid().required() }),
+    body: Joi.object({
+      amount: Joi.number().integer().min(-2000000).max(2000000).invalid(0).required(),
+      reason: Joi.string().trim().min(3).max(500).required(),
+      requestId: Joi.string().guid().required(),
     }),
   },
 

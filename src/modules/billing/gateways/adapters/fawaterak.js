@@ -26,7 +26,8 @@ function webhookUrl(config, kind) {
   return `${env.appUrl.replace(/\/+$/, '')}/api/${env.apiVersion}/billing/fawaterak/${config.webhookToken}/${kind}`;
 }
 
-function itemName(plan, billingCycle) {
+function itemName(plan, billingCycle, attempt) {
+  if (attempt && attempt.purpose === 'topup') return 'ZIMOS balance top-up';
   const cycle = billingCycle === 'yearly' ? 'annual' : 'monthly';
   return `ZIMOS ${plan ? plan.name : 'subscription'} (${cycle})`.slice(0, 120);
 }
@@ -44,7 +45,7 @@ function transactionRequest(config, attempt, { plan, billingCycle, user, lang, r
       last_name: (rest.join(' ') || firstName).slice(0, 60),
       email: user.email,
     },
-    cartItems: [{ name: itemName(plan, billingCycle), price: total, quantity: 1 }],
+    cartItems: [{ name: itemName(plan, billingCycle, attempt), price: total, quantity: 1 }],
     pay_load: { attemptId: attempt.id, billingInvoiceId: attempt.billingInvoiceId, workspaceId: attempt.workspaceId },
     redirectionUrls: {
       successUrl: returnUrls.success,

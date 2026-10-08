@@ -29,6 +29,11 @@ module.exports = (sequelize, DataTypes) => {
       // The pay-per-order plan's fee for one order, from the store's prepaid
       // balance (migration 131, billing/walletService). 0 = no fee.
       perOrderFeeAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'per_order_fee_amount' },
+      // Orders placed free before any fee is taken (migration 220). 0 = none.
+      walletFreeOrders: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'wallet_free_orders' },
+      // How far below zero the balance may go, minor units. null = the fixed
+      // overdraft and the old refusal (walletService).
+      walletDebtLimitAmount: { type: DataTypes.BIGINT, allowNull: true, field: 'wallet_debt_limit_amount' },
     },
     { tableName: 'plans' }
   );

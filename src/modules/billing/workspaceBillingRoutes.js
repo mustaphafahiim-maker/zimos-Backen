@@ -54,6 +54,8 @@ router.get('/payment-proofs', payments.listPaymentProofs);
 router.get('/wallet', payments.getWallet);
 router.get('/wallet/ledger', validate(schemas.walletLedger), payments.getWalletLedger);
 router.post('/wallet/topups', paymentProofLimiter, payments.acceptProofFile, validate(schemas.submitTopup), payments.submitTopup);
+// A card top-up through a gateway of Zimos's own; GET /payments/:paymentId reads it back.
+router.post('/wallet/topups/online', paymentProofLimiter, validate(schemas.startOnlineTopup), payments.startOnlineTopup);
 router.post('/pay-per-order', requireConfirmedAccount, payments.choosePayPerOrder);
 
 module.exports = router;

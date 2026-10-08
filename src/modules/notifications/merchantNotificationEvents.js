@@ -99,6 +99,32 @@ function exportReady(workspaceId, userId, { name, link }) {
   });
 }
 
+const money = (minor, currency) => `${toDisplay(minor)} ${currency}`;
+
+/** The prepaid balance is low or below zero (billing/walletService, a plan with a debt limit). Once a day. */
+function walletLow(workspaceId, wallet) {
+  return service.create(workspaceId, {
+    type: 'wallet.low',
+    title: wallet.balance <= 0 ? 'رصيد Zimos أصبح صفرًا أو أقل' : 'رصيد Zimos يقترب من النفاد',
+    body: `الرصيد ${money(wallet.balance, wallet.currency)}. اشحنه حتى لا تتوقف الطلبات الجديدة.`,
+    link: '/subscription?tab=usage',
+    data: { balance: wallet.balance, fee: wallet.fee, ordersLeft: wallet.ordersLeft, currency: wallet.currency },
+    dedupeKey: `wallet.low:${today()}`,
+  });
+}
+
+/** The balance reached the plan's debt limit: new orders are refused until a top-up. Once a day. */
+function walletLimitReached(workspaceId, wallet) {
+  return service.create(workspaceId, {
+    type: 'wallet.limit_reached',
+    title: 'وصل رصيد Zimos إلى الحد: الطلبات الجديدة متوقفة',
+    body: `المديونية ${money(wallet.debt, wallet.currency)}. اشحن رصيدك لتعود الطلبات الجديدة.`,
+    link: '/subscription?tab=usage',
+    data: { balance: wallet.balance, debt: wallet.debt, limit: wallet.overdraft, currency: wallet.currency },
+    dedupeKey: `wallet.limit_reached:${today()}`,
+  });
+}
+
 const HANDLERS = { 'order.created': orderCreated };
 
 /** Fire-and-forget, like automationEngine.emit; awaited under test for the same reason. */
@@ -111,4 +137,4 @@ function emit(workspaceId, event, entityId) {
   return env.isTest ? work : undefined;
 }
 
-module.exports = { emit, orderCreated, integrationFailed, exportReady };
+module.exports = { emit, orderCreated, integrationFailed, exportReady, walletLow, walletLimitReached };

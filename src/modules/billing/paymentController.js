@@ -6,6 +6,7 @@ const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const paymentMethods = require('./paymentMethodService');
 const proofs = require('./paymentProofService');
 const wallet = require('./walletService');
+const onlineBilling = require('./onlineBillingService');
 const { verifyProofImageLink } = require('./proofLinks');
 
 const upload = multer({
@@ -63,7 +64,14 @@ const submitInvoiceProof = asyncHandler(async (req, res) => {
 
 const getWallet = asyncHandler(async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ wallet: await wallet.summary(req.tenant.workspaceId) });
+  const [summary, onlineTopups] = await Promise.all([wallet.summary(req.tenant.workspaceId), onlineBilling.listTopups(req.tenant.workspaceId)]);
+  res.json({ wallet: { ...summary, onlineTopups } });
+});
+
+// POST /workspaces/:workspaceId/billing/wallet/topups/online — a card top-up's checkout.
+const startOnlineTopup = asyncHandler(async (req, res) => {
+  const { payment, reused } = await onlineBilling.startTopup(req.tenant.workspaceId, req.body, req);
+  res.status(reused ? 200 : 201).json({ payment, reused });
 });
 
 const getWalletLedger = asyncHandler(async (req, res) => {
@@ -90,6 +98,16 @@ const adminWorkspaceWallet = asyncHandler(async (req, res) => {
   const { workspaceId } = req.params;
   const [summary, entries] = await Promise.all([wallet.summary(workspaceId), wallet.ledger(workspaceId, req.query)]);
   res.json({ wallet: summary, ledger: entries });
+});
+
+const adminGrantFreeOrders = asyncHandler(async (req, res) => {
+  const result = await wallet.grantFreeOrders(req.params.workspaceId, req.body, req);
+  res.status(result.replayed ? 200 : 201).json(result);
+});
+
+const adminAdjustWallet = asyncHandler(async (req, res) => {
+  const result = await wallet.adjustBalance(req.params.workspaceId, req.body, req);
+  res.status(result.replayed ? 200 : 201).json(result);
 });
 
 const listPaymentProofs = asyncHandler(async (req, res) => {
@@ -168,10 +186,13 @@ module.exports = {
   submitInvoiceProof,
   listPaymentProofs,
   getWallet,
+  startOnlineTopup,
   getWalletLedger,
   submitTopup,
   choosePayPerOrder,
   adminWorkspaceWallet,
+  adminGrantFreeOrders,
+  adminAdjustWallet,
   adminListPaymentMethods,
   adminUpdatePaymentMethod,
   adminReorderPaymentMethods,

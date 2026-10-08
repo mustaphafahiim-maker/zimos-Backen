@@ -12,6 +12,8 @@ module.exports = (sequelize, DataTypes) => {
       // topup | order_fee | order_fee_reversal | order_fee_recharge
       entryType: { type: DataTypes.STRING(30), allowNull: false, field: 'entry_type' },
       cashDelta: { type: DataTypes.BIGINT, allowNull: false, field: 'cash_delta' },
+      // Free orders taken (-1), given back (+1) or granted (+n) (migration 220).
+      freeOrdersDelta: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'free_orders_delta' },
       balanceAfter: { type: DataTypes.BIGINT, allowNull: false, field: 'balance_after' },
       currency: { type: DataTypes.STRING(3), allowNull: false },
       orderId: { type: DataTypes.UUID, allowNull: true, field: 'order_id' },

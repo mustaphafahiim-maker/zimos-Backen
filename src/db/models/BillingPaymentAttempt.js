@@ -8,7 +8,10 @@ module.exports = (sequelize, DataTypes) => {
     'BillingPaymentAttempt',
     {
       id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-      billingInvoiceId: { type: DataTypes.UUID, allowNull: false, field: 'billing_invoice_id' },
+      // null for a top-up of the prepaid balance (purpose 'topup', migration 221).
+      billingInvoiceId: { type: DataTypes.UUID, allowNull: true, field: 'billing_invoice_id' },
+      // 'invoice' (a subscription charge) | 'topup' (the prepaid balance).
+      purpose: { type: DataTypes.STRING(10), allowNull: false, defaultValue: 'invoice' },
       workspaceId: { type: DataTypes.UUID, allowNull: false, field: 'workspace_id' },
       subscriptionId: { type: DataTypes.UUID, allowNull: false, field: 'subscription_id' },
       // 'fawaterak'
