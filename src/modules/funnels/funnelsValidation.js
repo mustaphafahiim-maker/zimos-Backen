@@ -62,6 +62,8 @@ const createFunnel = {
       .max(63)
       .pattern(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/)
       .optional(),
+    // A funnel or landing template from GET /templates (its card's templateVersionId): its pages become the steps.
+    templateVersionId: uuid.optional(),
   }),
 };
 

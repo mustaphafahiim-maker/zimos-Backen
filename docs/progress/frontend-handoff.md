@@ -5086,3 +5086,21 @@ Shoppers' uploads — product-field photos and transfer receipts (`POST /store/:
 ### Screens
 - Media picker / product images / builder image field: hint «حتى 10 ميجابايت للصورة» / "Images up to 10 MB".
 - Storefront photo field, receipt and proof upload: hint «حتى 5 ميجابايت» / "Up to 5 MB"; refuse a bigger file before sending with the 413 text above.
+
+## 401. Starter template gallery: usage count, sort and filters — UI: pending (small)
+
+The starter templates (`GET /api/v1/templates`, public, no auth) now carry a usage count and take a sort and filters. A funnel can be created from a funnel or landing template.
+
+### Changed
+- **GET `/templates`** query (all optional): `kind` = `store` | `funnel` | `landing` (the tab, as before); `category` (exact value from `categories`); `price` = `free` | `paid` (the template's `isFree` flag); `rtl` = `true` | `false`; `language` = `ar` | `en` | `fr` (a template has a direction, not a language: `ar` → right to left, `en`/`fr` → left to right); `sort` = `name` (default, A→Z as before) | `newest` | `most_used`. An unknown `sort` or `price` → 422.
+- Response is now `{ templates: [card], categories: ["coffee", "fashion", …] }`. `categories` lists every category on the current tab, whatever the other filters, so the chips stay put. Each card adds `usesCount` (the websites and funnels made from it, not counting the trash) and `createdAt`.
+- **GET `/templates/:id`** also returns `usesCount`.
+- **POST `/workspaces/:ws/funnels`** takes `templateVersionId` (a funnel or landing card's `templateVersionId`) → 201 `{ funnel, steps }`: the template's first page becomes the `landing` step (key `home`) and the others generic pages (`custom`, key from the page path, e.g. `about`); no links are drawn, so the map's issues list says what to connect. A store template → 422 `TEMPLATE_KIND_MISMATCH`; a version that is gone or switched off → 404. The funnel keeps `sourceTemplateVersionId`. Websites already took `templateVersionId` on `POST /workspaces/:ws/websites`.
+- Platform console: `GET /admin/templates` rows and `GET /admin/templates/:id` add `usesCount`; each version in the detail adds `funnelCount` next to `websiteCount`. Deleting a template a funnel was built from is refused like a website's (409 `TEMPLATE_IN_USE`).
+
+### Screens
+- Gallery card: «اتستخدم {n} مرة» / "Used {n} times" (hide at 0, or «جديد» / "New").
+- Sort menu «ترتيب حسب» / "Sort by": «الاسم» / "Name", «الأحدث» / "Newest", «الأكثر استخدامًا» / "Most used".
+- Filters: «التصنيف» / "Category" (chips from `categories`, first chip «الكل» / "All"); «السعر» / "Price": «الكل» / "All", «مجاني» / "Free", «مدفوع» / "Paid"; «اللغة» / "Language": «الكل» / "All", «عربي» / "Arabic", «إنجليزي» / "English". Empty result: «مفيش قوالب بالفلاتر دي» / "No templates match these filters" with «امسح الفلاتر» / "Clear filters".
+- Funnel wizard step 1: pick a funnel/landing card → send its `templateVersionId` with step 3's name and link; open the editor on the returned `steps`. On 422 `TEMPLATE_KIND_MISMATCH`: «القالب ده للمتجر، اختار قالب فانل أو صفحة هبوط» / "This is a store template — pick a funnel or landing template".
+- Platform console templates table: a «الاستخدام» / "Uses" column from `usesCount`; version list: «مواقع» / "Websites" and «فانلز» / "Funnels" counts.

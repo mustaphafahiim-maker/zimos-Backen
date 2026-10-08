@@ -4,7 +4,8 @@ const asyncHandler = require('express-async-handler');
 const service = require('./templateService');
 
 const list = asyncHandler(async (req, res) => {
-  res.json({ templates: await service.listPublishedTemplates({ kind: req.query.kind }) });
+  // { templates, categories } — the filters and sort are in templateValidation.list.
+  res.json(await service.listPublishedTemplates(req.query));
 });
 
 const get = asyncHandler(async (req, res) => {

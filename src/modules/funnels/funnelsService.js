@@ -21,6 +21,7 @@ const { conditionProblem, pickNextEdge, hasWhen, orderContext, whenReferenceProb
 const { assertBumpOfferUsable, bumpProblem, presentBump, BUMP_STEP_TYPES } = require('../checkout/orderBump');
 const funnelOfferMerge = require('./funnelOfferMerge');
 const entitlements = require('../billing/entitlementsService');
+const templateUsage = require('../templates/templateUsage');
 
 const Op = db.Sequelize.Op;
 
@@ -134,7 +135,12 @@ async function createFunnel(workspaceId, data, req) {
   return db.sequelize.transaction(async (t) => {
     const id = crypto.randomUUID();
     await entitlements.recordFunnelCreation(workspaceId, id, 'create', { transaction: t });
-    const funnel = await scoped(db.Funnel, workspaceId).create({ id, name: data.name, subdomain, status: 'draft' }, { transaction: t });
+    const templateVersion = data.templateVersionId ? await templateUsage.funnelTemplateVersion(data.templateVersionId, t) : null;
+    const funnel = await scoped(db.Funnel, workspaceId).create(
+      { id, name: data.name, subdomain, status: 'draft', sourceTemplateVersionId: templateVersion ? templateVersion.id : null },
+      { transaction: t }
+    );
+    const steps = templateVersion ? await templateUsage.seedFunnelSteps(workspaceId, funnel.id, templateVersion, t) : [];
     await recordAudit({
       workspaceId,
       actorUserId: req.user.id,
@@ -142,6 +148,7 @@ async function createFunnel(workspaceId, data, req) {
       entityType: 'Funnel',
       entityId: funnel.id,
       after: funnel.toJSON(),
+      metadata: templateVersion ? { fromTemplateVersionId: templateVersion.id, stepsCopied: steps.length } : undefined,
       req,
       transaction: t,
     });
