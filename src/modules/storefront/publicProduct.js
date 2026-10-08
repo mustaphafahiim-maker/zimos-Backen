@@ -62,9 +62,31 @@ function toPublicProduct(product) {
     offers: (product.offers || []).map(toPublicOffer),
     // The fields the shopper fills in when ordering; [] for most products.
     customFields: Array.isArray(product.customFields) ? product.customFields : [],
+    // Menu options to pick on the product page (a card sends the shopper there instead of adding).
+    // Absent when the row was loaded without publicAttributes().
+    ...(typeof product.get === 'function' && product.get('hasOptionGroups') !== undefined
+      ? { hasOptionGroups: Boolean(product.get('hasOptionGroups')) }
+      : {}),
     // Paid every period or in installments (SPEC §18.1); null when sold once.
   };
 }
+
+/**
+ * The product's columns plus `hasOptionGroups`: whether it has an active menu
+ * option group with an active choice (catalog/menuOptions.js publicGroups).
+ * An EXISTS in the same SELECT, so a list costs no query per product.
+ */
+const publicAttributes = () => ({
+  include: [
+    [
+      db.sequelize.literal(
+        'EXISTS (SELECT 1 FROM product_option_groups g JOIN product_option_choices c ON c.group_id = g.id AND c.active = true ' +
+          'WHERE g.workspace_id = "Product"."workspace_id" AND g.product_id = "Product"."id" AND g.active = true)'
+      ),
+      'hasOptionGroups',
+    ],
+  ],
+});
 
 const publicInclude = () => [
   { model: db.ProductVariant, as: 'variants', where: { status: 'active' }, required: false },
@@ -82,10 +104,11 @@ async function loadPublicProducts(workspaceId, ids) {
   if (ids.length === 0) return [];
   const rows = await db.Product.findAll({
     where: { id: ids, workspaceId, status: 'active' },
+    attributes: publicAttributes(),
     include: publicInclude(),
   });
   const byId = new Map(rows.map((row) => [row.id, row]));
   return ids.map((id) => byId.get(id)).filter(Boolean).map(toPublicProduct);
 }
 
-module.exports = { toPublicVariant, toPublicOffer, toPublicProduct, publicInclude, loadPublicProducts };
+module.exports = { toPublicVariant, toPublicOffer, toPublicProduct, publicAttributes, publicInclude, loadPublicProducts };

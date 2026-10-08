@@ -780,14 +780,16 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
     funnelId: order.funnelId || null,
     transaction,
   });
+  // A pickup order has no delivery fee, with or without the new line.
+  const shippingAmount = storePickup.isPickup(order) ? 0 : shipping.amount;
   const { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
     lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
-    shippingAmount: shipping.amount,
+    shippingAmount,
     transaction,
   });
-  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
+  const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount;
 
   const item = await db.OrderItem.create(
     {
@@ -814,7 +816,7 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
       subtotalAmount: subtotal,
       discountAmount,
       discountsSnapshot,
-      shippingAmount: shipping.amount,
+      shippingAmount,
       taxAmount,
       totalAmount,
       totalWeightGrams: shipping.weightGrams,

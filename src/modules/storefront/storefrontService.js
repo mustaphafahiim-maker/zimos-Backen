@@ -11,7 +11,7 @@ const { publicNavPages } = require('../pages/pageFlags');
 const { publicGeneralSettings } = require('./generalSettings');
 const { resolveCatalogSettings } = require('./catalogSettings');
 const { presentStoreBump } = require('../checkout/orderBump');
-const { toPublicProduct, toPublicVariant, publicInclude } = require('./publicProduct');
+const { toPublicProduct, toPublicVariant, publicAttributes, publicInclude } = require('./publicProduct');
 const productSearch = require('./productSearch');
 const { notHiddenSql } = require('../catalog/productPage');
 
@@ -50,7 +50,7 @@ async function listProducts(workspaceId, query = {}) {
     include.push({ model: db.Collection, as: 'collections', where: { id: collectionId }, attributes: [] });
   }
 
-  const products = await db.Product.findAll({ where, include, order: [['id', 'ASC']], limit: limit + 1 });
+  const products = await db.Product.findAll({ where, attributes: publicAttributes(), include, order: [['id', 'ASC']], limit: limit + 1 });
   const hasMore = products.length > limit;
   const page = products.slice(0, limit);
 
@@ -61,6 +61,7 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrSlug);
   const product = await db.Product.findOne({
     where: { workspaceId, status: 'active', ...(isUuid ? { id: idOrSlug } : { slug: idOrSlug }) },
+    attributes: publicAttributes(),
     include: publicInclude(),
   });
   if (!product) throw new NotFoundError('Product');

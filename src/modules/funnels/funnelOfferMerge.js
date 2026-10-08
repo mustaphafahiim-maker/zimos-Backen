@@ -5,6 +5,7 @@ const { AppError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const { clientIp } = require('../../core/middleware/clientIp');
 const orderService = require('../orders/orderService');
+const storePickup = require('../shipping/storePickup');
 const { OFFER_STEP_TYPES } = require('./funnelGraph');
 
 /**
@@ -141,6 +142,10 @@ async function offerJoinsOrder(workspaceId, session, transaction) {
   if (!session.orderId) return false;
   const workspace = await db.Workspace.findByPk(workspaceId, { attributes: ['id', 'settings'], transaction });
   if (!mergeSettings(workspace && workspace.settings).enabled) return false;
+  // Only a cash-on-delivery order takes a line (mergeableTask): one paid by InstaPay or a
+  // wallet keeps the amount the shopper transfers, and the add-on becomes its own order.
+  const order = await db.Order.findOne({ where: { id: session.orderId, workspaceId }, attributes: ['id', 'paymentMethod'], transaction });
+  if (!order || order.paymentMethod !== 'cod') return false;
   const task = await db.ConfirmationTask.findOne({
     where: { workspaceId, orderId: session.orderId, status: 'queued' },
     order: [['createdAt', 'DESC']],
@@ -285,6 +290,8 @@ async function acceptOffer({ workspaceId, funnelId, step, session, req, variantI
       items: [line],
       contact: order.contactSnapshot,
       shippingAddress: order.shippingAddressSnapshot || undefined,
+      // Collected with the order it follows: a pickup stays a pickup.
+      ...(storePickup.isPickup(order) ? { deliveryMethod: storePickup.METHOD } : {}),
       paymentMethod: 'cod',
       funnelId,
     },

@@ -289,7 +289,7 @@ describe('GET/PATCH /shipping/settings', () => {
       storeHours: {
         enabled: false,
         override: 'auto',
-        days: Array.from({ length: 7 }, () => ({ closed: false, open: '09:00', close: '23:00' })),
+        days: Array.from({ length: 7 }, () => ({ closed: false, open: '09:00', close: '23:00', periods: [{ open: '09:00', close: '23:00' }] })),
         message: '',
       },
       deliveryEtaMinutes: null,
