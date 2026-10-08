@@ -115,7 +115,8 @@ async function credentialsFor(workspaceId) {
   const integration = await db.WorkspaceIntegration.findOne({ where: { workspaceId, provider: 'google_sheets', status: 'connected' } });
   if (!integration || !integration.secretsSealed) return null;
   try {
-    return JSON.parse(secretBox.open(integration.secretsSealed));
+    // With the hooks that keep a refreshed token and mark a revoked account (credentialStore.js).
+    return require('./credentialStore').attach(workspaceId, JSON.parse(secretBox.open(integration.secretsSealed)));
   } catch {
     return null;
   }
@@ -157,7 +158,7 @@ async function alert(connection, reason) {
 /** What a failed write does to the connection; true when the event should be retried. */
 async function recordFailure(connection, err) {
   const message = String(err.message || err).slice(0, 500);
-  if (err.code === 'SHEETS_ACCESS_REVOKED' || err.code === 'SHEETS_NOT_FOUND') {
+  if (err.code === 'SHEETS_ACCESS_REVOKED' || err.code === 'SHEETS_NOT_FOUND' || err.code === 'SHEETS_PERMISSION_DENIED') {
     const status = err.code === 'SHEETS_ACCESS_REVOKED' ? 'revoked' : 'error';
     if (connection.status !== status) {
       await connection.update({ status, lastError: message });

@@ -4985,3 +4985,23 @@ The server can now send real browser push (Web Push with VAPID) once the owner s
 - `GET /push-config` → `{ push: { available, publicKey } }` (available only with the store's app on and a push provider).
 - Thank-you page "Notify me" (order updates): unchanged, but `token` must be `JSON.stringify(subscription)`; 422 `INVALID_PUSH_SUBSCRIPTION` as above.
 - **New**: on a sold-out variant's "Notify me when it's back", when `push.available`, offer «نبّهني على المتصفح» / "Notify me in this browser" beside email/phone: subscribe as above and `POST /stock-alerts` with `{ variantId, pushToken: JSON.stringify(subscription), locale }` (exactly one of `email`, `phone`, `pushToken`). 201 `{ subscribed: true, channel: "push" }`; 409 `PUSH_UNAVAILABLE` (hide the option), 422 `INVALID_PUSH_SUBSCRIPTION`, 409 `IN_STOCK`, 429 as before. Success text: «هنبعتلك إشعار أول ما يرجع» / "We'll notify you here as soon as it's back". The push is sent once (title «رجع متاح!» / "Back in stock", link = the product page); nothing else is ever pushed from it.
+
+## 393. Google Sheets with a real Google account — UI: pending (small)
+
+The Google Sheets page (`/apps/google-sheets`, API `/api/v1/workspaces/:workspaceId/integrations/google-sheets`) can now connect a real Google account once the owner sets `GOOGLE_SHEETS_PROVIDER=google` and its keys. Until then `GET /` answers `adapter.available: false` (keep the "not available yet" state) and the routes 503 `SHEETS_UNAVAILABLE`.
+
+### Connect
+- "Connect Google" → `POST /authorize` `{ redirectUri }` → `{ url }` → `window.location.assign(url)` (a full-page redirect to Google, not a popup or fetch). With the `google` adapter Google always sends the merchant back to `GOOGLE_SHEETS_REDIRECT_URI`, which the owner sets to this page (`https://<dashboard>/apps/google-sheets`); `redirectUri` is still sent (the sandbox uses it).
+- On load, when the URL has `?code=&state=`: `POST /account` `{ code, state }`, then remove them from the URL (`history.replaceState`) whatever the answer, so a reload does not post the used code again.
+- When the URL has `?error=access_denied` (the merchant pressed Cancel on Google): «تم إلغاء الربط مع Google» / "Google connection cancelled"; any other `error`: «Google رفض الربط، حاول مرة أخرى» / "Google refused the connection, try again". Clear the URL as above.
+- Errors from `POST /account`: 400 `SHEETS_STATE_INVALID` «انتهت صلاحية تسجيل الدخول أو كان لمتجر آخر — حاول مرة أخرى» / "The Google sign-in expired or was for another store — try again"; 400 `SHEETS_AUTH_FAILED` «تسجيل الدخول مع Google لم يكتمل — حاول مرة أخرى» / "The Google sign-in didn't complete — try again"; 400 `SHEETS_SCOPE_MISSING` «لازم توافق على صلاحية ملفات Google Drive علشان نكتب في الشيت» / "Allow the Google Drive files permission so we can write to your sheet" with the Connect button again.
+- Before the redirect, a short note: «هنطلب صلاحية على الملفات اللي ZIMOS بيعملها بس — مش على كل ملفاتك» / "ZIMOS only gets access to the spreadsheets it creates — not your other files".
+
+### Account state
+- `account` is now `{ connected, email, reconnect }`. `reconnect: true` (Google took the access away: revoked, password change, or a test app's 7-day token) → a warning banner «Google وقف صلاحية ZIMOS على الشيتات — اربط الحساب تاني» / "Google removed ZIMOS's access to your sheets — connect the account again" with the email and the Connect button. Connecting again resumes the stopped sheets.
+- Connection `status: "revoked"` rows read «متوقف — اربط Google تاني» / "Stopped — connect Google again"; `status: "error"` rows show `lastError` with «اختر شيت تاني أو احذف الاتصال» / "Pick another sheet or remove it".
+
+### New sheet
+- "Use an existing spreadsheet" now takes a pasted link (`https://docs.google.com/spreadsheets/d/<id>/…`) or the id in `spreadsheetId`; hint: «ZIMOS يقدر يستخدم الشيتات اللي عملها بنفسه بس» / "ZIMOS can only reuse spreadsheets it created". Errors: 404 `SHEETS_NOT_FOUND` (its `message`), 403 `SHEETS_PERMISSION_DENIED` «الحساب ده مايقدرش يعدّل الشيت ده» / "This account can't edit that spreadsheet".
+- `spreadsheetUrl` is now a real Google Sheets link: show «افتح في Google Sheets» / "Open in Google Sheets" (new tab).
+- `GET /connections/:id/rows` works with Google too (preview). It may answer 429 `SHEETS_UNREACHABLE` «Google طالب نستنى شوية — جرّب بعد دقيقة» / "Google asked us to slow down — try again in a minute", or 403 `SHEETS_ACCESS_REVOKED` (show the reconnect banner).
