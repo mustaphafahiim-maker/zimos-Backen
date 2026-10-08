@@ -361,6 +361,8 @@ async function listJobs({ status = 'failed', queue = null, limit = 50 } = {}) {
 
 /** Puts a failed job back in line with a fresh set of attempts. */
 async function retryJob(id) {
+  // Job ids here are uuids; anything else is no job (a 404, not a database error).
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))) return false;
   const rows = await db.sequelize.query(
     `UPDATE queue_jobs SET status = 'pending', attempts = 0, run_at = NOW(), finished_at = NULL, updated_at = NOW()
       WHERE id = :id AND status = 'failed' RETURNING id`,

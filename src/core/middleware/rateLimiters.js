@@ -262,7 +262,13 @@ const storefrontLimiter = createStorefrontLimiter({
 const TRACKING_PHONE_PATTERN = /^[0-9]{10,15}$/;
 const TRACKING_NUMBER_PATTERN = /^[A-Za-z0-9-]{3,40}$/;
 
-/** The shopper's { phone, number } bucket keys, or null if not keyable yet. */
+/**
+ * The shopper's { phone, number } bucket keys, or null if not keyable yet.
+ * Read from the query string only: this limiter is for GET /orders/track and
+ * nothing else. On any other route (a POST with a body, say) it finds nothing
+ * to key on and lets every request through, so a public POST needs a limiter
+ * of its own (storefrontPostLimiters below), not this one.
+ */
 function resolveTrackingKeys(req) {
   const { phone, number } = req.query || {};
   if (typeof phone !== 'string' || typeof number !== 'string') return null;
@@ -468,6 +474,45 @@ const CHECKOUT_REFUSALS_PER_MINUTE = 20;
 const checkoutRefusalLimiter = createIpMinuteLimiter('checkout-refused', CHECKOUT_REFUSALS_PER_MINUTE, { skip, failedOnly: true });
 
 /*
+ * Public storefront POSTs that once (wrongly) used trackingLimiter, which keys
+ * on query phone/number and so let every POST through (item 409). Each gets a
+ * per-minute bucket per shopper IP: the connecting IP, or the shopper's IP our
+ * own storefront server vouched for (X-Storefront-Client-IP with the secret,
+ * read by the storefront limiter as req.storefrontClient) — never the cart
+ * token, which the client picks. Limits sit well above what a person does in
+ * a minute and well below a script guessing codes or filling the inbox.
+ */
+function shopperIpKey(req) {
+  const client = req.storefrontClient;
+  if (client && client.trustedServer && client.visitorKey) return client.visitorKey;
+  return `ip:${ipKeyGenerator(parseIp(clientIp(req)) || clientIp(req) || 'unknown')}`;
+}
+
+function createShopperMinuteLimiter(prefix, max, { skip: skipAll = () => false } = {}) {
+  return rateLimit({
+    windowMs: 60 * 1000,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipAll,
+    keyGenerator: (req) => `${prefix}:${shopperIpKey(req)}`,
+    handler,
+  });
+}
+
+const STOREFRONT_POST_LIMITS = Object.freeze({
+  giftCardCheck: 10, // POST /store/:ws/gift-cards/check — a code guessed is money
+  productQuestion: 5, // POST /store/:ws/products/:id/questions — lands in the merchant's inbox
+  quoteRequest: 5, // POST /store/:ws/quotes — likewise
+  searchClick: 60, // POST /store/:ws/search/click — one per result opened
+  googleSignIn: 10, // POST /store/:ws/account/google — verifies a Google token
+  orderSelfService: 10, // POST /store/:ws/orders/:id/self-service/{cancel,confirm,address}, one bucket
+});
+const storefrontPostLimiters = Object.freeze(
+  Object.fromEntries(Object.entries(STOREFRONT_POST_LIMITS).map(([name, max]) => [name, createShopperMinuteLimiter(`store-${name}`, max, { skip })]))
+);
+
+/*
  * Password reset requests, per IP per hour, keyed on the IP alone (unlike
  * authLimiter, whose key includes the email the caller sends). It answers the
  * same for every address, so a 429 says nothing about whether one is
@@ -669,6 +714,9 @@ module.exports = {
   publicPlansLimiter,
   verifyCodeLimiter,
   createIpMinuteLimiter,
+  STOREFRONT_POST_LIMITS,
+  storefrontPostLimiters,
+  createShopperMinuteLimiter,
   passwordResetLimiter,
   createPasswordResetLimiter,
   loginIpLimiter,

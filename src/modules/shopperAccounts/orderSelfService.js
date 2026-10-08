@@ -12,7 +12,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { storefrontPostLimiters } = require('../../core/middleware/rateLimiters');
 const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
@@ -132,17 +132,17 @@ store.get('/', resolvePublicWorkspace, validate({ params, query: Joi.object({ to
   res.set('Cache-Control', 'private, no-store');
   res.json({ ...allowed(req.publicWorkspace, order), ...(await require('../cod/customerLinkConfirmation').view(req.publicWorkspace, order)) });
 }));
-store.post('/cancel', trackingLimiter, resolvePublicWorkspace, validate({ params, body: Joi.object({ token: Joi.string().max(500), reason: Joi.string().trim().max(300).allow('', null) }) }), asyncHandler(async (req, res) => {
+store.post('/cancel', storefrontPostLimiters.orderSelfService, resolvePublicWorkspace, validate({ params, body: Joi.object({ token: Joi.string().max(500), reason: Joi.string().trim().max(300).allow('', null) }) }), asyncHandler(async (req, res) => {
   const order = await orderFor(req.publicWorkspace, req.params.orderId, auth(req));
   res.json(await cancel(req.publicWorkspace, order, req.body.reason, req));
 }));
 // The shopper confirms their COD order from the link in a message (item 388).
-store.post('/confirm', trackingLimiter, resolvePublicWorkspace, validate({ params, body: Joi.object({ token: Joi.string().max(500) }) }), asyncHandler(async (req, res) => {
+store.post('/confirm', storefrontPostLimiters.orderSelfService, resolvePublicWorkspace, validate({ params, body: Joi.object({ token: Joi.string().max(500) }) }), asyncHandler(async (req, res) => {
   const order = await orderFor(req.publicWorkspace, req.params.orderId, auth(req));
   res.set('Cache-Control', 'private, no-store');
   res.json(await require('../cod/customerLinkConfirmation').confirm(req.publicWorkspace, order, req));
 }));
-store.post('/address', trackingLimiter, resolvePublicWorkspace, validate({
+store.post('/address', storefrontPostLimiters.orderSelfService, resolvePublicWorkspace, validate({
   params,
   body: Joi.object({ token: Joi.string().max(500), address: Joi.object({ country: Joi.string().length(2), province: Joi.string().max(120).required(), city: Joi.string().max(120).required(), area: Joi.string().max(120).allow('', null), addressLine: Joi.string().max(500).required(), placeId: Joi.string().uuid().allow(null), postalCode: Joi.string().max(20).allow('', null), notes: Joi.string().max(500).allow('', null) }).required() }),
 }), asyncHandler(async (req, res) => {

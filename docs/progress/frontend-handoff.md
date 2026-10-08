@@ -5105,3 +5105,16 @@ The starter templates (`GET /api/v1/templates`, public, no auth) now carry a usa
 - Filters: «التصنيف» / "Category" (chips from `categories`, first chip «الكل» / "All"); «السعر» / "Price": «الكل» / "All", «مجاني» / "Free", «مدفوع» / "Paid"; «اللغة» / "Language": «الكل» / "All", «عربي» / "Arabic", «إنجليزي» / "English". Empty result: «مفيش قوالب بالفلاتر دي» / "No templates match these filters" with «امسح الفلاتر» / "Clear filters".
 - Funnel wizard step 1: pick a funnel/landing card → send its `templateVersionId` with step 3's name and link; open the editor on the returned `steps`. On 422 `TEMPLATE_KIND_MISMATCH`: «القالب ده للمتجر، اختار قالب فانل أو صفحة هبوط» / "This is a store template — pick a funnel or landing template".
 - Platform console templates table: a «الاستخدام» / "Uses" column from `usesCount`; version list: «مواقع» / "Websites" and «فانلز» / "Funnels" counts.
+
+## 405 and 408. Console: who a two-step reset may target, and a system.manage permission — UI: pending (small)
+
+No new screen; two console buttons answer differently.
+
+### Changed
+- **POST `/admin/users/:userId/two-factor/reset`** (still `support.manage`) follows the same target rules as suspend / delete: 409 `CANNOT_ACT_ON_SELF` "You cannot do this to your own account."; 403 `CREATOR_REQUIRED` "Only a creator can act on a creator's account."; 403 `ADMINS_MANAGE_REQUIRED` "Only an admin who manages platform users can act on a console account." (the user has a `platformRole` and you lack `admins.manage`); 404 `NOT_FOUND`.
+- New platform permission **`system.manage`** (in `GET /admin/roles` → `permissions`, and in the admin role's default set). **POST `/admin/system/queues/jobs/:jobId/retry`** now needs it (was `system.view`); without it 403 `FORBIDDEN`. An id that is not a job is now 404 `NOT_FOUND` (was a 500).
+
+### Screens
+- Console → Users → a user: hide «إعادة ضبط التحقق بخطوتين» / "Reset two-step sign-in" on your own account, on a creator's account unless you are a creator, and on any console account unless you hold `admins.manage` (same rule as the suspend / delete buttons).
+- Console → Platform users → permission checklist: label `system.manage` «إدارة النظام (إعادة تشغيل المهام)» / "Manage the system (retry jobs)", grouped next to `system.view`.
+- Console → System → Queues: show the «إعادة المحاولة» / "Retry" button only with `system.manage`.

@@ -50,6 +50,8 @@ const PLATFORM_PERMISSIONS = Object.freeze({
   PROVIDERS_MANAGE: 'providers.manage',
   // System health, including the live re-check.
   SYSTEM_VIEW: 'system.view',
+  // Acting on the system: retrying a failed queue job (migration 549).
+  SYSTEM_MANAGE: 'system.manage',
   FEATURE_FLAGS_VIEW: 'feature_flags.view',
   FEATURE_FLAGS_MANAGE: 'feature_flags.manage',
   ANNOUNCEMENTS_VIEW: 'announcements.view',

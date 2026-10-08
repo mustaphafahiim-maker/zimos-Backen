@@ -58,8 +58,12 @@ function view(user) {
  * moment are serialized, and the second finds itself suspended and stops.
  * A console account (any platform role) also needs admins.manage, as changing
  * or revoking its access does.
+ *
+ * `permission` is what the actor needs for the action itself: workspaces.manage
+ * here; support.manage for the console's two-step reset (auth/twoFactorRecovery),
+ * which shares these target rules.
  */
-async function lockTarget(rawUserId, req, transaction) {
+async function lockTarget(rawUserId, req, transaction, { permission = PLATFORM_PERMISSIONS.WORKSPACES_MANAGE } = {}) {
   // Postgres matches a uuid in any case; compare the canonical form.
   const userId = String(rawUserId).toLowerCase();
   if (userId === req.user.id) {
@@ -72,7 +76,7 @@ async function lockTarget(rawUserId, req, transaction) {
     lock: transaction.LOCK.UPDATE,
   });
   const actor = rows.find((u) => u.id === req.user.id);
-  if (!actor || actor.status !== 'active' || actor.deletedAt || !hasPlatformPermission(actor, PLATFORM_PERMISSIONS.WORKSPACES_MANAGE)) {
+  if (!actor || actor.status !== 'active' || actor.deletedAt || !hasPlatformPermission(actor, permission)) {
     throw new AuthorizationError();
   }
   const target = rows.find((u) => u.id === userId);
@@ -257,4 +261,4 @@ async function remove(userId, { reason, stores }, req) {
   });
 }
 
-module.exports = { suspend, unsuspend, remove };
+module.exports = { suspend, unsuspend, remove, lockTarget };

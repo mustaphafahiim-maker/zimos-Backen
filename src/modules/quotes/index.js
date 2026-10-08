@@ -15,7 +15,7 @@ const { requirePermission } = require('../../core/middleware/rbac');
 const { PERMISSIONS } = require('../../core/security/permissions');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
-const { trackingLimiter } = require('../../core/middleware/rateLimiters');
+const { storefrontPostLimiters } = require('../../core/middleware/rateLimiters');
 const { clientIp } = require('../../core/middleware/clientIp');
 
 /*
@@ -173,7 +173,7 @@ const sp = { workspaceId: Joi.string().required() };
 const qp = Joi.object({ ...sp, quoteId: Joi.string().uuid().required() });
 store.post(
   '/',
-  trackingLimiter,
+  storefrontPostLimiters.quoteRequest,
   resolvePublicWorkspace,
   validate({ params: Joi.object(sp), body: Joi.object({ contact: Joi.object({ fullName: Joi.string().trim().min(2).max(120).required(), phone: Joi.string().trim().min(6).max(32).required(), email: Joi.string().trim().email().max(255).allow('', null), company: Joi.string().trim().max(120).allow('', null) }).required(), lines: Joi.array().items(Joi.object({ variantId: Joi.string().uuid().required(), quantity: Joi.number().integer().min(1).max(100000).required(), note: Joi.string().trim().max(300).allow('', null) })).min(1).max(50).unique('variantId').required(), message: Joi.string().trim().max(2000).allow('', null) }) }),
   asyncHandler(async (req, res) => res.status(201).json(await request(req.publicWorkspace, req.body, req)))
