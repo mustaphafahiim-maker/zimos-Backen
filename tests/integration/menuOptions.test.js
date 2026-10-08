@@ -6,7 +6,7 @@
 // store's choices are refused; the order keeps a snapshot that later menu
 // edits never change. A product without groups sells exactly as before.
 
-const { app, request, setupWorkspaceWithProduct } = require('../helpers/factories');
+const { app, request, setupWorkspaceWithProduct, createProductWithVariant } = require('../helpers/factories');
 const db = require('../../src/db/models');
 const orderDocuments = require('../../src/modules/orders/orderDocuments');
 const { customDataLines } = require('../../src/modules/waybill/customData');
@@ -256,5 +256,26 @@ describe('menu options: cart, funnel and payment paths', () => {
     expect(sheet.rows[0].items).toContain('إضافات: جبنة, زيتون');
     const lines = await customDataLines(id);
     expect(lines.join('\n')).toContain('الحجم: كبير');
+  });
+});
+
+describe('menu options: product lists', () => {
+  it('flags the products with menu options in lists, search and the product page, in one query', async () => {
+    const ctx = await setup();
+    const plain = await createProductWithVariant(ctx.auth.accessToken, ctx.ws, { price: 5000, stock: 5 });
+    const store = (path) => request(app).get(`/api/v1/store/${ctx.ws}${path}`);
+    const flags = (products) => Object.fromEntries(products.map((p) => [p.id, p.hasOptionGroups]));
+
+    const list = await store('/products');
+    expect(list.status).toBe(200);
+    expect(flags(list.body.products)).toEqual({ [ctx.productId]: true, [plain.product.id]: false });
+    const search = await store('/products?sort=newest');
+    expect(flags(search.body.products)).toEqual({ [ctx.productId]: true, [plain.product.id]: false });
+    expect((await store(`/products/${ctx.productId}`)).body.product.hasOptionGroups).toBe(true);
+    expect((await store(`/products/${plain.product.id}`)).body.product.hasOptionGroups).toBe(false);
+
+    // No active choice left: nothing to pick, so the card may add it again.
+    await db.ProductOptionChoice.update({ active: false }, { where: { workspaceId: ctx.ws } });
+    expect(flags((await store('/products')).body.products)[ctx.productId]).toBe(false);
   });
 });
