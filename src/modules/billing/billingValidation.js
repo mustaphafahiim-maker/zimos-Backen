@@ -81,6 +81,42 @@ module.exports = {
       lang: Joi.string().valid('ar', 'en').default('ar'),
     }),
   },
+  // A refund of the prepaid balance (billing/walletRefundService): the amount
+  // in minor units (the limits are the service's), where to send it, and the
+  // dialog's own id so a retry is one request.
+  requestWalletRefund: {
+    body: Joi.object({
+      amount: Joi.number().integer().min(1).max(1e12).required(),
+      payoutMethod: Joi.string().trim().max(30).allow('', null).optional(),
+      payoutAccount: Joi.string().trim().max(120).allow('', null).optional(),
+      requestId: Joi.string().guid().optional(),
+    }),
+  },
+  walletRefundParams: {
+    params: Joi.object({ workspaceId: Joi.string().required(), refundId: Joi.string().guid().required() }),
+  },
+  adminListWalletRefunds: {
+    query: Joi.object({
+      status: Joi.string().valid('requested', 'approved', 'rejected', 'cancelled', 'paid').optional(),
+      page: Joi.number().integer().min(1).max(10000).default(1),
+      pageSize: Joi.number().integer().min(1).max(50).default(20),
+    }),
+  },
+  adminApproveWalletRefund: {
+    params: Joi.object({ refundId: Joi.string().guid().required() }),
+    body: Joi.object({ note: Joi.string().trim().max(500).allow('', null).optional() }),
+  },
+  adminRejectWalletRefund: {
+    params: Joi.object({ refundId: Joi.string().guid().required() }),
+    body: Joi.object({ note: Joi.string().trim().min(3).max(500).required() }),
+  },
+  adminMarkWalletRefundPaid: {
+    params: Joi.object({ refundId: Joi.string().guid().required() }),
+    body: Joi.object({
+      payoutReference: Joi.string().trim().min(2).max(200).required(),
+      note: Joi.string().trim().max(500).allow('', null).optional(),
+    }),
+  },
   walletLedger: {
     query: Joi.object({
       page: Joi.number().integer().min(1).max(10000).default(1),
@@ -111,6 +147,9 @@ module.exports = {
       amount: Joi.number().integer().min(-2000000).max(2000000).invalid(0).required(),
       reason: Joi.string().trim().min(3).max(500).required(),
       requestId: Joi.string().guid().required(),
+      // correction (either way, as before) or gift (adds only); never refundable.
+      kind: Joi.string().valid('correction', 'gift').default('correction'),
+      notifyMerchant: Joi.boolean().default(false),
     }),
   },
 

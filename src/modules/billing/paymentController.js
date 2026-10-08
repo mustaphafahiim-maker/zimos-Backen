@@ -7,6 +7,7 @@ const paymentMethods = require('./paymentMethodService');
 const proofs = require('./paymentProofService');
 const wallet = require('./walletService');
 const onlineBilling = require('./onlineBillingService');
+const walletRefunds = require('./walletRefundService');
 const { verifyProofImageLink } = require('./proofLinks');
 
 const upload = multer({
@@ -96,8 +97,13 @@ const choosePayPerOrder = asyncHandler(async (req, res) => {
 const adminWorkspaceWallet = asyncHandler(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const { workspaceId } = req.params;
-  const [summary, entries] = await Promise.all([wallet.summary(workspaceId), wallet.ledger(workspaceId, req.query)]);
-  res.json({ wallet: summary, ledger: entries });
+  const [summary, entries, refunds] = await Promise.all([
+    wallet.summary(workspaceId),
+    wallet.ledger(workspaceId, req.query),
+    walletRefunds.storeBreakdown(workspaceId),
+  ]);
+  // refunds: each paid top-up with its ceiling, what was refunded or is held, what is left; and the totals.
+  res.json({ wallet: summary, ledger: entries, refunds });
 });
 
 const adminGrantFreeOrders = asyncHandler(async (req, res) => {
@@ -108,6 +114,39 @@ const adminGrantFreeOrders = asyncHandler(async (req, res) => {
 const adminAdjustWallet = asyncHandler(async (req, res) => {
   const result = await wallet.adjustBalance(req.params.workspaceId, req.body, req);
   res.status(result.replayed ? 200 : 201).json(result);
+});
+
+// --- refunds of the prepaid balance (billing/walletRefundService)
+
+const getWalletRefunds = asyncHandler(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await walletRefunds.overview(req.tenant.workspaceId));
+});
+
+const requestWalletRefund = asyncHandler(async (req, res) => {
+  const result = await walletRefunds.requestRefund(req.tenant.workspaceId, req.body, req);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
+const cancelWalletRefund = asyncHandler(async (req, res) => {
+  res.json(await walletRefunds.cancelRefund(req.tenant.workspaceId, req.params.refundId, req));
+});
+
+const adminListWalletRefunds = asyncHandler(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await walletRefunds.listForAdmin(req.query));
+});
+
+const adminApproveWalletRefund = asyncHandler(async (req, res) => {
+  res.json(await walletRefunds.approve(req.params.refundId, req.body, req));
+});
+
+const adminRejectWalletRefund = asyncHandler(async (req, res) => {
+  res.json(await walletRefunds.reject(req.params.refundId, req.body, req));
+});
+
+const adminMarkWalletRefundPaid = asyncHandler(async (req, res) => {
+  res.json(await walletRefunds.markPaid(req.params.refundId, req.body, req));
 });
 
 const listPaymentProofs = asyncHandler(async (req, res) => {
@@ -191,6 +230,13 @@ module.exports = {
   submitTopup,
   choosePayPerOrder,
   adminWorkspaceWallet,
+  getWalletRefunds,
+  requestWalletRefund,
+  cancelWalletRefund,
+  adminListWalletRefunds,
+  adminApproveWalletRefund,
+  adminRejectWalletRefund,
+  adminMarkWalletRefundPaid,
   adminGrantFreeOrders,
   adminAdjustWallet,
   adminListPaymentMethods,

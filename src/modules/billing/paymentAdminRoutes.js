@@ -49,6 +49,13 @@ router.post(
   payments.adminAdjustWallet
 );
 
+// Refund requests of the prepaid balance (billing/walletRefundService): the
+// console reviews them and records the transfer made by hand.
+router.get('/wallet-refunds', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminListWalletRefunds), payments.adminListWalletRefunds);
+router.post('/wallet-refunds/:refundId/approve', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminApproveWalletRefund), payments.adminApproveWalletRefund);
+router.post('/wallet-refunds/:refundId/reject', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminRejectWalletRefund), payments.adminRejectWalletRefund);
+router.post('/wallet-refunds/:refundId/mark-paid', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminMarkWalletRefundPaid), payments.adminMarkWalletRefundPaid);
+
 router.get('/payment-proofs', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminListProofs), payments.adminListProofs);
 router.get('/payment-proofs/:proofId', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminProofParams), payments.adminGetProof);
 router.post('/payment-proofs/:proofId/approve', ...allow(P.PAYMENTS_RECORD), validate(schemas.adminApproveProof), payments.adminApproveProof);

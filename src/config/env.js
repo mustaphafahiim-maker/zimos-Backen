@@ -13,6 +13,12 @@ function required(name, fallback) {
   return value;
 }
 
+/** A whole number from the environment within [min, max]; anything else is the default. */
+function intInRange(raw, fallback, min, max) {
+  const n = Number(raw);
+  return raw !== undefined && raw !== '' && Number.isInteger(n) && n >= min && n <= max ? n : fallback;
+}
+
 // Production must not start on a secret anyone can read in this repository
 // (SPEC §3.4): the three keys below have to be set, at least 32 characters
 // long, and not one of the placeholders from .env.example / docker-compose.
@@ -260,6 +266,15 @@ const env = {
   // starts off whatever the .env says; a test that needs it sets it here.
   wallet: {
     enabled: process.env.NODE_ENV !== 'test' && process.env.WALLET_ENABLED === 'true',
+    // Refunds of the prepaid balance (billing/walletRefundService). Each paid
+    // top-up gives back at most this share of itself (basis points, 7500 =
+    // 75%); a request takes from the newest top-ups first (or oldest_first);
+    // and asks for at least this much (minor units, 5000 = EGP 50).
+    refund: {
+      ceilingBp: intInRange(process.env.WALLET_REFUND_CEILING_BP, 7500, 0, 10000),
+      allocation: process.env.WALLET_REFUND_ALLOCATION === 'oldest_first' ? 'oldest_first' : 'newest_first',
+      minAmount: intInRange(process.env.WALLET_REFUND_MIN_AMOUNT, 5000, 1, 100000000),
+    },
   },
 
   // Plan features as a gate (billing/planFeatureGate): adding a custom domain,
