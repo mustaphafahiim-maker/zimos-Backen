@@ -176,6 +176,22 @@ describe('moving off pay per order', () => {
   });
 });
 
+describe('the console', () => {
+  it('names a pending move on the store’s charge list', async () => {
+    const store = await payPerOrderStore();
+    const res = await move(store, { planId: pro.id, billingCycle: 'yearly' });
+    const admin = await makePlatformUser('admin');
+    const list = await request(app).get(`/api/v1/admin/workspaces/${store.wid}/charges`).set(admin.H);
+    expect(list.status).toBe(200);
+    expect(list.body.charges.find((c) => c.id === res.body.invoice.id)).toMatchObject({
+      status: 'pending',
+      targetPlanId: pro.id,
+      targetPlanName: 'Pro',
+      targetBillingCycle: 'yearly',
+    });
+  });
+});
+
 describe('everyone else keeps today’s rules', () => {
   it('a paid subscription still changes plan through support; a trial uses POST /billing/plan', async () => {
     const setup = await setupWorkspaceWithProduct({ stock: 1 });

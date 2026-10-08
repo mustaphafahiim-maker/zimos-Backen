@@ -766,9 +766,16 @@ async function listCharges(workspaceId) {
       ['id', 'ASC'],
     ],
   });
+  // A pay-per-order store's move names the plan it moves to.
+  const targetIds = [...new Set(invoices.map((i) => i.targetPlanId).filter(Boolean))];
+  const targetNames = new Map(
+    targetIds.length ? (await db.Plan.findAll({ where: { id: targetIds }, attributes: ['id', 'name'] })).map((p) => [p.id, p.name]) : []
+  );
   const charges = [];
   for (const invoice of invoices) {
-    charges.push(serializeCharge(invoice, invoice.status === 'paid' ? null : await payableNow(invoice)));
+    const row = serializeCharge(invoice, invoice.status === 'paid' ? null : await payableNow(invoice));
+    if (invoice.targetPlanId) row.targetPlanName = targetNames.get(invoice.targetPlanId) || null;
+    charges.push(row);
   }
 
   const plan = subscription.plan;
