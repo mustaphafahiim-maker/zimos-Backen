@@ -90,6 +90,8 @@ async function add(workspaceId, { domain, localPart }, req) {
     'email_domain.add',
     { domain: name }
   );
+  // A domain bought here gets these records in its zone at once (domains/purchaseDns.js, item 385).
+  await require('../domains/purchaseDns').addSendingRecords(workspaceId, name, req);
   return { sendingDomain: result };
 }
 

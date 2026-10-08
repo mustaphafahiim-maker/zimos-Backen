@@ -12,6 +12,11 @@ store is connected to it with no DNS work by the merchant; it renews itself.
 | `setRecords({ domain, providerRef, records })` | — records `[{ type: 'A' \| 'CNAME' \| 'ALIAS' \| 'TXT', name, value }]` |
 | `renew({ domain, providerRef, years, expiresAt })` | `{ expiresAt }` |
 | `renewQuote({ domain, providerRef, years })` (optional) | `{ amount, currency } \| null` — else `search`'s `renewalPrice` × years |
+| `getRecords({ domain, providerRef })` (optional, item 385) | `[{ type, name, value, ttl, priority? }]` — the whole zone, names in full, MX with `priority` |
+| `unlock({ domain, providerRef })` (optional, item 385) | — turns the registrar lock off so the domain can be transferred |
+| `authCode({ domain, providerRef })` (optional, item 385) | `{ authCode }` — the transfer (EPP) code; never logged, never stored |
+
+`setRecords` also takes MX records (`{ type: 'MX', name, value, priority }`) since item 385.
 
 Prices are never written in our code: they come from the registrar's answer
 (or, in the sandbox, from `DOMAIN_SANDBOX_PRICES`). A purchase sends back the price
@@ -101,6 +106,52 @@ Registrar**'s API is beta and cannot renew yet. **Namecheap** works, but its API
 
 **Before going live**, run the same sandbox checklist as for Dynadot. The XML answers were mocked from Namecheap's API documentation.
 
+## DNS records and transfer-out (item 385, `../purchaseDns.js`)
+
+**DNS records.** `GET /purchases/:id/dns-records` reads the zone (`getRecords`) and lists every record.
+ZIMOS's own records are `locked` while the domain is connected to the store: the root's A or ALIAS
+(`purpose: routing`), the www CNAME when www is sent to the domain (`redirect`) and the TXT on
+`_zimos-verify.<domain>` (`verification`). `present: false` means it is not in the zone yet, and
+the next save writes it. `PUT` takes the merchant's records only: A, AAAA, CNAME, MX (with
+`priority` 0–65535) and TXT, up to 50. They are checked (addresses, host names, no CNAME on the
+root or beside another record, nothing on our names, no duplicates). Then the **whole zone** is
+written, our records and theirs, because `set_dns2` and `setHosts` replace the zone. A locked
+record is never removed or changed by a save. Records of a type we can't write back (forwarding,
+SRV, CAA…) make the save stop with 409 `DNS_RECORDS_UNSUPPORTED`, so nothing is lost. If the
+platform has since moved to another registrar, the answer is 409 `DOMAIN_REGISTRAR_CHANGED`. If
+the registrar has no `getRecords`, the answer is 501 `DOMAIN_DNS_UNSUPPORTED`. Once the domain is
+removed from the store nothing is locked any more: every record is the merchant's.
+
+**Sending-domain records.** If the store set up its email sending domain
+(`emailDomains/sendingDomain.js`) on the bought name, or on a name under it, its SPF, DKIM,
+return-path and DMARC records are written into the zone at purchase. They are the merchant's
+records (`purpose: email_spf` etc.), not locked. A sending domain set up after the purchase is
+added to the zone in the same way. An SPF or DMARC record the merchant already has on that name is
+kept (one per name). An older DKIM on the same name is replaced.
+
+**Transfer-out.** `POST /purchases/:id/transfer-code` is for the store owner only (403
+`NOT_STORE_OWNER`), with their password, at most 5 tries an hour per account. It calls `unlock`
+then `authCode` and returns the code in that one answer (`Cache-Control: no-store`). The code is
+not kept, not logged and not put in the audit entry `domain.transfer_code`. Auto-renew is
+switched off and `transferUnlockedAt` is set. If the registrar can't give the code, the answer is
+501 `DOMAIN_TRANSFER_UNSUPPORTED` before anything is changed.
+
+| Registrar | getRecords | unlock | authCode |
+|---|---|---|---|
+| sandbox | the zone last written, kept in memory (empty after a restart) | in memory | made up, the same each time for a domain |
+| Dynadot | `get_dns` (`NameServerSettings.MainDomains` / `SubDomains`; an MX's distance in `Value2`) | `get_transfer_auth_code` with `unlock_domain_for_transfer=1` | `get_transfer_auth_code` (`AuthCode`) |
+| Namecheap | `domains.dns.getHosts` | `domains.setRegistrarLock` with `LockAction=UNLOCK` | **not implemented**: Namecheap's API has no command that returns the EPP code (the owner gets it from Namecheap's dashboard), so transfer-out answers 501 |
+
+MX records are written with Dynadot's `main_recordx` / `sub_recordx` (the MX distance), and with
+Namecheap's `MXPref` plus `EmailType=MX` (without it Namecheap ignores the MX hosts).
+
+**Before going live, check against each sandbox.** Dynadot's site and docs could not be reached from
+where this was built. The command and parameter names were checked against an open-source API3
+client; the shapes of the answers were not checked and are read loosely.
+1. `get_dns` on a bought domain: the records must come back with their names, and an MX with its distance. If not, adjust `getRecords()`.
+2. `get_transfer_auth_code`: the code must be found under `AuthCode`, and the domain must show as unlocked afterwards.
+3. Namecheap `getHosts` after a `setHosts` with an MX: the MX must be there with its `MXPref`.
+
 ## The domain's owner (registrant)
 
 A real registrar needs the merchant's details as the domain's owner of record. The buy dialog asks for them once, `POST /purchases` sends them as `contact`, and they are kept in `workspace.settings.domain_registrant` for the next purchase. `GET /registrant` returns `{ required, contact }`. If a contact is required but none is given or saved, the answer is 422 `DOMAIN_CONTACT_REQUIRED`. ICANN then emails the registrant to confirm the address, and the domain is suspended if they don't confirm within 15 days.
@@ -118,7 +169,7 @@ sandbox nothing is bought.
 
 1. Records the purchase (`domain_purchases`).
 2. Adds the domain to the store (`domains`), marks it verified (we hold its DNS).
-3. Sets the routing records (`rootDomains.routingFor`) and the verification TXT through `setRecords`.
+3. Sets the routing records (`rootDomains.routingFor`) and the verification TXT through `setRecords`, with the store's sending-domain records when it has one on that name (item 385).
 4. The daily job `domains.renew_due` renews purchases with auto-renew on that expire within 30 days.
 
 ## Order of checks (frontend request)

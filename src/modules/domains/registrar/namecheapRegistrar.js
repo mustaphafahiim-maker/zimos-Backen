@@ -172,7 +172,7 @@ async function register({ domain, years, contact }) {
   return { providerRef: result.DomainID || domain, expiresAt };
 }
 
-const TYPES = new Set(['A', 'AAAA', 'ALIAS', 'CNAME', 'TXT']);
+const TYPES = new Set(['A', 'AAAA', 'ALIAS', 'CNAME', 'TXT', 'MX']);
 
 /** setHosts replaces the whole host list, so every record goes in one call. */
 async function setRecords({ domain, records }) {
@@ -187,12 +187,38 @@ async function setRecords({ domain, records }) {
     else throw new AppError('REGISTRAR_REFUSED', `${r.name} is not inside ${domain}`, 502);
     const n = i + 1;
     Object.assign(params, { [`HostName${n}`]: host, [`RecordType${n}`]: type, [`Address${n}`]: r.value, [`TTL${n}`]: r.ttl || 300 });
+    if (type === 'MX') params[`MXPref${n}`] = r.priority ?? 10;
   });
+  // Namecheap only keeps MX hosts with EmailType=MX (item 385).
+  if (records.some((r) => String(r.type).toUpperCase() === 'MX')) params.EmailType = 'MX';
   // The host list lives on Namecheap's own DNS: make sure the domain uses it.
   await call('namecheap.domains.dns.setDefault', split(domain));
   const xml = await call('namecheap.domains.dns.setHosts', params);
   const result = elements(xml, 'DomainDNSSetHostsResult')[0];
   if (!result || result.IsSuccess !== 'true') throw new AppError('REGISTRAR_REFUSED', 'The domain registrar did not save the DNS records', 502);
+}
+
+/** The host list (item 385): domains.dns.getHosts → <host Name Type Address MXPref TTL/>. */
+async function getRecords({ domain }) {
+  const xml = await call('namecheap.domains.dns.getHosts', split(domain));
+  return [...String(xml).matchAll(/<host\b([^>]*?)\/?>/gi)].map((m) => attrsOf(m[1])).map((h) => {
+    const type = String(h.Type || '').toUpperCase();
+    const label = String(h.Name || '@').toLowerCase();
+    return {
+      type,
+      name: label === '@' ? domain : `${label}.${domain}`,
+      value: String(h.Address || ''),
+      ttl: Number(h.TTL) || 300,
+      ...(type === 'MX' ? { priority: Number(h.MXPref) || 0 } : {}),
+    };
+  });
+}
+
+/** domains.setRegistrarLock with LockAction=UNLOCK. Namecheap's API has no call for the EPP code: no authCode here. */
+async function unlock({ domain }) {
+  const xml = await call('namecheap.domains.setRegistrarLock', { DomainName: domain, LockAction: 'UNLOCK' });
+  const result = elements(xml, 'DomainSetRegistrarLockResult')[0];
+  if (!result || result.IsSuccess !== 'true') throw new AppError('REGISTRAR_REFUSED', 'The domain registrar did not unlock the domain', 502);
 }
 
 /** "10/26/2027" (MM/DD/YYYY) → a date, else null. */
@@ -220,4 +246,4 @@ function assertReady() {
   config();
 }
 
-module.exports = { search, register, setRecords, renew, renewQuote, assertReady, needsContact: true, _elements: elements, _usDate: usDate };
+module.exports = { search, register, setRecords, getRecords, unlock, renew, renewQuote, assertReady, needsContact: true, _elements: elements, _usDate: usDate };

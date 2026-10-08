@@ -14,6 +14,12 @@
  * Optional: renewQuote({ domain, providerRef, years }), assertReady() (throws
  * before a purchase when the adapter is not set up), needsContact (the buy
  * asks for the registrant's details).
+ *
+ * Optional, item 385 (purchaseDns.js; without them the endpoint answers 501):
+ *   getRecords({ domain, providerRef })     → [{ type, name, value, ttl, priority? }]  the whole zone
+ *   unlock({ domain, providerRef })         → void   (registrar lock off, for a transfer)
+ *   authCode({ domain, providerRef })       → { authCode }   (never logged or stored)
+ * setRecords also takes MX records ({ type: 'MX', name, value, priority }).
  */
 
 const ADAPTERS = {

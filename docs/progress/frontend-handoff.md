@@ -4682,3 +4682,50 @@ A finance view of the store's online payments: every captured or failed gateway 
 - **Payments → «التحويلات البنكية» / "Payouts"**: list with «تاريخ الوصول» / "Arrival date", «البوابة» / "Gateway", «المبلغ» / "Amount", «الرسوم» / "Fees", «الحالة» / "Status" («في الطريق» / "In transit", «وصل» / "Paid", «معلّق» / "Pending", «فشل» / "Failed", «اتلغى» / "Canceled"), «مدفوعات» / "Payments" and «استردادات» / "Refunds" counts; a «تحديث» / "Refresh" button (POST `/payouts/sync`, then reload; show per-gateway errors from `results[].message`, and «اتحدّث من شوية» / "Refreshed a moment ago" for `recently_synced`). Hint under the title: «بنجيب التحويلات من البوابة مرة كل يوم» / "Payouts are fetched from the gateway once a day". Empty state: «مفيش تحويلات لسه — Stripe والـ Sandbox بس اللي بيبعتوا التحويلات دلوقتي» / "No payouts yet — only Stripe and the Sandbox report payouts for now".
 - **Payout page** (`/payments/payouts/:id`): header with amount, status, arrival date and the gateway's id (`externalId`, copyable); summary rows «المدفوعات» / "Payments" (`paymentsAmount`), «الاستردادات» / "Refunds" (`refundsAmount`), «الرسوم» / "Fees", «مش من زيموس» / "Not from ZIMOS" (`unmatchedAmount`, with the tooltip «تسويات أو رسوم من البوابة أو مبيعات من برّه المتجر» / "Gateway adjustments or fees, or sales made outside the store", shown only when `unmatchedCount > 0`), «الإجمالي» / "Total"; then the two tables (same columns as Transactions).
 - **Order page → payments panel**: optional — show «رسوم البوابة {fee}» / "Gateway fee {fee}" under a captured payment when the ledger row has one (GET `/transactions?orderId=`).
+
+## 385. DNS records and transfer-out for domains bought here — UI: pending
+
+A domain bought in the dashboard now has its own DNS records screen, so the merchant can add email (MX), site verification (TXT), subdomains (A, AAAA, CNAME). The store owner can also take the domain to another registrar. All endpoints are under `/api/v1/workspaces/:ws/domains` and need **`domain.manage`**; the transfer code is for the **store owner** only.
+
+### Endpoints
+- **GET `/purchases`** — each row now also has `transferUnlockedAt` (null, or when the owner took the transfer code) and `manage: { "dnsRecords": true, "transferCode": true }`. Show the «سجلات DNS» / "DNS records" and «نقل الدومين» / "Transfer out" actions only when the flag is true.
+- **GET `/purchases/:id/dns-records`**
+```json
+{
+  "hostname": "ahmedstore.com",
+  "registrar": "dynadot",
+  "records": [
+    { "type": "A", "name": "ahmedstore.com", "host": "@", "value": "203.0.113.10", "ttl": 300, "locked": true, "purpose": "routing", "present": true },
+    { "type": "CNAME", "name": "www.ahmedstore.com", "host": "www", "value": "ahmed.zimos.app", "ttl": 300, "locked": true, "purpose": "redirect", "present": true },
+    { "type": "TXT", "name": "_zimos-verify.ahmedstore.com", "host": "_zimos-verify", "value": "zimos-verify=b35b…", "ttl": 300, "locked": true, "purpose": "verification", "present": true },
+    { "type": "MX", "name": "ahmedstore.com", "host": "@", "value": "mx1.mail.example.net", "priority": 10, "ttl": 300, "locked": false, "purpose": null, "editable": true },
+    { "type": "TXT", "name": "ahmedstore.com", "host": "@", "value": "v=spf1 include:spf.mail.zimos.example ~all", "ttl": 300, "locked": false, "purpose": "email_spf", "editable": true }
+  ],
+  "limits": { "maxRecords": 50, "types": ["A", "AAAA", "CNAME", "MX", "TXT"] }
+}
+```
+  - `locked: true` = the store's own record (`purpose` `routing` | `redirect` | `verification`). Show it greyed with a lock icon, never editable. `present: false` = not in the zone yet; it is written on the next save.
+  - `purpose` `email_spf` | `email_dkim` | `email_return_path` | `email_dmarc` = written for the store's email sending domain. It is editable, but show a hint.
+  - `editable: false` = a record type that can't be edited here.
+- **PUT `/purchases/:id/dns-records`** `{ "records": [ { "type": "MX", "name": "@", "value": "mx1.mail.example.net", "priority": 10, "ttl": 300 }, { "type": "TXT", "name": "@", "value": "google-site-verification=abc123" }, { "type": "CNAME", "name": "blog", "value": "blogs.example.org" } ] }` sends **all of the merchant's records** (every unlocked row, with its `ttl`, plus the new ones, minus the deleted ones). Never send the locked ones. `name` is `"@"` for the domain itself, a label like `"mail"`, or the full name. `priority` is required for MX (0–65535) and not allowed for the other types. `ttl` is optional (60–86400, default 300). The answer has the same shape as GET.
+  - 422 `VALIDATION_ERROR` with `details[].field` like `records[2].value` / `records[0].priority` / `records[1].name`, and a message to show under that row (e.g. "Enter the mail server's name, like mx.example.com (not an IP address)", "ahmedstore.com itself can't have a CNAME record — use A records", "www is used by the store's own records: it can't be changed here", "This record is listed twice"). More than 50 records is also 422.
+  - 409 `DNS_RECORDS_UNSUPPORTED` (the zone has records that can't be edited here: contact support), 409 `DOMAIN_REGISTRAR_CHANGED`, 409 `DOMAIN_NOT_ACTIVE`, 501 `DOMAIN_DNS_UNSUPPORTED`, 502 `REGISTRAR_REFUSED` / `REGISTRAR_UNAVAILABLE` (show the message, keep the form).
+- **POST `/purchases/:id/transfer-code`** `{ "password": "…" }` →
+```json
+{ "hostname": "ahmedstore.com", "authCode": "Kq9T2x-7fPz0A#b3Wm", "unlocked": true, "autoRenew": false,
+  "note": "Auto-renew is off: renew the domain at its new registrar. The store stays connected while its DNS records stay as they are.",
+  "purchase": { "id": "…", "autoRenew": false, "transferUnlockedAt": "2026-10-08T00:29:40.000Z", "…": "…" } }
+```
+  - The code is shown **only in this answer**: it is not stored, so don't cache it or put it in a URL. A new request asks the registrar again.
+  - 403 `NOT_STORE_OWNER` (hide the button for anyone but the owner), 422 `VALIDATION_ERROR` field `password` ("The password is not right"), 429 after 5 tries in an hour, 501 `DOMAIN_TRANSFER_UNSUPPORTED` (e.g. on Namecheap: «الكود ده مش متاح أوتوماتيك عند المسجّل ده — كلّم الدعم» / "This registrar doesn't give the code automatically — contact support").
+
+### Screens
+- **Domains → bought domain row**: a menu with «سجلات DNS» / "DNS records" and, for the owner, «نقل لمسجّل تاني» / "Transfer to another registrar". When `transferUnlockedAt` is set, show a badge «مفتوح للنقل» / "Unlocked for transfer".
+- **DNS records page** (`/domains/purchases/:id/dns`): title «سجلات DNS لـ {hostname}» / "DNS records for {hostname}". A table with «النوع» / "Type", «الاسم» / "Name" (`host`), «القيمة» / "Value", «الأولوية» / "Priority" (MX only), «TTL».
+  - Locked rows come first, with a lock icon and the tooltip «السجل ده بيوصّل الدومين بمتجرك — مينفعش يتغيّر» / "This record connects the domain to your store — it can't be changed". When `present` is false, add «هيتكتب مع الحفظ الجاي» / "Will be written on the next save".
+  - Email rows carry a tag «إيميل المتجر» / "Store email", with the hint «لو مسحته، إيميلات الطلبات مش هتتبعت من الدومين ده» / "If you delete it, order emails won't be sent from this domain".
+  - Buttons: «إضافة سجل» / "Add record" (a drawer with type, name, value, priority for MX, TTL), «تعديل» / "Edit" and «حذف» / "Delete" per unlocked row. Changes are kept in the page until «حفظ التغييرات» / "Save changes" sends the full list in one PUT. Then the toast «اتحفظت سجلات DNS — ممكن تاخد لحد ساعة لحد ما تشتغل» / "DNS records saved — they can take up to an hour to work".
+  - Helper text: «@ يعني الدومين نفسه» / "@ means the domain itself"; for MX «الأولوية الأقل بتتجرّب الأول» / "Lower priority is tried first". Counter «{n} من 50» / "{n} of 50".
+  - Empty state (only locked rows): «مفيش سجلات خاصة بيك لسه — ضيف MX للإيميل أو TXT للتحقق» / "No records of your own yet — add MX for email or TXT for verification".
+- **Transfer out dialog** (owner only): a warning «لما تاخد الكود، الدومين بيتفتح للنقل والتجديد التلقائي بيتقفل. المتجر هيفضل شغال على الدومين طول ما سجلات DNS زي ما هي» / "Taking the code unlocks the domain and turns auto-renew off. The store keeps working on the domain as long as its DNS records stay the same". Then a password field «كلمة السر» / "Password" and the button «إظهار كود النقل» / "Show transfer code".
+  - The result shows the code in a box with «نسخ» / "Copy", the note «احتفظ بالكود — إحنا مش بنحتفظ بنسخة منه» / "Keep this code — we don't keep a copy", and `note` underneath. Closing the dialog clears the code from memory.

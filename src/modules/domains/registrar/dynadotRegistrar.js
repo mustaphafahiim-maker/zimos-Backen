@@ -170,7 +170,7 @@ function expiry(value, years, from = new Date()) {
   return at;
 }
 
-const TYPES = { A: 'a', AAAA: 'aaaa', CNAME: 'cname', TXT: 'txt' };
+const TYPES = { A: 'a', AAAA: 'aaaa', CNAME: 'cname', TXT: 'txt', MX: 'mx' };
 
 /** The whole zone in one call (set_dns2 replaces what was there). Dynadot has no ALIAS: roots need PLATFORM_APEX_IPS. */
 async function setRecords({ domain, records }) {
@@ -181,20 +181,75 @@ async function setRecords({ domain, records }) {
     const type = TYPES[String(r.type).toUpperCase()];
     if (!type) throw new AppError('REGISTRAR_REFUSED', `Dynadot cannot hold a ${r.type} record — set PLATFORM_APEX_IPS`, 502);
     const name = String(r.name).toLowerCase();
+    // main_recordx / sub_recordx carry an MX record's distance (item 385).
+    const distance = type === 'mx' ? r.priority ?? 10 : undefined;
     if (name === domain) {
       params[`main_record_type${main}`] = type;
       params[`main_record${main}`] = r.value;
+      if (distance !== undefined) params[`main_recordx${main}`] = distance;
       main += 1;
     } else if (name.endsWith(`.${domain}`)) {
       params[`subdomain${sub}`] = name.slice(0, -(domain.length + 1));
       params[`sub_record_type${sub}`] = type;
       params[`sub_record${sub}`] = r.value;
+      if (distance !== undefined) params[`sub_recordx${sub}`] = distance;
       sub += 1;
     } else {
       throw new AppError('REGISTRAR_REFUSED', `${r.name} is not inside ${domain}`, 502);
     }
   }
   await call('set_dns2', params);
+}
+
+const asList = (v) => {
+  if (Array.isArray(v)) return v;
+  if (!v || typeof v !== 'object') return [];
+  // A list may come wrapped ({ MainDomain: [...] }) or as a single record.
+  if (v.RecordType !== undefined) return [v];
+  return Object.values(v).flatMap(asList);
+};
+
+function findNode(node, re) {
+  if (!node || typeof node !== 'object') return null;
+  for (const [k, v] of Object.entries(node)) {
+    if (re.test(k) && v && typeof v === 'object') return v;
+    const deeper = findNode(v, re);
+    if (deeper) return deeper;
+  }
+  return null;
+}
+
+/**
+ * The zone (item 385): get_dns → NameServerSettings.MainDomains / SubDomains, each
+ * { [Subhost], RecordType, Value, [Value2] } (Value2: an MX record's distance). Forwarding
+ * and parking settings come back with another type and are listed as they are.
+ */
+async function getRecords({ domain }) {
+  const out = await call('get_dns', { domain });
+  const settings = findNode(out, /^NameServerSettings$/i) || out;
+  const ttl = Number(settings.TTL) || 300;
+  const read = (r, name) => {
+    const type = String(r.RecordType || '').toUpperCase();
+    const extra = r.Value2 ?? r.RecordValue2 ?? r.Distance;
+    return { type, name, value: String(r.Value ?? ''), ttl, ...(type === 'MX' ? { priority: Number(extra) || 0 } : {}) };
+  };
+  return [
+    ...asList(settings.MainDomains).map((r) => read(r, domain)),
+    ...asList(settings.SubDomains).map((r) => read(r, `${String(r.Subhost || r.SubHost || '').toLowerCase()}.${domain}`)),
+  ].filter((r) => r.type);
+}
+
+/** Unlocks the domain for transfer: get_transfer_auth_code with unlock_domain_for_transfer=1. */
+async function unlock({ domain }) {
+  await call('get_transfer_auth_code', { domain, unlock_domain_for_transfer: 1 });
+}
+
+/** The current transfer (EPP) code; never logged. */
+async function authCode({ domain }) {
+  const out = await call('get_transfer_auth_code', { domain });
+  const code = findValue(out, /^Auth(Code)?$/i);
+  if (!code) throw new AppError('REGISTRAR_REFUSED', 'The domain registrar did not return the transfer code', 502);
+  return { authCode: code };
 }
 
 async function renew({ domain, years, expiresAt }) {
@@ -218,4 +273,4 @@ function assertReady() {
   }
 }
 
-module.exports = { search, register, setRecords, renew, renewQuote, assertReady, needsContact: true, _money: money };
+module.exports = { search, register, setRecords, getRecords, unlock, authCode, renew, renewQuote, assertReady, needsContact: true, _money: money };

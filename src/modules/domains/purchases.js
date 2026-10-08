@@ -41,6 +41,7 @@ const view = (p) => ({
   lastRenewedAt: p.lastRenewedAt,
   lastError: p.lastError,
   domainId: p.domainId,
+  transferUnlockedAt: p.transferUnlockedAt || null,
   createdAt: p.createdAt,
 });
 
@@ -120,7 +121,9 @@ async function registrant(workspaceId) {
 }
 
 async function list(workspaceId) {
-  return { purchases: (await db.DomainPurchase.findAll({ where: { workspaceId }, order: [['createdAt', 'DESC']] })).map(view) };
+  const { capabilities } = require('./purchaseDns');
+  // `manage`: whether this registrar lets the dashboard edit its DNS records and give its transfer code (item 385).
+  return { purchases: (await db.DomainPurchase.findAll({ where: { workspaceId }, order: [['createdAt', 'DESC']] })).map((p) => ({ ...view(p), manage: capabilities(p) })) };
 }
 
 async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice, contact }, req) {
@@ -182,7 +185,10 @@ async function purchase(workspaceId, { domain, years, autoRenew, acceptPrice, co
     const routing = rootDomains.routingFor(host, target);
     // www (or the root) is sent to the domain: its record is ours to create too, so the merchant has none to add.
     const counterpart = added.counterpart && added.counterpart.redirect && counterpartHost ? rootDomains.routingFor(counterpartHost, target, 'redirect').records : [];
-    await r.setRecords({ domain: host, providerRef: reg.providerRef, records: [...routing.records, ...counterpart, record] });
+    // The store's sending-domain records for this name, if it has one set up, go in too (item 385).
+    const ours = [...routing.records, ...counterpart, record];
+    const sending = await require('./purchaseDns').sendingRecordsFor(workspaceId, host, ours).catch(() => []);
+    await r.setRecords({ domain: host, providerRef: reg.providerRef, records: [...ours, ...sending] });
     // Verified as by the TXT, other stores' unverified claims go (item 341); then the certificate is asked for.
     await domainsService.markVerified(added, counterpart.length ? { counterpart: { ...added.counterpart, dnsManaged: true } } : {});
     await row.update({ status: 'active', domainId: added.id, lastError: null });
@@ -316,6 +322,8 @@ function mount(router, { customDomain = (req, res, next) => next() } = {}) {
   );
   router.patch('/purchases/:purchaseId', validate({ params: withId, body: Joi.object({ autoRenew: Joi.boolean().required() }) }), asyncHandler(async (req, res) => res.json(await setAutoRenew(req.tenant.workspaceId, req.params.purchaseId, req.body.autoRenew, req))));
   router.get('/purchases/:purchaseId/renew-quote', validate({ params: withId, query: Joi.object({ years: Joi.number().integer().min(1).max(10).default(1) }) }), asyncHandler(async (req, res) => res.json(await renewQuote(req.tenant.workspaceId, req.params.purchaseId, req.query.years))));
+  // DNS records and transfer-out (item 385, purchaseDns.js).
+  require('./purchaseDns').mount(router, { view });
   router.post('/purchases/:purchaseId/renew', validate({ params: withId, body: Joi.object({ years: Joi.number().integer().min(1).max(10).default(1), acceptPrice: money.allow(null) }) }), requireLive, asyncHandler(async (req, res) => res.json(await renewNow(req.tenant.workspaceId, req.params.purchaseId, req.body.years, req, req.body.acceptPrice))));
 }
 
