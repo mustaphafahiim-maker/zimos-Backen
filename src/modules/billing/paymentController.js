@@ -7,6 +7,7 @@ const paymentMethods = require('./paymentMethodService');
 const proofs = require('./paymentProofService');
 const wallet = require('./walletService');
 const onlineBilling = require('./onlineBillingService');
+const walletRefunds = require('./walletRefundService');
 const { verifyProofImageLink } = require('./proofLinks');
 
 const upload = multer({
@@ -110,6 +111,39 @@ const adminAdjustWallet = asyncHandler(async (req, res) => {
   res.status(result.replayed ? 200 : 201).json(result);
 });
 
+// --- refunds of the prepaid balance (billing/walletRefundService)
+
+const getWalletRefunds = asyncHandler(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await walletRefunds.overview(req.tenant.workspaceId));
+});
+
+const requestWalletRefund = asyncHandler(async (req, res) => {
+  const result = await walletRefunds.requestRefund(req.tenant.workspaceId, req.body, req);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
+const cancelWalletRefund = asyncHandler(async (req, res) => {
+  res.json(await walletRefunds.cancelRefund(req.tenant.workspaceId, req.params.refundId, req));
+});
+
+const adminListWalletRefunds = asyncHandler(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await walletRefunds.listForAdmin(req.query));
+});
+
+const adminApproveWalletRefund = asyncHandler(async (req, res) => {
+  res.json(await walletRefunds.approve(req.params.refundId, req.body, req));
+});
+
+const adminRejectWalletRefund = asyncHandler(async (req, res) => {
+  res.json(await walletRefunds.reject(req.params.refundId, req.body, req));
+});
+
+const adminMarkWalletRefundPaid = asyncHandler(async (req, res) => {
+  res.json(await walletRefunds.markPaid(req.params.refundId, req.body, req));
+});
+
 const listPaymentProofs = asyncHandler(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json(await proofs.listForWorkspace(req.tenant.workspaceId));
@@ -191,6 +225,13 @@ module.exports = {
   submitTopup,
   choosePayPerOrder,
   adminWorkspaceWallet,
+  getWalletRefunds,
+  requestWalletRefund,
+  cancelWalletRefund,
+  adminListWalletRefunds,
+  adminApproveWalletRefund,
+  adminRejectWalletRefund,
+  adminMarkWalletRefundPaid,
   adminGrantFreeOrders,
   adminAdjustWallet,
   adminListPaymentMethods,

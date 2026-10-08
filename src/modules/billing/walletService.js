@@ -166,7 +166,7 @@ async function orderFeeState(orderId, transaction) {
 
 async function writeEntry(
   wallet,
-  { type, delta, freeDelta = 0, orderId = null, paymentProofId = null, actorUserId = null, note = null, key },
+  { type, delta, freeDelta = 0, orderId = null, paymentProofId = null, refundRequestId = null, actorUserId = null, note = null, key },
   transaction
 ) {
   const balanceAfter = Number(wallet.cashBalance) + delta;
@@ -176,6 +176,7 @@ async function writeEntry(
       entryType: type,
       cashDelta: delta,
       freeOrdersDelta: freeDelta,
+      refundRequestId,
       balanceAfter,
       currency: wallet.currency,
       orderId,
@@ -466,6 +467,7 @@ function serializeEntry(entry) {
     currency: entry.currency,
     orderId: entry.orderId,
     paymentProofId: entry.paymentProofId,
+    refundRequestId: entry.refundRequestId || null,
     note: entry.note,
     createdAt: entry.createdAt,
   };
@@ -647,6 +649,9 @@ module.exports = {
   MAX_FREE_ORDERS_GRANT,
   enabled,
   disabledError,
+  // For walletRefundService: the wallet row locked (the last lock), and one entry written with its cache.
+  lockWallet,
+  writeEntry,
   feeDue,
   termsDue,
   termsOf,

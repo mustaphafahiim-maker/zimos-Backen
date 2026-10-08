@@ -102,7 +102,7 @@ A transfer's proof, the same flow as paying an invoice
 - **The credit:** the console credits **what arrived**, shown beside what was
   asked. Once per proof.
 
-There are no refunds and no promotional balance.
+There is no promotional balance. Refunds: see below.
 
 ### By card (migration 221)
 
@@ -122,6 +122,64 @@ The same gateway layer as paying a charge online
 - **Every paid attempt credits:** none supersedes another, since each is its
   own money.
 - The billing summary's latest online payment counts charges only.
+
+## Refunds (migration 223)
+
+A merchant asks for unused balance back, and the console pays it out by hand.
+Behind `WALLET_ENABLED`, for a store on the pay-per-order plan or one with a
+balance. Code: `src/modules/billing/walletRefundService.js`.
+
+### What can come back
+
+- **Per paid top-up:** each `topup` entry (a transfer the console approved,
+  or a card payment) gives back at most `WALLET_REFUND_CEILING_BP` of itself:
+  7500 = 75%, rounded down. A top-up of 1000 gives 750, one of 500 gives 375.
+- **What's left of a top-up:** its ceiling, less what open or paid requests
+  took from it.
+- **Never counted:** gifts, corrections (`adjustment`) and free orders. They
+  aren't top-ups.
+- **The most a request can ask for:** the smaller of what's left over all
+  top-ups and the balance.
+- **The least:** `WALLET_REFUND_MIN_AMOUNT` (5000 = EGP 50).
+- **Refused:**
+  - a debt (422 `WALLET_DEBT_OUTSTANDING`);
+  - a second open request (422 `REFUND_REQUEST_OPEN`);
+  - too little or too much (422 `REFUND_AMOUNT_TOO_LOW` / `_TOO_HIGH`, with
+    `details.min` / `max`).
+
+### The steps
+
+1. **Asked:** the amount is spread over the top-ups in
+   `wallet_refund_allocations`, newest first (`WALLET_REFUND_ALLOCATION=oldest_first`
+   for the other way). `refund_hold` takes it off the balance, so it can't
+   be spent.
+2. **Cancelled** (by the merchant, while requested) **or rejected** (by the
+   console, while open, with a note): `refund_release` puts it back. The
+   allocations stop counting, so every top-up has exactly what it had.
+3. **Approved:** nothing moves.
+4. **Paid:** the console made the transfer and gives its reference.
+   `refund_paid` is a marker with no money, because the hold already took
+   it. This happens once; a second call changes nothing.
+
+Each step:
+
+- locks the request first, then the wallet;
+- has its key (`refund_hold:<id>`, `refund_release:<id>`, `refund_paid:<id>`);
+- is audited (`wallet.refund_*`);
+- tells the merchant in the bell (`wallet.refund`).
+
+A repeated request with the same `requestId` is the same request. One open
+per store, by a unique partial index too.
+
+### Endpoints
+
+| | |
+|---|---|
+| `GET /workspaces/:id/billing/wallet/refunds` | the quote (max, min, balance, debt) and the latest requests |
+| `POST /workspaces/:id/billing/wallet/refunds { amount, payoutMethod, payoutAccount, requestId }` | ask |
+| `POST /workspaces/:id/billing/wallet/refunds/:refundId/cancel` | cancel while requested |
+| `GET /admin/wallet-refunds?status=` | the console's list (`payments.record`) |
+| `POST /admin/wallet-refunds/:id/approve { note }`, `/reject { note }`, `/mark-paid { payoutReference, note }` | `payments.record` |
 
 ## It never expires
 

@@ -110,6 +110,8 @@ const TABLES = {
   shipping_zones: wipe(STORE),
   site_visits: wipe('anonymous marketing-site visits from before launch, some linked to accounts that go'),
   store_payment_methods: wipe("a store's own InstaPay / wallet numbers (migration 209)"),
+  wallet_refund_requests: wipe('refund requests of the prepaid balance (migration 223)'),
+  wallet_refund_allocations: wipe('which top-ups a refund request takes from (migration 223)'),
   subscription_manual_changes: wipe('store subscriptions'),
   subscription_terms: wipe('store subscriptions'),
   subscriptions: wipe(STORE),

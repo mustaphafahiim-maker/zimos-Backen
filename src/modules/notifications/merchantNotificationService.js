@@ -46,6 +46,8 @@ const TYPES = Object.freeze({
   // The prepaid balance on a plan with its own debt limit (billing/walletService).
   'wallet.low': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
   'wallet.limit_reached': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
+  // A refund request of the prepaid balance changed status (billing/walletRefundService).
+  'wallet.refund': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 

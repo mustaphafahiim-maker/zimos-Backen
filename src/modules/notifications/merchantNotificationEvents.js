@@ -125,6 +125,26 @@ function walletLimitReached(workspaceId, wallet) {
   });
 }
 
+const REFUND_TITLES = {
+  requested: 'تم استلام طلب استرداد رصيد Zimos',
+  approved: 'تمت الموافقة على طلب الاسترداد',
+  rejected: 'تم رفض طلب الاسترداد وعاد المبلغ إلى رصيدك',
+  cancelled: 'تم إلغاء طلب الاسترداد وعاد المبلغ إلى رصيدك',
+  paid: 'تم تحويل مبلغ الاسترداد',
+};
+
+/** A refund request of the prepaid balance changed status. Once per request and status. */
+function walletRefund(workspaceId, request) {
+  return service.create(workspaceId, {
+    type: 'wallet.refund',
+    title: REFUND_TITLES[request.status] || 'تحديث على طلب الاسترداد',
+    body: `${money(request.amount, request.currency)}${request.status === 'rejected' && request.adminNote ? ` — ${request.adminNote}` : ''}`,
+    link: '/subscription?tab=usage',
+    data: { refundId: request.id, status: request.status, amount: request.amount, currency: request.currency, note: request.adminNote || null },
+    dedupeKey: `wallet.refund:${request.id}:${request.status}`,
+  });
+}
+
 const HANDLERS = { 'order.created': orderCreated };
 
 /** Fire-and-forget, like automationEngine.emit; awaited under test for the same reason. */
@@ -137,4 +157,4 @@ function emit(workspaceId, event, entityId) {
   return env.isTest ? work : undefined;
 }
 
-module.exports = { emit, orderCreated, integrationFailed, exportReady, walletLow, walletLimitReached };
+module.exports = { emit, orderCreated, integrationFailed, exportReady, walletLow, walletLimitReached, walletRefund };

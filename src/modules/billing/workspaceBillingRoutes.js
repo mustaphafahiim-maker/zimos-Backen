@@ -57,6 +57,10 @@ router.get('/wallet/ledger', validate(schemas.walletLedger), payments.getWalletL
 router.post('/wallet/topups', paymentProofLimiter, payments.acceptProofFile, validate(schemas.submitTopup), payments.submitTopup);
 // A card top-up through a gateway of Zimos's own; GET /payments/:paymentId reads it back.
 router.post('/wallet/topups/online', paymentProofLimiter, validate(schemas.startOnlineTopup), payments.startOnlineTopup);
+// Refunds of unused balance (billing/walletRefundService).
+router.get('/wallet/refunds', payments.getWalletRefunds);
+router.post('/wallet/refunds', paymentProofLimiter, validate(schemas.requestWalletRefund), payments.requestWalletRefund);
+router.post('/wallet/refunds/:refundId/cancel', validate(schemas.walletRefundParams), payments.cancelWalletRefund);
 router.post('/pay-per-order', requireConfirmedAccount, payments.choosePayPerOrder);
 
 module.exports = router;
