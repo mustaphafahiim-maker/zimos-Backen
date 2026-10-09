@@ -110,6 +110,7 @@ const TABLES = {
   shipping_zone_tier_prices: wipe(STORE),
   shipping_zones: wipe(STORE),
   site_visits: wipe('anonymous marketing-site visits from before launch, some linked to accounts that go'),
+  size_charts: wipe(STORE),
   store_payment_methods: wipe("a store's own InstaPay / wallet numbers (migration 209)"),
   trusted_devices: wipe("browsers remembered for two-step sign-in, the creator's included"),
   user_two_factor: wipe("two-step sign-in settings, the creator's included: turned on again after the reset"),

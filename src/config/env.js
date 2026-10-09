@@ -258,6 +258,13 @@ const env = {
     smsPerIpPerDay: positiveInt('VERIFICATION_SMS_PER_IP_PER_DAY', 5),
   },
 
+  // Store features that stay off until named here, comma-separated
+  // (core/middleware/storeFeatures.js): size_charts, product_questions,
+  // stock_alerts, preorders, holiday_mode, url_redirects, product_specs,
+  // purchase_limits, gift_options. Empty = all off. Under NODE_ENV=test it
+  // is always empty; a test pushes a name onto this list.
+  storeFeatures: csvList(process.env.STORE_FEATURES, ''),
+
   // Two-step sign-in (auth/twoFactorService) and the new-device checks
   // (auth/newDeviceSignIn). Each exactly "true" to turn on; off, sign-in is
   // as before. Under NODE_ENV=test they start off; a test sets them.
