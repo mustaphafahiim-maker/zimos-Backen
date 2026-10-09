@@ -82,6 +82,7 @@ const TABLES = {
   invoice_counters: wipe(STORE),
   invoices: wipe(STORE),
   login_challenges: wipe("sign-ins waiting for their second step, the creator's included"),
+  loyalty_transactions: wipe(STORE),
   media_assets: wipe(STORE),
   memberships: wipe('who works in which store'),
   notification_logs: wipe('sent notifications'),

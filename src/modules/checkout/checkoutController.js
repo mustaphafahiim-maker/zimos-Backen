@@ -47,7 +47,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, giftCardCode: cardCode, useStoreCredit, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, giftCardCode: cardCode, useStoreCredit, loyaltyPoints, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -71,6 +71,13 @@ const checkout = asyncHandler(async (req, res) => {
   if (giftCardCode) {
     if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery' }], 'Invalid body');
     await require('../giftCards/giftCardService').assertUsable(workspaceId, giftCardCode, null);
+  }
+  // Loyalty points, only a signed-in shopper's, checked now and taken once the order exists; cash on delivery only (modules/loyalty). Off, ignored.
+  let pointsOwner = null;
+  if (loyaltyPoints && storeFeatureOn('loyalty')) {
+    if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'loyaltyPoints', message: 'Points can be used with cash on delivery' }], 'Invalid body');
+    const shopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    pointsOwner = await require('../loyalty/loyaltyService').assertCanSpend(workspace, shopper, loyaltyPoints);
   }
   // Store credit, only a signed-in shopper's, cash on delivery only (modules/storeCredit). Off, ignored.
   let creditOwner = null;
@@ -182,12 +189,14 @@ const checkout = asyncHandler(async (req, res) => {
     const giftCard = giftCardCode ? await require('../giftCards/giftCardService').redeemOnOrder(order, giftCardCode, req) : null;
     // Then the store credit, on what is still due.
     const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
-    if ((giftCard && giftCard.applied) || (credit && credit.applied)) await order.reload();
+    // Then the points.
+    const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
+    if ((giftCard && giftCard.applied) || (credit && credit.applied) || (points && points.applied)) await order.reload();
     if (manualMethod) {
       const manualPayment = await manualPayments.getForShopper(workspaceId, order.id, manualToken.token);
       return res.status(201).json({ order: shopperOrder(order, orderItems), manualPayment, paymentToken: manualToken.token });
     }
-    return res.status(201).json({ order: shopperOrder(order, orderItems), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}) });
+    return res.status(201).json({ order: shopperOrder(order, orderItems), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(

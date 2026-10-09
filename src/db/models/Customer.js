@@ -39,6 +39,9 @@ module.exports = (sequelize, DataTypes) => {
       emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
       // Store credit held at the store, minor units, store currency (migration 681, modules/storeCredit).
       storeCreditAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'store_credit_amount' },
+      // Loyalty points balance and last earn/spend (migration 680, modules/loyalty).
+      loyaltyPoints: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'loyalty_points' },
+      loyaltyActivityAt: { type: DataTypes.DATE, allowNull: true, field: 'loyalty_activity_at' },
     },
     {
       tableName: 'customers',

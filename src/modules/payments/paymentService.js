@@ -15,7 +15,7 @@ const { GatewayRejectedError, GatewayAuthError } = require('./gateways/gatewayEr
 // a development/test fixture only — never a production gateway. `cod` is real:
 // the money is collected by the courier on delivery.
 // Store-held tenders: refunded to the card or the balance, never through a gateway.
-const STORE_TENDERS = ['gift_card', 'store_credit'];
+const STORE_TENDERS = ['gift_card', 'store_credit', 'loyalty'];
 const PROVIDERS = {
   mock: require('./providers/mockProvider'),
   cod: require('./providers/codProvider'),
@@ -23,6 +23,8 @@ const PROVIDERS = {
   gift_card: require('../giftCards/giftCardProvider'),
   // Store credit spent on an order (modules/storeCredit): refunds put it back on the balance.
   store_credit: require('../storeCredit/storeCreditProvider'),
+  // Loyalty points spent on an order (modules/loyalty): refunds give the points back.
+  loyalty: require('../loyalty/loyaltyProvider'),
 };
 
 // env.payments.defaultProvider (PAYMENTS_DEFAULT_PROVIDER) is not read on this
