@@ -62,6 +62,8 @@ module.exports = {
       useStoreCredit: Joi.boolean().optional(),
       // The signed-in shopper's loyalty points to use, with cash on delivery (modules/loyalty).
       loyaltyPoints: Joi.number().integer().min(1).max(100000000).optional(),
+      // A friend's invite code (modules/customerReferrals).
+      referralCode: Joi.string().trim().max(16).optional(),
       // Gift wrap / gift message (modules/giftOptions).
       gift: Joi.object({ wrap: Joi.boolean(), message: Joi.string().trim().max(500).allow(''), hidePrices: Joi.boolean() }).optional(),
       // The autosaved session (POST /checkout-sessions) this checkout came

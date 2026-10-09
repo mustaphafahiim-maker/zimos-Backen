@@ -59,6 +59,8 @@ const TABLES = {
   confirmation_tasks: wipe(STORE),
   credit_notes: wipe(STORE),
   customer_addresses: wipe(STORE),
+  customer_referral_codes: wipe(STORE),
+  customer_referrals: wipe(STORE),
   customer_uploads: wipe(STORE),
   customers: wipe(STORE),
   discount_redemptions: wipe(STORE),

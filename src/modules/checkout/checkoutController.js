@@ -47,7 +47,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, giftCardCode: cardCode, useStoreCredit, loyaltyPoints, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, giftCardCode: cardCode, useStoreCredit, loyaltyPoints, referralCode, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -152,6 +152,12 @@ const checkout = asyncHandler(async (req, res) => {
     const vipShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
     if (vipShopper) ({ items } = await require('../vipTiers').applyAtCheckout(workspace, items, vipShopper, orderBody));
   }
+  // A friend's invite: their offer on a first order, never on the inviter's own phone/email/account (modules/customerReferrals).
+  let referral = null;
+  if (referralCode && storeFeatureOn('customer_referrals')) {
+    const inviteShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    ({ items, referral } = await require('../customerReferrals').applyAtCheckout(workspace, items, referralCode, orderBody, inviteShopper));
+  }
   // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (modules/giftOptions).
   const giftChoice = await require('../giftOptions').prepare(workspace, gift);
   if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
@@ -182,6 +188,7 @@ const checkout = asyncHandler(async (req, res) => {
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
     await require('../giftOptions').recordOnOrder(order, giftChoice);
+    await require('../customerReferrals').recordOnOrder(order, referral);
     await require('../holidayMode').markOrder(workspace, order);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     await afterOrderCompleted(workspaceId, order, context);
@@ -215,6 +222,7 @@ const checkout = asyncHandler(async (req, res) => {
 
   await saveCheckoutAnswers(order, workspace, formFields);
   await require('../giftOptions').recordOnOrder(order, giftChoice);
+  await require('../customerReferrals').recordOnOrder(order, referral);
   await require('../holidayMode').markOrder(workspace, order);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
 
