@@ -1414,6 +1414,8 @@ async function createShipment(workspaceId, orderId, data, req) {
     carrierShipmentService.assertConfirmedOrPaid(order);
     storePickup.assertCourierAllowed(order, data.carrierCode);
     await carrierShipmentService.assertNoActiveShipment(order.id, transaction);
+    // A returned parcel that was restocked: its units are taken again.
+    await require('./returnedStock').retakeForReship(workspaceId, order.id, req.user ? req.user.id : null, transaction);
 
     const shipment = await insertShipment(
       {
@@ -1462,6 +1464,16 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
     }
     if (!extra.cancelMode && carrierShipmentService.TERMINAL_STATUSES.includes(data.status) && shipment.nextPollAt) {
       extra.nextPollAt = null;
+    }
+    // A returned or cancelled shipment set going again is the order sent again: if its
+    // returned parcel was restocked, the units are taken back first, as for a new shipment.
+    if (
+      data.status &&
+      carrierShipmentService.FINISHED_STATUSES.includes(shipment.status) &&
+      !carrierShipmentService.FINISHED_STATUSES.includes(data.status)
+    ) {
+      await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id'], transaction, lock: transaction.LOCK.UPDATE });
+      await require('./returnedStock').retakeForReship(workspaceId, orderId, req.user ? req.user.id : null, transaction);
     }
     // The stamps, fulfillment state and audit row live in shipmentLifecycle,
     // shared with the carrier status updates.

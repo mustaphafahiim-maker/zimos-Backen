@@ -161,6 +161,8 @@ async function moveShipment(workspaceId, orderId, from, to, { carrierCode, couri
       if (!order) throw new NotFoundError('Order');
       carrierShipmentService.assertConfirmedOrPaid(order);
       await carrierShipmentService.assertNoActiveShipment(order.id, transaction);
+      // A returned parcel that was restocked: its units are taken again.
+      await require('./returnedStock').retakeForReship(workspaceId, order.id, req.user.id, transaction);
       const created = await insertShipment(
         {
           workspaceId,
