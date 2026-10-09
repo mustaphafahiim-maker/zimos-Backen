@@ -74,7 +74,10 @@ async function lockTarget(rawUserId, req, transaction, { permission = PLATFORM_P
 }
 
 async function revokeSessions(userId, transaction) {
-  const [revoked] = await db.Session.update({ revokedAt: new Date() }, { where: { userId, revokedAt: null }, transaction });
+  const now = new Date();
+  const [revoked] = await db.Session.update({ revokedAt: now }, { where: { userId, revokedAt: null }, transaction });
+  // A sign-in that passed the password and waits for its second step ends too.
+  await db.LoginChallenge.update({ consumedAt: now }, { where: { userId, consumedAt: null }, transaction });
   return revoked;
 }
 

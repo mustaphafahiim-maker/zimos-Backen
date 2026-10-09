@@ -258,6 +258,24 @@ const env = {
     smsPerIpPerDay: positiveInt('VERIFICATION_SMS_PER_IP_PER_DAY', 5),
   },
 
+  // Two-step sign-in (auth/twoFactorService) and the new-device checks
+  // (auth/newDeviceSignIn). Each exactly "true" to turn on; off, sign-in is
+  // as before. Under NODE_ENV=test they start off; a test sets them.
+  //   twoFactor.enabled  TWO_FACTOR_ENABLED  the security settings' second
+  //                      step (email, WhatsApp or authenticator code, backup
+  //                      codes, remembered browsers, the console's reset)
+  //   newDevice.code     NEW_DEVICE_CODE     a password sign-in from a browser
+  //                      new to the account is asked for an email code
+  //   newDevice.alert    NEW_DEVICE_ALERT    an email when a sign-in finishes
+  //                      on a browser new to the account
+  twoFactor: {
+    enabled: process.env.NODE_ENV !== 'test' && process.env.TWO_FACTOR_ENABLED === 'true',
+  },
+  newDevice: {
+    code: process.env.NODE_ENV !== 'test' && process.env.NEW_DEVICE_CODE === 'true',
+    alert: process.env.NODE_ENV !== 'test' && process.env.NEW_DEVICE_ALERT === 'true',
+  },
+
   // A storefront checkout, shipping quote or coupon preview that names a
   // funnel must name a published funnel of this store that sells those lines
   // (funnels/funnelCheckout.js). Exactly "true" turns it on; off, a funnelId

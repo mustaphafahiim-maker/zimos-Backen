@@ -142,7 +142,8 @@ describe('Google OAuth login', () => {
     expect(await db.Session.count({ where: { userId: before.id, revokedAt: null } })).toBe(1); // the Google one
 
     const audit = await db.AuditLog.findOne({ where: { action: 'user.link.google', entityId: before.id } });
-    expect(audit.metadata).toEqual({ unconfirmedAccount: true, passwordRemoved: true, sessionsRevoked: 1 });
+    // The second step it may have set up goes too (nothing here: 2FA was never on).
+    expect(audit.metadata).toEqual({ unconfirmedAccount: true, passwordRemoved: true, sessionsRevoked: 1, devicesForgotten: 0, challengesClosed: 0, twoFactorReset: false });
 
     // The owner's Google session works.
     expect((await request(app).get('/api/v1/workspaces').set('Authorization', `Bearer ${q.accessToken}`)).status).toBe(200);
@@ -340,5 +341,24 @@ describe('Google sign-in: state and verified email', () => {
     const res = await callback('code=expired');
     expect(res.status).toBe(302);
     expect(query(res.headers.location).error).toBe('GOOGLE_LOGIN_FAILED');
+  });
+});
+
+describe('Google sign-in and two-step sign-in', () => {
+  afterEach(() => {
+    env.twoFactor.enabled = false;
+  });
+
+  it("asks for the account's own second step, through the callback's redirect", async () => {
+    env.twoFactor.enabled = true;
+    const user = await db.User.create({ email: 'twostep@example.com', googleId: 'g-2fa', fullName: 'Two Step', status: 'active', emailVerifiedAt: new Date() });
+    await db.UserTwoFactor.create({ userId: user.id, mode: 'email', enabledAt: new Date() });
+    googleClient.fetchProfile.mockResolvedValue({ googleId: 'g-2fa', email: 'twostep@example.com', emailVerified: true, fullName: 'Two Step' });
+
+    const res = await callback('code=two-step');
+    const u = new URL(res.headers.location, 'http://placeholder');
+    expect(u.searchParams.get('twoFactorRequired')).toBe('true');
+    expect(u.searchParams.get('challengeToken')).toBeTruthy();
+    expect(u.searchParams.get('accessToken')).toBeNull();
   });
 });

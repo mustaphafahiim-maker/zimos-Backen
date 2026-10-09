@@ -17,6 +17,12 @@ router.use(authenticate);
 
 // The couriers' areas map for every store.
 router.use(require('./carrierMapRoutes'));
+// Turning off a person's two-step sign-in after support checked who they are
+// (auth/twoFactorRecovery.js), while TWO_FACTOR_ENABLED is on.
+router.use('/users/:userId/two-factor', (req, res, next) =>
+  require('../../config/env').twoFactor.enabled ? next() : next(new (require('../../core/errors/AppError').AppError)('TWO_FACTOR_UNAVAILABLE', 'Two-step sign-in is not available', 404))
+);
+router.use(require('../auth/twoFactorRecovery').adminRouter);
 // The console's notifications and each admin's notification settings.
 router.use(require('./platformNotificationRoutes'));
 // Merchants' suggestions: list, filter, status and reply (modules/suggestions).

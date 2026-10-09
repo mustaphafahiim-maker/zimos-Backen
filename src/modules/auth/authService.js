@@ -261,6 +261,19 @@ async function login({ identifier, email, password, locale }, req) {
     await user.update({ status: 'active' });
   }
 
+  // Two-step sign-in (twoFactorService.js, TWO_FACTOR_ENABLED) and the new-device
+  // code (newDeviceSignIn.js, NEW_DEVICE_CODE): from a browser that is not
+  // remembered the answer is a challenge, and POST /auth/two-factor/verify
+  // finishes the sign-in through completeLogin. Both off: as before.
+  const newDevice = require('./newDeviceSignIn').needsCode(user, req);
+  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req, { locale, newDevice });
+  if (challenge) return challenge;
+
+  return completeLogin(user, req);
+}
+
+/** The last step of every password sign-in: stamp it, audit it, hand out the tokens. */
+async function completeLogin(user, req) {
   await user.update({ lastLoginAt: new Date() });
   await recordAudit({ actorUserId: user.id, action: 'user.login', entityType: 'User', entityId: user.id, req });
 
@@ -344,11 +357,19 @@ async function loginWithGoogle(code, req) {
           { transaction }
         );
         if (unconfirmed) {
+          const now = new Date();
           const [revoked] = await db.Session.update(
-            { revokedAt: new Date() },
+            { revokedAt: now },
             { where: { userId: byEmail.id, revokedAt: null }, transaction }
           );
-          linkMetadata = { unconfirmedAccount: true, passwordRemoved: true, sessionsRevoked: revoked };
+          // Whatever second step the unconfirmed account had set up goes with its password.
+          const devicesForgotten = await db.TrustedDevice.destroy({ where: { userId: byEmail.id }, transaction });
+          const [challengesClosed] = await db.LoginChallenge.update({ consumedAt: now }, { where: { userId: byEmail.id, consumedAt: null }, transaction });
+          const [twoFactorReset] = await db.UserTwoFactor.update(
+            { mode: 'off', totpSecretSealed: null, pendingSecretSealed: null, enabledAt: null, backupCodes: [], backupCodesCreatedAt: null },
+            { where: { userId: byEmail.id, mode: { [Op.ne]: 'off' } }, transaction }
+          );
+          linkMetadata = { unconfirmedAccount: true, passwordRemoved: true, sessionsRevoked: revoked, devicesForgotten, challengesClosed, twoFactorReset: twoFactorReset > 0 };
         }
       });
       user = byEmail;
@@ -369,6 +390,19 @@ async function loginWithGoogle(code, req) {
   }
 
   assertMaySignIn(user);
+
+  // Two-step sign-in: Google stands in for the password only. The account's
+  // own second step is still asked from a browser it does not remember; the
+  // new-device email code is not, since Google has just proved the address.
+  // A link or a new account is recorded now; the sign-in itself when the code
+  // is verified.
+  const challenge = await require('./twoFactorService').challengeIfNeeded(user, req);
+  if (challenge) {
+    if (action !== 'user.login.google') {
+      await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, metadata: linkMetadata, req });
+    }
+    return challenge;
+  }
 
   await user.update({ lastLoginAt: new Date() });
   await recordAudit({ actorUserId: user.id, action, entityType: 'User', entityId: user.id, metadata: linkMetadata, req });
@@ -573,6 +607,11 @@ async function resetPassword(rawToken, newPassword, req) {
       { revokedAt: now },
       { where: { userId: user.id, revokedAt: null }, transaction }
     );
+    // Two-step sign-in stays on; every browser asks for it again (twoFactorRecovery.js).
+    await db.TrustedDevice.destroy({ where: { userId: user.id }, transaction });
+    // A sign-in that passed the old password and waits for its code ends here, and the
+    // account's wrong second-step codes stop counting, once a day.
+    await require('./twoFactorService').forgiveWrongCodes(user.id, transaction);
     await recordAudit({
       actorUserId: user.id,
       action: 'user.password_reset',
@@ -693,6 +732,9 @@ async function resetPasswordSms(phone, code, newPassword) {
 
   await user.update({ passwordHash: await hashPassword(newPassword) });
   await db.Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
+  await db.TrustedDevice.destroy({ where: { userId: user.id } });
+  // Sign-ins waiting for their second step end; wrong codes stop counting, once a day.
+  await require('./twoFactorService').forgiveWrongCodes(user.id);
   await recordAudit({ actorUserId: user.id, action: 'user.password_reset_sms', entityType: 'User', entityId: user.id });
   return { success: true };
 }
@@ -708,6 +750,7 @@ module.exports = {
   verifyEmail,
   resendVerificationEmail,
   login,
+  completeLogin,
   getGoogleAuthUrl,
   loginWithGoogle,
   refresh,
