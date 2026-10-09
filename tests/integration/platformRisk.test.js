@@ -6,6 +6,7 @@
 
 const { app, request, registerAndActivate, createWorkspace, setupWorkspaceWithProduct, setPlatformRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const { storedOrder } = require('../helpers/storedOrder');
 const env = require('../../src/config/env');
 const { REJECTION_MESSAGE } = require('../../src/modules/fraud/fraudRules');
 const fakePaymob = require('../helpers/fakePaymob');
@@ -276,7 +277,7 @@ describe('platform blocklist — refuses order creation in every store', () => {
     // A different phone in the same stores is untouched.
     const other = await storefrontOrder(a, { phone: '01055550009' });
     expect(other.status).toBe(201);
-    expect(other.body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(other)).riskFlags).toEqual([]);
     expect((await auditRows('order.blocked')).map((r) => r.workspaceId).sort()).toEqual(
       [a.workspace.id, b.workspace.id].sort()
     );
@@ -307,7 +308,7 @@ describe('platform blocklist — refuses order creation in every store', () => {
       shippingAddress: { country: 'EG', city: 'Giza', addressLine: '6 شارع الهرم' },
     });
     expect(clean.status).toBe(201);
-    expect(clean.body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(clean)).riskFlags).toEqual([]);
   });
 
   it("refuses an order a staff member creates from the dashboard, and names them in the audit row", async () => {
@@ -372,7 +373,7 @@ describe('platform blocklist — refuses order creation in every store', () => {
     await db.PlatformBlocklistEntry.update({ expiresAt: new Date(Date.now() - 1000) }, { where: { id: body.entry.id } });
     const afterExpiry = await storefrontOrder(ctx);
     expect(afterExpiry.status).toBe(201);
-    expect(afterExpiry.body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(afterExpiry)).riskFlags).toEqual([]);
 
     // Extending it (the admin edits the expiry) blocks again.
     const extended = await request(app)
@@ -397,10 +398,10 @@ describe('platform blocklist — refuses order creation in every store', () => {
     const ctx = await setupWorkspaceWithProduct({ stock: 5 });
     // Blacklisted in this store only, with the store's rule off: flagged, not refused.
     const first = await storefrontOrder(ctx);
-    await db.Customer.update({ isBlacklisted: true, blacklistReason: 'x' }, { where: { id: first.body.order.customerId } });
+    await db.Customer.update({ isBlacklisted: true, blacklistReason: 'x' }, { where: { id: (await storedOrder(first)).customerId } });
     const flagged = await storefrontOrder(ctx);
     expect(flagged.status).toBe(201);
-    expect(flagged.body.order.riskFlags).toEqual(['blacklisted_customer']);
+    expect((await storedOrder(flagged)).riskFlags).toEqual(['blacklisted_customer']);
 
     await setRules(ctx, { block_blacklisted: true });
     expectRefused(await storefrontOrder(ctx));
@@ -413,7 +414,7 @@ describe('platform blocklist — refuses order creation in every store', () => {
     await setRules(ctx, { block_blacklisted: true });
     const res = await storefrontOrder(ctx);
     expect(res.status).toBe(201);
-    expect(res.body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(res)).riskFlags).toEqual([]);
   });
 });
 

@@ -15,6 +15,8 @@ const { resolveOrderBumpItem } = require('./orderBump');
 const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
 const productTests = require('../catalog/productTests');
 const logger = require('../../core/utils/logger');
+// The checkout answer leaves out what the store knows about the phone or visitor (risk, IP, cost).
+const { shopperOrder } = require('./shopperOrder');
 
 /** Credits the order to the shopper's variant in its products' A/B tests; never fails the checkout. */
 async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
@@ -147,9 +149,9 @@ const checkout = asyncHandler(async (req, res) => {
     await afterOrderCompleted(workspaceId, order, context);
     if (manualMethod) {
       const manualPayment = await manualPayments.getForShopper(workspaceId, order.id, manualToken.token);
-      return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, manualPayment, paymentToken: manualToken.token });
+      return res.status(201).json({ order: shopperOrder(order, orderItems), manualPayment, paymentToken: manualToken.token });
     }
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems } });
+    return res.status(201).json({ order: shopperOrder(order, orderItems) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -176,7 +178,7 @@ const checkout = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({
-    order: { ...order.toJSON(), items: orderItems },
+    order: shopperOrder(order, orderItems),
     payment: {
       id: attempt.id,
       status: attempt.status,

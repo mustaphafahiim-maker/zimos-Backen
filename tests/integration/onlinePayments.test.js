@@ -5,6 +5,7 @@
 
 const { app, request, setupWorkspaceWithProduct, addMemberWithRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const { storedOrder } = require('../helpers/storedOrder');
 const env = require('../../src/config/env');
 const fake = require('../helpers/fakePaymob');
 
@@ -641,7 +642,7 @@ describe('the standing rules', () => {
 
     const online = await place('card');
     expect(online.status).toBe(201);
-    expect(online.body.order.riskFlags).toContain('duplicate_order');
+    expect((await storedOrder(online)).riskFlags).toContain('duplicate_order');
 
     // ...and switching that order to COD is refused like a COD order would be.
     const sw = await shopper(ctx, online.body.order.id, online.body.paymentToken).cod();

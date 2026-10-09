@@ -13,6 +13,7 @@ const {
   setupWorkspaceWithProduct,
 } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const { storedOrder } = require('../helpers/storedOrder');
 const { REJECTION_MESSAGE } = require('../../src/modules/fraud/fraudRules');
 const { normalizePhone } = require('../../src/core/utils/phone');
 
@@ -73,7 +74,7 @@ describe('fraud rules — unset', () => {
 
     for (const res of [first, second, third]) {
       expect(res.status).toBe(201);
-      expect(res.body.order.riskFlags).toEqual([]);
+      expect((await storedOrder(res)).riskFlags).toEqual([]);
     }
   });
 });
@@ -84,11 +85,11 @@ describe('fraud rules — duplicate_order', () => {
     await setRules(ctx, { duplicate_window_minutes: 60 });
 
     const first = await storefrontOrder(ctx.workspace.id, ctx.variant.id);
-    expect(first.body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(first)).riskFlags).toEqual([]);
 
     const repeat = await storefrontOrder(ctx.workspace.id, ctx.variant.id);
     expect(repeat.status).toBe(201);
-    expect(repeat.body.order.riskFlags).toEqual(['duplicate_order']);
+    expect((await storedOrder(repeat)).riskFlags).toEqual(['duplicate_order']);
 
     // Flagged orders still enter the COD confirmation queue.
     expect(await db.ConfirmationTask.count({ where: { orderId: repeat.body.order.id } })).toBe(1);
@@ -100,12 +101,12 @@ describe('fraud rules — duplicate_order', () => {
     await setRules(ctx, { duplicate_window_minutes: 30 });
 
     const first = await storefrontOrder(ctx.workspace.id, ctx.variant.id);
-    expect((await storefrontOrder(ctx.workspace.id, other.id)).body.order.riskFlags).toEqual([]);
-    expect((await storefrontOrder(ctx.workspace.id, ctx.variant.id, { phone: '01077770002' })).body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(await storefrontOrder(ctx.workspace.id, other.id))).riskFlags).toEqual([]);
+    expect((await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id, { phone: '01077770002' }))).riskFlags).toEqual([]);
 
     // Cancelled: the earlier order no longer counts.
     await db.Order.update({ cancelledAt: new Date() }, { where: { workspaceId: ctx.workspace.id } });
-    expect((await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id))).riskFlags).toEqual([]);
 
     // Outside the window: age every order past 30 minutes.
     await db.sequelize.query(
@@ -113,7 +114,7 @@ describe('fraud rules — duplicate_order', () => {
       { bind: { ws: ctx.workspace.id } }
     );
     expect(first.status).toBe(201);
-    expect((await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id))).riskFlags).toEqual([]);
   });
 
   it("refuses the repeat in 'block' mode: 422, generic message, nothing reserved, audited", async () => {
@@ -160,11 +161,11 @@ describe('fraud rules — phone_daily_limit', () => {
     const ctx = await setupWorkspaceWithProduct({ stock: 20 });
     await setRules(ctx, { max_orders_per_phone_per_day: 2 });
 
-    expect((await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order.riskFlags).toEqual([]);
-    expect((await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id))).riskFlags).toEqual([]);
+    expect((await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id))).riskFlags).toEqual([]);
     const third = await storefrontOrder(ctx.workspace.id, ctx.variant.id);
     expect(third.status).toBe(201);
-    expect(third.body.order.riskFlags).toEqual(['phone_daily_limit']);
+    expect((await storedOrder(third)).riskFlags).toEqual(['phone_daily_limit']);
   });
 
   it("refuses it in 'block' mode", async () => {
@@ -189,14 +190,14 @@ describe('fraud rules — high_rejection_customer', () => {
     const ctx = await setupWorkspaceWithProduct({ stock: 20 });
     await setRules(ctx, { high_rejection_threshold: 3 });
 
-    expect((await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id))).riskFlags).toEqual([]);
     const customer = await customerByPhone(ctx.workspace.id);
     await customer.update({ totalRejectedOrders: 2 });
-    expect((await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order.riskFlags).toEqual([]);
+    expect((await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id))).riskFlags).toEqual([]);
 
     await customer.update({ totalRejectedOrders: 3 });
     const flagged = await storefrontOrder(ctx.workspace.id, ctx.variant.id);
-    expect(flagged.body.order.riskFlags).toEqual(['high_rejection_customer']);
+    expect((await storedOrder(flagged)).riskFlags).toEqual(['high_rejection_customer']);
 
     await setRules(ctx, { action: 'block' });
     const reservedBefore = await reserved(ctx.variant.id);
@@ -219,7 +220,7 @@ describe('fraud rules — blacklisted customers', () => {
 
     const res = await storefrontOrder(ctx.workspace.id, ctx.variant.id);
     expect(res.status).toBe(201);
-    expect(res.body.order.riskFlags).toEqual(['blacklisted_customer', 'duplicate_order']);
+    expect((await storedOrder(res)).riskFlags).toEqual(['blacklisted_customer', 'duplicate_order']);
   });
 
   it("block_blacklisted refuses a blacklisted phone even with action 'flag'", async () => {
@@ -528,7 +529,7 @@ describe('POST /fraud/flagged-orders/:orderId/approve', () => {
     const ctx = await setupWorkspaceWithProduct({ stock: 20 });
     await setRules(ctx, { duplicate_window_minutes: 60, max_orders_per_phone_per_day: 1 });
     await storefrontOrder(ctx.workspace.id, ctx.variant.id);
-    const order = (await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order;
+    const order = await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id));
     expect(order.riskFlags).toEqual(['duplicate_order', 'phone_daily_limit']);
     return { ctx, order };
   }
@@ -616,13 +617,13 @@ describe('/fraud/blocklist', () => {
 
     // The next storefront order from that phone lands on the blocked customer.
     const order = await storefrontOrder(ctx.workspace.id, ctx.variant.id, { phone: '01005550101' });
-    expect(order.body.order.customerId).toBe(customer.id);
-    expect(order.body.order.riskFlags).toEqual(['blacklisted_customer']);
+    expect((await storedOrder(order)).customerId).toBe(customer.id);
+    expect((await storedOrder(order)).riskFlags).toEqual(['blacklisted_customer']);
   });
 
   it('blocks an existing customer without creating another', async () => {
     const ctx = await setupWorkspaceWithProduct();
-    const order = (await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order;
+    const order = await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id));
 
     const res = await block(ctx, { phone: PHONE, reason: 'Fake address' });
     expect(res.status).toBe(201);
@@ -687,7 +688,7 @@ describe('/fraud/blocklist', () => {
 
   it('the existing PATCH blacklist sets blacklisted_at too', async () => {
     const ctx = await setupWorkspaceWithProduct();
-    const order = (await storefrontOrder(ctx.workspace.id, ctx.variant.id)).body.order;
+    const order = await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id));
 
     const res = await request(app)
       .patch(`/api/v1/workspaces/${ctx.workspace.id}/customers/${order.customerId}/blacklist`)
