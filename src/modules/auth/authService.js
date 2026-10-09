@@ -33,9 +33,9 @@ const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const PASSWORD_RESET_LIMITS = Object.freeze({ perHour: 3, perDay: 10 });
 
 function issueTokenPair(user, req) {
-  const accessToken = signAccessToken({ sub: user.id });
   return createSession(user, req).then(({ raw, session }) => ({
-    accessToken,
+    // The access token names its session (`sid`): ending the session ends it too (core/security/sessionGate).
+    accessToken: signAccessToken({ sub: user.id, sid: session.id }),
     refreshToken: raw,
     sessionId: session.id,
     expiresAt: session.expiresAt,
@@ -415,7 +415,7 @@ async function refresh(rawRefreshToken, req) {
   const { raw, session: newSession } = await createSession(user, req);
   await session.update({ revokedAt: new Date(), rotatedToSessionId: newSession.id });
 
-  const accessToken = signAccessToken({ sub: user.id });
+  const accessToken = signAccessToken({ sub: user.id, sid: newSession.id });
   return { accessToken, refreshToken: raw, sessionId: newSession.id, expiresAt: newSession.expiresAt };
 }
 

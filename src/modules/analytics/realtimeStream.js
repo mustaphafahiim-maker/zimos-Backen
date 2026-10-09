@@ -7,6 +7,7 @@ const asyncHandler = require('express-async-handler');
 const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const env = require('../../config/env');
+const sessionGate = require('../../core/security/sessionGate');
 const validate = require('../../core/middleware/validate');
 const { AuthenticationError } = require('../../core/errors/AppError');
 const { PERMISSIONS } = require('../../core/security/permissions');
@@ -211,6 +212,9 @@ streamRouter.get(
     const permissions = membership && membership.role ? membership.role.permissions || [] : [];
     const allowed = permissions.includes('*') || permissions.includes(PERMISSIONS.ANALYTICS_VIEW);
     if (!allowed) throw refused();
+    // The stream ends with the session it was opened under (core/security/sessionGate.js).
+    if (!(await sessionGate.isActive(ticket.sid))) throw refused();
+    sessionGate.closeWhenEnded(req, res, ticket.sid);
     await stream(ticket.workspaceId, req.query.funnelId || null, req, res);
   })
 );
