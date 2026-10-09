@@ -177,11 +177,11 @@ async function assertReshipStock(workspaceId, orderId, transaction) {
   for (const [variantId, quantity] of await orderStock.dueToReserve(workspaceId, orderId, transaction)) {
     const variant = await db.ProductVariant.findOne({
       where: { id: variantId, workspaceId },
-      attributes: ['id', 'stockOnHand', 'reservedStock', 'allowOverselling'],
+      attributes: ['id', 'productId', 'stockOnHand', 'reservedStock', 'allowOverselling'],
       transaction,
     });
     const available = variant.stockOnHand - variant.reservedStock;
-    if (variant.allowOverselling || available >= quantity) continue;
+    if (variant.allowOverselling || available >= quantity || (await require('../preorders').allowsPreorder(variant, quantity, transaction))) continue;
     throw new InsufficientStockError(`Insufficient stock for variant ${variantId}: requested ${quantity}, available ${available}`);
   }
 }

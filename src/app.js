@@ -236,6 +236,7 @@ v1.use('/workspaces/:workspaceId/delivery-zones', require('./modules/shipping/de
 v1.use('/workspaces/:workspaceId/product-options/:productId', require('./modules/catalog/menuOptionsRoutes'));
 // A store's suggestions to the platform (Help → Suggest a feature).
 v1.use('/workspaces/:workspaceId/suggestions', require('./modules/suggestions/suggestionRoutes'));
+v1.use('/workspaces/:workspaceId/preorders', require('./modules/preorders').router);
 v1.use('/workspaces/:workspaceId/stock-alerts', require('./modules/stockAlerts').staff);
 v1.use('/workspaces/:workspaceId/product-questions', require('./modules/productQuestions').staff);
 v1.use('/workspaces/:workspaceId/size-charts', require('./modules/sizeCharts').staff);
