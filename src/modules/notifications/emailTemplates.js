@@ -264,10 +264,13 @@ ${codeHtml}
     const store = escapeHtml(data.storeName || '');
     // Plain text in, safe HTML out: escaped, links made clickable, blank lines as paragraphs.
     const linkify = (text) => text.replace(/(https?:\/\/[^\s<]+)/g, (url) => `<a href="${url}" style="color:${color}">${url}</a>`);
-    const paragraphs = String(data.body || '')
-      .split(/\n{2,}/)
-      .map((p) => `<p style="margin:0 0 14px">${linkify(escapeHtml(p)).replace(/\n/g, '<br />')}</p>`)
-      .join('\n');
+    // A block-designed email arrives already rendered and escaped (emailBlocks.js renderBlocks).
+    const paragraphs = data.bodyHtml
+      ? String(data.bodyHtml)
+      : String(data.body || '')
+          .split(/\n{2,}/)
+          .map((p) => `<p style="margin:0 0 14px">${linkify(escapeHtml(p)).replace(/\n/g, '<br />')}</p>`)
+          .join('\n');
     const logo = data.logoUrl && /^https?:\/\//.test(data.logoUrl) ? `<img src="${escapeHtml(data.logoUrl)}" alt="${store}" style="max-height:48px;max-width:180px" />` : `<strong style="font-size:18px">${store}</strong>`;
     // A marketing email (the abandoned cart) ends with its unsubscribe link (marketingUnsubscribe.js).
     const unsubscribe = data.unsubscribeUrl && /^https?:\/\//.test(data.unsubscribeUrl) ? String(data.unsubscribeUrl) : null;
@@ -280,7 +283,7 @@ ${codeHtml}
         `<div style="border-top:4px solid ${color};padding-top:18px;margin-bottom:18px">${logo}</div>
 ${paragraphs}
 <p style="color:#6b7280;margin:18px 0 0">${store}</p>${unsubscribeHtml}`,
-        [data.body, data.storeName, unsubscribe && `إلغاء الاشتراك من الرسائل التسويقية: ${unsubscribe}`].filter(Boolean).join('\n\n'),
+        [data.bodyText || data.body, data.storeName, unsubscribe && `إلغاء الاشتراك من الرسائل التسويقية: ${unsubscribe}`].filter(Boolean).join('\n\n'),
         { dir: 'rtl', arabicFooter: true }
       ),
     };

@@ -81,6 +81,19 @@ const SAMPLE_VARS = Object.freeze({
   payment_link: 'https://example.com/pay/ORD-1042',
 });
 
+// The order table block's sample lines (emailBlocks.js), matching SAMPLE_VARS.
+const SAMPLE_LINES = Object.freeze({
+  lines: [
+    { name: 'قميص كتان أزرق', quantity: 1, total: '600 EGP' },
+    { name: 'حزام جلد', quantity: 1, total: '200 EGP' },
+  ],
+  totals: { shipping: '50 EGP', total: '850 EGP' },
+});
+
+// The block designer (emailBlocks.js); off, blocks are neither stored, shown nor used.
+const blocksOn = () => require('../../core/middleware/storeFeatures').storeFeatureOn('email_blocks');
+const blocksOf = (row) => (blocksOn() && row && Array.isArray(row.blocks) && row.blocks.length ? row.blocks : null);
+
 function view(key, row) {
   const base = TEMPLATES[key];
   return {
@@ -89,7 +102,9 @@ function view(key, row) {
     isEnabled: Boolean(row && row.isEnabled),
     subject: (row && row.subject) || base.subject,
     body: (row && row.body) || base.body,
-    isCustomised: Boolean(row && (row.subject || row.body)),
+    isCustomised: Boolean(row && (row.subject || row.body || blocksOf(row))),
+    // The block designer's blocks (emailBlocks.js); null = the plain body is used.
+    ...(blocksOn() ? { blocks: blocksOf(row) } : {}),
     defaults: { subject: base.subject, body: base.body },
     updatedAt: row ? row.updatedAt : null,
   };
@@ -116,6 +131,7 @@ async function update(workspaceId, key, patch, req) {
     if (patch.isEnabled !== undefined) next.isEnabled = patch.isEnabled;
     if (patch.subject !== undefined) next.subject = patch.subject && patch.subject !== base.subject ? patch.subject : null;
     if (patch.body !== undefined) next.body = patch.body && patch.body !== base.body ? patch.body : null;
+    if (patch.blocks !== undefined && blocksOn()) next.blocks = patch.blocks && patch.blocks.length ? patch.blocks : null;
     await row.update(next, { transaction });
     await recordAudit({
       workspaceId,
@@ -138,30 +154,19 @@ async function brandOf(workspaceId) {
   return { storeName: workspace ? workspace.name : '', logoUrl: workspace ? workspace.logoUrl : null, color };
 }
 
-/** Subject + branded HTML + text for one template and one set of values. */
-function compose({ subject, body }, vars, brand) {
-  const { render } = context();
-  return emailTemplates.render('order_email', {
-    subject: render(subject, vars).slice(0, 200),
-    body: render(body, vars).slice(0, 10000),
-    storeName: brand.storeName,
-    logoUrl: brand.logoUrl,
-    color: brand.color,
-  });
-}
-
 /** What the email will look like, with sample values. `draft` previews unsaved text. */
 async function preview(workspaceId, key, draft = {}) {
   assertKey(key);
   const row = await db.OrderEmailTemplate.findOne({ where: { workspaceId, key } });
   const current = view(key, row);
   const brand = await brandOf(workspaceId);
-  const rendered = compose({ subject: draft.subject || current.subject, body: draft.body || current.body }, { ...SAMPLE_VARS, store_name: brand.storeName }, brand);
+  const blocks = draft.blocks !== undefined ? draft.blocks : current.blocks;
+  const rendered = emailTemplates.render('order_email', composeData({ subject: draft.subject || current.subject, body: draft.body || current.body, blocks }, { ...SAMPLE_VARS, store_name: brand.storeName }, brand, SAMPLE_LINES));
   return { subject: rendered.subject, html: rendered.html, text: rendered.text };
 }
 
 /** Sends the template with sample values to one address (the teammate's own by default). */
-async function sendTest(workspaceId, key, { to, subject, body } = {}, req) {
+async function sendTest(workspaceId, key, { to, subject, body, blocks } = {}, req) {
   assertKey(key);
   const recipient = to || (await db.User.findByPk(req.user.id, { attributes: ['email'] })).email;
   if (!recipient) throw new ValidationError([{ field: 'to', message: 'An email address is required' }], 'Invalid body');
@@ -173,7 +178,7 @@ async function sendTest(workspaceId, key, { to, subject, body } = {}, req) {
     template: 'order_email',
     workspaceId,
     data: {
-      ...composeData({ subject: subject || current.subject, body: body || current.body }, { ...SAMPLE_VARS, store_name: brand.storeName }, brand),
+      ...composeData({ subject: subject || current.subject, body: body || current.body, blocks: blocks !== undefined ? blocks : current.blocks }, { ...SAMPLE_VARS, store_name: brand.storeName }, brand, SAMPLE_LINES),
       // The store's sender name and Reply-To (orderEmailSender.js).
       ...(await require('./orderEmailSender').senderFor(workspaceId)),
     },
@@ -182,9 +187,31 @@ async function sendTest(workspaceId, key, { to, subject, body } = {}, req) {
   return { ok: result.status === 'sent', error: result.error || null, to: recipient };
 }
 
-function composeData({ subject, body }, vars, brand) {
+function composeData({ subject, body, blocks }, vars, brand, table = null) {
   const { render } = context();
-  return { subject: render(subject, vars).slice(0, 200), body: render(body, vars).slice(0, 10000), storeName: brand.storeName, logoUrl: brand.logoUrl, color: brand.color };
+  const data = { subject: render(subject, vars).slice(0, 200), body: render(body, vars).slice(0, 10000), storeName: brand.storeName, logoUrl: brand.logoUrl, color: brand.color };
+  if (!blocksOn() || !blocks || !blocks.length) return data;
+  // The block designer: rendered and escaped here, from the JSON (emailBlocks.js).
+  const out = require('./emailBlocks').renderBlocks(blocks, { fill: (t) => render(String(t || ''), vars), color: brand.color || undefined, ...(table || {}) });
+  return { ...data, bodyHtml: out.html, bodyText: out.text };
+}
+
+/** The order's (or cart's) lines for the order table block. */
+function tableOf(subject) {
+  const { formatAmount } = context();
+  if (subject.kind === 'order' && subject.order) {
+    const o = subject.order;
+    return {
+      lines: (o.items || []).map((i) => ({ name: i.productNameSnapshot, quantity: i.quantity, total: formatAmount(i.lineTotalAmount, o.currency) })),
+      totals: { shipping: Number(o.shippingAmount) ? formatAmount(o.shippingAmount, o.currency) : null, total: formatAmount(o.totalAmount, o.currency) },
+    };
+  }
+  if (subject.kind === 'checkout' && subject.session) {
+    const s = subject.session;
+    const items = Array.isArray(s.items) ? s.items : [];
+    return { lines: items.map((i) => ({ name: i.productName || '', quantity: i.quantity, total: formatAmount(i.lineTotalAmount, s.currency) })), totals: { total: formatAmount(s.subtotalAmount, s.currency) } };
+  }
+  return null;
 }
 
 /**
@@ -230,7 +257,7 @@ async function handleEvent(workspaceId, eventType, payload = {}) {
         workspaceId,
         // Listed on the order's timeline (orderTimeline.js).
         orderId: payload.orderId || null,
-        data: { ...composeData(current, subject.vars, brand), ...(await require('./orderEmailSender').senderFor(workspaceId)), unsubscribeUrl },
+        data: { ...composeData(current, subject.vars, brand, tableOf(subject)), ...(await require('./orderEmailSender').senderFor(workspaceId)), unsubscribeUrl },
       });
       results.push({ key: row.key, status: sent.status });
     }
