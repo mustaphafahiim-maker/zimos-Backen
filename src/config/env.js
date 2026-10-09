@@ -140,6 +140,18 @@ function positiveInt(name, fallback) {
   return Number(value);
 }
 
+// A whole number of 0 or more from the environment, for a limit that is off
+// until it is set. Unset or blank is 0 (off); anything else refuses to start,
+// naming the variable. Under NODE_ENV=test it is always 0: a test that needs
+// the limit sets it on the env object at runtime.
+function limitOrOff(name) {
+  const raw = process.env[name];
+  if (process.env.NODE_ENV === 'test' || isBlank(raw)) return 0;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value)) throw new Error(`${name} must be a whole number (0 or unset is off)`);
+  return Number(value);
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
@@ -244,6 +256,17 @@ const env = {
     ipPerHour: positiveInt('VERIFICATION_CODES_PER_IP_PER_HOUR', 20),
     ipPerDay: positiveInt('VERIFICATION_CODES_PER_IP_PER_DAY', 50),
     smsPerIpPerDay: positiveInt('VERIFICATION_SMS_PER_IP_PER_DAY', 5),
+  },
+
+  // Checkout codes (risk/checkoutOtp) one client may have sent, whatever the
+  // phone or the store, counted in otp_codes.request_ip so the budget holds
+  // across API instances. Past it the checkout, the COD switch and Resend
+  // answer 429 OTP_RATE_LIMITED and nothing is sent. 0 or unset is off (no
+  // per-client budget, as before): shoppers behind one carrier-grade NAT
+  // share an address, so pick a value with the traffic in mind.
+  checkoutOtp: {
+    ipPerMinute: limitOrOff('CHECKOUT_OTP_IP_PER_MINUTE'),
+    ipPerHour: limitOrOff('CHECKOUT_OTP_IP_PER_HOUR'),
   },
 
   // Public endpoints that stay closed until their identity checks are
