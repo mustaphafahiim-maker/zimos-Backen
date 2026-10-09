@@ -46,7 +46,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -126,6 +126,9 @@ const checkout = asyncHandler(async (req, res) => {
   items = await productTests.pinPrices(workspaceId, items, testVisitor);
   // Each product's min / max per order and max per customer (catalog/purchaseLimits.js).
   await require('../catalog/purchaseLimits').assertWithin(workspaceId, items, orderBody.contact);
+  // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (modules/giftOptions).
+  const giftChoice = await require('../giftOptions').prepare(workspace, gift);
+  if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
 
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
@@ -152,6 +155,7 @@ const checkout = asyncHandler(async (req, res) => {
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
+    await require('../giftOptions').recordOnOrder(order, giftChoice);
     await require('../holidayMode').markOrder(workspace, order);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     await afterOrderCompleted(workspaceId, order, context);
@@ -177,6 +181,7 @@ const checkout = asyncHandler(async (req, res) => {
   );
 
   await saveCheckoutAnswers(order, workspace, formFields);
+  await require('../giftOptions').recordOnOrder(order, giftChoice);
   await require('../holidayMode').markOrder(workspace, order);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
 

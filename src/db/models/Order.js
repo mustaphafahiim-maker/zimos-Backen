@@ -94,6 +94,8 @@ module.exports = (sequelize, DataTypes) => {
       // The shipping card's saved draft (migration 194, orders/shipmentDraft.js); cleared when a shipment is created.
       shipmentDraft: { type: DataTypes.JSONB, allowNull: true, field: 'shipment_draft' },
       tags: { type: DataTypes.ARRAY(DataTypes.TEXT), allowNull: false, defaultValue: [] },
+      // { wrapped, message, hidePrices } — a gift order (migration 647, modules/giftOptions).
+      giftOptions: { type: DataTypes.JSONB, allowNull: true, field: 'gift_options' },
       isSeen: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_seen' },
       seenAt: { type: DataTypes.DATE, allowNull: true, field: 'seen_at' },
       isTest: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'is_test' },
