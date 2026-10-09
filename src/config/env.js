@@ -258,6 +258,14 @@ const env = {
     smsPerIpPerDay: positiveInt('VERIFICATION_SMS_PER_IP_PER_DAY', 5),
   },
 
+  // A storefront checkout, shipping quote or coupon preview that names a
+  // funnel must name a published funnel of this store that sells those lines
+  // (funnels/funnelCheckout.js). Exactly "true" turns it on; off, a funnelId
+  // is taken as before. Under NODE_ENV=test it starts off; a test sets it.
+  funnelCheckout: {
+    guard: process.env.NODE_ENV !== 'test' && process.env.FUNNEL_CHECKOUT_GUARD === 'true',
+  },
+
   // Checkout codes (risk/checkoutOtp) one client may have sent, whatever the
   // phone or the store, counted in otp_codes.request_ip so the budget holds
   // across API instances. Past it the checkout, the COD switch and Resend
