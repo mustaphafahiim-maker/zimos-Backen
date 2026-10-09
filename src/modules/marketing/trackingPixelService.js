@@ -195,13 +195,12 @@ async function remove(workspaceId, pixelId, req) {
 
 /** What the storefront may know: the public IDs and where each applies. */
 async function publicPixels(workspaceId) {
-  // The store took the Tracking tools app off: no pixel loads in the shop.
   const pixels = await db.TrackingPixel.findAll({
     where: { workspaceId, isActive: true },
     attributes: ['id', 'platform', 'pixelId', 'scopeType', 'scopeIds', 'config'],
     order: [['createdAt', 'ASC']],
   });
-  return pixels.filter((p) => clarityOn || p.platform !== 'clarity').map((p) => ({
+  return pixels.map((p) => ({
     platform: p.platform,
     pixelId: p.pixelId,
     scope: { type: p.scopeType, ids: p.scopeIds || [] },
