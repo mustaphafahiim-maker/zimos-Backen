@@ -48,6 +48,8 @@ const TABLES = {
   billing_gateway_events: wipe('payment gateway webhooks for store invoices'),
   billing_invoices: wipe('subscription invoices of stores'),
   billing_payment_attempts: wipe('online payments of store invoices'),
+  blog_categories: wipe(STORE),
+  blog_posts: wipe(STORE),
   carrier_accounts: wipe("a store's courier connection; the courier list itself is in code and the environment"),
   cart_items: wipe('store carts (each line)'),
   carts: wipe(STORE),
