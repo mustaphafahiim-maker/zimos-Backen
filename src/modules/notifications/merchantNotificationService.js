@@ -52,6 +52,8 @@ const TYPES = Object.freeze({
   'wallet.credit': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
   // The subscription ended and the balance now pays per order (billing/walletFallbackService).
   'wallet.fallback': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
+  // A shopper asked a question on a product (modules/productQuestions).
+  'product.question': { permission: PERMISSIONS.PRODUCTS_MANAGE, defaults: { inApp: true, email: false } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 

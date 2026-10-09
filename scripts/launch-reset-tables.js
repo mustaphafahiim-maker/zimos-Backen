@@ -96,6 +96,7 @@ const TABLES = {
   platform_notification_reads: wipe('which console notification each admin has read'),
   platform_notifications: wipe('console notifications about stores and accounts from before launch'),
   product_collections: wipe('store products'),
+  product_questions: wipe(STORE),
   product_variants: wipe(STORE),
   products: wipe(STORE),
   referral_codes: wipe('referral codes of agents (accounts that go; agent_id is NOT NULL, ON DELETE RESTRICT) (decided: wipe)'),

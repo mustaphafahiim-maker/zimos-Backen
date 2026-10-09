@@ -446,6 +446,8 @@ const manualProofLimiter = createIpMinuteLimiter('manual-payment-proof', MANUAL_
 // The checkout code step (risk/checkoutOtp.js): verify and resend share one budget per IP a minute.
 const CHECKOUT_OTP_PER_MINUTE = 10;
 const checkoutOtpLimiter = createIpMinuteLimiter('checkout-otp', CHECKOUT_OTP_PER_MINUTE, { skip });
+// A shopper's question on a product (modules/productQuestions): it lands in the merchant's inbox.
+const productQuestionLimiter = createIpMinuteLimiter('store-product-question', 5, { skip });
 
 /*
  * Password reset requests, per IP per hour, keyed on the IP alone (unlike
@@ -596,6 +598,7 @@ module.exports = {
   manualProofLimiter,
   CHECKOUT_OTP_PER_MINUTE,
   checkoutOtpLimiter,
+  productQuestionLimiter,
   usernameCheckLimiter,
   createUsernameCheckLimiter,
   publicPlansLimiter,
