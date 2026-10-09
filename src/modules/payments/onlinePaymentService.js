@@ -457,6 +457,22 @@ async function inquireAttempt(attempt) {
 }
 
 /**
+ * Marks an order's open attempts cancelled (only rows still open when the
+ * update runs). `gatewayOnly` leaves a manual receipt waiting for review
+ * (provider `manual`) as it is. A payment that still lands on a cancelled
+ * attempt is recorded and flagged paid_after_cancel, as before.
+ */
+async function cancelOpenAttempts(order, transaction, { gatewayOnly = false } = {}) {
+  const where = {
+    orderId: order.id,
+    status: OPEN_ATTEMPT,
+    ...(gatewayOnly ? { providerCode: gateways.listAdapters().map((a) => a.code) } : {}),
+  };
+  const [count] = await db.Payment.update({ status: 'cancelled' }, { where, transaction });
+  return count;
+}
+
+/**
  * Inquires every attempt of an order that could still turn into a payment.
  * `throttle` skips attempts asked about in the last few seconds (the
  * shopper's status polling). Returns { unknown } — how many could not be
@@ -829,6 +845,7 @@ module.exports = {
   recordPaymentTransaction,
   inquireAttempt,
   inquireOpenAttempts,
+  cancelOpenAttempts,
   expireOrder,
   expireOverdueHolding,
   getShopperStatus,

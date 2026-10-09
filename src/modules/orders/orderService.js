@@ -1208,6 +1208,14 @@ async function riskCounts(workspaceId, { q, from, to, riskLevel, ...filters }) {
  * reason. Refused once a parcel has shipped — use a return after that.
  */
 async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false, notifyCustomer }, req) {
+  // The gateway is asked about an open card or wallet attempt first (best effort, as expiry does), so a payment
+  // that already went through is recorded before the cancel closes the attempt.
+  const known = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'cancelledAt'] });
+  if (known && !known.cancelledAt) {
+    await require('../payments/onlinePaymentService')
+      .inquireOpenAttempts(known.id)
+      .catch((err) => logger.warn('[orders] payment inquiry before cancel failed', { orderId, reason: err.message }));
+  }
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({
       where: { id: orderId, workspaceId },
@@ -1230,6 +1238,9 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       { workspaceId, orderId: order.id, referenceType: 'order_cancelled', actorUserId: req.user.id },
       transaction
     );
+    // An order waiting for its card or wallet payment: its open gateway attempts end
+    // here too (a manual transfer receipt waiting for review is left as it is).
+    await require('../payments/onlinePaymentService').cancelOpenAttempts(order, transaction, { gatewayOnly: true });
 
     // A shipment booked with a connected courier is cancelled there first. If
     // the courier refuses, this throws and the whole cancellation rolls back:
