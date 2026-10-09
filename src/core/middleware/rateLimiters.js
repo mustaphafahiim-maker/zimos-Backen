@@ -2,7 +2,8 @@
 
 const crypto = require('crypto');
 const net = require('net');
-const rateLimit = require('express-rate-limit');
+// Counters are shared through Redis when RATE_LIMIT_REDIS and REDIS_URL are set (rateLimitStore.js).
+const rateLimit = require('./rateLimitStore').withSharedStore(require('express-rate-limit'));
 const { ipKeyGenerator } = require('express-rate-limit');
 const env = require('../../config/env');
 const { RateLimitError } = require('../errors/AppError');

@@ -207,6 +207,9 @@ const env = {
   },
 
   rateLimit: {
+    // Counters shared through Redis (core/middleware/rateLimitStore.js): only with
+    // RATE_LIMIT_REDIS=true and REDIS_URL set; off = counted in each process's memory.
+    sharedStoreUrl: process.env.NODE_ENV !== 'test' && process.env.RATE_LIMIT_REDIS === 'true' ? (process.env.REDIS_URL || '').trim() || null : null,
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     authMax: parseInt(process.env.AUTH_RATE_LIMIT_MAX || '10', 10),
