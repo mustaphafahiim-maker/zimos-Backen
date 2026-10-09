@@ -4,6 +4,7 @@ const { QueryTypes } = require('sequelize');
 const db = require('../../db/models');
 const logger = require('../../core/utils/logger');
 const { ValidationError } = require('../../core/errors/AppError');
+const { PLATFORM_PERMISSIONS: P, hasPlatformPermission } = require('../../core/security/platformPermissions');
 
 /**
  * The console's notifications (migration 206): one row per event for every
@@ -15,6 +16,12 @@ const { ValidationError } = require('../../core/errors/AppError');
  * end within 7 days or have ended. Writing one never fails or slows the
  * change it reports: it runs in a savepoint of the caller's transaction, and
  * any error is logged and swallowed.
+ *
+ * Who sees what: every type belongs to the console permission that opens
+ * what it is about (TYPE_PERMISSION), so an admin is only told about what
+ * they could look at — a support ticket needs support.view, a payment proof
+ * payments.record. Types an admin cannot see are left out of their list, their
+ * unread count, "mark all read" and their preferences.
  *
  * Preferences: per type, shown in the console (default on) and by email
  * (default off). No email is sent yet; the email choice is only kept.
@@ -36,6 +43,26 @@ const TYPES = [
   // A store whose subscription ended moved to pay per order (billing/walletFallbackService, migration 224).
   'wallet_fallback',
 ];
+
+// The console permission of the page each type points at.
+const TYPE_PERMISSION = Object.freeze({
+  user_signup: P.WORKSPACES_VIEW,
+  workspace_created: P.WORKSPACES_VIEW,
+  user_suspended: P.WORKSPACES_VIEW,
+  subscription_activated: P.SUBSCRIPTIONS_VIEW,
+  subscription_expiring: P.SUBSCRIPTIONS_VIEW,
+  subscription_expired: P.SUBSCRIPTIONS_VIEW,
+  referral_signup: P.SUBSCRIPTIONS_VIEW,
+  payment_failed: P.SUBSCRIPTIONS_VIEW,
+  payment_proof_submitted: P.PAYMENTS_RECORD,
+  support_ticket: P.SUPPORT_VIEW,
+  // The suggestions inbox is read with support.view (suggestions/suggestionAdminRoutes).
+  suggestion: P.SUPPORT_VIEW,
+  wallet_fallback: P.SUBSCRIPTIONS_VIEW,
+});
+
+/** The types this console account may be told about. */
+const visibleTypes = (user) => TYPES.filter((type) => hasPlatformPermission(user, TYPE_PERMISSION[type]));
 
 const PAGE_MAX = 50;
 
@@ -163,12 +190,14 @@ async function sweepSubscriptions() {
 
 // ------------------------------------------------------------------ reading
 
-async function disabledTypes(userId) {
+/** The types shown to this admin: the ones they may see, less the ones they turned off. */
+async function shownTypes(user) {
   const rows = await db.sequelize.query('SELECT type FROM platform_notification_prefs WHERE user_id = :userId AND enabled = false', {
-    replacements: { userId },
+    replacements: { userId: user.id },
     type: QueryTypes.SELECT,
   });
-  return rows.map((r) => r.type);
+  const disabled = new Set(rows.map((r) => r.type));
+  return visibleTypes(user).filter((type) => !disabled.has(type));
 }
 
 // The cursor carries created_at as Postgres prints it (microseconds; a JS
@@ -184,17 +213,12 @@ function decodeCursor(cursor) {
   return { at, id };
 }
 
-function filters(userId, disabled, { type, unread, cursor }) {
-  const where = ['1 = 1'];
-  const replacements = { userId };
-  if (disabled.length) {
-    where.push('n.type NOT IN (:disabled)');
-    replacements.disabled = disabled;
-  }
-  if (type) {
-    where.push('n.type = :type');
-    replacements.type = type;
-  }
+/** null when nothing can match (no type shown, or the asked type is not one of them). */
+function filters(userId, shown, { type, unread, cursor }) {
+  const types = type ? shown.filter((t) => t === type) : shown;
+  if (!types.length) return null;
+  const where = ['n.type IN (:types)'];
+  const replacements = { userId, types };
   if (unread) where.push('r.notification_id IS NULL');
   if (cursor) {
     const c = decodeCursor(cursor);
@@ -219,80 +243,90 @@ const serialize = (row) => ({
   readAt: row.read_at || null,
 });
 
-/** GET /admin/notifications?type=&unread=&cursor=&limit= — newest first; types this admin turned off are left out. */
-async function list(userId, { type, unread, cursor, limit = 20 } = {}) {
+/** GET /admin/notifications?type=&unread=&cursor=&limit= — newest first; types this admin may not see or turned off are left out. */
+async function list(user, { type, unread, cursor, limit = 20 } = {}) {
   const size = Math.min(Math.max(Number(limit) || 20, 1), PAGE_MAX);
-  const { where, replacements } = filters(userId, await disabledTypes(userId), { type, unread, cursor });
+  if (cursor) decodeCursor(cursor);
+  const shown = await shownTypes(user);
+  const f = filters(user.id, shown, { type, unread, cursor });
+  if (!f) return { notifications: [], nextCursor: null, unread: await unreadCount(user, shown) };
   const rows = await db.sequelize.query(
     `SELECT n.*, r.read_at, to_char(n.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at FROM platform_notifications n
      LEFT JOIN platform_notification_reads r ON r.notification_id = n.id AND r.user_id = :userId
-     WHERE ${where} ORDER BY n.created_at DESC, n.id DESC LIMIT :size`,
-    { replacements: { ...replacements, size: size + 1 }, type: QueryTypes.SELECT }
+     WHERE ${f.where} ORDER BY n.created_at DESC, n.id DESC LIMIT :size`,
+    { replacements: { ...f.replacements, size: size + 1 }, type: QueryTypes.SELECT }
   );
   const page = rows.slice(0, size);
   return {
     notifications: page.map(serialize),
     nextCursor: rows.length > size ? encodeCursor(page[page.length - 1]) : null,
-    unread: await unreadCount(userId),
+    unread: await unreadCount(user, shown),
   };
 }
 
 /** GET /admin/notifications/unread-count — for the bell. */
-async function unreadCount(userId) {
-  const { where, replacements } = filters(userId, await disabledTypes(userId), { unread: true });
+async function unreadCount(user, shown = null) {
+  const f = filters(user.id, shown || (await shownTypes(user)), { unread: true });
+  if (!f) return 0;
   const [row] = await db.sequelize.query(
     `SELECT COUNT(*)::int AS count FROM platform_notifications n
      LEFT JOIN platform_notification_reads r ON r.notification_id = n.id AND r.user_id = :userId
-     WHERE ${where}`,
-    { replacements, type: QueryTypes.SELECT }
+     WHERE ${f.where}`,
+    { replacements: f.replacements, type: QueryTypes.SELECT }
   );
   return row.count;
 }
 
-/** POST /admin/notifications/read — { ids } or { all: true }, for this admin only. */
-async function markRead(userId, { ids, all }) {
+/** POST /admin/notifications/read — { ids } or { all: true }, for this admin only. "All" is every unread one they can see. */
+async function markRead(user, { ids, all }) {
   if (all) {
-    await db.sequelize.query(
-      `INSERT INTO platform_notification_reads (user_id, notification_id)
-       SELECT :userId, n.id FROM platform_notifications n ON CONFLICT DO NOTHING`,
-      { replacements: { userId } }
-    );
+    const types = visibleTypes(user);
+    if (types.length) {
+      await db.sequelize.query(
+        `INSERT INTO platform_notification_reads (user_id, notification_id)
+         SELECT :userId, n.id FROM platform_notifications n
+         WHERE n.type IN (:types)
+           AND NOT EXISTS (SELECT 1 FROM platform_notification_reads r WHERE r.user_id = :userId AND r.notification_id = n.id)
+         ON CONFLICT DO NOTHING`,
+        { replacements: { userId: user.id, types } }
+      );
+    }
   } else if (ids && ids.length) {
     await db.sequelize.query(
       `INSERT INTO platform_notification_reads (user_id, notification_id)
        SELECT :userId, n.id FROM platform_notifications n WHERE n.id IN (:ids) ON CONFLICT DO NOTHING`,
-      { replacements: { userId, ids } }
+      { replacements: { userId: user.id, ids } }
     );
   }
-  return { unread: await unreadCount(userId) };
+  return { unread: await unreadCount(user) };
 }
 
-/** GET /admin/notification-prefs — every type, defaults filled in. */
-async function getPrefs(userId) {
+/** GET /admin/notification-prefs — every type this admin may see, defaults filled in. */
+async function getPrefs(user) {
   const rows = await db.sequelize.query('SELECT type, enabled, email FROM platform_notification_prefs WHERE user_id = :userId', {
-    replacements: { userId },
+    replacements: { userId: user.id },
     type: QueryTypes.SELECT,
   });
   const saved = new Map(rows.map((r) => [r.type, r]));
   return {
-    prefs: TYPES.map((type) => ({ type, enabled: saved.has(type) ? saved.get(type).enabled : true, email: saved.has(type) ? saved.get(type).email : false })),
+    prefs: visibleTypes(user).map((type) => ({ type, enabled: saved.has(type) ? saved.get(type).enabled : true, email: saved.has(type) ? saved.get(type).email : false })),
     // No email is sent yet: the choice is kept for when it is.
     emailDelivery: false,
   };
 }
 
-/** PUT /admin/notification-prefs — { prefs: [{ type, enabled, email }] }. */
-async function savePrefs(userId, prefs) {
+/** PUT /admin/notification-prefs — { prefs: [{ type, enabled, email }] }. A type the admin may not see is kept, for if they are given it. */
+async function savePrefs(user, prefs) {
   await db.sequelize.transaction(async (transaction) => {
     for (const p of prefs) {
       await db.sequelize.query(
         `INSERT INTO platform_notification_prefs (user_id, type, enabled, email, updated_at) VALUES (:userId, :type, :enabled, :email, NOW())
          ON CONFLICT (user_id, type) DO UPDATE SET enabled = EXCLUDED.enabled, email = EXCLUDED.email, updated_at = NOW()`,
-        { replacements: { userId, type: p.type, enabled: p.enabled, email: Boolean(p.email) }, transaction }
+        { replacements: { userId: user.id, type: p.type, enabled: p.enabled, email: Boolean(p.email) }, transaction }
       );
     }
   });
-  return getPrefs(userId);
+  return getPrefs(user);
 }
 
-module.exports = { TYPES, notify, onAudit, paymentFailed, sweepSubscriptions, list, unreadCount, markRead, getPrefs, savePrefs };
+module.exports = { TYPES, TYPE_PERMISSION, visibleTypes, notify, onAudit, paymentFailed, sweepSubscriptions, list, unreadCount, markRead, getPrefs, savePrefs };

@@ -10,7 +10,9 @@ const notifications = require('./platformNotificationService');
 
 // The console's notifications (platformNotificationService), mounted under
 // /api/v1/admin like the rest of the console. Each admin reads, marks read
-// and sets preferences for themselves only; reads are not audited.
+// and sets preferences for themselves only; reads are not audited. Each
+// admin is told only about the types their console permissions open
+// (platformNotificationService.TYPE_PERMISSION).
 const router = Router();
 const type = Joi.string().valid(...notifications.TYPES);
 
@@ -44,25 +46,25 @@ router.get(
   '/notifications',
   can(P.OVERVIEW_VIEW),
   validate(schemas.list),
-  asyncHandler(async (req, res) => res.json(await notifications.list(req.user.id, req.query)))
+  asyncHandler(async (req, res) => res.json(await notifications.list(req.user, req.query)))
 );
 router.get(
   '/notifications/unread-count',
   can(P.OVERVIEW_VIEW),
-  asyncHandler(async (req, res) => res.json({ unread: await notifications.unreadCount(req.user.id) }))
+  asyncHandler(async (req, res) => res.json({ unread: await notifications.unreadCount(req.user) }))
 );
 router.post(
   '/notifications/read',
   can(P.OVERVIEW_VIEW),
   validate(schemas.read),
-  asyncHandler(async (req, res) => res.json(await notifications.markRead(req.user.id, req.body)))
+  asyncHandler(async (req, res) => res.json(await notifications.markRead(req.user, req.body)))
 );
-router.get('/notification-prefs', can(P.OVERVIEW_VIEW), asyncHandler(async (req, res) => res.json(await notifications.getPrefs(req.user.id))));
+router.get('/notification-prefs', can(P.OVERVIEW_VIEW), asyncHandler(async (req, res) => res.json(await notifications.getPrefs(req.user))));
 router.put(
   '/notification-prefs',
   can(P.OVERVIEW_VIEW),
   validate(schemas.prefs),
-  asyncHandler(async (req, res) => res.json(await notifications.savePrefs(req.user.id, req.body.prefs)))
+  asyncHandler(async (req, res) => res.json(await notifications.savePrefs(req.user, req.body.prefs)))
 );
 
 module.exports = router;
