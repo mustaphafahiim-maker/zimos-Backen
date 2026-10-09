@@ -338,7 +338,7 @@ describe('signing in', () => {
 
   it('never asks a Google account for a code', async () => {
     googleClient.fetchProfile.mockResolvedValueOnce({ googleId: 'g-77', email: uniqueEmail('g'), emailVerified: true, fullName: 'G' });
-    const res = await request(app).get('/api/v1/auth/google/callback?code=x').redirects(0);
+    const res = await require('../helpers/googleSignIn').googleCallback('code=x');
     const token = new URL(res.headers.location, 'http://x').searchParams.get('accessToken');
     expect(token).toBeTruthy();
     expect((await request(app).get('/api/v1/auth/me').set(bearer(token))).status).toBe(200);

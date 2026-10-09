@@ -26,7 +26,8 @@ function query(location) {
   };
 }
 
-const callback = (qs) => request(app).get(`/api/v1/auth/google/callback?${qs}`).redirects(0);
+// Through GET /auth/google first, as a browser does (the OAuth state).
+const { googleCallback: callback } = require('../helpers/googleSignIn');
 
 describe('Google OAuth login', () => {
   it('GET /auth/google redirects the browser to the Google consent screen', async () => {
@@ -285,5 +286,59 @@ describe("Google sign-in and the account's status", () => {
     const after = await db.User.findByPk(before.id);
     expect(after).toMatchObject({ status: 'active', googleId: 'g-9009' });
     expect(after.passwordHash).toBe(before.passwordHash); // confirmed: keeps its password
+  });
+});
+
+describe('Google sign-in: state and verified email', () => {
+  it('GET /auth/google puts a random state in an httpOnly cookie and in the URL it builds', async () => {
+    const res = await request(app).get('/api/v1/auth/google').redirects(0);
+    const cookie = (res.headers['set-cookie'] || []).find((c) => c.startsWith('zimos_gstate'));
+    expect(cookie).toMatch(/HttpOnly/i);
+    expect(cookie).toMatch(/SameSite=Lax/i);
+    const state = cookie.split(';')[0].split('=')[1];
+    expect(state).toMatch(/^[0-9a-f]{64}$/);
+    expect(googleClient.getAuthUrl).toHaveBeenLastCalledWith(state);
+  });
+
+  it('a callback the browser did not start (no state cookie) is refused before Google is asked', async () => {
+    googleClient.fetchProfile.mockResolvedValue({ googleId: 'g-csrf', email: 'csrf@example.com', emailVerified: true, fullName: 'X' });
+    const res = await request(app).get('/api/v1/auth/google/callback?code=attacker-code&state=abc').redirects(0);
+    expect(res.status).toBe(302);
+    const q = query(res.headers.location);
+    expect(q.error).toBe('GOOGLE_STATE_MISMATCH');
+    expect(q.accessToken).toBeNull();
+    expect(googleClient.fetchProfile).not.toHaveBeenCalled();
+    expect(await db.User.count()).toBe(0);
+  });
+
+  it('a state that does not match the cookie is refused', async () => {
+    const start = await request(app).get('/api/v1/auth/google').redirects(0);
+    const pair = start.headers['set-cookie'].find((c) => c.startsWith('zimos_gstate')).split(';')[0];
+    const res = await request(app)
+      .get(`/api/v1/auth/google/callback?code=x&state=${'0'.repeat(64)}`)
+      .set('Cookie', pair)
+      .redirects(0);
+    expect(query(res.headers.location).error).toBe('GOOGLE_STATE_MISMATCH');
+  });
+
+  it('a Google account whose email is not verified neither creates nor links an account', async () => {
+    const before = await db.User.create({ email: 'owner@example.com', passwordHash: await hashPassword('Passw0rd!123'), fullName: 'O', status: 'active', emailVerifiedAt: new Date() });
+    googleClient.fetchProfile.mockResolvedValue({ googleId: 'g-unverified', email: 'owner@example.com', emailVerified: false, fullName: 'Not Owner' });
+
+    const res = await callback('code=unverified');
+    expect(query(res.headers.location).error).toBe('GOOGLE_EMAIL_UNVERIFIED');
+    expect((await db.User.findByPk(before.id)).googleId).toBeNull();
+
+    googleClient.fetchProfile.mockResolvedValue({ googleId: 'g-unverified-2', email: 'nobody@example.com', emailVerified: false, fullName: 'N' });
+    const res2 = await callback('code=unverified-2');
+    expect(query(res2.headers.location).error).toBe('GOOGLE_EMAIL_UNVERIFIED');
+    expect(await db.User.count({ where: { email: 'nobody@example.com' } })).toBe(0);
+  });
+
+  it('a code Google refuses comes back as GOOGLE_LOGIN_FAILED, not a server error', async () => {
+    googleClient.fetchProfile.mockRejectedValue(new Error('invalid_grant'));
+    const res = await callback('code=expired');
+    expect(res.status).toBe(302);
+    expect(query(res.headers.location).error).toBe('GOOGLE_LOGIN_FAILED');
   });
 });

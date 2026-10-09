@@ -283,8 +283,8 @@ function assertMaySignIn(user) {
 }
 
 /** URL to send the browser to for Google's consent screen. */
-function getGoogleAuthUrl() {
-  return googleClient.getAuthUrl();
+function getGoogleAuthUrl(state) {
+  return googleClient.getAuthUrl(state);
 }
 
 /**
@@ -294,9 +294,20 @@ function getGoogleAuthUrl() {
  * - neither         -> create a new active, email-verified, passwordless user
  */
 async function loginWithGoogle(code, req) {
-  const profile = await googleClient.fetchProfile(code);
+  let profile;
+  try {
+    profile = await googleClient.fetchProfile(code);
+  } catch (err) {
+    logger.warn('Google sign-in: the code exchange failed', { message: err.message });
+    throw new AuthenticationError('Google sign-in failed. Try again.', 'GOOGLE_LOGIN_FAILED');
+  }
   if (!profile.googleId || !profile.email) {
     throw new AuthenticationError('Google did not return a usable profile', 'GOOGLE_PROFILE_INCOMPLETE');
+  }
+  // An address Google has not verified proves nothing about who owns it: it
+  // never links to, or creates, an account under that email.
+  if (!profile.emailVerified) {
+    throw new AuthenticationError('Your Google account has no verified email', 'GOOGLE_EMAIL_UNVERIFIED');
   }
 
   let user = await db.User.findOne({ where: { googleId: profile.googleId } });

@@ -193,7 +193,7 @@ describe('with REQUIRE_PLAN_AT_SIGNUP on', () => {
 describe('Google accounts', () => {
   const googleLogin = async (email) => {
     googleClient.fetchProfile.mockResolvedValueOnce({ googleId: `g-${email}`, email, emailVerified: true, fullName: 'G User' });
-    const res = await request(app).get('/api/v1/auth/google/callback?code=x').redirects(0);
+    const res = await require('../helpers/googleSignIn').googleCallback('code=x');
     return new URL(res.headers.location, 'http://x').searchParams.get('accessToken');
   };
 
