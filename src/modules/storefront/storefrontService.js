@@ -85,6 +85,8 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
     abTest: await require('../catalog/productTests').hasRunningTest(workspaceId, product.id),
     // Sold beyond stock as a pre-order: { shipsAt, message, limited } or null (modules/preorders).
     preorder: require('../preorders').publicView(product),
+    // { min, max, maxPerCustomer } or null (catalog/purchaseLimits.js).
+    purchaseLimits: require('../catalog/purchaseLimits').limitsOf(product),
     rating,
     reviews,
   };

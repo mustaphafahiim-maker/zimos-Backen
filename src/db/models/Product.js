@@ -56,6 +56,8 @@ module.exports = (sequelize, DataTypes) => {
       pageSettings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {}, field: 'page_settings' },
       // Sold beyond stock as a pre-order (migration 643, modules/preorders): { enabled, shipsAt, limit, message }.
       preorder: { type: DataTypes.JSONB, allowNull: true },
+      // { min, max, maxPerCustomer } units per order / per customer (migration 646, catalog/purchaseLimits.js).
+      purchaseLimits: { type: DataTypes.JSONB, allowNull: true, field: 'purchase_limits' },
       cms: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
       // The quantity bundle this product sells with (migration 149, modules/bundles).
       bundleId: { type: DataTypes.UUID, allowNull: true, field: 'bundle_id' },
