@@ -116,6 +116,7 @@ const TABLES = {
   shipping_weight_tiers: wipe(STORE),
   shipping_zone_tier_prices: wipe(STORE),
   shipping_zones: wipe(STORE),
+  shopper_login_codes: wipe(STORE),
   site_visits: wipe('anonymous marketing-site visits from before launch, some linked to accounts that go'),
   size_charts: wipe(STORE),
   spec_keys: wipe(STORE),

@@ -31,6 +31,12 @@ module.exports = (sequelize, DataTypes) => {
       // confirmation/fulfillment outcomes are recorded.
       totalOrders: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'total_orders' },
       totalRejectedOrders: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'total_rejected_orders' },
+      // Shopper accounts (migrations 670, 672, modules/shopperAccounts).
+      savedAddresses: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'saved_addresses' },
+      accountVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1, field: 'account_version' },
+      lastLoginAt: { type: DataTypes.DATE, allowNull: true, field: 'last_login_at' },
+      // When the shopper proved they own `email`: only then does it sign them in.
+      emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
     },
     {
       tableName: 'customers',

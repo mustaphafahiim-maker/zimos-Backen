@@ -386,6 +386,24 @@ ${paragraphs}
     return { subject: `كارت هدية من ${data.storeName || ''}`, ...wrap(`<p>${data.recipientName ? `أهلًا ${escapeHtml(data.recipientName)}،` : 'أهلًا،'}</p><p>ده كارت هدية من ${store} بقيمة <b>${value}</b>.</p>${note}${codeHtml}<p>اكتب الكود ده في صفحة الدفع.${until ? ` صالح لحد ${until}.` : ''}</p>`, `كارت هدية من ${data.storeName}: ${data.code} (${value}).${until ? ` صالح لحد ${until}.` : ''}`, { dir: 'rtl', arabicFooter: true }) };
   },
 
+  // A shopper's sign-in code to a store (modules/shopperAccounts): the store's name, not Zimos.
+  shopper_login_code(data = {}) {
+    const code = String(data.code || '');
+    const minutes = Number(data.minutes) || 10;
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const codeHtml = `<p dir="ltr" style="font-size:30px;font-weight:700;letter-spacing:8px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</p>`;
+    if (data.locale === 'en') {
+      return {
+        subject: `Your sign-in code for ${data.storeName || 'the store'}`,
+        ...wrap(`<p>Your code to sign in to ${store}:</p>\n${codeHtml}\n<p>It is valid for ${minutes} minutes and works once. If you didn't ask for it, ignore this email.</p>`, `Your code to sign in to ${data.storeName}: ${code}\n\nIt is valid for ${minutes} minutes and works once.`),
+      };
+    }
+    return {
+      subject: `رمز الدخول إلى ${data.storeName || 'المتجر'}`,
+      ...wrap(`<p>رمز الدخول إلى ${store}:</p>\n${codeHtml}\n<p>الرمز صالح لمدة ${minutes} دقائق ولمرة واحدة. إذا لم تطلبه فتجاهل هذه الرسالة.</p>`, `رمز الدخول إلى ${data.storeName}: ${code}\n\nالرمز صالح لمدة ${minutes} دقائق ولمرة واحدة.`, { dir: 'rtl', arabicFooter: true }),
+    };
+  },
+
   merchant_notification(data = {}) {
     const title = String(data.title || '');
     const body = data.body ? String(data.body) : '';

@@ -39,7 +39,7 @@ describe('CORS', () => {
       expect(res.headers['access-control-allow-origin']).toBe('*');
       expect(res.headers['access-control-allow-credentials']).toBeUndefined();
       expect(headerList(res.headers['access-control-allow-headers']).sort()).toEqual(
-        ['content-type', 'idempotency-key', 'x-cart-token', 'x-payment-token', 'x-store-locale', 'x-store-preview', 'x-student-token', 'x-visitor-id']
+        ['content-type', 'idempotency-key', 'x-cart-token', 'x-payment-token', 'x-shopper-token', 'x-store-locale', 'x-store-preview', 'x-student-token', 'x-visitor-id']
       );
       expect(headerList(res.headers['access-control-allow-methods'])).toEqual(
         expect.arrayContaining(['get', 'post', 'patch', 'delete'])

@@ -354,4 +354,7 @@ module.exports = {
   trackOrder,
   trackOrderByToken,
   toPublicVariant,
+  // Shopper accounts show their orders the same way (shopperAccounts/).
+  trackingStage,
+  presentTrackedOrder,
 };
