@@ -583,6 +583,9 @@ const env = {
     inProcess: process.env.NODE_ENV !== 'test' && process.env.WORKER_IN_PROCESS === 'true',
     pollMs: Math.max(250, parseInt(process.env.QUEUE_POLL_MS || '1000', 10) || 1000),
     concurrency: Math.max(1, parseInt(process.env.QUEUE_CONCURRENCY || '10', 10) || 10),
+    // A running job renews its lock; one not renewed for this long had its
+    // worker stop and is taken back (core/queue/postgresDriver). 10 minutes, as before.
+    staleLockMs: Math.max(10000, parseInt(process.env.QUEUE_STALE_LOCK_MS || '600000', 10) || 600000),
   },
 
   // Outbound webhooks to merchants' own systems (modules/webhooks).
