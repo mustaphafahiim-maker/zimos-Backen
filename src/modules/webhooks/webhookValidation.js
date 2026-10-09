@@ -24,11 +24,11 @@ module.exports = {
   list: { params: Joi.object(workspaceParam) },
   create: {
     params: Joi.object(workspaceParam),
-    body: Joi.object({ url: url.required(), events: events.required(), isActive: Joi.boolean().optional(), filter: filter.optional() }),
+    body: Joi.object({ url: url.required(), events: events.required(), isActive: Joi.boolean().optional(), filter: filter.optional(), customHeaders: require('./customHeaders').schema.optional() }),
   },
   update: {
     params: endpointParams,
-    body: Joi.object({ url: url.optional(), events: events.optional(), isActive: Joi.boolean().optional(), filter: filter.optional() }).min(1),
+    body: Joi.object({ url: url.optional(), events: events.optional(), isActive: Joi.boolean().optional(), filter: filter.optional(), customHeaders: require('./customHeaders').schema.optional() }).min(1),
   },
   byId: { params: endpointParams },
   deliveries: {
