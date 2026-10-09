@@ -22,8 +22,9 @@ function intInRange(raw, fallback, min, max) {
 // Production must not start on a secret anyone can read in this repository
 // (SPEC §3.4): the three keys below have to be set, at least 32 characters
 // long, and not one of the placeholders from .env.example / docker-compose.
-// Uploads must go to R2 — the local disk of a container is lost on redeploy —
+// Uploads should go to R2 — the local disk of a container is lost on redeploy —
 // unless ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true says the disk is a real volume.
+// That one is a loud boot error, not a refusal (modules/media/storage).
 
 // A single DATABASE_URL (Railway / Heroku) wins over the separate DB_* vars,
 // except under NODE_ENV=test — tests always use the dedicated test database
@@ -372,6 +373,19 @@ const env = {
       // they go to the media bucket under customer-uploads/ (never linked publicly).
       privateBucketName: (process.env.R2_PRIVATE_BUCKET_NAME || '').trim(),
     },
+    // Says the local upload folder is a persistent volume, so production on
+    // STORAGE_PROVIDER=local is intended. Off, production on local disk logs
+    // an error at every boot and the admin storage tile shows "degraded".
+    allowLocalInProduction: process.env.ALLOW_LOCAL_STORAGE_IN_PRODUCTION === 'true',
+  },
+
+  // Merchant library images (modules/media/imageProcessing.js): the longest
+  // side a stored picture keeps, and the JPEG/WebP quality it is re-encoded
+  // at. Pictures of 512px or less (favicons, icons) are never resized or
+  // re-compressed. A value out of range falls back to the default.
+  media: {
+    maxDimension: intInRange(process.env.MEDIA_MAX_DIMENSION, 2000, 256, 10000),
+    jpegQuality: intInRange(process.env.MEDIA_JPEG_QUALITY, 85, 40, 100),
   },
 
   // Photos shoppers attach to an order through a product's custom fields

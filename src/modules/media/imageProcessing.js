@@ -15,8 +15,10 @@ const { AppError } = require('../../core/errors/AppError');
  *   - the bytes are a real image: a file sharp cannot decode is refused, so a
  *     polyglot or a truncated upload never reaches storage.
  *
- * Merchant images keep their format and size (the library's 5 MB cap is on
- * what is sent). Shopper photos are resized and compressed until they fit
+ * Merchant images keep their format; uploads to the library are scaled down
+ * to MEDIA_MAX_DIMENSION on their long side and re-encoded at
+ * MEDIA_JPEG_QUALITY, small ones (icons) excepted. The library's 5 MB cap is
+ * on what is sent. Shopper photos are resized and compressed until they fit
  * CUSTOMER_MAX_OUTPUT_BYTES. An animated or static GIF is never re-encoded —
  * that would flatten or re-palette it — its comment and XMP blocks are cut out
  * of the byte stream instead (stripGifMetadata).
@@ -139,19 +141,39 @@ function stripGifMetadata(buffer) {
 // Merchant images (media library)
 // ---------------------------------------------------------------------------
 
+// At or under this on the long side a picture is an icon or a favicon: it is
+// never resized or re-compressed beyond the metadata strip.
+const SMALL_IMAGE_EDGE = 512;
+// The quality a picture keeps when it is not being shrunk (and the one
+// scripts/strip-media-exif.js has always used).
+const KEEP_QUALITY = 90;
+
 /**
  * Re-encodes a merchant upload in its own format with no metadata, turned
  * upright. `detected` is mediaService's content-sniffed signature. Returns the
  * new bytes; the mime type and extension do not change.
+ *
+ * With `maxDimension`, a picture over SMALL_IMAGE_EDGE is also scaled down to
+ * fit it (never up) and JPEG/WebP are encoded at `quality`; PNG stays
+ * lossless. Without it (the EXIF script), only the metadata goes.
  */
-async function processMerchantImage(buffer, detected) {
+async function processMerchantImage(buffer, detected, { maxDimension, quality } = {}) {
   if (detected.mime === 'image/gif') return stripGifMetadata(buffer);
   const sharp = requireSharp();
+  const open = () => sharp(buffer, { failOn: 'error', limitInputPixels: MAX_INPUT_PIXELS });
   try {
-    const pipeline = sharp(buffer, { failOn: 'error', limitInputPixels: MAX_INPUT_PIXELS }).rotate();
-    if (detected.mime === 'image/jpeg') return await pipeline.jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+    let pipeline = open().rotate();
+    let lossy = KEEP_QUALITY;
+    if (maxDimension) {
+      const { width = 0, height = 0 } = await open().metadata();
+      if (Math.max(width, height) > SMALL_IMAGE_EDGE) {
+        pipeline = pipeline.resize({ width: maxDimension, height: maxDimension, fit: 'inside', withoutEnlargement: true });
+        lossy = quality || KEEP_QUALITY;
+      }
+    }
+    if (detected.mime === 'image/jpeg') return await pipeline.jpeg({ quality: lossy, mozjpeg: true }).toBuffer();
     if (detected.mime === 'image/png') return await pipeline.png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer();
-    if (detected.mime === 'image/webp') return await pipeline.webp({ quality: 90 }).toBuffer();
+    if (detected.mime === 'image/webp') return await pipeline.webp({ quality: lossy }).toBuffer();
   } catch (err) {
     if (err instanceof AppError) throw err;
     throw unreadable();
@@ -218,4 +240,5 @@ module.exports = {
   stripGifMetadata,
   CUSTOMER_MAX_DIMENSION,
   CUSTOMER_MAX_OUTPUT_BYTES,
+  SMALL_IMAGE_EDGE,
 };

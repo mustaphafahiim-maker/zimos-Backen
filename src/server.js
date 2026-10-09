@@ -4,7 +4,7 @@ const app = require('./app');
 const env = require('./config/env');
 const db = require('./db/models');
 const logger = require('./core/utils/logger');
-const { describeStorage, r2ConfigError } = require('./modules/media/storage');
+const { describeStorage, storageProblems } = require('./modules/media/storage');
 const { logRollout: logCarrierRollout } = require('./modules/shipping/carriers');
 const { imageProcessingStatus } = require('./modules/media/imageProcessing');
 const signupPolicy = require('./modules/auth/signupPolicy');
@@ -29,9 +29,12 @@ async function start() {
 
   // Same idea for image storage: print what STORAGE_PROVIDER actually
   // resolved to in THIS process, so a deploy log settles "is it on R2?".
+  // Every problem is logged at error level on every boot; none of them stops
+  // the API (images already stored elsewhere keep working).
   logger.info(`Storage backend: ${describeStorage()}`);
-  const storageProblem = r2ConfigError();
-  if (storageProblem) logger.error(`Storage misconfigured: ${storageProblem} — uploads will fail until this is fixed`);
+  for (const problem of storageProblems()) {
+    logger.error(`Storage misconfigured: ${problem} — uploaded images will not load until this is fixed`);
+  }
 
   // Image processing (sharp): every upload is re-encoded and stripped of its
   // metadata, so a missing native binary must be visible at boot.

@@ -146,7 +146,17 @@ app.get('/health/ready', async (req, res) => {
 // --- Uploaded media (local disk, no CDN) --------------------------------
 // Files written by POST /workspaces/:id/media are served straight from
 // public/uploads so the returned URL works directly in logoUrl/imageUrl.
-app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads'), { fallthrough: true, maxAge: '1h' }));
+// helmet() sends Cross-Origin-Resource-Policy: same-origin on everything, which
+// stops the dashboard and the stores (other origins) from showing these public
+// images at all, so they are marked cross-origin here.
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, '..', 'public', 'uploads'), {
+    fallthrough: true,
+    maxAge: '1h',
+    setHeaders: (res) => res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'),
+  })
+);
 
 // --- Storefront host routing (subdomain / custom domain -> /shop/:id) -----
 // Runs after /health so monitoring works on any host; before all route mounts.

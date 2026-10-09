@@ -2,7 +2,7 @@
 
 const env = require('../../config/env');
 const db = require('../../db/models');
-const { probeStorage } = require('../media/storage');
+const { probeStorage, storageProblems, describeStorage } = require('../media/storage');
 const brevo = require('../notifications/brevoEmailProvider');
 const twilio = require('../notifications/twilioSmsProvider');
 const gateways = require('../payments/gateways');
@@ -112,15 +112,14 @@ const PROBES = [
     name: 'Media storage',
     run: async () => {
       const result = await probeStorage();
-      // Local disk works, but on a container filesystem it is erased by the
-      // next deploy. That is worth a warning even though the probe passed.
-      if (env.storage.provider !== 'r2' && env.isProduction) {
-        return {
-          status: 'degraded',
-          detail: 'local disk on an ephemeral filesystem — uploads will not survive a redeploy (set STORAGE_PROVIDER=r2)',
-        };
-      }
-      return result;
+      // The probe passing says the backend answers; the links it hands out can
+      // still be wrong (R2_PUBLIC_URL, APP_URL) or short-lived (local disk in
+      // production with no volume). Either is worth a warning. The detail
+      // always names the active driver and the public base URL, no secrets.
+      const problems = storageProblems();
+      const summary = describeStorage();
+      if (problems.length) return { status: 'degraded', detail: `${summary} — ${problems.join('; ')}` };
+      return { ...result, detail: `${result.detail} — ${summary}` };
     },
   },
   {
