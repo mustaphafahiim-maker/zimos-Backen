@@ -110,6 +110,7 @@ const TABLES = {
   products: wipe(STORE),
   referral_codes: wipe('referral codes of agents (accounts that go; agent_id is NOT NULL, ON DELETE RESTRICT) (decided: wipe)'),
   refunds: wipe(STORE),
+  report_deliveries: wipe(STORE),
   return_requests: wipe(STORE),
   reviews: wipe(STORE),
   roles: wipe("a store's own roles, not the console roles"),
