@@ -1558,3 +1558,39 @@ describe('cancelling a Bosta shipment by hand (PATCH)', () => {
     expect(row.cancelMode).toBe('manual_ack');
   });
 });
+
+describe('editing an order under a live Bosta booking', () => {
+  const patchOrder = (ctx, body) =>
+    request(app).patch(`/api/v1/workspaces/${ctx.workspace.id}/orders/${ctx.order.id}`).set(bearer(ctx.token)).send(body);
+
+  it('refuses a new address, receiver or items until the booking is cancelled; notes stay editable', async () => {
+    const ctx = await bookedShipment();
+    const address = { ...ctx.order.shippingAddressSnapshot, addressLine: '99 Somewhere Else' };
+
+    const moved = await patchOrder(ctx, { shippingAddress: address });
+    expect(moved.status).toBe(409);
+    expect(moved.body.error.code).toBe('SHIPMENT_BOOKED');
+    expect(moved.body.error.details).toMatchObject({ shipmentId: ctx.shipment.id, waybillNumber: ctx.shipment.waybillNumber });
+
+    const phone = await patchOrder(ctx, { contact: { fullName: ctx.order.contactSnapshot.fullName, phone: '01099990000' } });
+    expect(phone.status).toBe(409);
+
+    const notes = await patchOrder(ctx, { notes: 'Call before delivery' });
+    expect(notes.status).toBe(200);
+
+    const items = await request(app)
+      .put(`/api/v1/workspaces/${ctx.workspace.id}/orders/${ctx.order.id}/items`)
+      .set(bearer(ctx.token))
+      .send({ items: [{ variantId: ctx.variant.id, quantity: 2 }] });
+    expect(items.status).toBe(409);
+    expect(items.body.error.code).toBe('SHIPMENT_BOOKED');
+
+    // Once the booking is cancelled the address can change.
+    await request(app)
+      .patch(`/api/v1/workspaces/${ctx.workspace.id}/orders/${ctx.order.id}/shipments/${ctx.shipment.id}`)
+      .set(bearer(ctx.token))
+      .send({ status: 'cancelled' })
+      .expect(200);
+    expect((await patchOrder(ctx, { shippingAddress: address })).status).toBe(200);
+  });
+});
