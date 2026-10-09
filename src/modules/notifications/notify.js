@@ -42,11 +42,23 @@ function loggable(data) {
   return { ...data, code: '[REDACTED]' };
 }
 
-async function persist({ workspaceId, channel, provider, recipient, template, status, error, attempts }) {
-  await db.NotificationLog.create({ workspaceId, channel, provider, recipient, template, status, error, attempts });
+// `orderId`: a message to a customer about an order — logged with it and its line, for the order's timeline.
+async function persist({ workspaceId, channel, provider, recipient, template, status, error, attempts, orderId = null, subject = null }) {
+  await db.NotificationLog.create({
+    workspaceId,
+    channel,
+    provider,
+    recipient,
+    template,
+    status,
+    error,
+    attempts,
+    orderId: orderId || null,
+    subject: orderId && subject ? String(subject).replace(/\s+/g, ' ').trim().slice(0, 300) : null,
+  });
 }
 
-async function sendEmail({ recipient, template, data, workspaceId = null }) {
+async function sendEmail({ recipient, template, data, workspaceId = null, orderId = null }) {
   const provider = env.notifications.emailProvider;
   const { subject, html, text } = emailTemplates.render(template, data);
 
@@ -69,11 +81,11 @@ async function sendEmail({ recipient, template, data, workspaceId = null }) {
     logger.error(`[notification:email] ${template} -> ${recipient} failed after ${attempts} attempt(s): ${err.message}`);
   }
 
-  await persist({ workspaceId, channel: 'email', provider, recipient, template, status, error, attempts });
+  await persist({ workspaceId, channel: 'email', provider, recipient, template, status, error, attempts, orderId, subject });
   return { status, error, subject, attempts };
 }
 
-async function sendChannel(channel, provider, { recipient, template, data, workspaceId = null }) {
+async function sendChannel(channel, provider, { recipient, template, data, workspaceId = null, orderId = null }) {
   let status = 'sent';
   let error = null;
   let attempts = 1;
@@ -97,7 +109,7 @@ async function sendChannel(channel, provider, { recipient, template, data, works
     logger.error(`[notification:${channel}] ${template} -> ${recipient} failed after ${attempts} attempt(s): ${err.message}`);
   }
 
-  await persist({ workspaceId, channel, provider, recipient, template, status, error, attempts });
+  await persist({ workspaceId, channel, provider, recipient, template, status, error, attempts, orderId, subject: orderId ? smsBody(template, data) : null });
   return { status, error, attempts };
 }
 
