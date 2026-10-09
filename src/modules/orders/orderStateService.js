@@ -77,6 +77,19 @@ function assertTransition(from, to) {
 }
 
 /**
+ * The stage guard for cancelling one shipment, run before the courier is
+ * asked: the stage the order will have once the shipment no longer counts
+ * must be a move the table above allows (while ORDER_STATUS_GUARDS is on), so
+ * a refused move never follows a cancel the courier already made.
+ */
+async function assertShipmentCancelMove(orderId, shipmentId, transaction) {
+  if (!env.orderStatusGuards) return;
+  const to = await statusHistory.stageOf(orderId, transaction, { withoutShipmentId: shipmentId });
+  const last = await statusHistory.lastRow(orderId, transaction);
+  if (to && last && last.toStatus !== to) assertTransition(last.toStatus, to);
+}
+
+/**
  * Records the order's stage in order_status_history if it has moved since the
  * last row (orderStatusHistory.sync). Called, in the caller's transaction, by
  * everything that changes an order's state — the three setters below, the
@@ -196,5 +209,6 @@ module.exports = {
   nextStages,
   canTransition,
   assertTransition,
+  assertShipmentCancelMove,
   trackStage,
 };

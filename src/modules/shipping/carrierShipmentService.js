@@ -109,6 +109,13 @@ async function flagUnconfirmedCancel(shipment, result, { trigger, check = null, 
 
 const cancelsManually = (adapter) => Boolean(adapter && adapter.capabilities.cancel === 'manual');
 
+/** A courier booking the courier could still act on, with a courier that cancels through its API. */
+function cancelsByApi(shipment) {
+  if (!['created', 'failed'].includes(shipment.status) || !isCarrierBooked(shipment)) return false;
+  const adapter = getAdapter(shipment.carrierCode);
+  return Boolean(adapter && adapter.capabilities.cancel === 'api');
+}
+
 /**
  * 409 CARRIER_MANUAL_CANCEL_REQUIRED: these shipments can only be cancelled
  * in the carrier's own dashboard. The request is repeated with
@@ -632,6 +639,49 @@ async function alreadySettledAtCarrier(adapter, account, credentials, shipment, 
  * shipment is marked cancelled (cancel_mode 'manual_ack') and the carrier is
  * checked again later (carrierSyncService).
  */
+/**
+ * Asks the courier to cancel one booking. A delivery the courier already
+ * cancelled/terminated counts as done. Any other refusal throws 409
+ * CARRIER_CANCEL_FAILED (its message ends with `notDone`); a courier that
+ * does not let this account call its cancel endpoint at all throws 422
+ * CARRIER_PERMISSION_DENIED as it is. Returns the adapter.
+ */
+async function cancelAtCarrier(workspaceId, shipment, { transaction = null, notDone }) {
+  const { adapter, account, credentials } = await accounts.loadConnection(workspaceId, shipment.carrierCode, {
+    transaction,
+  });
+  try {
+    await accounts.withAuthHandling(account, () =>
+      adapter.cancelShipment(credentials, shipment.waybillNumber, {
+        carrierShipmentId: shipment.carrierResponse ? shipment.carrierResponse.carrierShipmentId : null,
+      })
+    );
+  } catch (err) {
+    const check = await alreadySettledAtCarrier(adapter, account, credentials, shipment, err);
+    // Not a refusal of this cancel: the carrier does not let this account
+    // call its cancel endpoint at all (J&T). 422 CARRIER_PERMISSION_DENIED
+    // as it is; nothing is cancelled.
+    if (!check.settled && err instanceof CarrierPermissionError && err.details && err.details.endpoint) throw err;
+    if (!check.settled) {
+      throw new AppError(
+        'CARRIER_CANCEL_FAILED',
+        `${adapter.name} did not cancel shipment ${shipment.waybillNumber}: ${err.message} ${notDone}`,
+        409,
+        { shipmentId: shipment.id, carrierCode: adapter.code, carrierErrorCode: err.code || null }
+      );
+    }
+    logger.info('Carrier refused the cancel but the delivery is already cancelled there', {
+      workspaceId,
+      orderId: shipment.orderId,
+      carrierCode: adapter.code,
+      trackingNumber: shipment.waybillNumber,
+      via: check.via,
+      carrierStateCode: check.code ?? null,
+    });
+  }
+  return adapter;
+}
+
 async function cancelCarrierShipmentsForOrder(workspaceId, orderId, transaction, options = {}) {
   const { acknowledgeManualCancel = false, req = null, trigger = 'order_cancel' } = options;
   const shipments = await db.Shipment.findAll({
@@ -649,38 +699,7 @@ async function cancelCarrierShipmentsForOrder(workspaceId, orderId, transaction,
       await acknowledgeManualCancelOf(workspaceId, shipment, { transaction, req, trigger });
       continue;
     }
-    const { adapter, account, credentials } = await accounts.loadConnection(workspaceId, shipment.carrierCode, {
-      transaction,
-    });
-    try {
-      await accounts.withAuthHandling(account, () =>
-        adapter.cancelShipment(credentials, shipment.waybillNumber, {
-          carrierShipmentId: shipment.carrierResponse ? shipment.carrierResponse.carrierShipmentId : null,
-        })
-      );
-    } catch (err) {
-      const check = await alreadySettledAtCarrier(adapter, account, credentials, shipment, err);
-      // Not a refusal of this cancel: the carrier does not let this account
-      // call its cancel endpoint at all (J&T). 422 CARRIER_PERMISSION_DENIED
-      // as it is; the order is not cancelled.
-      if (!check.settled && err instanceof CarrierPermissionError && err.details && err.details.endpoint) throw err;
-      if (!check.settled) {
-        throw new AppError(
-          'CARRIER_CANCEL_FAILED',
-          `${adapter.name} did not cancel shipment ${shipment.waybillNumber}: ${err.message} The order was not cancelled.`,
-          409,
-          { shipmentId: shipment.id, carrierCode: adapter.code, carrierErrorCode: err.code || null }
-        );
-      }
-      logger.info('Carrier refused the cancel but the delivery is already cancelled there', {
-        workspaceId,
-        orderId,
-        carrierCode: adapter.code,
-        trackingNumber: shipment.waybillNumber,
-        via: check.via,
-        carrierStateCode: check.code ?? null,
-      });
-    }
+    const adapter = await cancelAtCarrier(workspaceId, shipment, { transaction, notDone: 'The order was not cancelled.' });
     const previousStatus = shipment.status;
     await shipment.update({ status: 'cancelled', cancelMode: 'api', nextPollAt: null }, { transaction });
     logger.info('Carrier shipment cancelled with the order', {
@@ -726,6 +745,33 @@ function manualCancelUpdates(shipment, data, req) {
   return manualCancelFields(req && req.user ? req.user.id : null);
 }
 
+// Why a cancel by API did not happen: the courier can't be reached from this
+// store (not available, server key missing, not connected) or it refused
+// (rejected credentials, no cancel permission, any other refusal).
+const ACK_FALLBACK_CODES = ['NOT_FOUND', 'CARRIERS_NOT_CONFIGURED', 'CARRIER_NOT_CONNECTED', 'CARRIER_CANCEL_FAILED', 'CARRIER_PERMISSION_DENIED'];
+
+/**
+ * PATCH .../shipments/:id to 'cancelled' on a booking whose courier cancels
+ * through its API: the courier is asked, and the extra fields the update must
+ * write are returned. When it could not be asked or refused, the merchant can
+ * cancel it in the courier's own dashboard and repeat the request with
+ * acknowledgeManualCancel: the shipment is then marked cancelled as
+ * 'manual_ack' and checked again later, as for a courier without a cancel
+ * API. Without it the error is thrown with details.manualCancelAllowed.
+ */
+async function apiCancelUpdates(workspaceId, shipment, data, req, transaction) {
+  try {
+    await cancelAtCarrier(workspaceId, shipment, { transaction, notDone: 'The shipment was not cancelled.' });
+    return { cancelMode: 'api', nextPollAt: null };
+  } catch (err) {
+    if (!ACK_FALLBACK_CODES.includes(err.code)) throw err;
+    if (data.acknowledgeManualCancel) return manualCancelFields(req && req.user ? req.user.id : null);
+    const details = err.details && typeof err.details === 'object' && !Array.isArray(err.details) ? err.details : {};
+    err.details = { ...details, shipmentId: shipment.id, manualCancelAllowed: true };
+    throw err;
+  }
+}
+
 module.exports = {
   FINISHED_STATUSES,
   TERMINAL_STATUSES,
@@ -743,5 +789,8 @@ module.exports = {
   syncShipment,
   getShipmentLabel,
   cancelCarrierShipmentsForOrder,
+  cancelAtCarrier,
+  cancelsByApi,
+  apiCancelUpdates,
   codAmountFor,
 };

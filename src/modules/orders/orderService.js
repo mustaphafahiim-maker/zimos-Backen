@@ -1430,6 +1430,15 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
     // Cancelling a booking whose courier has no cancel API needs the
     // merchant's acknowledgeManualCancel; a final status stops polling.
     const extra = carrierShipmentService.manualCancelUpdates(shipment, data, req);
+    // A courier with a cancel API is asked first, before anything here
+    // changes: a refusal (409 CARRIER_CANCEL_FAILED) leaves the shipment as
+    // it was, instead of a parcel live at the courier that we call cancelled
+    // and whose COD we would then ignore. The stage guard runs before that,
+    // so a refused move never follows a cancel the courier already made.
+    if (data.status === 'cancelled' && carrierShipmentService.cancelsByApi(shipment)) {
+      await require('./orderStateService').assertShipmentCancelMove(orderId, shipment.id, transaction);
+      Object.assign(extra, await carrierShipmentService.apiCancelUpdates(workspaceId, shipment, data, req, transaction));
+    }
     if (!extra.cancelMode && carrierShipmentService.TERMINAL_STATUSES.includes(data.status) && shipment.nextPollAt) {
       extra.nextPollAt = null;
     }

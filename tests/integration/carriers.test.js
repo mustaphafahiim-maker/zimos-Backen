@@ -907,8 +907,8 @@ describe('a failed Bosta shipment is not final', () => {
       .send({ status: 'cancelled' });
     expect(patched.status).toBe(200);
     expect(await shipmentStatus(ctx.shipment.id)).toBe('cancelled');
-    // A manual PATCH never calls Bosta.
-    expect(callsTo('DELETE', `/deliveries/business/${tn}/terminate`)).toHaveLength(0);
+    // Cancelling a booking by hand asks Bosta first (it is already cancelled there, so that is done).
+    expect(callsTo('DELETE', `/deliveries/business/${tn}/terminate`)).toHaveLength(1);
 
     const rebooked = await createShipment(ctx.token, ctx.workspace.id, ctx.order.id);
     expect(rebooked.status).toBe(201);
@@ -1522,5 +1522,39 @@ describe('Bosta state mapping', () => {
     expect(bosta.toEgp(12345)).toBe(123.45);
     expect(bosta.toEgp('500000')).toBe(5000);
     expect(bosta.toEgp(0)).toBe(0);
+  });
+});
+
+describe('cancelling a Bosta shipment by hand (PATCH)', () => {
+  const patch = (ctx, body) =>
+    request(app)
+      .patch(`/api/v1/workspaces/${ctx.workspace.id}/orders/${ctx.order.id}/shipments/${ctx.shipment.id}`)
+      .set(bearer(ctx.token))
+      .send(body);
+
+  it('cancels it at Bosta first, then here', async () => {
+    const ctx = await bookedShipment();
+    const res = await patch(ctx, { status: 'cancelled' });
+    expect(res.status).toBe(200);
+    expect(callsTo('DELETE', `/deliveries/business/${ctx.shipment.waybillNumber}/terminate`)).toHaveLength(1);
+    const row = await db.Shipment.findByPk(ctx.shipment.id);
+    expect(row.status).toBe('cancelled');
+    expect(row.cancelMode).toBe('api');
+  });
+
+  it('a refusal leaves the shipment as it was; the merchant can cancel it in Bosta and acknowledge', async () => {
+    const ctx = await bookedShipment();
+    fake.refuseTerminate = true;
+    const refused = await patch(ctx, { status: 'cancelled' });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('CARRIER_CANCEL_FAILED');
+    expect(refused.body.error.details).toMatchObject({ shipmentId: ctx.shipment.id, manualCancelAllowed: true });
+    expect((await db.Shipment.findByPk(ctx.shipment.id)).status).toBe('created');
+
+    const acknowledged = await patch(ctx, { status: 'cancelled', acknowledgeManualCancel: true });
+    expect(acknowledged.status).toBe(200);
+    const row = await db.Shipment.findByPk(ctx.shipment.id);
+    expect(row.status).toBe('cancelled');
+    expect(row.cancelMode).toBe('manual_ack');
   });
 });
