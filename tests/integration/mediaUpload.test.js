@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const bwipjs = require('bwip-js');
+const sharp = require('sharp');
 const { app, request, setupWorkspaceWithProduct, registerAndActivate, createWorkspace } = require('../helpers/factories');
 const { UPLOAD_ROOT } = require('../../src/modules/media/mediaService');
 const { jpegWithExif } = require('../helpers/images');
@@ -59,6 +60,21 @@ describe('media upload', () => {
     // helmet's same-origin default would stop the dashboard and the stores
     // (other origins) from showing it
     expect(fetched.headers['cross-origin-resource-policy']).toBe('cross-origin');
+  });
+
+  it('stores a big photo scaled down to MEDIA_MAX_DIMENSION', async () => {
+    const { auth, workspace } = await setupWorkspaceWithProduct();
+    const big = await sharp({ create: { width: 2600, height: 1300, channels: 3, background: '#3366aa' } }).jpeg().toBuffer();
+
+    const res = await request(app)
+      .post(`/api/v1/workspaces/${workspace.id}/media`)
+      .set(bearer(auth.accessToken))
+      .attach('file', big, { filename: 'big.jpg', contentType: 'image/jpeg' });
+
+    expect(res.status).toBe(201);
+    const stored = fs.readFileSync(path.join(UPLOAD_ROOT, res.body.path.replace('/uploads/', '')));
+    expect(await sharp(stored).metadata()).toMatchObject({ width: 2000, height: 1000, format: 'jpeg' });
+    expect(res.body.size).toBe(stored.length);
   });
 
   it('decides type by content, not by extension', async () => {

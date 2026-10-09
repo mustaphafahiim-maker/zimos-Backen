@@ -379,6 +379,15 @@ const env = {
     allowLocalInProduction: process.env.ALLOW_LOCAL_STORAGE_IN_PRODUCTION === 'true',
   },
 
+  // Merchant library images (modules/media/imageProcessing.js): the longest
+  // side a stored picture keeps, and the JPEG/WebP quality it is re-encoded
+  // at. Pictures of 512px or less (favicons, icons) are never resized or
+  // re-compressed. A value out of range falls back to the default.
+  media: {
+    maxDimension: intInRange(process.env.MEDIA_MAX_DIMENSION, 2000, 256, 10000),
+    jpegQuality: intInRange(process.env.MEDIA_JPEG_QUALITY, 85, 40, 100),
+  },
+
   // Photos shoppers attach to an order through a product's custom fields
   // (POST /store/:workspaceId/uploads). See modules/customerUploads.
   customerUploads: {

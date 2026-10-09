@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const db = require('../../db/models');
+const env = require('../../config/env');
 const logger = require('../../core/utils/logger');
 const { AppError, NotFoundError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
@@ -71,10 +72,17 @@ async function storeImage(workspaceId, file, req) {
   }
 
   // Upright, re-encoded in its own format, and stripped of EXIF / XMP / IPTC
-  // (a phone photo's GPS position among them) before anything is stored. A
+  // (a phone photo's GPS position among them) before anything is stored, and
+  // scaled down to MEDIA_MAX_DIMENSION (icons of 512px or less untouched). A
   // GIF keeps its frames and only loses its comment and XMP blocks. An image
   // that cannot be decoded is refused here (422 IMAGE_UNREADABLE).
-  const processed = isModel || video ? file.buffer : await processMerchantImage(file.buffer, sig);
+  const processed =
+    isModel || video
+      ? file.buffer
+      : await processMerchantImage(file.buffer, sig, {
+          maxDimension: env.media.maxDimension,
+          quality: env.media.jpegQuality,
+        });
 
   const filename = `${crypto.randomUUID()}.${sig.ext}`;
   const { url, path } = await getStorage().put({
