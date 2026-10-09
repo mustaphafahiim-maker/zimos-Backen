@@ -11,8 +11,13 @@ const { AppError } = require('../../core/errors/AppError');
  * inside the same order-creation transaction so a usage-limit check and the
  * increment that enforces it can never race. `transaction` is that order
  * transaction, so these reads do not need a second pooled connection.
+ *
+ * `lines` ([{ productId, lineTotalAmount, freeGift? }]) are the priced lines:
+ * a code limited to some products or collections takes its percentage (or
+ * caps its fixed amount) on those lines only. Without them the whole
+ * subtotal is used.
  */
-async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds, customerId, funnelId, transaction }) {
+async function evaluate(workspaceId, code, { subtotal, productIds, lines = null, customerId, funnelId, transaction }) {
   if (!code) return { discount: null, amount: 0 };
 
   const discount = await db.Discount.findOne({ where: { workspaceId, code, status: 'active' }, transaction });
@@ -24,11 +29,17 @@ async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds
   if (discount.minimumSubtotal && subtotal < discount.minimumSubtotal) {
     throw new AppError('DISCOUNT_MINIMUM_NOT_MET', 'Order subtotal does not meet the discount minimum', 422);
   }
-  if (discount.productRestrictions.length && !discount.productRestrictions.some((id) => productIds.includes(id))) {
+  const eligible = await eligibleProducts(discount, productIds, transaction);
+  if (eligible && eligible.size === 0) {
     throw new AppError('DISCOUNT_NOT_APPLICABLE', 'Discount code does not apply to items in this order', 422);
   }
   if (discount.funnelRestrictions.length && (!funnelId || !discount.funnelRestrictions.includes(funnelId))) {
     throw new AppError('DISCOUNT_NOT_APPLICABLE', 'Discount code does not apply to this funnel', 422);
+  }
+  // A personal code: only the customers it was made for. An unknown shopper
+  // (the storefront's preview) is checked when the order is placed.
+  if ((discount.customerRestrictions || []).length && customerId && !discount.customerRestrictions.includes(customerId)) {
+    throw new AppError('DISCOUNT_NOT_APPLICABLE', 'Discount code does not apply to this customer', 422);
   }
   if (discount.usageLimit !== null && discount.usageCount >= discount.usageLimit) {
     throw new AppError('DISCOUNT_USAGE_LIMIT_REACHED', 'Discount code has reached its usage limit', 422);
@@ -40,7 +51,53 @@ async function evaluate(workspaceId, code, { subtotal, productIds, collectionIds
     }
   }
 
-  return { discount, amount: amountFor(discount, subtotal) };
+  return { discount, amount: amountOn(discount, eligible, lines, subtotal) };
+}
+
+/** What a discount takes off these lines: the covered subtotal for a limited one, else the whole order. */
+function amountOn(discount, eligible, lines, subtotal) {
+  return amountFor(discount, eligibleSubtotal(eligible, lines, subtotal));
+}
+
+/**
+ * The products of `productIds` a product- or collection-limited discount
+ * covers: in its product list, or linked to one of its collections (smart
+ * collections keep their links in product_collections too). null when the
+ * discount is not limited, so it covers the whole order.
+ */
+async function eligibleProducts(discount, productIds, transaction) {
+  const products = discount.productRestrictions || [];
+  const collections = discount.collectionRestrictions || [];
+  if (!products.length && !collections.length) return null;
+  const eligible = new Set((productIds || []).filter((id) => products.includes(id)));
+  const rest = [...new Set(productIds || [])].filter((id) => !eligible.has(id));
+  if (collections.length && rest.length) {
+    const links = await db.ProductCollection.findAll({
+      where: { productId: rest, collectionId: collections },
+      attributes: ['productId'],
+      raw: true,
+      transaction,
+    });
+    for (const link of links) eligible.add(link.productId);
+  }
+  return eligible;
+}
+
+/** The part of the order a limited discount works on: its covered lines' totals (free gifts never count). */
+function eligibleSubtotal(eligible, lines, subtotal) {
+  if (!eligible || !Array.isArray(lines)) return subtotal;
+  return lines.filter((l) => !l.freeGift && eligible.has(l.productId)).reduce((sum, l) => sum + Number(l.lineTotalAmount), 0);
+}
+
+/**
+ * amountFor on priced lines: the whole subtotal, or only the covered lines'
+ * for a product- or collection-limited discount. For an order whose lines
+ * change after the code was redeemed (items edited, an upsell joined).
+ */
+async function amountForLines(discount, lines, transaction) {
+  const subtotal = lines.reduce((sum, l) => sum + Number(l.lineTotalAmount), 0);
+  const eligible = await eligibleProducts(discount, lines.filter((l) => !l.freeGift).map((l) => l.productId), transaction);
+  return amountOn(discount, eligible, lines, subtotal);
 }
 
 /**
@@ -79,4 +136,4 @@ async function redeem(discountId, { orderId, customerId, amountAllocated }, tran
   );
 }
 
-module.exports = { evaluate, redeem, amountFor };
+module.exports = { evaluate, redeem, amountFor, amountOn, amountForLines, eligibleProducts, eligibleSubtotal };

@@ -133,7 +133,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
     if (discount) {
-      discountAmount = discountService.amountFor(discount, subtotal);
+      // A product- or collection-limited code still covers only its lines.
+      discountAmount = await discountService.amountForLines(discount, lines, transaction);
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
       await redemption.update({ amountAllocated: discountAmount }, { transaction });
     }
