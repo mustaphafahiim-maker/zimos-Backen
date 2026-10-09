@@ -242,6 +242,7 @@ v1.use('/workspaces/:workspaceId/store-credit', require('./modules/storeCredit')
 v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
 v1.use('/workspaces/:workspaceId/loyalty', require('./modules/loyalty').staff);
 v1.use('/workspaces/:workspaceId/customer-referrals', require('./modules/customerReferrals').staff);
+v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
 v1.use('/workspaces/:workspaceId/shopper-accounts', require('./modules/shopperAccounts').staff);
 v1.use('/workspaces/:workspaceId/wishlists', require('./modules/shopperAccounts/wishlist').staff);
 v1.use('/workspaces/:workspaceId/blog', require('./modules/blog').staff);
@@ -325,6 +326,7 @@ v1.use('/store/:workspaceId/account/referral', require('./modules/customerReferr
 v1.use('/store/:workspaceId/account', require('./modules/shopperAccounts').store);
 v1.use('/store/:workspaceId/loyalty', require('./modules/loyalty').store);
 v1.use('/store/:workspaceId/referrals', require('./modules/customerReferrals').store);
+v1.use('/store/:workspaceId/returns', require('./modules/returns/shopperReturns').store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 

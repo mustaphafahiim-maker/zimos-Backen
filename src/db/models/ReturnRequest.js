@@ -17,6 +17,15 @@ module.exports = (sequelize, DataTypes) => {
       // Restocking is an explicit separate action (see returnService.restock),
       // never automatic on refund/approval.
       restockedAt: { type: DataTypes.DATE, allowNull: true, field: 'restocked_at' },
+      // merchant | shopper (migration 690): a shopper opens one from the tracking page or their account (shopperReturns.js).
+      source: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'merchant' },
+      photoUploadIds: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'photo_upload_ids' },
+      // Migration 691 (returnExchange.js): refund | exchange (each item line then names its exchangeVariantId),
+      // the replacement order, and the merchant's answer.
+      resolution: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'refund' },
+      exchangeOrderId: { type: DataTypes.UUID, allowNull: true, field: 'exchange_order_id' },
+      decisionNote: { type: DataTypes.STRING(500), allowNull: true, field: 'decision_note' },
+      decidedAt: { type: DataTypes.DATE, allowNull: true, field: 'decided_at' },
     },
     { tableName: 'return_requests', indexes: [{ fields: ['workspace_id'] }, { fields: ['order_id'] }] }
   );
