@@ -115,6 +115,7 @@ const TABLES = {
   stock_alerts: wipe(STORE),
   store_payment_methods: wipe("a store's own InstaPay / wallet numbers (migration 209)"),
   trusted_devices: wipe("browsers remembered for two-step sign-in, the creator's included"),
+  url_redirects: wipe(STORE),
   user_two_factor: wipe("two-step sign-in settings, the creator's included: turned on again after the reset"),
   wallet_refund_requests: wipe('refund requests of the prepaid balance (migration 223)'),
   wallet_refund_allocations: wipe('which top-ups a refund request takes from (migration 223)'),
