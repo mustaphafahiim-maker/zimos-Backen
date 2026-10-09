@@ -9,7 +9,7 @@ const env = require('./config/env');
 const requestId = require('./core/middleware/requestId');
 const { resolveClientIp, clientIp } = require('./core/middleware/clientIp');
 const { corsPolicy } = require('./core/middleware/cors');
-const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter } = require('./core/middleware/rateLimiters');
+const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter, deliveryWebhookLimiter } = require('./core/middleware/rateLimiters');
 const { errorHandler, notFoundHandler } = require('./core/middleware/errorHandler');
 const { hostResolver } = require('./core/middleware/hostResolver');
 const logger = require('./core/utils/logger');
@@ -130,6 +130,8 @@ app.use(`/api/${env.apiVersion}/store`, storefrontLimiter);
 // webhook token, not per IP (see rateLimiters.js).
 app.use(`/api/${env.apiVersion}/webhooks/carriers`, carrierWebhookLimiter);
 app.use(`/api/${env.apiVersion}/webhooks/payments`, paymentWebhookLimiter);
+// Email and SMS delivery status webhooks: per provider, not per IP (rateLimiters.js).
+app.use([`/api/${env.apiVersion}/webhooks/email`, `/api/${env.apiVersion}/webhooks/sms`], deliveryWebhookLimiter);
 app.use(generalLimiter);
 
 // --- Health / readiness -----------------------------------------------
@@ -257,6 +259,8 @@ v1.use('/workspaces/:workspaceId/store-app', require('./modules/storefront/store
 v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
 v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
+// The store's email suppression list (notifications/deliveryStatus, DELIVERY_STATUS_ENABLED).
+v1.use('/workspaces/:workspaceId/email-suppressions', require('./modules/notifications/deliveryStatus/suppressionRoutes'));
 // The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
 v1.use('/inbox-stream', inboxRoutes.stream);
 // The analytics live view's SSE stream — opened with a ticket, like the inbox stream.
@@ -272,6 +276,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
+// Email and SMS delivery status — public; Brevo's secret token / Twilio's signature prove the sender (DELIVERY_STATUS_ENABLED).
+v1.use('/webhooks', require('./modules/notifications/deliveryStatus/webhookRoutes').router);
 v1.use('/admin', adminRoutes);
 // Payment methods and transfer proofs (billing/paymentAdminRoutes).
 v1.use('/admin', paymentAdminRoutes);

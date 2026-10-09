@@ -65,6 +65,7 @@ const TABLES = {
   discounts: wipe(STORE),
   domain_provider_deletions: wipe('custom hostnames still to remove at the certificate provider; before launch there are none in production'),
   domains: wipe(STORE),
+  email_suppressions: wipe('addresses that bounced or complained: store rows go with their store, platform rows (store-less sends) are bounces of accounts that go'),
   experiment_assignments: wipe('store experiments'),
   experiments: wipe(STORE),
   funnel_creations: wipe(STORE),

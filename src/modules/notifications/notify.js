@@ -8,6 +8,16 @@ const brevoEmailProvider = require('./brevoEmailProvider');
 const twilioSmsProvider = require('./twilioSmsProvider');
 const platformWhatsapp = require('./platformWhatsapp');
 
+// Delivery status (deliveryStatus/, DELIVERY_STATUS_ENABLED): the suppression list checked before an
+// email, the console provider's simulated reports and the Twilio statusCallback. Lazy: they reach back here.
+const deliveryStatus = () => ({
+  on: require('./deliveryStatus/gate').deliveryStatusOn(),
+  suppressions: require('./deliveryStatus/suppressions'),
+  simulate: require('./deliveryStatus/simulate'),
+  webhooks: require('./deliveryStatus/webhookRoutes'),
+});
+const consoleMessageId = () => `console-${require('crypto').randomUUID()}`;
+
 // Minimal SMS bodies. OTP flows pass { code } (and, for the sign-up code,
 // { minutes, locale }); anything else falls back to a terse template-name +
 // data dump so nothing sends blank.
@@ -43,7 +53,8 @@ function loggable(data) {
 }
 
 // `orderId`: a message to a customer about an order — logged with it and its line, for the order's timeline.
-async function persist({ workspaceId, channel, provider, recipient, template, status, error, attempts, orderId = null, subject = null }) {
+// `providerMessageId`: the provider's id for the message, so its status webhook finds the row (deliveryStatus/).
+async function persist({ workspaceId, channel, provider, recipient, template, status, error, attempts, orderId = null, subject = null, providerMessageId = null, deliveryStatus: delivery = null, statusReason = null }) {
   await db.NotificationLog.create({
     workspaceId,
     channel,
@@ -55,6 +66,9 @@ async function persist({ workspaceId, channel, provider, recipient, template, st
     attempts,
     orderId: orderId || null,
     subject: orderId && subject ? String(subject).replace(/\s+/g, ' ').trim().slice(0, 300) : null,
+    providerMessageId: providerMessageId ? String(providerMessageId).slice(0, 255) : null,
+    deliveryStatus: delivery,
+    statusReason,
   });
 }
 
@@ -62,15 +76,28 @@ async function sendEmail({ recipient, template, data, workspaceId = null, orderI
   const provider = env.notifications.emailProvider;
   const { subject, html, text } = emailTemplates.render(template, data);
 
+  // An address that hard-bounced or complained gets nothing more (account and security emails excepted).
+  const delivery = deliveryStatus();
+  const suppressed = delivery.on ? await delivery.suppressions.blocking({ workspaceId, recipient, template }) : null;
+  if (suppressed) {
+    const error = `Suppressed: ${suppressed.reason}`;
+    logger.info(`[notification:email] ${template} not sent: the address is suppressed (${suppressed.reason})`);
+    await persist({ workspaceId, channel: 'email', provider, recipient, template, status: 'failed', error, attempts: 0, orderId, subject, deliveryStatus: 'suppressed', statusReason: suppressed.reason });
+    return { status: 'suppressed', error, subject, attempts: 0 };
+  }
+
   let status = 'sent';
   let error = null;
   let attempts = 1;
+  let messageId = null;
   try {
     if (provider === 'console') {
+      messageId = consoleMessageId();
       logger.info(`[notification:email] ${template} -> ${recipient} :: ${subject}`, { data: loggable(data) });
     } else if (provider === 'brevo') {
       const sent = await brevoEmailProvider.sendEmail({ to: recipient, subject, html, text, fromName: data && data.fromName ? String(data.fromName).slice(0, 100) : undefined, replyTo: data && data.replyTo ? String(data.replyTo) : undefined });
       attempts = sent.attempts || attempts;
+      messageId = sent.messageId ? String(sent.messageId).trim().replace(/^<|>$/g, '') : null;
     } else {
       throw new Error(`Email provider "${provider}" is not configured`);
     }
@@ -81,7 +108,8 @@ async function sendEmail({ recipient, template, data, workspaceId = null, orderI
     logger.error(`[notification:email] ${template} -> ${recipient} failed after ${attempts} attempt(s): ${err.message}`);
   }
 
-  await persist({ workspaceId, channel: 'email', provider, recipient, template, status, error, attempts, orderId, subject });
+  await persist({ workspaceId, channel: 'email', provider, recipient, template, status, error, attempts, orderId, subject, providerMessageId: status === 'sent' ? messageId : null });
+  if (status === 'sent' && provider === 'console') delivery.simulate.afterConsoleSend({ channel: 'email', recipient, messageId });
   return { status, error, subject, attempts };
 }
 
@@ -89,16 +117,19 @@ async function sendChannel(channel, provider, { recipient, template, data, works
   let status = 'sent';
   let error = null;
   let attempts = 1;
+  let messageId = null;
   try {
     if (provider === 'console') {
+      messageId = consoleMessageId();
       // Nothing leaves the server: logged, as before.
       logger.info(`[notification:${channel}] ${template} -> ${recipient}`, { data: loggable(data) });
     } else if (channel === 'whatsapp' && provider === 'cloud') {
       // ZIMOS's own number (PLATFORM_WHATSAPP.md).
       await platformWhatsapp.send({ to: recipient, template, data });
     } else if (channel === 'sms' && provider === 'twilio') {
-      const sent = await twilioSmsProvider.sendSms({ to: recipient, body: smsBody(template, data) });
+      const sent = await twilioSmsProvider.sendSms({ to: recipient, body: smsBody(template, data), statusCallback: deliveryStatus().webhooks.twilioStatusCallbackUrl() });
       attempts = sent.attempts || attempts;
+      messageId = sent.sid || null;
     } else {
       throw new Error(`Notification provider "${provider}" is not configured with credentials`);
     }
@@ -109,7 +140,8 @@ async function sendChannel(channel, provider, { recipient, template, data, works
     logger.error(`[notification:${channel}] ${template} -> ${recipient} failed after ${attempts} attempt(s): ${err.message}`);
   }
 
-  await persist({ workspaceId, channel, provider, recipient, template, status, error, attempts, orderId, subject: orderId ? smsBody(template, data) : null });
+  await persist({ workspaceId, channel, provider, recipient, template, status, error, attempts, orderId, subject: orderId ? smsBody(template, data) : null, providerMessageId: status === 'sent' ? messageId : null });
+  if (status === 'sent' && provider === 'console') deliveryStatus().simulate.afterConsoleSend({ channel, recipient, messageId });
   return { status, error, attempts };
 }
 
