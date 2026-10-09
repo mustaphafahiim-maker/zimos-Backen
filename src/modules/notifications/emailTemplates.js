@@ -347,6 +347,16 @@ ${paragraphs}
     };
   },
 
+  // A sold-out product is back (modules/stockAlerts): its name and a link, the store's name.
+  back_in_stock(data = {}) {
+    const name = escapeHtml(String(data.productName || '').slice(0, 300));
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const url = /^https?:\/\//.test(String(data.url || '')) ? String(data.url) : '';
+    const button = url ? `<p><a href="${escapeHtml(url)}" style="display:inline-block;padding:10px 18px;background:#111;color:#fff;border-radius:6px;text-decoration:none">${data.locale === 'en' ? 'Order now' : 'اطلبه دلوقتي'}</a></p>` : '';
+    if (data.locale === 'en') return { subject: `${data.productName} is back in stock`, ...wrap(`<p><b>${name}</b> is back in stock at ${store}.</p>${button}<p style="color:#6b7280">You asked to be told once; we won't write again about it.</p>`, `${data.productName} is back in stock at ${data.storeName}: ${url}`) };
+    return { subject: `${data.productName} رجع متاح`, ...wrap(`<p><b>${name}</b> رجع متاح في ${store}.</p>${button}<p style="color:#6b7280">طلبت نبلغك مرة واحدة، ومش هنبعتلك تاني عنه.</p>`, `${data.productName} رجع متاح في ${data.storeName}: ${url}`, { dir: 'rtl', arabicFooter: true }) };
+  },
+
   // The store answered a shopper's question on a product (modules/productQuestions): once, to the asker.
   question_answered(data = {}) {
     const name = escapeHtml(String(data.productName || '').slice(0, 300));
