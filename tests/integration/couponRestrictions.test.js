@@ -167,3 +167,37 @@ describe('free-shipping and buy-X-get-Y codes', () => {
     expect(preview.details[0]).toMatchObject({ buyQuantity: 2, getQuantity: 1, units: 2, remainingUnits: 1 });
   });
 });
+
+describe('tax after the discount', () => {
+  async function taxedStore() {
+    const ctx = await twoProducts();
+    const ws = await db.Workspace.findByPk(ctx.workspace.id);
+    await ws.update({ settings: { ...(ws.settings || {}), tax_enabled: true } });
+    await db.TaxRate.create({ workspaceId: ctx.workspace.id, name: 'VAT', country: 'EG', rateBasisPoints: 1400 });
+    return ctx;
+  }
+
+  it('taxes what the shopper pays: a code comes off before the tax', async () => {
+    const ctx = await taxedStore();
+    await code(ctx, { code: 'HALF', type: 'percentage', value: 5000 });
+    const res = await order(ctx, [ctx.a.variant], 'HALF');
+    expect(res.status).toBe(201);
+    expect(Number(res.body.order.discountAmount)).toBe(500);
+    expect(Number(res.body.order.taxAmount)).toBe(70); // 14% of 500, not of 1000
+  });
+
+  it('a product-limited code lowers the tax of its own lines only, and an items edit keeps that', async () => {
+    const ctx = await taxedStore();
+    await code(ctx, { code: 'TWENTYA', type: 'percentage', value: 2000, productRestrictions: [ctx.a.product.id] });
+    const res = await order(ctx, [ctx.a.variant, ctx.b.variant], 'TWENTYA');
+    expect(Number(res.body.order.discountAmount)).toBe(200);
+    expect(Number(res.body.order.taxAmount)).toBe(392); // 14% of (800 + 2000)
+
+    const preview = await request(app)
+      .post(`/api/v1/workspaces/${ctx.workspace.id}/orders/${res.body.order.id}/items/preview`)
+      .set(bearer(ctx.auth.accessToken))
+      .send({ items: [{ variantId: ctx.a.variant.id, quantity: 1 }, { variantId: ctx.b.variant.id, quantity: 1 }] });
+    expect(preview.status).toBe(200);
+    expect(Number(preview.body.preview.after.taxAmount)).toBe(392);
+  });
+});

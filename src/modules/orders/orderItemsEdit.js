@@ -6,7 +6,7 @@ const { add } = require('../../core/utils/money');
 const inventoryService = require('../inventory/inventoryService');
 const discountService = require('../discounts/discountService');
 const { calculateShippingAmount } = require('../shipping/shippingPricing');
-const { calculateTax } = require('../tax/taxService');
+const { calculateTax, taxableLines } = require('../tax/taxService');
 const { recordAudit } = require('../audit/auditService');
 const { assertNotShipped } = require('./shipmentLifecycle');
 const orderService = require('./orderService');
@@ -134,15 +134,19 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
 
   let discountAmount = Number(order.discountAmount);
   let discountsSnapshot = order.discountsSnapshot || [];
+  let placed = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
+    placed = discount;
     if (discount) {
       // A product- or collection-limited code still covers only its lines.
       discountAmount = await discountService.amountForLines(discount, lines, transaction);
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
       await redemption.update({ amountAllocated: discountAmount }, { transaction });
     }
+  } else {
+    placed = await orderService.placedDiscount(order, transaction);
   }
   discountAmount = Math.min(discountAmount, subtotal);
 
@@ -162,7 +166,8 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   const { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
-    lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+    // Taxed on what the shopper pays: the order's discount comes off first.
+    lines: await taxableLines(lines, discountAmount, placed, transaction),
     shippingAmount: shipping.amount,
     transaction,
   });

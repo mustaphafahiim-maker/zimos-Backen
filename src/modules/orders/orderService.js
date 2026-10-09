@@ -22,7 +22,7 @@ const orderStock = require('../inventory/orderStock');
 const customerService = require('../customers/customerService');
 const discountService = require('../discounts/discountService');
 const { calculateShippingAmount } = require('../shipping/shippingPricing');
-const { calculateTax } = require('../tax/taxService');
+const { calculateTax, taxableLines } = require('../tax/taxService');
 const { completeOrderInTransaction } = require('./orderCompletion');
 const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState, trackStage, nextStages } = require('./orderStateService');
@@ -529,7 +529,8 @@ async function createOrder(
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
-      lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+      // Taxed on what the shopper pays: the code's or automatic discount comes off first.
+      lines: await taxableLines(pricedLines, discountAmount, discountRecord, transaction),
       shippingAmount,
       transaction,
     });
@@ -716,6 +717,18 @@ async function createOrder(
  *
  * @returns {Promise<{ order, item, before }>} before: the totals it replaced
  */
+/**
+ * The discount an order was placed with when it has no redemption yet: an order still awaiting its
+ * online payment keeps its code in completionContext.discount until it is paid, and an automatic
+ * discount names itself in discountsSnapshot. Tax spreads it over the lines it covers.
+ */
+async function placedDiscount(order, transaction) {
+  const pending = order.completionContext && order.completionContext.discount;
+  const automatic = (order.discountsSnapshot || []).find((d) => d && d.kind !== 'bundle' && d.discountId);
+  const discountId = (pending && pending.discountId) || (automatic && automatic.discountId) || null;
+  return discountId ? db.Discount.findByPk(discountId, { transaction }) : null;
+}
+
 async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = false, actorUserId = null } = {}, transaction) {
   const before = {
     subtotalAmount: Number(order.subtotalAmount),
@@ -782,15 +795,19 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   // and redeemed when the order was placed and is not checked again.
   let discountAmount = before.discountAmount;
   let discountsSnapshot = order.discountsSnapshot || [];
+  let placed = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
+    placed = discount;
     if (discount) {
       // A product- or collection-limited code still covers only its lines.
       discountAmount = await discountService.amountForLines(discount, lines, transaction);
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
       await redemption.update({ amountAllocated: discountAmount }, { transaction });
     }
+  } else {
+    placed = await placedDiscount(order, transaction);
   }
 
   const address = order.shippingAddressSnapshot || null;
@@ -810,7 +827,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   const { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
-    lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+    // Taxed on what the shopper pays: the order's discount comes off first.
+    lines: await taxableLines(lines, discountAmount, placed, transaction),
     shippingAmount,
     transaction,
   });
@@ -1440,6 +1458,7 @@ module.exports = {
   generateTrackingCode,
   priceLine,
   couponShipsFree,
+  placedDiscount,
   cancelOrder,
   updateOrderLimited,
   listShipments,
