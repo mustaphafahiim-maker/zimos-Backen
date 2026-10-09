@@ -1,6 +1,7 @@
 'use strict';
 
 const Joi = require('joi');
+const { EVENTS: BROWSER_EVENTS, X_EVENT_ID } = require('./browserPixelEvents');
 const { PLATFORM_NAMES, SCOPE_TYPES } = require('./trackingPixelService');
 const { TIMINGS } = require('./purchaseTiming');
 
@@ -21,6 +22,10 @@ const scope = Joi.object({
 const config = Joi.object({
   // Google Ads conversion label ("AbC-D_efG-h12_34-567"), used with an AW- id.
   adsConversionLabel: Joi.string().trim().pattern(/^[A-Za-z0-9_-]{4,60}$/).allow(null, ''),
+  // Pinterest ad account id, for its Conversions API (pixelProviders/pinterestCapi.js).
+  adAccountId: Joi.string().trim().pattern(/^\d{6,20}$/).allow(null, ''),
+  // X conversion event ids per standard event ("tw-<pixel>-<event>"; browserPixelEvents.js).
+  eventIds: Joi.object(Object.fromEntries(BROWSER_EVENTS.map((e) => [e, Joi.string().trim().pattern(X_EVENT_ID).allow(null, '')]))),
 });
 
 const shared = {
