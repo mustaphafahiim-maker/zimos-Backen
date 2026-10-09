@@ -140,6 +140,11 @@ const checkout = asyncHandler(async (req, res) => {
   items = await productTests.pinPrices(workspaceId, items, testVisitor);
   // Each product's min / max per order and max per customer (catalog/purchaseLimits.js).
   await require('../catalog/purchaseLimits').assertWithin(workspaceId, items, orderBody.contact);
+  // The signed-in shopper's VIP tier: a percent off plain lines and/or free shipping (modules/vipTiers). Not in funnels.
+  if (!orderBody.funnelId && req.headers['x-shopper-token'] && storeFeatureOn('vip_tiers')) {
+    const vipShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    if (vipShopper) ({ items } = await require('../vipTiers').applyAtCheckout(workspace, items, vipShopper, orderBody));
+  }
   // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (modules/giftOptions).
   const giftChoice = await require('../giftOptions').prepare(workspace, gift);
   if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];

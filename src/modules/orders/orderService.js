@@ -494,7 +494,8 @@ async function createOrder(
     }
     // A free-shipping code: every line ships free, and the order keeps it when a
     // line joins later or its items are edited (freeShippingGranted below).
-    const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping');
+    // A VIP tier with free shipping (modules/vipTiers) sets this on the checkout's payload: the same as such a code.
+    const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping') || payload[Symbol.for('zimos.freeShipping')] === true;
     if (couponFreeShipping) {
       for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
     }
