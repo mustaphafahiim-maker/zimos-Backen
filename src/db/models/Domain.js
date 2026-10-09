@@ -25,6 +25,8 @@ module.exports = (sequelize, DataTypes) => {
       sslCheckedAt: { type: DataTypes.DATE, allowNull: true, field: 'ssl_checked_at' },
       // The provider's reason when the certificate failed (migration 212).
       sslDetail: { type: DataTypes.STRING(300), allowNull: true, field: 'ssl_detail' },
+      // When the provider was first asked for the certificate: the job's 72 hours count from it (migration 630).
+      sslRequestedAt: { type: DataTypes.DATE, allowNull: true, field: 'ssl_requested_at' },
       // Not served while set: store_suspended | plan (migration 213, domains/domainJobs.js).
       suspendedAt: { type: DataTypes.DATE, allowNull: true, field: 'suspended_at' },
       suspendedReason: { type: DataTypes.STRING(20), allowNull: true, field: 'suspended_reason' },

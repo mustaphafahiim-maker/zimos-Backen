@@ -44,7 +44,7 @@ async function each(rows, fn) {
 /**
  * Every 5 minutes: verified domains with no certificate yet. A first request
  * that failed is made again; a pending one is asked where it stands; still
- * not issued 72 hours after verification, it is failed with a reason the
+ * not issued 72 hours after the request, it is failed with a reason the
  * merchant can act on.
  */
 async function pollPendingCertificates(now = Date.now()) {
@@ -55,12 +55,19 @@ async function pollPendingCertificates(now = Date.now()) {
     limit: BATCH,
   });
   return each(rows, async (domain) => {
-    const since = new Date(domain.verifiedAt || domain.createdAt).getTime();
-    if (now - since > CERTIFICATE_DEADLINE_MS) {
+    // The 72 hours count from the provider request (migration 630), not from the
+    // verification: a domain verified before a provider was set up gets its full time.
+    // A first request the provider kept refusing ('none', its attempts recorded by
+    // refreshCertificate) runs out the same way, with the provider's last answer.
+    const since = domain.sslRequestedAt ? new Date(domain.sslRequestedAt).getTime() : null;
+    if (since !== null && now - since > CERTIFICATE_DEADLINE_MS) {
+      const neverRequested = domain.sslStatus === 'none' && domain.sslDetail;
       await domain.update({
         sslStatus: 'failed',
         sslCheckedAt: new Date(now),
-        sslDetail: 'The certificate was not issued within 72 hours: check that the CNAME record points at us',
+        sslDetail: neverRequested
+          ? `The certificate could not be requested within 72 hours: ${domain.sslDetail}`.slice(0, 300)
+          : 'The certificate was not issued within 72 hours: check that the CNAME record points at us',
       });
     } else {
       await refreshCertificate(domain);

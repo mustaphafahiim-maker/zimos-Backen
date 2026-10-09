@@ -120,17 +120,35 @@ async function refreshCertificate(domain) {
     throw new ConflictError('Verify the domain before requesting its certificate', 'DOMAIN_NOT_VERIFIED');
   }
   const provider = getCertificateProvider();
-  const result =
-    domain.sslStatus === 'none' || !domain.sslProviderRef
+  const first = domain.sslStatus === 'none' || !domain.sslProviderRef;
+  let result;
+  try {
+    result = first
       ? await provider.requestCertificate({ hostname: domain.hostname })
       : await provider.getStatus({ hostname: domain.hostname, providerRef: domain.sslProviderRef });
+  } catch (err) {
+    // A first request that failed is recorded: the job's batch moves on to the
+    // others, the merchant sees why, and the 72 hours also cover a request the
+    // provider keeps refusing (domainJobs.js).
+    if (first) {
+      await domain.update({
+        sslCheckedAt: new Date(),
+        sslDetail: (err instanceof CertificateProviderError ? err.message : 'The certificate provider could not be reached').slice(0, 300),
+        sslRequestedAt: domain.sslRequestedAt || new Date(),
+      });
+    }
+    throw err;
+  }
   const sslStatus = SSL_STATUSES.includes(result.status) ? result.status : 'pending';
+  const now = new Date();
   await domain.update({
     sslStatus,
     sslProvider: provider.code,
     sslProviderRef: result.providerRef || domain.sslProviderRef,
-    sslCheckedAt: new Date(),
+    sslCheckedAt: now,
     sslDetail: result.detail ? String(result.detail).slice(0, 300) : null,
+    // The job's 72 hours count from the request (migration 630).
+    sslRequestedAt: first ? now : domain.sslRequestedAt || now,
     // A verified domain with a certificate is fully live.
     status: sslStatus === 'issued' ? 'active' : domain.status,
   });
