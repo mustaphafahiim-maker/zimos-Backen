@@ -80,3 +80,42 @@ describe('COD settlements', () => {
     expect(summary.body.summary.received).toBe(s.netAmount);
   });
 });
+
+describe('confirming a settlement after an order was paid another way', () => {
+  const db = require('../../src/db/models');
+
+  it('adds only what each order still owes, never the cash twice', async () => {
+    const { auth, workspace, variant } = await setupWorkspaceWithProduct({ price: 30000, stock: 20 });
+    const a = await deliveredOrder(auth, workspace.id, variant.id);
+    const b = await deliveredOrder(auth, workspace.id, variant.id);
+    const c = await deliveredOrder(auth, workspace.id, variant.id);
+
+    const created = await request(app)
+      .post(`/api/v1/workspaces/${workspace.id}/settlements`)
+      .set(bearer(auth.accessToken))
+      .send({ carrierCode: 'manual', lines: [{ orderId: a.id }, { orderId: b.id }, { orderId: c.id }] });
+    expect(created.status).toBe(201);
+    const s = created.body.settlement;
+
+    // After the draft: A is paid in full another way, C is half paid.
+    const total = Number(a.totalAmount);
+    await db.Order.update({ amountPaid: total, financialState: 'paid' }, { where: { id: a.id } });
+    await db.Payment.create({ workspaceId: workspace.id, orderId: a.id, providerCode: 'cod', status: 'captured', amount: total, currency: a.currency });
+    await db.Order.update({ amountPaid: total / 2, financialState: 'partially_paid' }, { where: { id: c.id } });
+
+    const confirmed = await request(app).post(`/api/v1/workspaces/${workspace.id}/settlements/${s.id}/confirm`).set(bearer(auth.accessToken));
+    expect(confirmed.status).toBe(200);
+
+    const amountPaid = async (id) => Number((await db.Order.findByPk(id)).amountPaid);
+    expect(await amountPaid(a.id)).toBe(total);
+    expect(await amountPaid(b.id)).toBe(total);
+    expect(await amountPaid(c.id)).toBe(total);
+    expect(await db.Payment.count({ where: { orderId: a.id } })).toBe(1);
+
+    const applied = Object.fromEntries(confirmed.body.settlement.lines.map((l) => [l.orderId, l.appliedAmount]));
+    expect(applied).toEqual({ [a.id]: 0, [b.id]: total, [c.id]: total / 2 });
+
+    const audit = await db.AuditLog.findOne({ where: { action: 'settlement.confirm', entityId: s.id } });
+    expect(audit.metadata.notApplied.map((r) => r.orderId).sort()).toEqual([a.id, c.id].sort());
+  });
+});
