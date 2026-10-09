@@ -151,15 +151,15 @@ describe('moving off pay per order', () => {
     expect((await move(store, { planId: starter.id })).status).toBe(201);
   });
 
-  it('asked twice, writes one charge; another plan while it waits is refused', async () => {
+  it('asked twice, writes one charge; another plan while it waits replaces it (migration 224)', async () => {
     const store = await payPerOrderStore();
     const [a, b] = await Promise.all([move(store, { planId: starter.id }), move(store, { planId: starter.id })]);
     expect([a.status, b.status].sort()).toEqual([200, 201]);
     expect(a.body.invoice.id).toBe(b.body.invoice.id);
     const other = await move(store, { planId: pro.id });
-    expect(other.status).toBe(409);
-    expect(other.body.error.code).toBe('OPEN_CHARGE_EXISTS');
-    expect(await db.BillingInvoice.count({ where: { workspaceId: store.wid } })).toBe(1);
+    expect(other.status).toBe(201);
+    expect(await db.BillingInvoice.count({ where: { workspaceId: store.wid, status: 'pending' } })).toBe(1);
+    expect((await db.BillingInvoice.findByPk(a.body.invoice.id)).status).toBe('void');
   });
 
   it('a reversed payment puts the store back on pay per order', async () => {

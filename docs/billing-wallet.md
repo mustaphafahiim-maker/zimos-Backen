@@ -42,8 +42,30 @@ A store on the pay-per-order plan moves by itself, with no support:
   `WALLET_DEBT_OUTSTANDING`, with `details.debt`. The balance itself is
   never touched by a move.
 - **Asked twice:** the same plan and cycle while its charge waits get that
-  charge back (200). Anything else while a charge is pending gets 409
+  charge back (200). Another plan or cycle **replaces** the waiting move: its
+  charge is voided (`replaced`) and the new one written, in one transaction.
+  Only a pending charge that isn't a move (a renewal) still gets 409
   `OPEN_CHARGE_EXISTS`.
+- **Never trapped (migration 224):** an unpaid move changes nothing about the
+  store. Its charge becomes `void`, with `void_reason`, which means it isn't
+  due, isn't owed, isn't dunned and doesn't touch the subscription. It gets
+  there three ways:
+  - the merchant cancels it (`POST /billing/plan-move/cancel`): `cancelled`;
+  - another move replaces it: `replaced`;
+  - the hourly billing job `billing.expire_plan_moves` finds it unpaid after
+    `WALLET_MOVE_EXPIRY_HOURS` (48): `expired`. Only with `WALLET_ENABLED`.
+
+  Each is audited (`subscription.plan_move_void`).
+- **Money that arrives for a void move** (a proof approved later, a checkout
+  paid late, the console's record-payment): `settlePaid` hands it to
+  `settleLateMovePayment`, so it's never lost.
+  - It's **applied** when the store is still on pay per order, the plan is
+    still on offer and no other charge is pending.
+  - Otherwise it's **credited** to the balance once per payment
+    (`move_payment_credit`). That's not a top-up, so it isn't refundable by
+    request. The charge stays void and records what arrived.
+  - Audited: `subscription.plan_move_late_applied` /
+    `_payment_credited`.
 - **After the switch:** the plan has no fee, so no order fee is taken. The
   free orders used stay counted.
 - **A manual payment reversed:** the plan, cycle, status and period from
@@ -122,6 +144,44 @@ The same gateway layer as paying a charge online
 - **Every paid attempt credits:** none supersedes another, since each is its
   own money.
 - The billing summary's latest online payment counts charges only.
+
+## Falling back to pay per order (billing/walletFallbackService)
+
+The balance belongs to the merchant, never to a plan.
+
+**When it happens:** a paid subscription's period ends unrenewed. That
+covers the grace day running out, and a cancellation that takes effect at
+period end. If the balance can pay at least one order's fee, the store
+moves to the offered pay-per-order plan (`offeredFeePlan`) instead of going
+past due and then restricted.
+
+**What runs it:** the hourly billing job `billing.wallet_fallback`. The
+lifecycle itself is computed when read and has no job of its own, so this
+is the first run after the period ends.
+
+**Exactly as today when:**
+
+- `WALLET_ENABLED` is off;
+- no pay-per-order plan is on offer;
+- the balance is below one fee, or in debt;
+- a charge is still pending (the merchant may be paying the renewal);
+- the store is a draft or a trial;
+- the subscription is cancelled or suspended;
+- the subscription is priced by hand.
+
+**How it runs:**
+
+- Each store in its own transaction: the subscription is locked and
+  everything is checked again, then the wallet under its lock. A second run
+  changes nothing.
+- The free orders already used stay used.
+- The account is marked as having had its trial.
+- Audited (`subscription.wallet_fallback`).
+- Told in the merchant's bell (`wallet.fallback`) and the console's
+  notifications (`wallet_fallback`).
+
+The merchant can move back to a subscription at any time (`POST
+/billing/plan-move`).
 
 ## Refunds (migration 223)
 

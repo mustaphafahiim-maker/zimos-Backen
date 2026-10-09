@@ -270,6 +270,9 @@ const env = {
     // top-up gives back at most this share of itself (basis points, 7500 =
     // 75%); a request takes from the newest top-ups first (or oldest_first);
     // and asks for at least this much (minor units, 5000 = EGP 50).
+    // A move's charge left unpaid this long is voided by the hourly billing
+    // job (billing/merchantPlansService.expirePendingMoves).
+    moveExpiryHours: intInRange(process.env.WALLET_MOVE_EXPIRY_HOURS, 48, 1, 24 * 90),
     refund: {
       ceilingBp: intInRange(process.env.WALLET_REFUND_CEILING_BP, 7500, 0, 10000),
       allocation: process.env.WALLET_REFUND_ALLOCATION === 'oldest_first' ? 'oldest_first' : 'newest_first',

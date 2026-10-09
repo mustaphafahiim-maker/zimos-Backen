@@ -50,6 +50,8 @@ const TYPES = Object.freeze({
   'wallet.refund': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
   // Credit given by Zimos, when the console chose to tell the store (billing/walletService.adjustBalance).
   'wallet.credit': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
+  // The subscription ended and the balance now pays per order (billing/walletFallbackService).
+  'wallet.fallback': { permission: PERMISSIONS.BILLING_MANAGE, defaults: { inApp: true, email: false } },
 });
 const TYPE_NAMES = Object.keys(TYPES);
 
