@@ -56,6 +56,9 @@ describe('media upload', () => {
     });
     expect(fetched.status).toBe(200);
     expect(fetched.body.length).toBe(storedLength);
+    // helmet's same-origin default would stop the dashboard and the stores
+    // (other origins) from showing it
+    expect(fetched.headers['cross-origin-resource-policy']).toBe('cross-origin');
   });
 
   it('decides type by content, not by extension', async () => {

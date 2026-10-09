@@ -6,6 +6,14 @@ const r2Storage = require('./r2Storage');
 
 const backends = { local: localStorage, r2: r2Storage };
 
+const R2_VARS = {
+  accountId: 'R2_ACCOUNT_ID',
+  accessKeyId: 'R2_ACCESS_KEY_ID',
+  secretAccessKey: 'R2_SECRET_ACCESS_KEY',
+  bucketName: 'R2_BUCKET_NAME',
+  publicUrl: 'R2_PUBLIC_URL',
+};
+
 // Picks the backend from STORAGE_PROVIDER (already trimmed/lower-cased in
 // env.js). Read here rather than captured once so a runtime override in tests
 // still applies. Every backend exposes the same
@@ -23,37 +31,76 @@ function getStorage() {
   return backend;
 }
 
-// One-line summary for the boot log so the deploy log shows what actually
-// resolved, and which R2 vars (if any) are missing.
-function describeStorage() {
-  const name = env.storage.provider;
-  if (name !== 'r2') return `local (serving /uploads from disk)`;
-
-  const r2 = env.storage.r2;
-  const missing = ['accountId', 'accessKeyId', 'secretAccessKey', 'bucketName', 'publicUrl'].filter((k) => !r2[k]);
-  const map = {
-    accountId: 'R2_ACCOUNT_ID',
-    accessKeyId: 'R2_ACCESS_KEY_ID',
-    secretAccessKey: 'R2_SECRET_ACCESS_KEY',
-    bucketName: 'R2_BUCKET_NAME',
-    publicUrl: 'R2_PUBLIC_URL',
-  };
-  const suffix = missing.length ? ` — MISSING ${missing.map((k) => map[k]).join(', ')}` : '';
-  return `r2 (bucket=${r2.bucketName || '?'}, public=${r2.publicUrl || '?'})${suffix}`;
+/** The prefix every stored file's public URL starts with, or null when there is none. */
+function publicBaseUrl() {
+  if (env.storage.provider === 'r2') return env.storage.r2.publicUrl || null;
+  return `${String(env.appUrl).replace(/\/$/, '')}/uploads`;
 }
 
-function r2ConfigError() {
-  if (env.storage.provider !== 'r2') return null;
-  const r2 = env.storage.r2;
-  const map = {
-    accountId: 'R2_ACCOUNT_ID',
-    accessKeyId: 'R2_ACCESS_KEY_ID',
-    secretAccessKey: 'R2_SECRET_ACCESS_KEY',
-    bucketName: 'R2_BUCKET_NAME',
-    publicUrl: 'R2_PUBLIC_URL',
-  };
-  const missing = Object.keys(map).filter((k) => !r2[k]);
-  return missing.length ? `STORAGE_PROVIDER=r2 but missing: ${missing.map((k) => map[k]).join(', ')}` : null;
+function parseHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
+
+/**
+ * Every setting that makes the links put() hands out wrong, unreachable or
+ * short-lived. Each entry names the variable to fix, never a secret's value.
+ * An empty list means the configuration itself is sound (whether the bucket
+ * answers is probeStorage's job).
+ */
+function storageProblems() {
+  const name = env.storage.provider;
+  if (!backends[name]) return [`Unknown STORAGE_PROVIDER "${name}" — expected "local" or "r2"`];
+  const problems = [];
+
+  if (name === 'r2') {
+    const r2 = env.storage.r2;
+    const missing = Object.keys(R2_VARS).filter((k) => !r2[k]);
+    if (missing.length) problems.push(`STORAGE_PROVIDER=r2 but missing: ${missing.map((k) => R2_VARS[k]).join(', ')}`);
+    if (r2.publicUrl) {
+      const parsed = parseHttpUrl(r2.publicUrl);
+      if (!parsed) {
+        problems.push(
+          'R2_PUBLIC_URL is not an absolute http(s) URL — every image link built from it is relative and breaks (use https://<the bucket public domain>)'
+        );
+      } else if (parsed.hostname.endsWith('.r2.cloudflarestorage.com')) {
+        problems.push(
+          'R2_PUBLIC_URL is the private S3 API endpoint (*.r2.cloudflarestorage.com), which never serves files publicly — use the bucket public r2.dev URL or its custom domain'
+        );
+      } else if (env.isProduction && parsed.protocol !== 'https:') {
+        problems.push('R2_PUBLIC_URL is http:// — an https dashboard or store may refuse to show those images');
+      }
+    }
+    return problems;
+  }
+
+  if (env.isProduction) {
+    if (!env.storage.allowLocalInProduction) {
+      problems.push(
+        'production is on STORAGE_PROVIDER=local without ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true — public/uploads is erased by the next deploy, and every image uploaded before it stops loading (set STORAGE_PROVIDER=r2, or mount a volume there and set the flag)'
+      );
+    }
+    const app = parseHttpUrl(env.appUrl);
+    if (!app || LOOPBACK.has(app.hostname)) {
+      problems.push('APP_URL is not the public address of this API — every local upload link is built from it');
+    }
+  }
+  return problems;
+}
+
+// One-line summary for the boot log and the admin storage tile: the driver
+// that actually resolved and the public base URL its links use. No secrets.
+function describeStorage() {
+  const name = env.storage.provider;
+  const base = publicBaseUrl() || '?';
+  if (name !== 'r2') return `local (serving /uploads from disk, public=${base})`;
+  return `r2 (bucket=${env.storage.r2.bucketName || '?'}, public=${base})`;
 }
 
 // Health probe for the ACTIVE backend, for /admin/system/services. Each
@@ -76,7 +123,8 @@ module.exports = {
   getStorage,
   getMultipart,
   describeStorage,
-  r2ConfigError,
+  publicBaseUrl,
+  storageProblems,
   probeStorage,
   UPLOAD_ROOT: localStorage.UPLOAD_ROOT,
 };
