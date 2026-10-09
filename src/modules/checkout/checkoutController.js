@@ -47,7 +47,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, giftCardCode: cardCode, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, giftCardCode: cardCode, useStoreCredit, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -71,6 +71,13 @@ const checkout = asyncHandler(async (req, res) => {
   if (giftCardCode) {
     if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery' }], 'Invalid body');
     await require('../giftCards/giftCardService').assertUsable(workspaceId, giftCardCode, null);
+  }
+  // Store credit, only a signed-in shopper's, cash on delivery only (modules/storeCredit). Off, ignored.
+  let creditOwner = null;
+  if (useStoreCredit && storeFeatureOn('store_credit')) {
+    if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'useStoreCredit', message: 'Store credit can be used with cash on delivery' }], 'Invalid body');
+    const shopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    creditOwner = await require('../storeCredit/storeCreditService').assertCanSpend(workspace, shopper);
   }
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
@@ -168,12 +175,14 @@ const checkout = asyncHandler(async (req, res) => {
     await afterOrderCompleted(workspaceId, order, context);
     // The card pays what it can now, as a captured payment; a card spent meanwhile leaves the order as it is.
     const giftCard = giftCardCode ? await require('../giftCards/giftCardService').redeemOnOrder(order, giftCardCode, req) : null;
-    if (giftCard && giftCard.applied) await order.reload();
+    // Then the store credit, on what is still due.
+    const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
+    if ((giftCard && giftCard.applied) || (credit && credit.applied)) await order.reload();
     if (manualMethod) {
       const manualPayment = await manualPayments.getForShopper(workspaceId, order.id, manualToken.token);
       return res.status(201).json({ order: shopperOrder(order, orderItems), manualPayment, paymentToken: manualToken.token });
     }
-    return res.status(201).json({ order: shopperOrder(order, orderItems), ...(giftCard ? { giftCard } : {}) });
+    return res.status(201).json({ order: shopperOrder(order, orderItems), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(

@@ -14,13 +14,15 @@ const { GatewayRejectedError, GatewayAuthError } = require('./gateways/gatewayEr
 // `mock` authorises and captures in-process without moving any money, so it is
 // a development/test fixture only — never a production gateway. `cod` is real:
 // the money is collected by the courier on delivery.
-// Store-held tenders: refunded to the card, never through a gateway.
-const STORE_TENDERS = ['gift_card'];
+// Store-held tenders: refunded to the card or the balance, never through a gateway.
+const STORE_TENDERS = ['gift_card', 'store_credit'];
 const PROVIDERS = {
   mock: require('./providers/mockProvider'),
   cod: require('./providers/codProvider'),
   // A gift card's part of an order (modules/giftCards): refunds credit the card.
   gift_card: require('../giftCards/giftCardProvider'),
+  // Store credit spent on an order (modules/storeCredit): refunds put it back on the balance.
+  store_credit: require('../storeCredit/storeCreditProvider'),
 };
 
 // env.payments.defaultProvider (PAYMENTS_DEFAULT_PROVIDER) is not read on this
@@ -159,7 +161,7 @@ async function processRefund(workspaceId, orderId, { amount, reason, paymentId }
     });
     const gatewayPayments = captured.filter((p) => gateways.isGateway(p.providerCode));
 
-    // A gift card's part, named by the merchant: back to the card, at most what is left of that payment.
+    // A gift card's or store credit's part, named by the merchant: back to it, at most what is left of that payment.
     const storeTender = paymentId ? captured.find((p) => p.id === paymentId && STORE_TENDERS.includes(p.providerCode)) : null;
     if (storeTender) {
       const left = await refundableOnPayment(storeTender, transaction);
@@ -171,7 +173,7 @@ async function processRefund(workspaceId, orderId, { amount, reason, paymentId }
       if (paymentId) {
         throw new AppError('REFUND_PAYMENT_INVALID', 'That payment is not a captured gateway payment on this order', 422);
       }
-      // Never a gift-card payment: that is refunded only when named, capped at what is left on it.
+      // Never a gift-card or store-credit payment: those are refunded only when named, capped at what is left on them.
       const offline = captured.find((p) => p.status === 'captured' && !STORE_TENDERS.includes(p.providerCode)) || null;
       return { refund: await refundOffline(workspaceId, order, offline, { amount, reason }, req, transaction) };
     }

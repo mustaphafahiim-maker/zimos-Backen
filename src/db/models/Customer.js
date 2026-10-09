@@ -37,6 +37,8 @@ module.exports = (sequelize, DataTypes) => {
       lastLoginAt: { type: DataTypes.DATE, allowNull: true, field: 'last_login_at' },
       // When the shopper proved they own `email`: only then does it sign them in.
       emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
+      // Store credit held at the store, minor units, store currency (migration 681, modules/storeCredit).
+      storeCreditAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'store_credit_amount' },
     },
     {
       tableName: 'customers',

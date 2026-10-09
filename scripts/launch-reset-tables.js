@@ -121,6 +121,7 @@ const TABLES = {
   size_charts: wipe(STORE),
   spec_keys: wipe(STORE),
   stock_alerts: wipe(STORE),
+  store_credit_transactions: wipe(STORE),
   store_payment_methods: wipe("a store's own InstaPay / wallet numbers (migration 209)"),
   trusted_devices: wipe("browsers remembered for two-step sign-in, the creator's included"),
   url_redirects: wipe(STORE),
