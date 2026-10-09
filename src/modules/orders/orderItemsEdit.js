@@ -9,6 +9,7 @@ const { calculateShippingAmount } = require('../shipping/shippingPricing');
 const { calculateTax, taxableLines } = require('../tax/taxService');
 const { recordAudit } = require('../audit/auditService');
 const { assertNotShipped } = require('./shipmentLifecycle');
+const { applyBundleTiers } = require('../bundles/bundlePricing');
 const orderService = require('./orderService');
 
 /**
@@ -95,9 +96,18 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       lines.push({
         kept,
         productId: kept.productId,
+        // What decides whether a bundle tier covers the line (bundlePricing.applyBundleTiers).
+        offerId: kept.offerId,
+        isOrderBump: kept.isOrderBump,
+        isUpsell: kept.isUpsell,
+        // A free gift never unlocks a tier: a labelled plain line at 0.
+        freeGift: !kept.offerId && Number(kept.unitPriceAmount) === 0 && Boolean(kept.offerNameSnapshot),
         quantity: wanted.quantity,
         unitPriceAmount: Number(kept.unitPriceAmount),
+        // Full price here; the bundle tiers below take their saving off again, unless the product
+        // is untouched (below).
         lineTotalAmount: Number(kept.unitPriceAmount) * wanted.quantity,
+        lineDiscountAmount: 0,
         consumedInventory: facts ? facts.consumedInventory : [{ variantId: kept.variantId, quantity: wanted.quantity }],
         shippingOverride: facts ? facts.shippingOverride : null,
         weightUnits: facts
@@ -109,6 +119,31 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       const priced = await orderService.priceLine(workspaceId, wanted, transaction);
       lines.push({ ...priced, kept: null, lineTotalAmount: Number(priced.lineTotalAmount) });
     }
+  }
+
+  // ---- which products the edit touches: a line added, removed or with a new quantity. Lines of any other
+  // product keep their stored price and bundle saving as sold, even if the bundle has changed or ended since;
+  // a bundle entry of the order is priced again only when one of its products is touched.
+  const touched = new Set();
+  for (const line of lines) if (!line.kept || line.kept.quantity !== line.quantity) touched.add(line.productId);
+  const keptItemIds = new Set(lines.filter((l) => l.kept).map((l) => l.kept.id));
+  for (const item of existing) if (!keptItemIds.has(item.id)) touched.add(item.productId);
+  const oldBundles = (order.discountsSnapshot || []).filter((d) => d && d.kind === 'bundle');
+  const productsOf = (entry) => (Array.isArray(entry.productIds) ? entry.productIds : [entry.productId]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const entry of oldBundles) {
+      if (productsOf(entry).some((id) => touched.has(id)) && !productsOf(entry).every((id) => touched.has(id))) {
+        for (const id of productsOf(entry)) touched.add(id);
+        grew = true;
+      }
+    }
+  }
+  for (const line of lines) {
+    if (!line.kept || touched.has(line.productId)) continue;
+    line.frozen = true;
+    line.lineTotalAmount = Number(line.kept.lineTotalAmount);
+    line.lineDiscountAmount = Number(line.kept.lineDiscountAmount) || 0;
   }
 
   const wantedStock = new Map();
@@ -125,6 +160,16 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   }
 
   // ---- price the order again
+  // Quantity bundles priced again on the new quantities, as createOrder prices them.
+  const bundleSnapshots = await applyBundleTiers(workspaceId, lines.filter((l) => !l.frozen), transaction);
+  // The bundle entries of untouched products stay as sold, free shipping included.
+  const keptBundles = oldBundles.filter((entry) => !productsOf(entry).some((id) => touched.has(id)));
+  for (const entry of keptBundles) {
+    if (entry.freeShipping !== true) continue;
+    for (const line of lines) {
+      if (line.frozen && line.shippingRule && productsOf(entry).includes(line.productId)) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+    }
+  }
   // Free shipping the order was given when placed (a free-shipping code) still holds for every line.
   if ((order.shippingSnapshot || {}).freeShippingGranted === true) {
     for (const line of lines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
@@ -135,7 +180,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   const offerShippingOverride = orderService.couponShipsFree(order) ? null : lines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
   let discountAmount = Number(order.discountAmount);
-  let discountsSnapshot = order.discountsSnapshot || [];
+  let discountsSnapshot = [...keptBundles, ...bundleSnapshots, ...(order.discountsSnapshot || []).filter((d) => !d || d.kind !== 'bundle')];
   let placed = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
@@ -165,15 +210,22 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
     productLines: lines.map((l) => l.shippingRule),
     transaction,
   });
+  // The shipping option the shopper picked, at its price for the new order; standard when the store no
+  // longer offers it. Shipping typed in by hand stays as typed.
+  const keptShipping = order.shippingSnapshot || {};
+  const option = !manualShipping && keptShipping.option && keptShipping.option.key
+    ? await require('../shipping/shippingOptions').choose(workspaceId, keptShipping.option.key, shipping, transaction).catch(() => null)
+    : null;
+  const shippingAmount = option ? option.amount : shipping.amount;
   const { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
     // Taxed on what the shopper pays: the order's discount comes off first.
     lines: await taxableLines(lines, discountAmount, placed, transaction),
-    shippingAmount: shipping.amount,
+    shippingAmount,
     transaction,
   });
-  const totalAmount = subtotal - discountAmount + shipping.amount + taxAmount;
+  const totalAmount = subtotal - discountAmount + shippingAmount + taxAmount;
 
   // ---- write the lines
   const keptIds = new Set(lines.filter((l) => l.kept).map((l) => l.kept.id));
@@ -186,7 +238,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   for (const [index, line] of lines.entries()) {
     if (line.kept) {
       await line.kept.update(
-        { quantity: line.quantity, lineTotalAmount: line.lineTotalAmount, unitWeightGrams: shipping.lineWeights[index] },
+        { quantity: line.quantity, lineDiscountAmount: line.lineDiscountAmount || 0, lineTotalAmount: line.lineTotalAmount, unitWeightGrams: shipping.lineWeights[index] },
         { transaction }
       );
       items.push(line.kept);
@@ -205,6 +257,7 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
             quantity: line.quantity,
             unitPriceAmount: line.unitPriceAmount,
             unitCostAmount: line.unitCostAmount,
+            lineDiscountAmount: line.lineDiscountAmount || 0,
             lineTotalAmount: line.lineTotalAmount,
             unitWeightGrams: shipping.lineWeights[index],
           },
@@ -219,12 +272,14 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
       subtotalAmount: subtotal,
       discountAmount,
       discountsSnapshot,
-      shippingAmount: shipping.amount,
+      shippingAmount,
       taxAmount,
       totalAmount,
       totalWeightGrams: shipping.weightGrams,
       weightTierSnapshot: shipping.tier,
       weightEstimated: shipping.weightEstimated,
+      // Only the option is re-priced; the zone, pickup and granted free shipping stay.
+      ...(keptShipping.option ? { shippingSnapshot: { ...keptShipping, option: option ? option.snapshot : undefined } } : {}),
     },
     { transaction }
   );
