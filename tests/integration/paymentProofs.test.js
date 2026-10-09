@@ -160,6 +160,50 @@ describe('sending a proof', () => {
     expect(list.status).toBe(200);
     expect(list.headers['cache-control']).toBe('no-store');
     expect(list.body.proofs).toHaveLength(1);
+    // The list names each proof's method as the send answer does (not the row's index in the list).
+    expect(list.body.proofs[0].method).toEqual({ code: 'instapay', label: { ar: 'إنستا باي', en: 'InstaPay' } });
+  });
+
+  it('lists every proof with its own method, however many there are', async () => {
+    const m = await merchantWithOpenInvoice();
+    const method = await db.PaymentMethod.findOne({ where: { code: 'instapay' } });
+    const sub = await db.Subscription.findOne({ where: { workspaceId: m.wid } });
+    for (let i = 0; i < 3; i += 1) {
+      const old = await db.BillingInvoice.create({
+        workspaceId: m.wid,
+        subscriptionId: sub.id,
+        grossAmount: MONTHLY,
+        discountAmount: 0,
+        amount: MONTHLY,
+        currency: 'EGP',
+        status: 'failed',
+        periodStart: new Date(),
+        periodEnd: new Date(),
+      });
+      await db.PaymentProof.create({
+        workspaceId: m.wid,
+        purpose: 'invoice',
+        billingInvoiceId: old.id,
+        paymentMethodId: method.id,
+        methodCode: 'instapay',
+        receivingNumber: 'zimos@instapay',
+        senderPhone: '201012345678',
+        currency: 'EGP',
+        requestedAmount: MONTHLY,
+        grossAmount: MONTHLY,
+        discountAmount: 0,
+        imageKey: `payment-proofs/${m.wid}/list${i}.jpg`,
+        imageMime: 'image/jpeg',
+        imageBytes: 10,
+        imageSha256: String(i + 5).repeat(64),
+      });
+    }
+    const list = await request(app).get(`${base(m)}/payment-proofs`).set(m.H);
+    expect(list.status).toBe(200);
+    expect(list.body.proofs).toHaveLength(3);
+    for (const proof of list.body.proofs) {
+      expect(proof.method).toEqual({ code: 'instapay', label: { ar: 'إنستا باي', en: 'InstaPay' } });
+    }
   });
 
   it('refuses the same image twice, even from another store', async () => {
