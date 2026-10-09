@@ -20,7 +20,10 @@ const getSitemap = asyncHandler(async (req, res) =>
 const cache = require('./storefrontCache');
 const getStore = asyncHandler(async (req, res) => {
   const ws = req.tenant.workspaceId;
-  res.json({ store: await cache.cached(ws, 'store', () => service.getStorefront(ws)) });
+  const store = await cache.cached(ws, 'store', () => service.getStorefront(ws));
+  // A holiday: orders paused, or taken and shipped later (modules/holidayMode). Read
+  // per request, outside the cache: it starts and ends by the clock.
+  res.json({ store: { ...store, holiday: require('../holidayMode').publicView(req.publicWorkspace) } });
 });
 // Products and collections come back in the shopper's language when the store
 // has it translated (X-Store-Locale; modules/translations) — originals otherwise.

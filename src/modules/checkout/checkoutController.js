@@ -50,6 +50,8 @@ const checkout = asyncHandler(async (req, res) => {
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
+  // A store on a "pause" holiday takes no orders (modules/holidayMode).
+  require('../holidayMode').assertOpen(workspace);
   // Per-store required fields (settings.checkout_settings). Checked before any
   // cart work so a rejected checkout costs nothing.
   // A pickup order has no address, so the form's address rules do not apply to it.
@@ -148,6 +150,7 @@ const checkout = asyncHandler(async (req, res) => {
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
+    await require('../holidayMode').markOrder(workspace, order);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     await afterOrderCompleted(workspaceId, order, context);
     if (manualMethod) {
@@ -172,6 +175,7 @@ const checkout = asyncHandler(async (req, res) => {
   );
 
   await saveCheckoutAnswers(order, workspace, formFields);
+  await require('../holidayMode').markOrder(workspace, order);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
 
   const attempt = await online.startAttempt(order, {
