@@ -142,6 +142,7 @@ const TABLES = {
   website_pages: wipe(STORE),
   website_revisions: wipe(STORE),
   websites: wipe(STORE),
+  wishlist_items: wipe(STORE),
   workspace_feature_overrides: wipe(STORE),
   workspaces: wipe("every store, the creator's included"),
 
