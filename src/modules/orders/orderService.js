@@ -162,6 +162,13 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
 
 // The product's shipping mode for shippingRules.productShipping: `units` is
 // how many units of it the line ships.
+// Whether the order was placed with a free-shipping code: it ships free even when an offer
+// in it sets its own shipping price, also when a line joins later or its items are edited.
+function couponShipsFree(order) {
+  return Boolean(order.shippingSnapshot && order.shippingSnapshot.freeShippingGranted === true) &&
+    (order.discountsSnapshot || []).some((d) => d && d.kind !== 'bundle' && d.type === 'free_shipping');
+}
+
 function productShippingRule(product, units) {
   return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units, profileId: product.shippingProfileId || null };
 }
@@ -475,6 +482,12 @@ async function createOrder(
         discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
       }
     }
+    // A free-shipping code: every line ships free, and the order keeps it when a
+    // line joins later or its items are edited (freeShippingGranted below).
+    const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping');
+    if (couponFreeShipping) {
+      for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+    }
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
     if (!req.user && !shippingOverride) await couponExtras.assertMinimumOrder(workspaceId, subtotal, transaction);
@@ -495,7 +508,8 @@ async function createOrder(
       region: shippingAddress ? shippingAddress.province : null,
       subtotal,
       totalQuantity,
-      offerShippingOverride,
+      // A free-shipping code beats an offer's own shipping price; an add-on's does not.
+      offerShippingOverride: couponFreeShipping && !shippingOverride ? null : offerShippingOverride,
       weightLines: pricedLines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
       productLines: pricedLines.map((l) => l.shippingRule),
       funnelId: payload.funnelId || null,
@@ -567,6 +581,8 @@ async function createOrder(
           ...(zone ? { zone: { id: zone.id, name: zone.name, feeAmount: zone.feeAmount, etaMinutes: zone.etaMinutes } } : {}),
           // The estimated delivery time the customer was shown: the zone's, else the store's.
           ...(etaMinutes ? { etaMinutes } : {}),
+          // Free shipping a free-shipping code gave: kept when a line joins later or the items are edited.
+          ...(couponFreeShipping ? { freeShippingGranted: true } : {}),
         },
         ...(awaitingPayment
           ? {
@@ -752,9 +768,15 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   }
   lines.push({ ...newLine, lineTotalAmount: Number(newLine.lineTotalAmount) });
 
+  // Free shipping the order was given when placed (a free-shipping code) still holds for every line.
+  if ((order.shippingSnapshot || {}).freeShippingGranted === true) {
+    for (const line of lines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+  }
+
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
-  const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
+  // A free-shipping code beats an offer's own shipping price.
+  const offerShippingOverride = couponShipsFree(order) ? null : lines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
   // The code the order was placed with, on the new subtotal. It was checked
   // and redeemed when the order was placed and is not checked again.
@@ -1417,6 +1439,7 @@ module.exports = {
   generateOrderNumber,
   generateTrackingCode,
   priceLine,
+  couponShipsFree,
   cancelOrder,
   updateOrderLimited,
   listShipments,

@@ -123,9 +123,14 @@ async function apply(workspaceId, orderId, requested, req, transaction) {
   }
 
   // ---- price the order again
+  // Free shipping the order was given when placed (a free-shipping code) still holds for every line.
+  if ((order.shippingSnapshot || {}).freeShippingGranted === true) {
+    for (const line of lines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+  }
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
-  const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
+  // A free-shipping code beats an offer's own shipping price.
+  const offerShippingOverride = orderService.couponShipsFree(order) ? null : lines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
   let discountAmount = Number(order.discountAmount);
   let discountsSnapshot = order.discountsSnapshot || [];

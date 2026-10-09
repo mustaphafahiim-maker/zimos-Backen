@@ -136,7 +136,8 @@ async function automaticApplies(discount, { subtotal, productIds, customerId, fu
  */
 async function bestAutomatic(workspaceId, context, transaction) {
   const candidates = await db.Discount.findAll({
-    where: { workspaceId, code: null, status: 'active', type: ['percentage', 'fixed'] },
+    // A buy-X-get-Y one gives units away (needs `context.lines`); a free-shipping one is left to the store's threshold.
+    where: { workspaceId, code: null, status: 'active', type: ['percentage', 'fixed', 'buy_x_get_y'] },
     transaction,
   });
   const now = new Date();
@@ -229,9 +230,13 @@ async function previewCode(workspaceId, code, items, visitorId = null, funnelId 
       // A code limited to some funnels applies in those funnels' checkouts only.
       funnelId,
     });
-    return { valid: true, code: discount.code, type: discount.type, amount, subtotal, reason: null };
+    // A free-shipping code takes nothing off the items: the order ships free.
+    return { valid: true, code: discount.code, type: discount.type, amount, freeShipping: discount.type === 'free_shipping', subtotal, reason: null };
   } catch (err) {
-    if (err instanceof AppError && err.statusCode === 422) return { valid: false, code, type: null, amount: 0, subtotal, reason: err.code };
+    // DISCOUNT_QUANTITY_NOT_MET says how many more units a buy-X-get-Y code needs.
+    if (err instanceof AppError && err.statusCode === 422) {
+      return { valid: false, code, type: null, amount: 0, freeShipping: false, subtotal, reason: err.code, ...(err.code === 'DISCOUNT_QUANTITY_NOT_MET' ? { details: err.details } : {}) };
+    }
     throw err;
   }
 }

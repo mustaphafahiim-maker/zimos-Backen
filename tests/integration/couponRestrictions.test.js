@@ -100,3 +100,70 @@ describe('coupon restrictions', () => {
     expect(preview).toMatchObject({ valid: true, amount: 200, subtotal: 3000 });
   });
 });
+
+describe('free-shipping and buy-X-get-Y codes', () => {
+  async function storeWithShipping() {
+    const ctx = await twoProducts();
+    const res = await request(app)
+      .patch(`/api/v1/workspaces/${ctx.workspace.id}/shipping/settings`)
+      .set(bearer(ctx.auth.accessToken))
+      .send({ defaultRateAmount: 500 });
+    if (res.status !== 200) throw new Error(`shipping: ${res.status} ${JSON.stringify(res.body)}`);
+    return ctx;
+  }
+
+  function orderQty(ctx, variant, quantity, discountCode) {
+    return request(app)
+      .post(`/api/v1/workspaces/${ctx.workspace.id}/orders`)
+      .set(bearer(ctx.auth.accessToken))
+      .set('Idempotency-Key', `fx-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      .send({
+        items: [{ variantId: variant.id, quantity }],
+        contact: { fullName: 'Code Buyer', phone: '01012349999' },
+        shippingAddress: { country: 'EG', city: 'Cairo', addressLine: '2 Code St' },
+        paymentMethod: 'cod',
+        ...(discountCode ? { discountCode } : {}),
+      });
+  }
+
+  it('a free-shipping code makes the order ship free, and an items edit keeps it', async () => {
+    const ctx = await storeWithShipping();
+    await code(ctx, { code: 'SHIPFREE', type: 'free_shipping', value: 0 });
+
+    const plain = await orderQty(ctx, ctx.a.variant, 1);
+    expect(Number(plain.body.order.shippingAmount)).toBe(500);
+
+    const res = await orderQty(ctx, ctx.a.variant, 1, 'SHIPFREE');
+    expect(res.status).toBe(201);
+    expect(Number(res.body.order.shippingAmount)).toBe(0);
+    expect(Number(res.body.order.discountAmount)).toBe(0);
+    expect(Number(res.body.order.totalAmount)).toBe(1000);
+
+    const edited = await request(app)
+      .put(`/api/v1/workspaces/${ctx.workspace.id}/orders/${res.body.order.id}/items`)
+      .set(bearer(ctx.auth.accessToken))
+      .send({ items: [{ variantId: ctx.a.variant.id, quantity: 2 }] });
+    expect(edited.status).toBe(200);
+    expect(Number((await db.Order.findByPk(res.body.order.id)).shippingAmount)).toBe(0);
+
+    const preview = await require('../../src/modules/discounts/couponExtras').previewCode(ctx.workspace.id, 'SHIPFREE', [{ variantId: ctx.a.variant.id, quantity: 1 }]);
+    expect(preview).toMatchObject({ valid: true, freeShipping: true, amount: 0 });
+  });
+
+  it('buy 2 get 1 free takes the cheapest unit off, and says how many more units are needed', async () => {
+    const ctx = await storeWithShipping();
+    await code(ctx, { code: 'B2G1', type: 'buy_x_get_y', value: 0, buyXGetYConfig: { buyQuantity: 2, getQuantity: 1 } });
+
+    const three = await orderQty(ctx, ctx.a.variant, 3, 'B2G1');
+    expect(three.status).toBe(201);
+    expect(Number(three.body.order.discountAmount)).toBe(1000);
+
+    const two = await orderQty(ctx, ctx.a.variant, 2, 'B2G1');
+    expect(two.status).toBe(422);
+    expect(two.body.error.code).toBe('DISCOUNT_QUANTITY_NOT_MET');
+
+    const preview = await require('../../src/modules/discounts/couponExtras').previewCode(ctx.workspace.id, 'B2G1', [{ variantId: ctx.a.variant.id, quantity: 2 }]);
+    expect(preview).toMatchObject({ valid: false, reason: 'DISCOUNT_QUANTITY_NOT_MET' });
+    expect(preview.details[0]).toMatchObject({ buyQuantity: 2, getQuantity: 1, units: 2, remainingUnits: 1 });
+  });
+});
