@@ -359,3 +359,31 @@ describe('the certificate provider (Cloudflare, fetch mocked)', () => {
     expect(await db.DomainProviderDeletion.count()).toBe(0);
   });
 });
+
+describe('redirect to the primary domain, per domain', () => {
+  afterEach(() => {
+    env.customDomains.maxPerStore = 1;
+  });
+
+  it('a domain sends visits to the primary one by default; set not to, it is served as it is', async () => {
+    // CUSTOM_DOMAINS_MAX_PER_STORE above 1: a store with two domains.
+    env.customDomains.maxPerStore = 2;
+    const { wid, H } = await setupStore('Two Domains');
+    const primary = await addDomain(wid, H, 'www.mainstore.com');
+    const other = await addDomain(wid, H, 'shop.mainstore.com');
+    await db.Domain.update({ status: 'active', sslStatus: 'issued', verifiedAt: new Date(), isPrimary: true }, { where: { id: primary.body.domain.id } });
+    await db.Domain.update({ status: 'verified', verifiedAt: new Date() }, { where: { id: other.body.domain.id } });
+    require('../../src/modules/domains/primaryHost').forget(wid);
+
+    const before = await request(app).get('/api/v1/store/resolve-host').query({ host: 'shop.mainstore.com' });
+    expect(before.status).toBe(200);
+    expect(before.body.store).toMatchObject({ primaryHost: 'www.mainstore.com', redirectToPrimary: true });
+
+    const off = await request(app).patch(`/api/v1/workspaces/${wid}/domains/${other.body.domain.id}`).set(H).send({ redirectToPrimary: false });
+    expect(off.status).toBe(200);
+    expect(off.body.domain.redirectToPrimary).toBe(false);
+
+    const after = await request(app).get('/api/v1/store/resolve-host').query({ host: 'shop.mainstore.com' });
+    expect(after.body.store).toMatchObject({ primaryHost: null, redirectToPrimary: false });
+  });
+});

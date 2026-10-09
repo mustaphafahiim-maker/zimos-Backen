@@ -34,6 +34,7 @@ function present(domain, funnel) {
     status: domain.status,
     verifiedAt: domain.verifiedAt,
     isPrimary: domain.isPrimary,
+    redirectToPrimary: domain.redirectToPrimary !== false,
     sslStatus: SSL_STATUSES.includes(domain.sslStatus) ? domain.sslStatus : 'none',
     sslProvider: domain.sslProvider || null,
     sslCheckedAt: domain.sslCheckedAt || null,
@@ -199,12 +200,12 @@ async function syncCertificate(workspaceId, domainId, req) {
   return { domain: await presentOne(workspaceId, domain), detail: result.detail || null };
 }
 
-/** Primary domain and home funnel. */
+/** Primary domain, home funnel and whether visits go on to the primary domain. */
 async function updateDomain(workspaceId, domainId, patch, req) {
   return db.sequelize.transaction(async (transaction) => {
     const domain = await db.Domain.findOne({ where: { id: domainId, workspaceId }, transaction });
     if (!domain) throw new NotFoundError('Domain');
-    const before = { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId };
+    const before = { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId, redirectToPrimary: domain.redirectToPrimary };
 
     if (patch.isPrimary === true) {
       if (!USABLE.includes(domain.status)) {
@@ -233,6 +234,8 @@ async function updateDomain(workspaceId, domainId, patch, req) {
       }
     }
 
+    if (patch.redirectToPrimary !== undefined) domain.redirectToPrimary = patch.redirectToPrimary;
+
     await domain.save({ transaction });
     await recordAudit({
       workspaceId,
@@ -241,7 +244,7 @@ async function updateDomain(workspaceId, domainId, patch, req) {
       entityType: 'Domain',
       entityId: domain.id,
       before,
-      after: { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId },
+      after: { isPrimary: domain.isPrimary, homeFunnelId: domain.homeFunnelId, redirectToPrimary: domain.redirectToPrimary },
       req,
       transaction,
     });
@@ -359,7 +362,9 @@ async function resolveHost(rawHost) {
     slug: workspace.slug,
     homeFunnel,
     // The store's canonical host (primaryHost.js): only a primary domain with a certificate.
-    primaryHost: await primaryHost.primaryHostOf(workspace.id),
+    // A domain set not to redirect answers none, so the proxy serves the store here.
+    primaryHost: domain.redirectToPrimary === false ? null : await primaryHost.primaryHostOf(workspace.id),
+    redirectToPrimary: domain.redirectToPrimary !== false,
     sslStatus: domain.sslStatus,
   };
 }
@@ -372,7 +377,7 @@ const schemas = {
   overview: { params: Joi.object({ workspaceId: uuid.required() }) },
   update: {
     params: domainParams,
-    body: Joi.object({ isPrimary: Joi.boolean().optional(), homeFunnelId: uuid.allow(null).optional() }).min(1),
+    body: Joi.object({ isPrimary: Joi.boolean().optional(), homeFunnelId: uuid.allow(null).optional(), redirectToPrimary: Joi.boolean().optional() }).min(1),
   },
   one: { params: domainParams },
   resolveHost: { query: Joi.object({ host: Joi.string().trim().max(255).required() }) },
