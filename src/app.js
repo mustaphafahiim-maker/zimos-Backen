@@ -236,6 +236,7 @@ v1.use('/workspaces/:workspaceId/delivery-zones', require('./modules/shipping/de
 v1.use('/workspaces/:workspaceId/product-options/:productId', require('./modules/catalog/menuOptionsRoutes'));
 // A store's suggestions to the platform (Help → Suggest a feature).
 v1.use('/workspaces/:workspaceId/suggestions', require('./modules/suggestions/suggestionRoutes'));
+v1.use('/workspaces/:workspaceId/gift-cards', require('./modules/giftCards').staff);
 v1.use('/workspaces/:workspaceId/gift-options', require('./modules/giftOptions').staff);
 v1.use('/workspaces/:workspaceId/purchase-limits', require('./modules/catalog/purchaseLimits').router);
 v1.use('/workspaces/:workspaceId/product-specs', require('./modules/productSpecs').staff);
@@ -301,6 +302,7 @@ v1.use('/store/:workspaceId/products/:productId/questions', require('./modules/p
 v1.use('/store/:workspaceId/stock-alerts', require('./modules/stockAlerts').store);
 v1.use('/store/:workspaceId/redirects', require('./modules/urlRedirects').store);
 v1.use('/store/:workspaceId/specs', require('./modules/productSpecs').store);
+v1.use('/store/:workspaceId/gift-cards', require('./modules/giftCards').store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 

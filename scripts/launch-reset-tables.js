@@ -72,6 +72,8 @@ const TABLES = {
   funnel_sessions: wipe(STORE),
   funnel_steps: wipe(STORE),
   funnels: wipe(STORE),
+  gift_card_transactions: wipe(STORE),
+  gift_cards: wipe(STORE),
   idempotency_keys: wipe(STORE),
   inventory_movements: wipe(STORE),
   invoice_counters: wipe(STORE),

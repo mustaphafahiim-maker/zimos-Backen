@@ -448,6 +448,8 @@ const CHECKOUT_OTP_PER_MINUTE = 10;
 const checkoutOtpLimiter = createIpMinuteLimiter('checkout-otp', CHECKOUT_OTP_PER_MINUTE, { skip });
 // A shopper's question on a product (modules/productQuestions): it lands in the merchant's inbox.
 const productQuestionLimiter = createIpMinuteLimiter('store-product-question', 5, { skip });
+// A gift card balance check (modules/giftCards): a code guessed is money.
+const giftCardCheckLimiter = createIpMinuteLimiter('store-gift-card-check', 10, { skip });
 
 /*
  * Password reset requests, per IP per hour, keyed on the IP alone (unlike
@@ -599,6 +601,7 @@ module.exports = {
   CHECKOUT_OTP_PER_MINUTE,
   checkoutOtpLimiter,
   productQuestionLimiter,
+  giftCardCheckLimiter,
   usernameCheckLimiter,
   createUsernameCheckLimiter,
   publicPlansLimiter,

@@ -1,6 +1,7 @@
 'use strict';
 const asyncHandler = require('express-async-handler');
 const env = require('../../config/env');
+const { storeFeatureOn } = require('../../core/middleware/storeFeatures');
 const cartService = require('../cart/cartService');
 const orderService = require('../orders/orderService');
 const { afterOrderCompleted } = require('../orders/orderCompletion');
@@ -46,7 +47,7 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, giftCardCode: cardCode, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
@@ -65,6 +66,12 @@ const checkout = asyncHandler(async (req, res) => {
       : null;
   const manualToken = manualMethod ? online.newPaymentToken() : null;
   const isOnline = orderBody.paymentMethod !== 'cod' && !manualMethod;
+  // A gift card lowers what the courier collects (modules/giftCards): cash on delivery only. Off, the code is ignored.
+  const giftCardCode = cardCode && storeFeatureOn('gift_cards') ? cardCode : null;
+  if (giftCardCode) {
+    if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery' }], 'Invalid body');
+    await require('../giftCards/giftCardService').assertUsable(workspaceId, giftCardCode, null);
+  }
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -159,11 +166,14 @@ const checkout = asyncHandler(async (req, res) => {
     await require('../holidayMode').markOrder(workspace, order);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     await afterOrderCompleted(workspaceId, order, context);
+    // The card pays what it can now, as a captured payment; a card spent meanwhile leaves the order as it is.
+    const giftCard = giftCardCode ? await require('../giftCards/giftCardService').redeemOnOrder(order, giftCardCode, req) : null;
+    if (giftCard && giftCard.applied) await order.reload();
     if (manualMethod) {
       const manualPayment = await manualPayments.getForShopper(workspaceId, order.id, manualToken.token);
       return res.status(201).json({ order: shopperOrder(order, orderItems), manualPayment, paymentToken: manualToken.token });
     }
-    return res.status(201).json({ order: shopperOrder(order, orderItems) });
+    return res.status(201).json({ order: shopperOrder(order, orderItems), ...(giftCard ? { giftCard } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(

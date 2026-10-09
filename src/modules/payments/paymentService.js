@@ -14,9 +14,13 @@ const { GatewayRejectedError, GatewayAuthError } = require('./gateways/gatewayEr
 // `mock` authorises and captures in-process without moving any money, so it is
 // a development/test fixture only — never a production gateway. `cod` is real:
 // the money is collected by the courier on delivery.
+// Store-held tenders: refunded to the card, never through a gateway.
+const STORE_TENDERS = ['gift_card'];
 const PROVIDERS = {
   mock: require('./providers/mockProvider'),
   cod: require('./providers/codProvider'),
+  // A gift card's part of an order (modules/giftCards): refunds credit the card.
+  gift_card: require('../giftCards/giftCardProvider'),
 };
 
 // env.payments.defaultProvider (PAYMENTS_DEFAULT_PROVIDER) is not read on this
@@ -155,11 +159,20 @@ async function processRefund(workspaceId, orderId, { amount, reason, paymentId }
     });
     const gatewayPayments = captured.filter((p) => gateways.isGateway(p.providerCode));
 
+    // A gift card's part, named by the merchant: back to the card, at most what is left of that payment.
+    const storeTender = paymentId ? captured.find((p) => p.id === paymentId && STORE_TENDERS.includes(p.providerCode)) : null;
+    if (storeTender) {
+      const left = await refundableOnPayment(storeTender, transaction);
+      if (amount > left) throw new AppError('REFUND_EXCEEDS_PAYMENT', `Cannot refund ${amount}; only ${left} is left on that payment`, 422);
+      return { refund: await refundOffline(workspaceId, order, storeTender, { amount, reason }, req, transaction) };
+    }
+
     if (gatewayPayments.length === 0) {
       if (paymentId) {
         throw new AppError('REFUND_PAYMENT_INVALID', 'That payment is not a captured gateway payment on this order', 422);
       }
-      const offline = captured.find((p) => p.status === 'captured') || null;
+      // Never a gift-card payment: that is refunded only when named, capped at what is left on it.
+      const offline = captured.find((p) => p.status === 'captured' && !STORE_TENDERS.includes(p.providerCode)) || null;
       return { refund: await refundOffline(workspaceId, order, offline, { amount, reason }, req, transaction) };
     }
 
