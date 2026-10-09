@@ -109,3 +109,27 @@ describe('console user moderation', () => {
     expect((await post(agent, user.userId, 'suspend', { reason: 'Testing', confirm: true })).status).toBe(403);
   });
 });
+
+describe('console moderation of console accounts', () => {
+  it('another console account needs admins.manage; a plain merchant does not', async () => {
+    const actor = await makePlatformUser('admin');
+    await db.User.update({ platformPermissions: ['workspaces.view', 'workspaces.manage'] }, { where: { id: actor.userId } });
+    const otherAdmin = await makePlatformUser('admin');
+    const merchant = await registerAndActivate();
+
+    const onAdmin = await post(actor, otherAdmin.userId, 'suspend', { reason: 'Testing', confirm: true });
+    expect(onAdmin.status).toBe(403);
+    expect(onAdmin.body.error.code).toBe('ADMINS_MANAGE_REQUIRED');
+    expect((await db.User.findByPk(otherAdmin.userId)).status).toBe('active');
+
+    const onMerchant = await post(actor, merchant.userId, 'suspend', { reason: 'Testing', confirm: true });
+    expect(onMerchant.status).toBe(200);
+  });
+
+  it('the target id is matched whatever its case', async () => {
+    const creator = await makePlatformUser('creator');
+    const self = await post(creator, creator.userId.toUpperCase(), 'suspend', { reason: 'Testing', confirm: true });
+    expect(self.status).toBe(409);
+    expect(self.body.error.code).toBe('CANNOT_ACT_ON_SELF');
+  });
+});
