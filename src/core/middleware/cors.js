@@ -44,7 +44,7 @@ const storefrontCors = cors({
   // store's password unlock (storeGate).
   // X-Visitor-Id: the storefront's anonymous visitor, which owns the photos it
   // uploads for custom fields (customerUploads).
-  allowedHeaders: ['Content-Type', 'X-Cart-Token', 'Idempotency-Key', 'X-Payment-Token', 'X-Store-Preview', 'X-Visitor-Id', 'X-Affiliate-Token', 'X-Student-Token', 'X-Store-Locale', 'X-Shopper-Token', 'X-Store-Gate'],
+  allowedHeaders: ['Content-Type', 'X-Cart-Token', 'Idempotency-Key', 'X-Payment-Token', 'X-Store-Preview', 'X-Visitor-Id', 'X-Affiliate-Token', 'X-Student-Token', 'X-Store-Locale', 'X-Shopper-Token', 'X-Store-Gate', 'X-Funnel-Id'],
   // The storefront reads Retry-After on a 429 to tell the shopper when to retry.
   exposedHeaders: ['Retry-After'],
   maxAge: 7200,

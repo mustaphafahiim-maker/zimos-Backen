@@ -19,6 +19,8 @@ const STORE_TENDERS = ['gift_card', 'loyalty', 'store_credit'];
 const PROVIDERS = {
   mock: require('./providers/mockProvider'),
   cod: require('./providers/codProvider'),
+  // Taken by hand (an approved transfer proof, a recorded on-account payment): a refund is recorded only.
+  manual: require('./providers/manualProvider'),
   // A gift card's part of an order (giftCards/, item 189): refunds credit the card.
   gift_card: require('../giftCards/giftCardProvider'),
   // Loyalty points spent on an order (loyalty/, item 203): refunds give the points back.

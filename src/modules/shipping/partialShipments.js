@@ -35,9 +35,9 @@ async function orderLines(orderId, transaction) {
   const items = await db.OrderItem.findAll({ where: { orderId }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction });
   const productIds = [...new Set(items.map((i) => i.productId).filter(Boolean))];
   const products = productIds.length
-    ? await db.Product.findAll({ where: { id: productIds }, attributes: ['id', 'type'], paranoid: false, transaction })
+    ? await db.Product.findAll({ where: { id: productIds }, attributes: ['id', 'productType'], paranoid: false, transaction })
     : [];
-  const typeOf = new Map(products.map((p) => [p.id, p.type]));
+  const typeOf = new Map(products.map((p) => [p.id, p.productType]));
   return items.map((item) => ({ item, shippable: !NOT_SHIPPED_TYPES.includes(typeOf.get(item.productId)) }));
 }
 
