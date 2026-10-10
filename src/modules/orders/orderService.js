@@ -22,7 +22,7 @@ const orderStock = require('../inventory/orderStock');
 const customerService = require('../customers/customerService');
 const discountService = require('../discounts/discountService');
 const { calculateShippingAmount } = require('../shipping/shippingPricing');
-const { calculateTax } = require('../tax/taxService');
+const { calculateTax, taxableLines } = require('../tax/taxService');
 const { completeOrderInTransaction } = require('./orderCompletion');
 const { recordAudit } = require('../audit/auditService');
 const { setConfirmationState, trackStage, nextStages } = require('./orderStateService');
@@ -162,6 +162,13 @@ async function priceLine(workspaceId, line, transaction, { forSale = true } = {}
 
 // The product's shipping mode for shippingRules.productShipping: `units` is
 // how many units of it the line ships.
+// Whether the order was placed with a free-shipping code: it ships free even when an offer
+// in it sets its own shipping price, also when a line joins later or its items are edited.
+function couponShipsFree(order) {
+  return Boolean(order.shippingSnapshot && order.shippingSnapshot.freeShippingGranted === true) &&
+    (order.discountsSnapshot || []).some((d) => d && d.kind !== 'bundle' && d.type === 'free_shipping');
+}
+
 function productShippingRule(product, units) {
   return { mode: product.shippingMode, extraAmount: product.shippingExtraAmount, units, profileId: product.shippingProfileId || null };
 }
@@ -455,6 +462,8 @@ async function createOrder(
       const evaluation = await discountService.evaluate(workspaceId, discountCode, {
         subtotal,
         productIds,
+        // A product- or collection-limited code works on its lines only.
+        lines: pricedLines,
         customerId: customer.id,
         funnelId,
         transaction,
@@ -466,12 +475,18 @@ async function createOrder(
     const couponExtras = require('../discounts/couponExtras');
     if (!discountCode) {
       // No code typed: the store's best automatic discount, when one applies.
-      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, customerId: customer.id, funnelId }, transaction);
+      const automatic = await couponExtras.bestAutomatic(workspaceId, { subtotal, productIds, lines: pricedLines, customerId: customer.id, funnelId }, transaction);
       if (automatic) {
         discountAmount = automatic.amount;
         discountRecord = automatic.discount;
         discountsSnapshot = [{ code: null, automatic: true, discountId: automatic.discount.id, type: automatic.discount.type, amount: discountAmount }];
       }
+    }
+    // A free-shipping code: every line ships free, and the order keeps it when a
+    // line joins later or its items are edited (freeShippingGranted below).
+    const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping');
+    if (couponFreeShipping) {
+      for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
     }
     // The store's minimum order amount binds shoppers, not staff typing an
     // order in, and not an add-on order that follows another one.
@@ -493,7 +508,8 @@ async function createOrder(
       region: shippingAddress ? shippingAddress.province : null,
       subtotal,
       totalQuantity,
-      offerShippingOverride,
+      // A free-shipping code beats an offer's own shipping price; an add-on's does not.
+      offerShippingOverride: couponFreeShipping && !shippingOverride ? null : offerShippingOverride,
       weightLines: pricedLines.map((l) => ({ quantity: l.quantity, units: l.weightUnits })),
       productLines: pricedLines.map((l) => l.shippingRule),
       funnelId: payload.funnelId || null,
@@ -513,7 +529,8 @@ async function createOrder(
     const { taxAmount } = await calculateTax(workspaceId, {
       country: shippingAddress ? shippingAddress.country : null,
       region: shippingAddress ? shippingAddress.province : null,
-      lines: pricedLines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+      // Taxed on what the shopper pays: the code's or automatic discount comes off first.
+      lines: await taxableLines(pricedLines, discountAmount, discountRecord, transaction),
       shippingAmount,
       transaction,
     });
@@ -565,6 +582,8 @@ async function createOrder(
           ...(zone ? { zone: { id: zone.id, name: zone.name, feeAmount: zone.feeAmount, etaMinutes: zone.etaMinutes } } : {}),
           // The estimated delivery time the customer was shown: the zone's, else the store's.
           ...(etaMinutes ? { etaMinutes } : {}),
+          // Free shipping a free-shipping code gave: kept when a line joins later or the items are edited.
+          ...(couponFreeShipping ? { freeShippingGranted: true } : {}),
         },
         ...(awaitingPayment
           ? {
@@ -675,7 +694,7 @@ async function createOrder(
   } catch (err) {
     if (err instanceof fraudRules.OrderRejectedError) await recordRefusal(workspaceId, err.refusal, req);
     // Nothing was saved; the shopper is sent a code and asked for it.
-    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone);
+    if (err instanceof checkoutOtp.NeedsOtp) throw await checkoutOtp.challengeError(workspaceId, contact.phone, { req });
     throw err;
   }
 }
@@ -698,6 +717,18 @@ async function createOrder(
  *
  * @returns {Promise<{ order, item, before }>} before: the totals it replaced
  */
+/**
+ * The discount an order was placed with when it has no redemption yet: an order still awaiting its
+ * online payment keeps its code in completionContext.discount until it is paid, and an automatic
+ * discount names itself in discountsSnapshot. Tax spreads it over the lines it covers.
+ */
+async function placedDiscount(order, transaction) {
+  const pending = order.completionContext && order.completionContext.discount;
+  const automatic = (order.discountsSnapshot || []).find((d) => d && d.kind !== 'bundle' && d.discountId);
+  const discountId = (pending && pending.discountId) || (automatic && automatic.discountId) || null;
+  return discountId ? db.Discount.findByPk(discountId, { transaction }) : null;
+}
+
 async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = false, actorUserId = null } = {}, transaction) {
   const before = {
     subtotalAmount: Number(order.subtotalAmount),
@@ -750,22 +781,33 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   }
   lines.push({ ...newLine, lineTotalAmount: Number(newLine.lineTotalAmount) });
 
+  // Free shipping the order was given when placed (a free-shipping code) still holds for every line.
+  if ((order.shippingSnapshot || {}).freeShippingGranted === true) {
+    for (const line of lines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
+  }
+
   const subtotal = add(...lines.map((l) => l.lineTotalAmount));
   const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
-  const offerShippingOverride = lines.find((l) => l.shippingOverride)?.shippingOverride || null;
+  // A free-shipping code beats an offer's own shipping price.
+  const offerShippingOverride = couponShipsFree(order) ? null : lines.find((l) => l.shippingOverride)?.shippingOverride || null;
 
   // The code the order was placed with, on the new subtotal. It was checked
   // and redeemed when the order was placed and is not checked again.
   let discountAmount = before.discountAmount;
   let discountsSnapshot = order.discountsSnapshot || [];
+  let placed = null;
   const redemption = await db.DiscountRedemption.findOne({ where: { orderId: order.id }, transaction });
   if (redemption) {
     const discount = await db.Discount.findByPk(redemption.discountId, { transaction });
+    placed = discount;
     if (discount) {
-      discountAmount = discountService.amountFor(discount, subtotal);
+      // A product- or collection-limited code still covers only its lines.
+      discountAmount = await discountService.amountForLines(discount, lines, transaction);
       discountsSnapshot = discountsSnapshot.map((d) => (d.code === discount.code ? { ...d, amount: discountAmount } : d));
       await redemption.update({ amountAllocated: discountAmount }, { transaction });
     }
+  } else {
+    placed = await placedDiscount(order, transaction);
   }
 
   const address = order.shippingAddressSnapshot || null;
@@ -785,7 +827,8 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   const { taxAmount } = await calculateTax(workspaceId, {
     country: address ? address.country : null,
     region: address ? address.province : null,
-    lines: lines.map((l) => ({ productId: l.productId, lineTotal: l.lineTotalAmount })),
+    // Taxed on what the shopper pays: the order's discount comes off first.
+    lines: await taxableLines(lines, discountAmount, placed, transaction),
     shippingAmount,
     transaction,
   });
@@ -1208,6 +1251,14 @@ async function riskCounts(workspaceId, { q, from, to, riskLevel, ...filters }) {
  * reason. Refused once a parcel has shipped — use a return after that.
  */
 async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCancel = false, notifyCustomer }, req) {
+  // The gateway is asked about an open card or wallet attempt first (best effort, as expiry does), so a payment
+  // that already went through is recorded before the cancel closes the attempt.
+  const known = await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id', 'cancelledAt'] });
+  if (known && !known.cancelledAt) {
+    await require('../payments/onlinePaymentService')
+      .inquireOpenAttempts(known.id)
+      .catch((err) => logger.warn('[orders] payment inquiry before cancel failed', { orderId, reason: err.message }));
+  }
   return db.sequelize.transaction(async (transaction) => {
     const order = await db.Order.findOne({
       where: { id: orderId, workspaceId },
@@ -1230,6 +1281,9 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
       { workspaceId, orderId: order.id, referenceType: 'order_cancelled', actorUserId: req.user.id },
       transaction
     );
+    // An order waiting for its card or wallet payment: its open gateway attempts end
+    // here too (a manual transfer receipt waiting for review is left as it is).
+    await require('../payments/onlinePaymentService').cancelOpenAttempts(order, transaction, { gatewayOnly: true });
 
     // A shipment booked with a connected courier is cancelled there first. If
     // the courier refuses, this throws and the whole cancellation rolls back:
@@ -1277,6 +1331,23 @@ async function cancelOrder(workspaceId, orderId, { reason, acknowledgeManualCanc
   });
 }
 
+const blank = (v) => (v === undefined || v === null ? '' : String(v));
+const sameFields = (a, b, keys) => keys.every((k) => blank((a || {})[k]) === blank((b || {})[k]));
+// What a courier booking carries of the receiver: the address fields this endpoint sets
+// (orderValidation's address), and the name and phones.
+const COURIER_ADDRESS_FIELDS = ['country', 'province', 'city', 'area', 'addressLine', 'placeId', 'postalCode', 'notes'];
+const COURIER_CONTACT_FIELDS = ['fullName', 'phone', 'alternatePhone'];
+
+/** Whether an updateOrderLimited body changes what a courier was given at booking. */
+function receiverChanges(order, data) {
+  if (data.shippingAddress !== undefined && !sameFields(order.shippingAddressSnapshot, data.shippingAddress, COURIER_ADDRESS_FIELDS)) return true;
+  if (data.contact !== undefined) {
+    const next = { ...(order.contactSnapshot || {}), ...data.contact };
+    if (!sameFields(order.contactSnapshot, next, COURIER_CONTACT_FIELDS)) return true;
+  }
+  return false;
+}
+
 /**
  * The only fields a merchant may edit on an existing order: the shipping
  * address snapshot, the customer's contact details and the internal notes. Totals, line items and pricing are
@@ -1288,6 +1359,10 @@ async function updateOrderLimited(workspaceId, orderId, data, req) {
     if (!order) throw new NotFoundError('Order');
     if (order.cancelledAt) throw new AppError('ORDER_CANCELLED', 'This order is cancelled', 409);
     await assertNotShipped(order, transaction);
+    // The courier delivers to the address and receiver it was given at booking:
+    // a real change to either waits for the booking to be cancelled. Notes, the email, or
+    // the same values sent again stay allowed.
+    if (receiverChanges(order, data)) await carrierShipmentService.assertNoCarrierBooking(order.id, transaction);
 
     const before = { shippingAddressSnapshot: order.shippingAddressSnapshot, contactSnapshot: order.contactSnapshot, notes: order.notes };
     const updates = {};
@@ -1339,6 +1414,8 @@ async function createShipment(workspaceId, orderId, data, req) {
     carrierShipmentService.assertConfirmedOrPaid(order);
     storePickup.assertCourierAllowed(order, data.carrierCode);
     await carrierShipmentService.assertNoActiveShipment(order.id, transaction);
+    // A returned parcel that was restocked: its units are taken again.
+    await require('./returnedStock').retakeForReship(workspaceId, order.id, req.user ? req.user.id : null, transaction);
 
     const shipment = await insertShipment(
       {
@@ -1376,8 +1453,27 @@ async function updateShipment(workspaceId, orderId, shipmentId, data, req) {
     // Cancelling a booking whose courier has no cancel API needs the
     // merchant's acknowledgeManualCancel; a final status stops polling.
     const extra = carrierShipmentService.manualCancelUpdates(shipment, data, req);
+    // A courier with a cancel API is asked first, before anything here
+    // changes: a refusal (409 CARRIER_CANCEL_FAILED) leaves the shipment as
+    // it was, instead of a parcel live at the courier that we call cancelled
+    // and whose COD we would then ignore. The stage guard runs before that,
+    // so a refused move never follows a cancel the courier already made.
+    if (data.status === 'cancelled' && carrierShipmentService.cancelsByApi(shipment)) {
+      await require('./orderStateService').assertShipmentCancelMove(orderId, shipment.id, transaction);
+      Object.assign(extra, await carrierShipmentService.apiCancelUpdates(workspaceId, shipment, data, req, transaction));
+    }
     if (!extra.cancelMode && carrierShipmentService.TERMINAL_STATUSES.includes(data.status) && shipment.nextPollAt) {
       extra.nextPollAt = null;
+    }
+    // A returned or cancelled shipment set going again is the order sent again: if its
+    // returned parcel was restocked, the units are taken back first, as for a new shipment.
+    if (
+      data.status &&
+      carrierShipmentService.FINISHED_STATUSES.includes(shipment.status) &&
+      !carrierShipmentService.FINISHED_STATUSES.includes(data.status)
+    ) {
+      await db.Order.findOne({ where: { id: orderId, workspaceId }, attributes: ['id'], transaction, lock: transaction.LOCK.UPDATE });
+      await require('./returnedStock').retakeForReship(workspaceId, orderId, req.user ? req.user.id : null, transaction);
     }
     // The stamps, fulfillment state and audit row live in shipmentLifecycle,
     // shared with the carrier status updates.
@@ -1403,6 +1499,8 @@ module.exports = {
   generateOrderNumber,
   generateTrackingCode,
   priceLine,
+  couponShipsFree,
+  placedDiscount,
   cancelOrder,
   updateOrderLimited,
   listShipments,

@@ -106,12 +106,17 @@ async function bulkGenerate(workspaceId, data, req) {
   return { count: codes.length, codes };
 }
 
-/** Whether an automatic discount's own conditions hold for this order. */
+/**
+ * Whether an automatic discount's own conditions hold for this order. Returns
+ * the products it covers (null = the whole order), or false.
+ */
 async function automaticApplies(discount, { subtotal, productIds, customerId, funnelId }, now, transaction) {
   if (discount.startsAt && discount.startsAt > now) return false;
   if (discount.endsAt && discount.endsAt < now) return false;
   if (discount.minimumSubtotal && subtotal < Number(discount.minimumSubtotal)) return false;
-  if (discount.productRestrictions.length && !discount.productRestrictions.some((id) => productIds.includes(id))) return false;
+  // Limited to some products or collections: one of them must be in the order.
+  const eligible = await discountService.eligibleProducts(discount, productIds, transaction);
+  if (eligible && eligible.size === 0) return false;
   if (discount.funnelRestrictions.length && (!funnelId || !discount.funnelRestrictions.includes(funnelId))) return false;
   if (discount.customerRestrictions.length && (!customerId || !discount.customerRestrictions.includes(customerId))) return false;
   if (discount.usageLimit !== null && discount.usageCount >= discount.usageLimit) return false;
@@ -119,24 +124,28 @@ async function automaticApplies(discount, { subtotal, productIds, customerId, fu
     const used = await db.DiscountRedemption.count({ where: { discountId: discount.id, customerId }, transaction });
     if (used >= discount.perCustomerLimit) return false;
   }
-  return true;
+  return eligible;
 }
 
 /**
  * The automatic discount (no code) that takes the most off this order, or
  * null. Only percentage and fixed ones lower the subtotal; the others are
- * left to the code path that knows how to apply them.
+ * left to the code path that knows how to apply them. With `context.lines`
+ * (the priced lines), a product- or collection-limited one takes its amount
+ * off the lines it covers only.
  */
 async function bestAutomatic(workspaceId, context, transaction) {
   const candidates = await db.Discount.findAll({
-    where: { workspaceId, code: null, status: 'active', type: ['percentage', 'fixed'] },
+    // A buy-X-get-Y one gives units away (needs `context.lines`); a free-shipping one is left to the store's threshold.
+    where: { workspaceId, code: null, status: 'active', type: ['percentage', 'fixed', 'buy_x_get_y'] },
     transaction,
   });
   const now = new Date();
   let best = null;
   for (const discount of candidates) {
-    if (!(await automaticApplies(discount, context, now, transaction))) continue;
-    const amount = discountService.amountFor(discount, context.subtotal);
+    const eligible = await automaticApplies(discount, context, now, transaction);
+    if (eligible === false) continue;
+    const amount = discountService.amountOn(discount, eligible, context.lines, context.subtotal);
     if (amount > 0 && (!best || amount > best.amount)) best = { discount, amount };
   }
   return best;
@@ -163,8 +172,8 @@ async function assertMinimumOrder(workspaceId, subtotal, transaction) {
 }
 
 /** For the shipping quote: the automatic discount these items would get and where they stand against the minimum. */
-async function quoteExtras(workspaceId, { subtotal, productIds }) {
-  const auto = await bestAutomatic(workspaceId, { subtotal, productIds, customerId: null, funnelId: null });
+async function quoteExtras(workspaceId, { subtotal, productIds, lines = null }) {
+  const auto = await bestAutomatic(workspaceId, { subtotal, productIds, lines, customerId: null, funnelId: null });
   const minimum = minOrderAmount(await workspaceSettings(workspaceId));
   return {
     automaticDiscount: auto ? { amount: auto.amount, type: auto.discount.type, value: Number(auto.discount.value) } : null,
@@ -215,14 +224,19 @@ async function previewCode(workspaceId, code, items, visitorId = null, funnelId 
   try {
     const { discount, amount } = await discountService.evaluate(workspaceId, String(code).trim().toUpperCase(), {
       subtotal,
-      productIds: lines.map((line) => line.productId),
+      productIds: lines.filter((line) => !line.freeGift).map((line) => line.productId),
+      lines,
       customerId: null,
       // A code limited to some funnels applies in those funnels' checkouts only.
       funnelId,
     });
-    return { valid: true, code: discount.code, type: discount.type, amount, subtotal, reason: null };
+    // A free-shipping code takes nothing off the items: the order ships free.
+    return { valid: true, code: discount.code, type: discount.type, amount, freeShipping: discount.type === 'free_shipping', subtotal, reason: null };
   } catch (err) {
-    if (err instanceof AppError && err.statusCode === 422) return { valid: false, code, type: null, amount: 0, subtotal, reason: err.code };
+    // DISCOUNT_QUANTITY_NOT_MET says how many more units a buy-X-get-Y code needs.
+    if (err instanceof AppError && err.statusCode === 422) {
+      return { valid: false, code, type: null, amount: 0, freeShipping: false, subtotal, reason: err.code, ...(err.code === 'DISCOUNT_QUANTITY_NOT_MET' ? { details: err.details } : {}) };
+    }
     throw err;
   }
 }

@@ -140,7 +140,7 @@ describe('accounts made through Google', () => {
       emailVerified: true,
       fullName: 'Layla G',
     });
-    const res = await request(app).get('/api/v1/auth/google/callback?code=x').redirects(0);
+    const res = await require('../helpers/googleSignIn').googleCallback('code=x');
     const token = new URL(res.headers.location, 'http://x').searchParams.get('accessToken');
     const H = { Authorization: `Bearer ${token}` };
 

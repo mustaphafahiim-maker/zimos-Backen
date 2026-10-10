@@ -389,7 +389,8 @@ async function listForWorkspace(workspaceId, { limit = 20 } = {}) {
     ],
     limit: Math.min(Math.max(1, limit), 50),
   });
-  return { proofs: rows.map(serializeForMerchant) };
+  // Not .map(serializeForMerchant): map's index would be taken for the method.
+  return { proofs: rows.map((row) => serializeForMerchant(row)) };
 }
 
 // -------------------------------------------------------------- console

@@ -12,6 +12,11 @@ module.exports = {
       events: ['order.confirmed', 'order.paid'],
       // eslint-disable-next-line global-require
       handle: (event) => require('./carrierBooking').autoBook(event),
+      // Cut off by a restart, it is never run again (the courier may have
+      // booked the parcel): the merchant is told to check (core/queue).
+      once: true,
+      // eslint-disable-next-line global-require
+      onInterrupted: (event) => require('./carrierBooking').autoBookInterrupted(event),
     },
   ],
   processors: [

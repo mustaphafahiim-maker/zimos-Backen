@@ -12,6 +12,7 @@ const { PERMISSIONS } = require('../../core/security/permissions');
 const { AuthenticationError } = require('../../core/errors/AppError');
 const service = require('./inboxService');
 const inboxEvents = require('./inboxEvents');
+const sessionGate = require('../../core/security/sessionGate');
 
 const uuid = Joi.string().uuid();
 const ws = { workspaceId: uuid.required() };
@@ -42,6 +43,9 @@ stream.get(
     });
     const permissions = membership ? membership.role.permissions : [];
     if (!permissions.includes('*') && !permissions.includes(PERMISSIONS.ORDERS_CONFIRM)) throw new AuthenticationError('The stream ticket is missing or has expired');
+    // The stream ends with the session it was opened under (core/security/sessionGate.js).
+    if (!(await sessionGate.isActive(ticket.sid))) throw new AuthenticationError('The stream ticket is missing or has expired');
+    sessionGate.closeWhenEnded(req, res, ticket.sid);
     await inboxEvents.stream(ticket.workspaceId, req, res);
   })
 );

@@ -907,8 +907,8 @@ describe('a failed Bosta shipment is not final', () => {
       .send({ status: 'cancelled' });
     expect(patched.status).toBe(200);
     expect(await shipmentStatus(ctx.shipment.id)).toBe('cancelled');
-    // A manual PATCH never calls Bosta.
-    expect(callsTo('DELETE', `/deliveries/business/${tn}/terminate`)).toHaveLength(0);
+    // Cancelling a booking by hand asks Bosta first (it is already cancelled there, so that is done).
+    expect(callsTo('DELETE', `/deliveries/business/${tn}/terminate`)).toHaveLength(1);
 
     const rebooked = await createShipment(ctx.token, ctx.workspace.id, ctx.order.id);
     expect(rebooked.status).toBe(201);
@@ -1522,5 +1522,75 @@ describe('Bosta state mapping', () => {
     expect(bosta.toEgp(12345)).toBe(123.45);
     expect(bosta.toEgp('500000')).toBe(5000);
     expect(bosta.toEgp(0)).toBe(0);
+  });
+});
+
+describe('cancelling a Bosta shipment by hand (PATCH)', () => {
+  const patch = (ctx, body) =>
+    request(app)
+      .patch(`/api/v1/workspaces/${ctx.workspace.id}/orders/${ctx.order.id}/shipments/${ctx.shipment.id}`)
+      .set(bearer(ctx.token))
+      .send(body);
+
+  it('cancels it at Bosta first, then here', async () => {
+    const ctx = await bookedShipment();
+    const res = await patch(ctx, { status: 'cancelled' });
+    expect(res.status).toBe(200);
+    expect(callsTo('DELETE', `/deliveries/business/${ctx.shipment.waybillNumber}/terminate`)).toHaveLength(1);
+    const row = await db.Shipment.findByPk(ctx.shipment.id);
+    expect(row.status).toBe('cancelled');
+    expect(row.cancelMode).toBe('api');
+  });
+
+  it('a refusal leaves the shipment as it was; the merchant can cancel it in Bosta and acknowledge', async () => {
+    const ctx = await bookedShipment();
+    fake.refuseTerminate = true;
+    const refused = await patch(ctx, { status: 'cancelled' });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('CARRIER_CANCEL_FAILED');
+    expect(refused.body.error.details).toMatchObject({ shipmentId: ctx.shipment.id, manualCancelAllowed: true });
+    expect((await db.Shipment.findByPk(ctx.shipment.id)).status).toBe('created');
+
+    const acknowledged = await patch(ctx, { status: 'cancelled', acknowledgeManualCancel: true });
+    expect(acknowledged.status).toBe(200);
+    const row = await db.Shipment.findByPk(ctx.shipment.id);
+    expect(row.status).toBe('cancelled');
+    expect(row.cancelMode).toBe('manual_ack');
+  });
+});
+
+describe('editing an order under a live Bosta booking', () => {
+  const patchOrder = (ctx, body) =>
+    request(app).patch(`/api/v1/workspaces/${ctx.workspace.id}/orders/${ctx.order.id}`).set(bearer(ctx.token)).send(body);
+
+  it('refuses a new address, receiver or items until the booking is cancelled; notes stay editable', async () => {
+    const ctx = await bookedShipment();
+    const address = { ...ctx.order.shippingAddressSnapshot, addressLine: '99 Somewhere Else' };
+
+    const moved = await patchOrder(ctx, { shippingAddress: address });
+    expect(moved.status).toBe(409);
+    expect(moved.body.error.code).toBe('SHIPMENT_BOOKED');
+    expect(moved.body.error.details).toMatchObject({ shipmentId: ctx.shipment.id, waybillNumber: ctx.shipment.waybillNumber });
+
+    const phone = await patchOrder(ctx, { contact: { fullName: ctx.order.contactSnapshot.fullName, phone: '01099990000' } });
+    expect(phone.status).toBe(409);
+
+    const notes = await patchOrder(ctx, { notes: 'Call before delivery' });
+    expect(notes.status).toBe(200);
+
+    const items = await request(app)
+      .put(`/api/v1/workspaces/${ctx.workspace.id}/orders/${ctx.order.id}/items`)
+      .set(bearer(ctx.token))
+      .send({ items: [{ variantId: ctx.variant.id, quantity: 2 }] });
+    expect(items.status).toBe(409);
+    expect(items.body.error.code).toBe('SHIPMENT_BOOKED');
+
+    // Once the booking is cancelled the address can change.
+    await request(app)
+      .patch(`/api/v1/workspaces/${ctx.workspace.id}/orders/${ctx.order.id}/shipments/${ctx.shipment.id}`)
+      .set(bearer(ctx.token))
+      .send({ status: 'cancelled' })
+      .expect(200);
+    expect((await patchOrder(ctx, { shippingAddress: address })).status).toBe(200);
   });
 });

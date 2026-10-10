@@ -3,7 +3,7 @@ const { Router } = require('express');
 const validate = require('../../core/middleware/validate');
 const { resolvePublicWorkspace, refuseDraftOrders } = require('../../core/middleware/publicWorkspace');
 const { idempotent } = require('../../core/middleware/idempotency');
-const { trackingLimiter, suggestLimiter, uploadLimiter, manualProofLimiter } = require('../../core/middleware/rateLimiters');
+const { trackingLimiter, suggestLimiter, uploadLimiter, manualProofLimiter, checkoutOtpLimiter } = require('../../core/middleware/rateLimiters');
 const customerUploadController = require('../customerUploads/customerUploadController');
 const { collectOptionFilters } = require('./optionFilters');
 const controller = require('./storefrontController');
@@ -35,8 +35,9 @@ router.get('/checkout/guard', botProtection.guardConfig);
 // The unsubscribe link in a marketing email (notifications/marketingUnsubscribe.js).
 router.use(require('../notifications/marketingUnsubscribe').router);
 // The code-entry step of a checkout that answered 428 OTP_REQUIRED.
-router.post('/checkout/otp/verify', checkoutOtp.verify);
-router.post('/checkout/otp/resend', checkoutOtp.resend);
+// One per-IP budget a minute for both, on top of the per-code and per-phone limits.
+router.post('/checkout/otp/verify', checkoutOtpLimiter, checkoutOtp.verify);
+router.post('/checkout/otp/resend', checkoutOtpLimiter, checkoutOtp.resend);
 // What a recovery link (/r/:token) rebuilds: the cart and the form.
 router.get('/recover/:token', lostOrderController.recover);
 

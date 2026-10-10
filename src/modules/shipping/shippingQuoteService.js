@@ -57,7 +57,8 @@ async function quote(workspaceId, { country, region, items, funnelId = null }) {
     bundles,
     // automaticDiscount (what a no-code discount will take off) and
     // minimumOrder (the store's minimum and how far these items are from it).
-    ...(await require('../discounts/couponExtras').quoteExtras(workspaceId, { subtotal, productIds: lines.map((l) => l.productId) })),
+    // A product- or collection-limited automatic discount counts its covered lines only.
+    ...(await require('../discounts/couponExtras').quoteExtras(workspaceId, { subtotal, productIds: lines.map((l) => l.productId), lines })),
     weightGrams: shipping.weightGrams,
     weightEstimated: shipping.weightEstimated,
     tier: shipping.tier,

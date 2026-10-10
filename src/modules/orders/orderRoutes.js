@@ -250,5 +250,7 @@ router.get(
 router.use(require('./orderSessionDetails').router);
 // The shipping card's "Save as draft" (shipmentDraft.js).
 router.use(require('./shipmentDraft').router);
+// A returned (undelivered) parcel back on the shelf: its reserved stock given back (returnedStock.js).
+router.use(require('./returnedStock').router);
 
 module.exports = router;

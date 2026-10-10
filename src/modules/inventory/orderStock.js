@@ -38,6 +38,8 @@ const ORDER_REFERENCE_TYPES = [
   'order_cancelled',
   'order_payment_expired',
   'order_customer_blocked',
+  'order_returned', // a returned parcel back on the shelf (orders/returnedStock.js)
+  'order_reshipped', // that order booked again (orders/returnedStock.retakeForReship)
 ];
 /** The reservations an order is placed with (its lines, then any joined upsell). */
 // An edit moves what the order is placed with, up or down.
@@ -118,20 +120,24 @@ async function releaseOrderStock({ workspaceId, orderId, referenceType, actorUse
   return released;
 }
 
-/**
- * Takes again what the order was placed with, less what it still holds (an
- * order reconfirmed after a rejection, reopened by a late payment). Throws
- * InsufficientStockError like inventoryService.reserve when it is gone.
- */
-async function reserveOrderStock({ workspaceId, orderId, referenceType, actorUserId = null }, transaction) {
+/** What reserveOrderStock would take, per existing variant (read only, nothing locked). */
+async function dueToReserve(workspaceId, orderId, transaction) {
   const { held, reserved } = await orderStock(workspaceId, orderId, transaction);
   const due = [...reserved]
     .map(([variantId, quantity]) => [variantId, quantity - Math.max(0, held.get(variantId) || 0)])
     .filter(([, quantity]) => quantity > 0)
     .sort(([a], [b]) => (a < b ? -1 : 1));
   const present = await existingVariants(workspaceId, due.map(([id]) => id), transaction);
-  for (const [variantId, quantity] of due) {
-    if (!present.has(variantId)) continue;
+  return due.filter(([variantId]) => present.has(variantId));
+}
+
+/**
+ * Takes again what the order was placed with, less what it still holds (an
+ * order reconfirmed after a rejection, reopened by a late payment). Throws
+ * InsufficientStockError like inventoryService.reserve when it is gone.
+ */
+async function reserveOrderStock({ workspaceId, orderId, referenceType, actorUserId = null }, transaction) {
+  for (const [variantId, quantity] of await dueToReserve(workspaceId, orderId, transaction)) {
     await inventoryService.reserve(
       { workspaceId, variantId, quantity, referenceType, referenceId: orderId, actorUserId },
       transaction
@@ -139,4 +145,4 @@ async function reserveOrderStock({ workspaceId, orderId, referenceType, actorUse
   }
 }
 
-module.exports = { orderStock, releaseOrderStock, reserveOrderStock, ORDER_REFERENCE_TYPES, INITIAL_TYPES };
+module.exports = { orderStock, releaseOrderStock, reserveOrderStock, dueToReserve, ORDER_REFERENCE_TYPES, INITIAL_TYPES };

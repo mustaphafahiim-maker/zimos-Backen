@@ -76,6 +76,8 @@ const shippingQuote = asyncHandler(async (req, res) => {
     ({ items } = await cartService.toOrderItems(workspaceId, cart.id));
     testVisitor = cart.visitorId || testVisitor;
   }
+  // Only a published funnel's price, for what it sells (funnels/funnelCheckout.js).
+  await require('../funnels/funnelCheckout').assertSells(workspaceId, req.body.funnelId, items);
   const quote = await shippingQuoteService.quote(workspaceId, {
     country: req.body.country,
     region: req.body.governorate,

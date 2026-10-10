@@ -61,15 +61,17 @@ const STAGES = [
  * cancelled waybill is not where the order is, and an order whose only
  * shipment was cancelled correctly falls back to being ready to ship.
  */
-const LATEST_SHIPMENT_JOIN = `
+// `extraCondition` narrows the shipments looked at (the stage once one is cancelled).
+const latestShipmentJoin = (extraCondition = '') => `
     LEFT JOIN LATERAL (
       SELECT s.status
         FROM shipments s
        WHERE s.order_id = o.id
-         AND s.status <> 'cancelled'
+         AND s.status <> 'cancelled'${extraCondition}
        ORDER BY s.created_at DESC, s.id DESC
        LIMIT 1
     ) ls ON TRUE`;
+const LATEST_SHIPMENT_JOIN = latestShipmentJoin();
 
 /** `FROM` clause every stage-aware query shares. */
 const ORDERS_WITH_STAGE_FROM = `orders o${LATEST_SHIPMENT_JOIN}`;
@@ -135,4 +137,4 @@ const STAGE_SQL = `CASE
       ELSE 'ready_to_ship'
     END`;
 
-module.exports = { STAGES, STAGE_SQL, LATEST_SHIPMENT_JOIN, ORDERS_WITH_STAGE_FROM, unpaidPrepaidSql, countsAsSaleSql };
+module.exports = { STAGES, STAGE_SQL, LATEST_SHIPMENT_JOIN, latestShipmentJoin, ORDERS_WITH_STAGE_FROM, unpaidPrepaidSql, countsAsSaleSql };

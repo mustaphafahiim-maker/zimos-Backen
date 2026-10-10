@@ -260,3 +260,19 @@ describe('shipping rate — is_active + estimated delivery via CRUD', () => {
     expect(patched.body.zone.countries).toEqual(['EG', 'SA']);
   });
 });
+
+describe('tax — shipping', () => {
+  it('taxes the shipping fee once, however many lines the order has', async () => {
+    const { workspace } = await freshWorkspace();
+    await db.Workspace.update({ settings: { tax_enabled: true } }, { where: { id: workspace.id } });
+    await db.TaxRate.create({ workspaceId: workspace.id, name: 'VAT', country: 'EG', rateBasisPoints: 1400, appliesToShipping: true });
+    const lines = [
+      { productId: null, lineTotal: 10000 },
+      { productId: null, lineTotal: 10000 },
+      { productId: null, lineTotal: 10000 },
+    ];
+    const { taxAmount } = await calculateTax(workspace.id, { country: 'EG', region: 'Cairo', lines, shippingAmount: 5000 });
+    // 14% of 30000 for the lines and 14% of 5000 for shipping, once.
+    expect(taxAmount).toBe(4200 + 700);
+  });
+});

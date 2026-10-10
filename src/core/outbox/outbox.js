@@ -203,11 +203,22 @@ function registerHandlers() {
     }
   });
   for (const consumer of consumers) {
-    queue.handle(consumer.queue || 'default', `consume:${consumer.name}`, async (job) => {
-      const event = await loadEvent(job.payload.eventId);
-      if (!event) return;
-      await consumer.handle(event);
-    });
+    const onInterrupted = consumer.onInterrupted
+      ? async (job) => {
+          const event = await loadEvent(job.payload.eventId);
+          if (event) await consumer.onInterrupted(event);
+        }
+      : null;
+    queue.handle(
+      consumer.queue || 'default',
+      `consume:${consumer.name}`,
+      async (job) => {
+        const event = await loadEvent(job.payload.eventId);
+        if (!event) return;
+        await consumer.handle(event);
+      },
+      { once: consumer.once, onInterrupted }
+    );
   }
 }
 

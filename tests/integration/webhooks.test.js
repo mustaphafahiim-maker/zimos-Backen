@@ -313,3 +313,29 @@ describe('delivery retries', () => {
     receiver = await startReceiver(); // afterEach closes it
   });
 });
+
+describe('the order change scanner', () => {
+  const { scanOnce } = require('../../src/modules/webhooks/orderChangeDetector');
+
+  it('reads its whole window page by page when more orders changed than one batch holds', async () => {
+    const { auth, workspace, variant } = await setupWorkspaceWithProduct({ stock: 20 });
+    await addEndpoint(auth.accessToken, workspace.id, { events: ['order.created'] });
+    await db.WebhookScanCursor.destroy({ where: {} });
+
+    for (let i = 0; i < 5; i += 1) await placeOrder(auth.accessToken, workspace.id, variant.id);
+
+    // A batch of 2 holds fewer than the 5 orders changed inside the overlap.
+    const now = new Date(Date.now() + 1000);
+    const pass = await scanOnce({ now, limit: 2 });
+    expect(pass.events).toBe(5);
+    expect(pass.scanned).toBe(5);
+    expect(pass.pages).toBe(3);
+    expect(await db.WebhookDelivery.count({ where: { workspaceId: workspace.id, eventType: 'order.created' } })).toBe(5);
+    // The cursor moves to now, past the window, whatever the batch size.
+    expect((await db.WebhookScanCursor.findOne()).scannedUntil.getTime()).toBe(now.getTime());
+
+    // A second pass re-reads the overlap and makes nothing new.
+    const again = await scanOnce({ now: new Date(now.getTime() + 1000), limit: 2 });
+    expect(again.events).toBe(0);
+  });
+});

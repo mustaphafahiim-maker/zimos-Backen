@@ -114,8 +114,10 @@ router.post(
       funnelId: uuid.optional(),
     }),
   }),
-  asyncHandler(async (req, res) =>
-    res.json({
+  asyncHandler(async (req, res) => {
+    // A funnel-limited code previews only in a published funnel that sells these items.
+    await require('../funnels/funnelCheckout').assertSells(ws(req), req.body.funnelId, req.body.items);
+    return res.json({
       coupon: await require('../discounts/couponExtras').previewCode(
         ws(req),
         req.body.code,
@@ -123,8 +125,8 @@ router.post(
         require('../catalog/productTests').visitorOf(req),
         req.body.funnelId || null
       ),
-    })
-  )
+    });
+  })
 );
 
 module.exports = router;

@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 const asyncHandler = require('express-async-handler');
+const { ipKeyGenerator } = require('express-rate-limit');
 const Joi = require('joi');
 const db = require('../../db/models');
 const env = require('../../config/env');
@@ -11,6 +12,7 @@ const { normalizePhone } = require('../../core/utils/phone');
 const notify = require('../notifications/notify');
 const otpService = require('../otp/otpService');
 const blockedEntries = require('../fraud/blockedEntries');
+const { visitorIp } = require('./visitorGate');
 
 /**
  * Phone verification at checkout (SPEC §5.6).
@@ -32,12 +34,23 @@ const blockedEntries = require('../fraud/blockedEntries');
  * Codes ride on the existing otp_codes table and otpService.verifyOtp
  * (purpose `checkout`, hashed, 5 minutes, 5 attempts, 3 sends per 10
  * minutes). A phone in the blocklist with scope `otp` is told a code is on
- * its way and is sent nothing.
+ * its way and is sent nothing: a row with an unguessable hash stands in for
+ * the code, so the send limits, Resend and verify answer it exactly as any
+ * other phone.
+ *
+ * Every code (and stand-in) records the store it was sent for and the client
+ * that asked for it (otp_codes.workspace_id / request_ip). Resend only reaches
+ * a phone this store challenged in the last RESEND_WINDOW_MS. With
+ * CHECKOUT_OTP_IP_PER_MINUTE / _PER_HOUR set (env.checkoutOtp), one client
+ * (an IPv6 /56) may have that many codes sent across every store; past it the
+ * checkout, the COD switch and Resend answer 429 OTP_RATE_LIMITED.
  */
 
 const PURPOSE = 'checkout';
 const RESEND_AFTER_SECONDS = 60;
 const PROOF_TTL_MS = 30 * 60 * 1000;
+// Resend only reaches a phone this store challenged at checkout this recently.
+const RESEND_WINDOW_MS = 30 * 60 * 1000;
 const CHANNELS = ['whatsapp', 'sms'];
 const APPLY_TO = ['all', 'cod_only', 'risky_only'];
 
@@ -84,18 +97,39 @@ function maskPhone(phoneNormalized) {
   return phoneNormalized.length > 4 ? `${'•'.repeat(phoneNormalized.length - 4)}${phoneNormalized.slice(-4)}` : phoneNormalized;
 }
 
+/** The per-IP key a code is counted under: the address, or its /56 for IPv6. */
+function ipKeyOf(req) {
+  const ip = visitorIp(req);
+  return ip ? ipKeyGenerator(ip) : null;
+}
+
+/** 429 when this client has used its send budget (env.checkoutOtp; off while unset). */
+async function assertIpBudget(requestIp) {
+  const { ipPerMinute, ipPerHour } = env.checkoutOtp;
+  if (!requestIp || (!ipPerMinute && !ipPerHour)) return;
+  const since = (ms) => ({ requestIp, purpose: PURPOSE, createdAt: { [Op.gt]: new Date(Date.now() - ms) } });
+  if (
+    (ipPerMinute && (await db.OtpCode.count({ where: since(60 * 1000) })) >= ipPerMinute) ||
+    (ipPerHour && (await db.OtpCode.count({ where: since(60 * 60 * 1000) })) >= ipPerHour)
+  ) {
+    throw new AppError('OTP_RATE_LIMITED', 'Too many codes requested — try again later', 429);
+  }
+}
+
 /**
- * Sends a code unless one went out in the last minute, the phone is blocked
- * from codes, or the send limit is reached. `strict` (the Resend button)
- * turns the last two quiet cases into errors the shopper sees.
+ * Sends a code unless the client has used its send budget (429 always), one
+ * went out to the phone in the last minute, or the phone's send limit is
+ * reached. `strict` (the Resend button) turns the last two quiet cases into
+ * errors the shopper sees. A phone blocked from codes goes through the same
+ * checks and gets a stand-in row instead of a code, so nothing tells it apart.
  */
-async function sendCode(workspace, rawPhone, { strict = false } = {}) {
+async function sendCode(workspace, rawPhone, { strict = false, req = null } = {}) {
   const phone = normalizePhone(rawPhone);
   if (!phone) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
   const settings = settingsOf(workspace);
 
-  const blocked = await blockedEntries.findMatch(workspace.id, 'otp', { phoneNormalized: phone });
-  if (blocked) return { sent: false, phone };
+  const requestIp = ipKeyOf(req);
+  await assertIpBudget(requestIp);
 
   const latest = await db.OtpCode.findOne({ where: { phone, purpose: PURPOSE }, order: [['createdAt', 'DESC']] });
   if (latest && Date.now() - latest.createdAt.getTime() < RESEND_AFTER_SECONDS * 1000) {
@@ -108,8 +142,14 @@ async function sendCode(workspace, rawPhone, { strict = false } = {}) {
     return { sent: false, phone };
   }
 
+  const row = { phone, purpose: PURPOSE, workspaceId: workspace.id, requestIp, expiresAt: new Date(Date.now() + otpService.CODE_TTL_MS) };
+  if (await blockedEntries.findMatch(workspace.id, 'otp', { phoneNormalized: phone })) {
+    // No code exists for this row: the hash of 32 random bytes matches no 4–6 digit code.
+    await db.OtpCode.create({ ...row, codeHash: hashCode(crypto.randomBytes(32).toString('hex')) });
+    return { sent: false, phone };
+  }
   const code = String(crypto.randomInt(0, 10 ** settings.codeLength)).padStart(settings.codeLength, '0');
-  await db.OtpCode.create({ phone, purpose: PURPOSE, codeHash: hashCode(code), expiresAt: new Date(Date.now() + otpService.CODE_TTL_MS) });
+  await db.OtpCode.create({ ...row, codeHash: hashCode(code) });
   const message = {
     recipient: phone,
     template: 'otp_checkout',
@@ -123,12 +163,12 @@ async function sendCode(workspace, rawPhone, { strict = false } = {}) {
 }
 
 /** The 428 the checkout answers while the phone is unverified. Sends the code first. */
-async function challengeError(workspaceOrId, rawPhone) {
+async function challengeError(workspaceOrId, rawPhone, { req = null } = {}) {
   const workspace =
     typeof workspaceOrId === 'string'
       ? await db.Workspace.findByPk(workspaceOrId, { attributes: ['id', 'settings', 'defaultLocale'] })
       : workspaceOrId;
-  const { phone } = await sendCode(workspace, rawPhone);
+  const { phone } = await sendCode(workspace, rawPhone, { req });
   const settings = settingsOf(workspace);
   const err = new AppError('OTP_REQUIRED', 'Enter the code we sent to your phone to place the order', 428, {
     channel: settings.channel,
@@ -164,7 +204,7 @@ const guardCheckout = asyncHandler(async (req, res, next) => {
   req.otpIfRisky = settings.enabled && settings.applyTo === 'risky_only';
   const always = settings.enabled && (settings.applyTo === 'all' || (settings.applyTo === 'cod_only' && body.paymentMethod === 'cod'));
   if (always && !req.otpVerified && phone) {
-    const err = await challengeError(workspace, body.contact.phone);
+    const err = await challengeError(workspace, body.contact.phone, { req });
     req.checkoutRefusal = err.refusal;
     throw err;
   }
@@ -194,10 +234,27 @@ const verify = asyncHandler(async (req, res) => {
   res.json({ verified: true, otpToken: issueProof(req.publicWorkspace.id, result.phone) });
 });
 
-/** POST /store/:workspaceId/checkout/otp/resend */
+/**
+ * POST /store/:workspaceId/checkout/otp/resend
+ *
+ * Only a second code: the first one goes out when this store's checkout
+ * answers 428 OTP_REQUIRED (or the COD switch asks for one). A phone this
+ * store has not challenged in the last 30 minutes gets 409
+ * OTP_NOT_REQUESTED and nothing is sent, so the button cannot send codes to
+ * any number through any store.
+ */
 const resend = asyncHandler(async (req, res) => {
-  const { phone } = parse(phoneBody, req.body);
-  await sendCode(req.publicWorkspace, phone, { strict: true });
+  const { phone: rawPhone } = parse(phoneBody, req.body);
+  const phone = normalizePhone(rawPhone);
+  if (!phone) throw new AppError('INVALID_PHONE', 'A valid phone number is required', 422);
+  const challenged = await db.OtpCode.count({
+    where: { phone, purpose: PURPOSE, workspaceId: req.publicWorkspace.id, createdAt: { [Op.gt]: new Date(Date.now() - RESEND_WINDOW_MS) } },
+  });
+  // A phone blocked from codes was challenged too (a stand-in row), so this never reads the blocklist.
+  if (!challenged) {
+    throw new AppError('OTP_NOT_REQUESTED', 'Place the order again to get a code', 409);
+  }
+  await sendCode(req.publicWorkspace, rawPhone, { strict: true, req });
   res.json({ sent: true, resendAfterSeconds: RESEND_AFTER_SECONDS });
 });
 

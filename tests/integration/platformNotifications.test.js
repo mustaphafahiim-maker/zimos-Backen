@@ -155,3 +155,46 @@ describe('console notifications', () => {
     expect((await request(app).get('/api/v1/admin/notifications?type=support_ticket&cursor=bad').set(admin.H)).status).toBe(422);
   });
 });
+
+describe('console notifications by permission', () => {
+  async function consoleUser(permissions) {
+    const u = await makePlatformUser('admin');
+    await db.User.update({ platformPermissions: permissions }, { where: { id: u.userId } });
+    return u;
+  }
+
+  it('an admin is told only about the types their console permissions open', async () => {
+    await db.sequelize.query('DELETE FROM platform_notifications');
+    await notifications.notify({ type: 'payment_proof_submitted', title: 'Proof' });
+    await notifications.notify({ type: 'support_ticket', title: 'Ticket' });
+    await notifications.notify({ type: 'suggestion', title: 'Idea' });
+    await notifications.notify({ type: 'wallet_fallback', title: 'Fallback' });
+
+    const overviewOnly = await consoleUser(['overview.view']);
+    const list = await request(app).get('/api/v1/admin/notifications').set(overviewOnly.H);
+    expect(list.status).toBe(200);
+    expect(list.body.notifications).toHaveLength(0);
+    expect(list.body.unread).toBe(0);
+    expect((await request(app).get('/api/v1/admin/notifications/unread-count').set(overviewOnly.H)).body.unread).toBe(0);
+    expect((await request(app).get('/api/v1/admin/notification-prefs').set(overviewOnly.H)).body.prefs).toEqual([]);
+
+    const support = await consoleUser(['overview.view', 'support.view']);
+    const seen = (await request(app).get('/api/v1/admin/notifications').set(support.H)).body.notifications.map((n) => n.type).sort();
+    expect(seen).toEqual(['suggestion', 'support_ticket']);
+    expect((await request(app).get('/api/v1/admin/notifications?type=payment_proof_submitted').set(support.H)).body.notifications).toHaveLength(0);
+    const prefTypes = (await request(app).get('/api/v1/admin/notification-prefs').set(support.H)).body.prefs.map((p) => p.type).sort();
+    expect(prefTypes).toEqual(['suggestion', 'support_ticket']);
+
+    // "Mark all read" marks only what this admin can see.
+    await request(app).post('/api/v1/admin/notifications/read').set(support.H).send({ all: true });
+    const [{ count }] = await db.sequelize.query('SELECT COUNT(*)::int AS count FROM platform_notification_reads WHERE user_id = :u', {
+      replacements: { u: support.userId },
+      type: QueryTypes.SELECT,
+    });
+    expect(count).toBe(2);
+
+    const payments = await consoleUser(['overview.view', 'payments.record', 'subscriptions.view']);
+    const forPayments = (await request(app).get('/api/v1/admin/notifications').set(payments.H)).body.notifications.map((n) => n.type).sort();
+    expect(forPayments).toEqual(['payment_proof_submitted', 'wallet_fallback']);
+  });
+});

@@ -33,9 +33,9 @@ const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const PASSWORD_RESET_LIMITS = Object.freeze({ perHour: 3, perDay: 10 });
 
 function issueTokenPair(user, req) {
-  const accessToken = signAccessToken({ sub: user.id });
   return createSession(user, req).then(({ raw, session }) => ({
-    accessToken,
+    // The access token names its session (`sid`): ending the session ends it too (core/security/sessionGate).
+    accessToken: signAccessToken({ sub: user.id, sid: session.id }),
     refreshToken: raw,
     sessionId: session.id,
     expiresAt: session.expiresAt,
@@ -283,8 +283,8 @@ function assertMaySignIn(user) {
 }
 
 /** URL to send the browser to for Google's consent screen. */
-function getGoogleAuthUrl() {
-  return googleClient.getAuthUrl();
+function getGoogleAuthUrl(state) {
+  return googleClient.getAuthUrl(state);
 }
 
 /**
@@ -294,9 +294,20 @@ function getGoogleAuthUrl() {
  * - neither         -> create a new active, email-verified, passwordless user
  */
 async function loginWithGoogle(code, req) {
-  const profile = await googleClient.fetchProfile(code);
+  let profile;
+  try {
+    profile = await googleClient.fetchProfile(code);
+  } catch (err) {
+    logger.warn('Google sign-in: the code exchange failed', { message: err.message });
+    throw new AuthenticationError('Google sign-in failed. Try again.', 'GOOGLE_LOGIN_FAILED');
+  }
   if (!profile.googleId || !profile.email) {
     throw new AuthenticationError('Google did not return a usable profile', 'GOOGLE_PROFILE_INCOMPLETE');
+  }
+  // An address Google has not verified proves nothing about who owns it: it
+  // never links to, or creates, an account under that email.
+  if (!profile.emailVerified) {
+    throw new AuthenticationError('Your Google account has no verified email', 'GOOGLE_EMAIL_UNVERIFIED');
   }
 
   let user = await db.User.findOne({ where: { googleId: profile.googleId } });
@@ -404,7 +415,7 @@ async function refresh(rawRefreshToken, req) {
   const { raw, session: newSession } = await createSession(user, req);
   await session.update({ revokedAt: new Date(), rotatedToSessionId: newSession.id });
 
-  const accessToken = signAccessToken({ sub: user.id });
+  const accessToken = signAccessToken({ sub: user.id, sid: newSession.id });
   return { accessToken, refreshToken: raw, sessionId: newSession.id, expiresAt: newSession.expiresAt };
 }
 

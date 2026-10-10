@@ -15,6 +15,8 @@ const { resolveOrderBumpItem } = require('./orderBump');
 const { offerWindowEnd } = require('../funnels/funnelOfferMerge');
 const productTests = require('../catalog/productTests');
 const logger = require('../../core/utils/logger');
+// The checkout answer leaves out what the store knows about the phone or visitor (risk, IP, cost).
+const { shopperOrder } = require('./shopperOrder');
 
 /** Credits the order to the shopper's variant in its products' A/B tests; never fails the checkout. */
 async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
@@ -100,6 +102,9 @@ const checkout = asyncHandler(async (req, res) => {
       400
     );
   }
+  // A funnel's checkout prices the funnel's way (shipping, coupons, payment methods): the
+  // funnel must be a published one of this store that sells these lines (funnels/funnelCheckout.js).
+  await require('../funnels/funnelCheckout').assertSells(workspaceId, orderBody.funnelId, items);
 
   // The ticked order bump becomes one more line of this order, built by the
   // server from the configured offer (422 when it is not that offer).
@@ -147,9 +152,9 @@ const checkout = asyncHandler(async (req, res) => {
     await afterOrderCompleted(workspaceId, order, context);
     if (manualMethod) {
       const manualPayment = await manualPayments.getForShopper(workspaceId, order.id, manualToken.token);
-      return res.status(201).json({ order: { ...order.toJSON(), items: orderItems }, manualPayment, paymentToken: manualToken.token });
+      return res.status(201).json({ order: shopperOrder(order, orderItems), manualPayment, paymentToken: manualToken.token });
     }
-    return res.status(201).json({ order: { ...order.toJSON(), items: orderItems } });
+    return res.status(201).json({ order: shopperOrder(order, orderItems) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -176,7 +181,7 @@ const checkout = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({
-    order: { ...order.toJSON(), items: orderItems },
+    order: shopperOrder(order, orderItems),
     payment: {
       id: attempt.id,
       status: attempt.status,

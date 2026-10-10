@@ -82,14 +82,18 @@ const choosePlan = [
   }),
 ];
 
+// The OAuth state ties the callback to the browser that started the sign-in (googleState.js).
 const googleRedirect = asyncHandler(async (req, res) => {
-  res.redirect(authService.getGoogleAuthUrl());
+  res.redirect(authService.getGoogleAuthUrl(require('./googleState').issue(res)));
 });
 
 const googleCallback = asyncHandler(async (req, res) => {
   const back = (params) => res.redirect(`${env.frontendUrl}/auth/callback?${new URLSearchParams(params).toString()}`);
 
+  const stateOk = require('./googleState').consume(req, res);
   if (req.query.error) return back({ error: req.query.error });
+  // Not started from this browser, or started over 10 minutes ago.
+  if (!stateOk) return back({ error: 'GOOGLE_STATE_MISMATCH' });
 
   try {
     const { accessToken, refreshToken } = await authService.loginWithGoogle(req.query.code, req);

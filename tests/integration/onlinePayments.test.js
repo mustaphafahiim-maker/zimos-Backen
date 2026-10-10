@@ -5,6 +5,7 @@
 
 const { app, request, setupWorkspaceWithProduct, addMemberWithRole } = require('../helpers/factories');
 const db = require('../../src/db/models');
+const { storedOrder } = require('../helpers/storedOrder');
 const env = require('../../src/config/env');
 const fake = require('../helpers/fakePaymob');
 
@@ -641,7 +642,7 @@ describe('the standing rules', () => {
 
     const online = await place('card');
     expect(online.status).toBe(201);
-    expect(online.body.order.riskFlags).toContain('duplicate_order');
+    expect((await storedOrder(online)).riskFlags).toContain('duplicate_order');
 
     // ...and switching that order to COD is refused like a COD order would be.
     const sw = await shopper(ctx, online.body.order.id, online.body.paymentToken).cod();
@@ -692,5 +693,33 @@ describe('return URL', () => {
     } finally {
       env.isProduction = false;
     }
+  });
+});
+
+describe('cancelling an order waiting for its payment', () => {
+  const cancel = (ctx, orderId) =>
+    request(app).post(`/api/v1/workspaces/${ctx.wid}/orders/${orderId}/cancel`).set(bearer(ctx.token)).send({ reason: 'Customer changed their mind' });
+
+  it('asks Paymob first, then cancels the open attempt; a late payment is still recorded and flagged', async () => {
+    const ctx = await store();
+    const placed = await placeOnline(ctx);
+    const res = await cancel(ctx, placed.order.id);
+    expect(res.status).toBe(200);
+    expect(paymob.calls.some((c) => c.url.endsWith('/transaction_inquiry'))).toBe(true);
+    expect((await db.Payment.findOne({ where: { orderId: placed.order.id } })).status).toBe('cancelled');
+
+    await payViaWebhook(ctx, placed);
+    const order = await db.Order.findByPk(placed.order.id);
+    expect(order.cancelledAt).not.toBeNull();
+    expect(order.riskFlags).toContain('paid_after_cancel');
+  });
+
+  it('a payment Paymob already took is recorded instead of being cancelled', async () => {
+    const ctx = await store();
+    const placed = await placeOnline(ctx);
+    paymob.transactions.set(placed.paymobOrderId, fake.transaction({ orderId: placed.paymobOrderId, amount: Number(placed.order.totalAmount) }));
+    await cancel(ctx, placed.order.id);
+    const payment = await db.Payment.findOne({ where: { orderId: placed.order.id } });
+    expect(payment.status).toBe('captured');
   });
 });
