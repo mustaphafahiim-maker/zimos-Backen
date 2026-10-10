@@ -263,6 +263,7 @@ v1.use('/workspaces/:workspaceId/preorders', require('./modules/preorders').rout
 v1.use('/workspaces/:workspaceId/stock-alerts', require('./modules/stockAlerts').staff);
 v1.use('/workspaces/:workspaceId/product-questions', require('./modules/productQuestions').staff);
 v1.use('/workspaces/:workspaceId/size-charts', require('./modules/sizeCharts').staff);
+v1.use('/workspaces/:workspaceId/price-history', require('./modules/priceHistory').staff);
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
@@ -319,6 +320,7 @@ v1.use('/store/:workspaceId/downloads', digitalRoutes.store);
 v1.use('/store/:workspaceId/shoppable-images', shoppableImageRoutes.store);
 v1.use('/store/:workspaceId/learn', courseRoutes.portal);
 v1.use('/store/:workspaceId/size-chart', require('./modules/sizeCharts').store);
+v1.use('/store/:workspaceId/lowest-prices', require('./modules/priceHistory').store);
 v1.use('/store/:workspaceId/products/:productId/questions', require('./modules/productQuestions').store);
 v1.use('/store/:workspaceId/stock-alerts', require('./modules/stockAlerts').store);
 v1.use('/store/:workspaceId/redirects', require('./modules/urlRedirects').store);

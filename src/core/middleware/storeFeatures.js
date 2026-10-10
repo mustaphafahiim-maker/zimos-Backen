@@ -20,6 +20,7 @@ const STORE_FEATURES = Object.freeze([
   'product_specs',
   'purchase_limits',
   'gift_options',
+  'price_history',
 ]);
 
 const storeFeatureOn = (name) => env.storeFeatures.includes(name);

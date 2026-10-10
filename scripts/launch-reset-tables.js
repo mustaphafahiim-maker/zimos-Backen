@@ -125,6 +125,7 @@ const TABLES = {
   shopper_login_codes: wipe(STORE),
   site_visits: wipe('anonymous marketing-site visits from before launch, some linked to accounts that go'),
   size_charts: wipe(STORE),
+  variant_price_history: wipe(STORE),
   spec_keys: wipe(STORE),
   stock_alerts: wipe(STORE),
   store_credit_transactions: wipe(STORE),
