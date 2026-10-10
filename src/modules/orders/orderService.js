@@ -16,6 +16,7 @@ const fraudRules = require('../fraud/fraudRules');
 const blockedEntries = require('../fraud/blockedEntries');
 const visitorGate = require('../risk/visitorGate');
 const riskService = require('../risk/riskService');
+const aiOrderCheck = require('../risk/aiOrderCheck');
 const checkoutOtp = require('../risk/checkoutOtp');
 const platformBlocklist = require('../risk/platformBlocklistService');
 const inventoryService = require('../inventory/inventoryService');
@@ -610,6 +611,8 @@ async function createOrder(
       },
       { transaction }
     );
+    // A moderate order may get the AI text check after it commits (risk/aiOrderCheck); nothing while AI_ENABLED is off.
+    if (risk) await aiOrderCheck.queueFor(workspaceId, order.id, risk.level, transaction);
 
     // Sequential, not Promise.all — see note in workspaceService: one
     // transaction = one pooled connection, so concurrent queries on it are unsafe.

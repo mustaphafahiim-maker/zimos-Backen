@@ -586,38 +586,47 @@ describe('/fraud/blocklist', () => {
   const block = (ctx, body, token = ctx.auth.accessToken) =>
     request(app).post(`/api/v1/workspaces/${ctx.workspace.id}/fraud/blocklist`).set(bearer(token)).send(body);
 
-  it('blocks a phone that never ordered by creating its customer, then updates the reason on a repeat', async () => {
+  it('blocks a phone that never ordered with a blocked_entries row (no customer), then updates the reason on a repeat', async () => {
     const ctx = await setupWorkspaceWithProduct();
 
     const created = await block(ctx, { phone: '+20 100 555 0101', reason: 'Refused three parcels' });
     expect(created.status).toBe(201);
-    const customer = await db.Customer.findOne({ where: { workspaceId: ctx.workspace.id, phoneNormalized: '201005550101' } });
-    expect(customer).not.toBeNull();
-    expect(customer.fullName).toBeNull();
-    expect(customer.isBlacklisted).toBe(true);
-    expect(customer.blacklistedAt).toBeInstanceOf(Date);
-    expect(created.body).toEqual({
-      entry: { customerId: customer.id, phone: '+20 100 555 0101', reason: 'Refused three parcels' },
+    const entry = await db.BlockedEntry.findOne({ where: { workspaceId: ctx.workspace.id, type: 'phone', scope: 'orders', value: '201005550101' } });
+    expect(entry).not.toBeNull();
+    expect(entry.createdByUserId).toBe(ctx.auth.userId);
+    // A phone that never ordered needs no customer row (fraud/blockedEntries.js).
+    expect(await db.Customer.count({ where: { workspaceId: ctx.workspace.id } })).toBe(0);
+    expect(created.body.entry).toEqual({
+      id: entry.id,
+      type: 'phone',
+      value: '201005550101',
+      label: '+20 100 555 0101',
+      scope: 'orders',
+      reason: 'Refused three parcels',
+      createdById: ctx.auth.userId,
+      createdBy: null,
+      createdAt: entry.createdAt.toISOString(),
+      customerId: null,
     });
-    const audit = await db.AuditLog.findOne({ where: { action: 'customer.blacklist_change', entityId: customer.id } });
+    expect(created.body.entries).toEqual([created.body.entry]);
+    const audit = await db.AuditLog.findOne({ where: { action: 'blocklist.entry_added', entityId: entry.id } });
     expect(audit.actorUserId).toBe(ctx.auth.userId);
-    expect(audit.afterState).toMatchObject({ isBlacklisted: true, reason: 'Refused three parcels' });
+    expect(audit.afterState).toEqual({ type: 'phone', value: '201005550101', label: '+20 100 555 0101', scope: 'orders', reason: 'Refused three parcels' });
 
-    // Same phone, typed differently: same customer, reason updated, 200, and
-    // blockedAt kept — the block did not start again.
-    const firstBlockedAt = customer.blacklistedAt.getTime();
-    const again = await block(ctx, { phone: '01005550101', reason: 'Updated reason', fullName: 'Known Name' });
+    // Same phone, typed differently: the same entry, reason updated, 200, and
+    // createdAt kept (the block did not start again); no second audit row.
+    const again = await block(ctx, { phone: '01005550101', reason: 'Updated reason' });
     expect(again.status).toBe(200);
-    expect(again.body.entry).toEqual({ customerId: customer.id, phone: '+20 100 555 0101', reason: 'Updated reason' });
-    await customer.reload();
-    expect(customer.blacklistReason).toBe('Updated reason');
-    expect(customer.fullName).toBe('Known Name');
-    expect(customer.blacklistedAt.getTime()).toBe(firstBlockedAt);
-    expect(await db.Customer.count({ where: { workspaceId: ctx.workspace.id } })).toBe(1);
+    expect(again.body.entry).toMatchObject({ id: entry.id, value: '201005550101', label: '+20 100 555 0101', reason: 'Updated reason' });
+    await entry.reload();
+    expect(entry.reason).toBe('Updated reason');
+    expect(again.body.entry.createdAt).toBe(created.body.entry.createdAt);
+    expect(await db.BlockedEntry.count({ where: { workspaceId: ctx.workspace.id } })).toBe(1);
+    expect(await db.AuditLog.count({ where: { action: 'blocklist.entry_added', entityId: entry.id } })).toBe(1);
 
-    // The next storefront order from that phone lands on the blocked customer.
+    // The next storefront order from that phone is flagged by the entry itself.
     const order = await storefrontOrder(ctx.workspace.id, ctx.variant.id, { phone: '01005550101' });
-    expect((await storedOrder(order)).customerId).toBe(customer.id);
+    expect(order.status).toBe(201);
     expect((await storedOrder(order)).riskFlags).toEqual(['blacklisted_customer']);
   });
 
@@ -631,59 +640,82 @@ describe('/fraud/blocklist', () => {
     expect(await db.Customer.count({ where: { workspaceId: ctx.workspace.id } })).toBe(1);
   });
 
-  it('validates the body: invalid phone is INVALID_PHONE, reason 2–300 chars', async () => {
+  it('validates the body: a phone that does not normalize, a missing phone, a reason outside 2–300 chars', async () => {
     const ctx = await setupWorkspaceWithProduct();
 
     const badPhone = await block(ctx, { phone: 'no digits', reason: 'Some reason' });
     expect(badPhone.status).toBe(422);
-    expect(badPhone.body.error.code).toBe('INVALID_PHONE');
+    expect(badPhone.body.error.code).toBe('VALIDATION_ERROR');
+    expect(badPhone.body.error.details).toEqual([{ field: 'value', message: 'Enter a valid phone number' }]);
 
     for (const body of [
       { reason: 'Missing phone' },
-      { phone: PHONE },
+      { phone: '123', reason: 'Too short to be real' },
       { phone: PHONE, reason: 'x' },
       { phone: PHONE, reason: 'x'.repeat(301) },
+      { phone: PHONE, reason: 'Unknown type', type: 'fax' },
+      { phone: PHONE, reason: 'Unknown scope', scope: 'everything' },
     ]) {
-      expect((await block(ctx, body)).status).toBe(422);
+      const res = await block(ctx, body);
+      expect([JSON.stringify(body), res.status, res.body.error.code]).toEqual([JSON.stringify(body), 422, 'VALIDATION_ERROR']);
     }
+    expect(await db.BlockedEntry.count({ where: { workspaceId: ctx.workspace.id } })).toBe(0);
     expect(await db.Customer.count({ where: { workspaceId: ctx.workspace.id } })).toBe(0);
+    expect(await db.AuditLog.count({ where: { workspaceId: ctx.workspace.id, action: 'blocklist.entry_added' } })).toBe(0);
   });
 
-  it('lists blacklisted customers newest blockedAt first; unblocking via PATCH removes the entry and clears blacklisted_at', async () => {
+  it('lists entries newest first with counts; DELETE unblocks a phone, PATCH on its customer unblocks and clears blacklisted_at', async () => {
     const ctx = await setupWorkspaceWithProduct();
-    await storefrontOrder(ctx.workspace.id, ctx.variant.id); // an unblocked customer, never listed
-    await block(ctx, { phone: '01005550201', reason: 'First blocked', fullName: 'First' });
-    const second = await block(ctx, { phone: '01005550202', reason: 'Second blocked' });
-    await db.Customer.update(
-      { blacklistedAt: new Date(Date.now() - 60_000) },
-      { where: { workspaceId: ctx.workspace.id, phoneNormalized: '201005550201' } }
-    );
+    const customerId = (await storedOrder(await storefrontOrder(ctx.workspace.id, ctx.variant.id))).customerId; // not blocked yet, not listed
+    expect((await getList(ctx)).body.entries).toEqual([]);
+
+    const first = await block(ctx, { phone: '01005550201', reason: 'First blocked' });
+    const second = await block(ctx, { phone: PHONE, reason: 'Second blocked' });
+    expect([first.status, second.status]).toEqual([201, 201]);
+    await db.BlockedEntry.update({ createdAt: new Date(Date.now() - 60_000) }, { where: { id: first.body.entry.id }, silent: true });
 
     const res = await getList(ctx);
     expect(res.status).toBe(200);
-    expect(res.body.entries.map((e) => e.phone)).toEqual(['01005550202', '01005550201']);
-    const stored = await db.Customer.findByPk(second.body.entry.customerId);
-    expect(res.body.entries[0]).toEqual({
-      customerId: stored.id,
-      fullName: null,
-      phone: '01005550202',
-      reason: 'Second blocked',
-      totalOrders: 0,
-      totalRejectedOrders: 0,
-      blockedAt: stored.blacklistedAt.toISOString(),
-    });
-    expect(res.body.entries[1].fullName).toBe('First');
+    expect(res.body.entries.map((e) => e.label)).toEqual([PHONE, '01005550201']);
+    expect(res.body.nextCursor).toBeNull();
+    expect(res.body.counts).toEqual({ phone: 2, ip: 0, email: 0, device: 0, name_address: 0 });
+    // The phone that ordered points at its customer, who is blocked too.
+    expect(res.body.entries[0]).toMatchObject({ id: second.body.entry.id, value: '201077770001', reason: 'Second blocked', scope: 'orders', customerId });
+    // The list names who blocked it (the POST answer above carries the id only).
+    expect(res.body.entries[0]).toMatchObject({ createdById: ctx.auth.userId, createdBy: 'Test User' });
+    expect(res.body.entries[1]).toMatchObject({ id: first.body.entry.id, reason: 'First blocked', customerId: null });
+    const customer = await db.Customer.findByPk(customerId);
+    expect(customer.isBlacklisted).toBe(true);
+    expect(customer.blacklistReason).toBe('Second blocked');
+    expect(customer.blacklistedAt).toBeInstanceOf(Date);
 
+    // DELETE removes the phone that never ordered.
+    const removed = await request(app)
+      .delete(`/api/v1/workspaces/${ctx.workspace.id}/fraud/blocklist/${first.body.entry.id}`)
+      .set(bearer(ctx.auth.accessToken));
+    expect(removed.status).toBe(200);
+    expect(removed.body).toEqual({ success: true });
+    expect(await db.BlockedEntry.findByPk(first.body.entry.id)).toBeNull();
+    const removedAudit = await db.AuditLog.findOne({ where: { action: 'blocklist.entry_removed', entityId: first.body.entry.id } });
+    expect(removedAudit.actorUserId).toBe(ctx.auth.userId);
+    expect((await getList(ctx)).body.entries.map((e) => e.id)).toEqual([second.body.entry.id]);
+    const gone = await request(app)
+      .delete(`/api/v1/workspaces/${ctx.workspace.id}/fraud/blocklist/${first.body.entry.id}`)
+      .set(bearer(ctx.auth.accessToken));
+    expect(gone.status).toBe(404);
+
+    // Unblocking the customer removes its (phone, orders) entry.
     const unblock = await request(app)
-      .patch(`/api/v1/workspaces/${ctx.workspace.id}/customers/${stored.id}/blacklist`)
+      .patch(`/api/v1/workspaces/${ctx.workspace.id}/customers/${customerId}/blacklist`)
       .set(bearer(ctx.auth.accessToken))
       .send({ isBlacklisted: false });
     expect(unblock.status).toBe(200);
-    await stored.reload();
-    expect(stored.isBlacklisted).toBe(false);
-    expect(stored.blacklistReason).toBeNull();
-    expect(stored.blacklistedAt).toBeNull();
-    expect((await getList(ctx)).body.entries.map((e) => e.phone)).toEqual(['01005550201']);
+    await customer.reload();
+    expect(customer.isBlacklisted).toBe(false);
+    expect(customer.blacklistReason).toBeNull();
+    expect(customer.blacklistedAt).toBeNull();
+    expect((await getList(ctx)).body.entries).toEqual([]);
+    expect(await db.BlockedEntry.count({ where: { workspaceId: ctx.workspace.id } })).toBe(0);
   });
 
   it('the existing PATCH blacklist sets blacklisted_at too', async () => {

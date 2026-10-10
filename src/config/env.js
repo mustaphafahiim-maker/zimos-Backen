@@ -357,6 +357,21 @@ const env = {
     phoneChangeEnabled: process.env.NODE_ENV !== 'test' && process.env.PHONE_CHANGE_ENABLED === 'true',
   },
 
+  // The AI features (modules/ai, translations/aiFill, risk/aiOrderCheck, the
+  // WhatsApp bot). Off unless AI_ENABLED is exactly "true": off, their routes
+  // answer as if they did not exist, the bot never replies, the order check
+  // does nothing and no provider is ever called. AI_PROVIDER names the
+  // provider (modules/ai/providers); empty means the sandbox outside
+  // production and none in production. AI_DAILY_LIMIT caps the requests of
+  // one store per UTC day (AI jobs and bot replies together; default 50).
+  // Under NODE_ENV=test it starts off whatever the .env says; a test that
+  // needs it sets it here.
+  ai: {
+    enabled: process.env.NODE_ENV !== 'test' && process.env.AI_ENABLED === 'true',
+    provider: (process.env.AI_PROVIDER || '').trim(),
+    dailyLimit: /^\d+$/.test((process.env.AI_DAILY_LIMIT || '').trim()) ? parseInt(process.env.AI_DAILY_LIMIT, 10) : 50,
+  },
+
   // How the backend recognises our own Next.js storefront server. The secret is
   // sent server-to-server only (never to a browser); a request carrying it may
   // forward the shopper's IP for rate limiting. STOREFRONT_SERVER_IP

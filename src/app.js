@@ -11,6 +11,7 @@ const { resolveClientIp, clientIp } = require('./core/middleware/clientIp');
 const { corsPolicy } = require('./core/middleware/cors');
 const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter, deliveryWebhookLimiter } = require('./core/middleware/rateLimiters');
 const { errorHandler, notFoundHandler } = require('./core/middleware/errorHandler');
+const { whenAiEnabled } = require('./modules/ai/aiGate');
 const { hostResolver } = require('./core/middleware/hostResolver');
 const logger = require('./core/utils/logger');
 const { redactUrl } = require('./core/utils/redactUrl');
@@ -214,6 +215,9 @@ v1.use('/workspaces/:workspaceId/experiments', require('./modules/funnels/splitT
 v1.use('/workspaces/:workspaceId/product-tests', require('./modules/catalog/productTests').router);
 // Translations of the merchant's own content, and the languages overview (website.edit).
 v1.use('/workspaces/:workspaceId/translations', require('./modules/translations/translations').router);
+// The AI features and the WhatsApp bot's staff routes: there only while AI_ENABLED is "true" (modules/ai/aiGate.js).
+v1.use('/workspaces/:workspaceId/ai', whenAiEnabled(require('./modules/ai/aiRoutes')));
+v1.use('/workspaces/:workspaceId/wa-bot', whenAiEnabled(require('./modules/whatsapp/bot/botService').router));
 v1.use('/workspaces/:workspaceId/media', mediaRoutes);
 v1.use('/workspaces/:workspaceId/reviews', reviewRoutes);
 v1.use('/workspaces/:workspaceId/fraud', fraudRoutes);

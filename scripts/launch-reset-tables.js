@@ -39,6 +39,8 @@ const TABLES = {
 
   // ---- wiped -------------------------------------------------------------
   agent_commissions: wipe('commissions of agents (accounts that go) on store invoices'),
+  ai_jobs: wipe(STORE),
+  ai_usage: wipe(STORE),
   analytics_events: wipe(STORE),
   analytics_sessions: wipe(STORE),
   announcements: wipe('announcements written in the console before launch (decided: wipe)'),

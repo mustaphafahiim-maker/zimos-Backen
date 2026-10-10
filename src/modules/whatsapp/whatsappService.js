@@ -250,6 +250,8 @@ async function handleWebhook(workspaceId, payload) {
         await require('./quickReplyConfirmation').enqueue(workspaceId, msg, phoneNormalized);
         // STOP withdraws marketing consent (optOut.js).
         await require('./optOut').handleInbound(workspaceId, msg, phoneNormalized);
+        // A typed message gets the customer service bot's answer when AI is on and the store has the bot on (bot/botService.js).
+        if (msg.type === 'text') await require('./bot/botService').enqueue(workspaceId, conversation.id, inbound.id);
         inboxEvents.publish(workspaceId, { conversationId: conversation.id, reason: 'message_in' });
         result.messages += 1;
       }
