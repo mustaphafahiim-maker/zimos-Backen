@@ -9,7 +9,7 @@ const env = require('./config/env');
 const requestId = require('./core/middleware/requestId');
 const { resolveClientIp, clientIp } = require('./core/middleware/clientIp');
 const { corsPolicy } = require('./core/middleware/cors');
-const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter } = require('./core/middleware/rateLimiters');
+const { generalLimiter, storefrontLimiter, carrierWebhookLimiter, paymentWebhookLimiter, deliveryWebhookLimiter } = require('./core/middleware/rateLimiters');
 const { errorHandler, notFoundHandler } = require('./core/middleware/errorHandler');
 const { hostResolver } = require('./core/middleware/hostResolver');
 const logger = require('./core/utils/logger');
@@ -130,6 +130,8 @@ app.use(`/api/${env.apiVersion}/store`, storefrontLimiter);
 // webhook token, not per IP (see rateLimiters.js).
 app.use(`/api/${env.apiVersion}/webhooks/carriers`, carrierWebhookLimiter);
 app.use(`/api/${env.apiVersion}/webhooks/payments`, paymentWebhookLimiter);
+// Email and SMS delivery status webhooks: per provider, not per IP (rateLimiters.js).
+app.use([`/api/${env.apiVersion}/webhooks/email`, `/api/${env.apiVersion}/webhooks/sms`], deliveryWebhookLimiter);
 app.use(generalLimiter);
 
 // --- Health / readiness -----------------------------------------------
@@ -236,6 +238,27 @@ v1.use('/workspaces/:workspaceId/delivery-zones', require('./modules/shipping/de
 v1.use('/workspaces/:workspaceId/product-options/:productId', require('./modules/catalog/menuOptionsRoutes'));
 // A store's suggestions to the platform (Help → Suggest a feature).
 v1.use('/workspaces/:workspaceId/suggestions', require('./modules/suggestions/suggestionRoutes'));
+v1.use('/workspaces/:workspaceId/store-credit', require('./modules/storeCredit').staff);
+v1.use('/workspaces/:workspaceId/vip-tiers', require('./modules/vipTiers').staff);
+v1.use('/workspaces/:workspaceId/loyalty', require('./modules/loyalty').staff);
+v1.use('/workspaces/:workspaceId/customer-referrals', require('./modules/customerReferrals').staff);
+v1.use('/workspaces/:workspaceId/shopper-returns', require('./modules/returns/shopperReturns').staff);
+v1.use('/workspaces/:workspaceId/rfm', require('./modules/rfm').router);
+v1.use('/workspaces/:workspaceId/store-reports', require('./modules/storeReports').router);
+v1.use('/workspaces/:workspaceId/scheduled-reports', require('./modules/scheduledReports').router);
+v1.use('/workspaces/:workspaceId/shopper-accounts', require('./modules/shopperAccounts').staff);
+v1.use('/workspaces/:workspaceId/wishlists', require('./modules/shopperAccounts/wishlist').staff);
+v1.use('/workspaces/:workspaceId/blog', require('./modules/blog').staff);
+v1.use('/workspaces/:workspaceId/gift-cards', require('./modules/giftCards').staff);
+v1.use('/workspaces/:workspaceId/gift-options', require('./modules/giftOptions').staff);
+v1.use('/workspaces/:workspaceId/purchase-limits', require('./modules/catalog/purchaseLimits').router);
+v1.use('/workspaces/:workspaceId/product-specs', require('./modules/productSpecs').staff);
+v1.use('/workspaces/:workspaceId/redirects', require('./modules/urlRedirects').staff);
+v1.use('/workspaces/:workspaceId/holiday-mode', require('./modules/holidayMode').router);
+v1.use('/workspaces/:workspaceId/preorders', require('./modules/preorders').router);
+v1.use('/workspaces/:workspaceId/stock-alerts', require('./modules/stockAlerts').staff);
+v1.use('/workspaces/:workspaceId/product-questions', require('./modules/productQuestions').staff);
+v1.use('/workspaces/:workspaceId/size-charts', require('./modules/sizeCharts').staff);
 v1.use('/workspaces/:workspaceId/profit', profitRoutes);
 v1.use('/workspaces/:workspaceId/server-pixels', serverPixelsRoutes.staff);
 v1.use('/workspaces/:workspaceId/api-keys', apiKeyRoutes);
@@ -246,6 +269,8 @@ v1.use('/workspaces/:workspaceId/store-app', require('./modules/storefront/store
 v1.use('/workspaces/:workspaceId/tracking-pixels', trackingPixelRoutes);
 v1.use('/workspaces/:workspaceId/inbox', inboxRoutes);
 v1.use('/workspaces/:workspaceId/order-emails', orderEmailRoutes);
+// The store's email suppression list (notifications/deliveryStatus, DELIVERY_STATUS_ENABLED).
+v1.use('/workspaces/:workspaceId/email-suppressions', require('./modules/notifications/deliveryStatus/suppressionRoutes'));
 // The inbox's live stream (SSE): opened with a short-lived ticket, not a staff session.
 v1.use('/inbox-stream', inboxRoutes.stream);
 // The analytics live view's SSE stream — opened with a ticket, like the inbox stream.
@@ -261,6 +286,8 @@ v1.use('/webhooks/carriers', carrierWebhookRoutes);
 // Payment gateway callbacks — public; the token names the account, the HMAC
 // proves the sender.
 v1.use('/webhooks/payments', paymentWebhookRoutes);
+// Email and SMS delivery status — public; Brevo's secret token / Twilio's signature prove the sender (DELIVERY_STATUS_ENABLED).
+v1.use('/webhooks', require('./modules/notifications/deliveryStatus/webhookRoutes').router);
 v1.use('/admin', adminRoutes);
 // Payment methods and transfer proofs (billing/paymentAdminRoutes).
 v1.use('/admin', paymentAdminRoutes);
@@ -287,6 +314,22 @@ v1.use('/store/:workspaceId/forms', contactRoutes.store);
 v1.use('/store/:workspaceId/downloads', digitalRoutes.store);
 v1.use('/store/:workspaceId/shoppable-images', shoppableImageRoutes.store);
 v1.use('/store/:workspaceId/learn', courseRoutes.portal);
+v1.use('/store/:workspaceId/size-chart', require('./modules/sizeCharts').store);
+v1.use('/store/:workspaceId/products/:productId/questions', require('./modules/productQuestions').store);
+v1.use('/store/:workspaceId/stock-alerts', require('./modules/stockAlerts').store);
+v1.use('/store/:workspaceId/redirects', require('./modules/urlRedirects').store);
+v1.use('/store/:workspaceId/specs', require('./modules/productSpecs').store);
+v1.use('/store/:workspaceId/gift-cards', require('./modules/giftCards').store);
+v1.use('/store/:workspaceId/blog', require('./modules/blog').store);
+v1.use('/store/:workspaceId/account/wishlist', require('./modules/shopperAccounts/wishlist').store);
+v1.use('/store/:workspaceId/account/store-credit', require('./modules/storeCredit').account);
+v1.use('/store/:workspaceId/account/vip', require('./modules/vipTiers').account);
+v1.use('/store/:workspaceId/account/loyalty', require('./modules/loyalty').account);
+v1.use('/store/:workspaceId/account/referral', require('./modules/customerReferrals').account);
+v1.use('/store/:workspaceId/account', require('./modules/shopperAccounts').store);
+v1.use('/store/:workspaceId/loyalty', require('./modules/loyalty').store);
+v1.use('/store/:workspaceId/referrals', require('./modules/customerReferrals').store);
+v1.use('/store/:workspaceId/returns', require('./modules/returns/shopperReturns').store);
 v1.use('/store/:workspaceId', storefrontRoutes);
 v1.use('/store/:workspaceId/cart', cartRoutes);
 

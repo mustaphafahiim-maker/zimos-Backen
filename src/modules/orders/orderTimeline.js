@@ -12,8 +12,11 @@ const statusHistory = require('./orderStatusHistory');
  * GET /orders/:id/timeline — everything that happened to one order, in one
  * list, newest first (SPEC §4.4 card 11): its moves between stages, what
  * staff did to it and its shipments (the audit log), the notes written on
- * it, the automation messages sent for it, the webhooks delivered for it and
- * what the courier reported for its shipments (shipment_events).
+ * it, the automation messages sent for it, the webhooks delivered for it,
+ * what the courier reported for its shipments (shipment_events) and, with
+ * STORE_FEATURES order_messages, the messages the customer was sent about it —
+ * order emails and SMS (notification_logs.order_id, migration 665) and WhatsApp
+ * messages from the store's number (whatsapp_messages.order_id).
  *
  * Read-only and assembled per request from the tables that already record
  * these things; nothing is copied into a timeline table.
@@ -60,7 +63,8 @@ async function timeline(workspaceId, orderId) {
   const shipments = await db.Shipment.findAll({ where: { workspaceId, orderId }, attributes: ['id'] });
   const shipmentIds = shipments.map((s) => s.id);
 
-  const [history, audits, notes, runs, deliveries, courier] = await Promise.all([
+  const withMessages = require('../../core/middleware/storeFeatures').storeFeatureOn('order_messages');
+  const [history, audits, notes, runs, deliveries, courier, sentLogs, whatsapps] = await Promise.all([
     statusHistory.listForOrder(workspaceId, orderId),
     db.sequelize.query(
       `SELECT a.id, a.action, a.entity_type, a.actor_user_id, a.before_state, a.after_state, a.metadata, a.created_at,
@@ -92,6 +96,25 @@ async function timeline(workspaceId, orderId) {
       { replacements: { workspaceId, needle: `%${orderId}%` }, type: QueryTypes.SELECT }
     ),
     require('../shipping/shipmentEvents').listForOrder(workspaceId, orderId),
+    withMessages
+      ? db.NotificationLog.findAll({
+          where: { workspaceId, orderId },
+          attributes: ['id', 'channel', 'template', 'subject', 'status', 'error', 'deliveryStatus', 'statusAt', 'statusReason', 'createdAt'],
+          order: [['createdAt', 'DESC']],
+          limit: 100,
+        })
+      : [],
+    withMessages
+      ? db.sequelize.query(
+          `SELECT m.id, m.type, m.body, m.template_name, m.status, m.error, m.sent_by_bot, m.created_at, u.full_name AS actor_name
+             FROM whatsapp_messages m
+             LEFT JOIN users u ON u.id = m.sent_by_user_id
+            WHERE m.workspace_id = :workspaceId AND m.order_id = :orderId AND m.direction = 'out'
+            ORDER BY m.created_at DESC
+            LIMIT 100`,
+          { replacements: { workspaceId, orderId }, type: QueryTypes.SELECT }
+        )
+      : [],
   ]);
 
   const events = [];
@@ -161,6 +184,44 @@ async function timeline(workspaceId, orderId) {
       at: c.occurredAt,
       actor: { type: 'carrier', name: null },
       data: { carrierCode: c.carrierCode, status: c.status, carrierStatusCode: c.carrierStatusCode, description: c.description, shipmentId: c.shipmentId },
+    });
+  }
+
+  // Messages to the customer: what went out, on which channel, and whether the provider took it.
+  for (const m of sentLogs) {
+    events.push({
+      id: `message:${m.id}`,
+      type: 'message',
+      at: m.createdAt,
+      actor: { type: 'system', name: null },
+      data: { channel: m.channel, template: m.template, subject: m.subject, status: m.status, error: m.error, deliveryStatus: m.deliveryStatus || null, statusAt: m.statusAt || null, statusReason: m.statusReason || null },
+    });
+    // What the provider reported later, at its own time: "email bounced", "SMS not delivered" (deliveryStatus/).
+    if (['bounced', 'complained', 'undelivered'].includes(m.deliveryStatus) && m.statusAt) {
+      events.push({
+        id: `message_status:${m.id}`,
+        type: 'message_status',
+        at: m.statusAt,
+        actor: { type: 'system', name: null },
+        data: { channel: m.channel, status: m.deliveryStatus, reason: m.statusReason || null, subject: m.subject, messageId: m.id },
+      });
+    }
+  }
+  for (const w of whatsapps) {
+    events.push({
+      id: `whatsapp:${w.id}`,
+      type: 'message',
+      at: w.created_at,
+      actor: w.actor_name ? { type: 'user', name: w.actor_name } : { type: 'system', name: null },
+      data: {
+        channel: 'whatsapp',
+        template: w.template_name || null,
+        subject: w.body ? String(w.body).slice(0, 300) : null,
+        // received / delivered / read when WhatsApp reported them.
+        status: w.status,
+        error: w.error || null,
+        bot: Boolean(w.sent_by_bot),
+      },
     });
   }
 

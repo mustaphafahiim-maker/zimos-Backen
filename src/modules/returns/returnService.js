@@ -2,10 +2,15 @@
 
 const { Op } = require('sequelize');
 const db = require('../../db/models');
-const { scoped } = require('../../core/utils/scopedRepository');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
 const inventoryService = require('../inventory/inventoryService');
+const outbox = require('../../core/outbox/outbox');
+const exchange = require('./returnExchange');
+const { storeFeatureOn } = require('../../core/middleware/storeFeatures');
+
+// The return.* domain events, for what follows a return (webhooks, automations), while a returns feature is on.
+const eventsOn = () => storeFeatureOn('shopper_returns') || storeFeatureOn('return_exchanges');
 
 // Fixed set of return reasons — the merchant picks a code, not free text.
 const REASON_CODES = [
@@ -33,7 +38,9 @@ async function orderIsDelivered(orderId, transaction) {
   return { order, delivered: everDelivered > 0 };
 }
 
-async function createReturn(workspaceId, orderId, { reasonCode, reasonDetail, items }, req) {
+async function createReturn(workspaceId, orderId, { reasonCode, reasonDetail, items, resolution: asked = 'refund' }, req) {
+  // An exchange only while exchanges are on; off, a return is a refund, as before.
+  const resolution = asked === 'exchange' && exchange.exchangesOn() ? 'exchange' : 'refund';
   return db.sequelize.transaction(async (transaction) => {
     const { order, delivered } = await orderIsDelivered(orderId, transaction);
     if (!order || order.workspaceId !== workspaceId) throw new NotFoundError('Order');
@@ -53,9 +60,13 @@ async function createReturn(workspaceId, orderId, { reasonCode, reasonDetail, it
       }
     }
 
+    // An exchange names, per line, the variant of the same product to send instead (returnExchange.js).
+    const problems = await exchange.lineProblems(workspaceId, resolution, items, byId);
+    if (problems.length) throw new ValidationError(problems);
+
     const reason = reasonDetail ? `${reasonCode}: ${reasonDetail}`.slice(0, 300) : reasonCode;
     const ret = await db.ReturnRequest.create(
-      { workspaceId, orderId: order.id, reason, status: 'requested', items },
+      { workspaceId, orderId: order.id, reason, status: 'requested', items, resolution },
       { transaction }
     );
 
@@ -69,6 +80,8 @@ async function createReturn(workspaceId, orderId, { reasonCode, reasonDetail, it
       req,
       transaction,
     });
+    // Webhooks and automations follow it, as for a shopper's request.
+    if (eventsOn()) await outbox.record(transaction, 'return.requested', { workspaceId, returnId: ret.id, orderId: order.id, source: 'merchant', resolution });
 
     return ret;
   });
@@ -86,26 +99,55 @@ async function listReturns(workspaceId, { status } = {}) {
   return db.ReturnRequest.findAll({ where, order: [['createdAt', 'DESC']] });
 }
 
-async function moderateReturn(workspaceId, returnId, { action }, req) {
-  const ret = await scoped(db.ReturnRequest, workspaceId, 'ReturnRequest').findByPkOrThrow(returnId);
-  if (ret.status !== 'requested') {
-    throw new AppError('RETURN_NOT_PENDING', `This return is already ${ret.status}`, 409);
-  }
-  const before = { status: ret.status };
-  const status = action === 'approve' ? 'approved' : 'rejected';
-  await ret.update({ status });
+/**
+ * Approves or rejects a requested return: the decision, the merchant's note
+ * to the shopper and when it was made are kept on the return, an approved
+ * exchange gets its replacement order (returnExchange.js), and
+ * return.approved / return.rejected go to the outbox while a returns feature
+ * is on.
+ */
+async function moderateReturn(workspaceId, returnId, { action, note = null, notifyCustomer, exchangeShippingAmount = 0 }, req) {
+  return db.sequelize.transaction(async (transaction) => {
+    const ret = await db.ReturnRequest.findOne({ where: { id: returnId, workspaceId }, transaction, lock: transaction.LOCK.UPDATE });
+    if (!ret) throw new NotFoundError('ReturnRequest');
+    if (ret.status !== 'requested') {
+      throw new AppError('RETURN_NOT_PENDING', `This return is already ${ret.status}`, 409);
+    }
+    const before = { status: ret.status };
+    const status = action === 'approve' ? 'approved' : 'rejected';
+    let replacement = null;
+    if (status === 'approved' && ret.resolution === 'exchange') {
+      replacement = await exchange.createReplacementOrder(workspaceId, ret, { shippingAmount: exchangeShippingAmount }, req, transaction);
+    }
+    await ret.update(
+      { status, decisionNote: note ? String(note).trim().slice(0, 500) || null : null, decidedAt: new Date(), ...(replacement ? { exchangeOrderId: replacement.id } : {}) },
+      { transaction }
+    );
 
-  await recordAudit({
-    workspaceId,
-    actorUserId: req.user.id,
-    action: `return.${action}`,
-    entityType: 'ReturnRequest',
-    entityId: ret.id,
-    before,
-    after: { status },
-    req,
+    await recordAudit({
+      workspaceId,
+      actorUserId: req.user.id,
+      action: `return.${action}`,
+      entityType: 'ReturnRequest',
+      entityId: ret.id,
+      before,
+      after: { status, resolution: ret.resolution, exchangeOrderId: ret.exchangeOrderId, note: ret.decisionNote },
+      metadata: typeof notifyCustomer === 'boolean' ? { notifyCustomer } : null,
+      req,
+      transaction,
+    });
+    if (eventsOn()) {
+      await outbox.record(transaction, `return.${status}`, {
+        workspaceId,
+        returnId: ret.id,
+        orderId: ret.orderId,
+        resolution: ret.resolution,
+        exchangeOrderId: ret.exchangeOrderId || null,
+        ...(typeof notifyCustomer === 'boolean' ? { notifyCustomer } : {}),
+      });
+    }
+    return ret;
   });
-  return ret;
 }
 
 // Separate restock step — approving a return never moves stock. Adds the
@@ -155,6 +197,7 @@ async function restockReturn(workspaceId, returnId, req) {
       req,
       transaction,
     });
+    if (eventsOn()) await outbox.record(transaction, 'return.received', { workspaceId, returnId: ret.id, orderId: ret.orderId, resolution: ret.resolution });
 
     return ret;
   });

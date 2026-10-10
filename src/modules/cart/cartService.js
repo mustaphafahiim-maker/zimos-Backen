@@ -141,6 +141,8 @@ async function addItem(workspaceId, cartId, { variantId, offerId, quantity, cust
   const existing = candidates.find(
     (line) => sameCustomizations(line.customizations, snapshot) && menuOptions.sameSelection(line.selectedOptions, picked.input)
   );
+  // The product's maximum per order (catalog/purchaseLimits.js).
+  await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, variantId, (existing ? existing.quantity : 0) + quantity, existing ? existing.id : null, offerId || null);
   if (existing) {
     await existing.update({ quantity: existing.quantity + quantity, unitPriceSnapshot: unitPrice });
   } else {
@@ -165,6 +167,7 @@ async function updateItemQuantity(workspaceId, cartId, itemId, quantity) {
   if (quantity <= 0) {
     await item.destroy();
   } else {
+    await require('../catalog/purchaseLimits').assertCartMax(workspaceId, cartId, item.variantId, quantity, item.id, item.offerId || null);
     await item.update({ quantity });
   }
   return getCart(workspaceId, cartId);

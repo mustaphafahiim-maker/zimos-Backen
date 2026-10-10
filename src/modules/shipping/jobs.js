@@ -39,5 +39,13 @@ module.exports = {
       // eslint-disable-next-line global-require
       handle: () => require('./carrierSyncService').syncDue(),
     },
+    {
+      // Manual and imported waybills followed through the store's tracking
+      // provider (trackingProviders/manualTracking.js); nothing while off.
+      name: 'shipments.track_manual',
+      everyMs: 30 * MINUTE,
+      // eslint-disable-next-line global-require
+      handle: () => require('./trackingProviders/manualTracking').pollDue(),
+    },
   ],
 };

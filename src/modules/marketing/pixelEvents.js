@@ -96,6 +96,8 @@ async function run(workspaceId, trigger, orderId) {
   // platforms' browser ids, hashed name / city / country, the lines.
   const matching = pixelMatching.matchingFor(order);
   const seen = { clientIp: matching.clientIp, userAgent: matching.userAgent, matching };
+  const touches = order.attribution || {};
+  const clickOf = (key) => (touches.last && touches.last[key]) || (touches.first && touches.first[key]) || undefined;
 
   // The providers keep their original signature (a `secrets` blob with one
   // named key per platform); each pixel's own token is handed to them in that
@@ -107,6 +109,15 @@ async function run(workspaceId, trigger, orderId) {
     snapchat: ({ pixel, token }) => snapchatCapi.sendPurchase({ pixelId: pixel.pixelId, secrets: { snapchatAccessToken: token }, order, eventId, eventSourceUrl, ...seen }),
     google: ({ pixel, token }) =>
       isGa4MeasurementId(pixel.pixelId) ? googleMp.sendPurchase({ measurementId: pixel.pixelId, secrets: { googleApiSecret: token }, order, eventId, matching }) : null,
+    // STORE_FEATURES extra_pixels; sandbox until their *_CAPI_MODE=live. Click ids come from the order's touch when it has them.
+    pinterest: ({ pixel, token }) =>
+      require('./pixelProviders/pinterestCapi').sendPurchase({ adAccountId: (pixel.config || {}).adAccountId, secrets: { pinterestAccessToken: token }, order, eventId, eventSourceUrl, ...seen, eventName: 'purchase', test: Boolean(pixel.testEventCode) }),
+    reddit: ({ pixel, token }) =>
+      require('./pixelProviders/redditCapi').sendPurchase({ accountId: pixel.pixelId, token, order, eventId, ...seen, clickId: clickOf('rdt_cid'), eventName: 'purchase', test: Boolean(pixel.testEventCode) }),
+    microsoft: ({ pixel, token }) =>
+      require('./pixelProviders/microsoftCapi').sendPurchase({ tagId: pixel.pixelId, token, order, eventId, eventSourceUrl, ...seen, msclkid: clickOf('msclkid'), eventName: 'purchase' }),
+    x: ({ pixel, token }) =>
+      require('./pixelProviders/xCapi').sendPurchase({ pixelId: pixel.pixelId, token, xEventId: ((pixel.config || {}).eventIds || {}).purchase || null, order, eventId, matching, twclid: clickOf('twclid') }),
   };
 
   const results = [];

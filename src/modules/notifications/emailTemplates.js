@@ -264,10 +264,13 @@ ${codeHtml}
     const store = escapeHtml(data.storeName || '');
     // Plain text in, safe HTML out: escaped, links made clickable, blank lines as paragraphs.
     const linkify = (text) => text.replace(/(https?:\/\/[^\s<]+)/g, (url) => `<a href="${url}" style="color:${color}">${url}</a>`);
-    const paragraphs = String(data.body || '')
-      .split(/\n{2,}/)
-      .map((p) => `<p style="margin:0 0 14px">${linkify(escapeHtml(p)).replace(/\n/g, '<br />')}</p>`)
-      .join('\n');
+    // A block-designed email arrives already rendered and escaped (emailBlocks.js renderBlocks).
+    const paragraphs = data.bodyHtml
+      ? String(data.bodyHtml)
+      : String(data.body || '')
+          .split(/\n{2,}/)
+          .map((p) => `<p style="margin:0 0 14px">${linkify(escapeHtml(p)).replace(/\n/g, '<br />')}</p>`)
+          .join('\n');
     const logo = data.logoUrl && /^https?:\/\//.test(data.logoUrl) ? `<img src="${escapeHtml(data.logoUrl)}" alt="${store}" style="max-height:48px;max-width:180px" />` : `<strong style="font-size:18px">${store}</strong>`;
     // A marketing email (the abandoned cart) ends with its unsubscribe link (marketingUnsubscribe.js).
     const unsubscribe = data.unsubscribeUrl && /^https?:\/\//.test(data.unsubscribeUrl) ? String(data.unsubscribeUrl) : null;
@@ -280,7 +283,7 @@ ${codeHtml}
         `<div style="border-top:4px solid ${color};padding-top:18px;margin-bottom:18px">${logo}</div>
 ${paragraphs}
 <p style="color:#6b7280;margin:18px 0 0">${store}</p>${unsubscribeHtml}`,
-        [data.body, data.storeName, unsubscribe && `إلغاء الاشتراك من الرسائل التسويقية: ${unsubscribe}`].filter(Boolean).join('\n\n'),
+        [data.bodyText || data.body, data.storeName, unsubscribe && `إلغاء الاشتراك من الرسائل التسويقية: ${unsubscribe}`].filter(Boolean).join('\n\n'),
         { dir: 'rtl', arabicFooter: true }
       ),
     };
@@ -343,6 +346,94 @@ ${paragraphs}
 <p dir="ltr">Your Zimos sign-in email is now <strong>${to}</strong>. If you didn't do this, contact support right away.</p>`,
         `أصبح بريد الدخول لحسابك في Zimos ${data.newEmail}.\n\nYour Zimos sign-in email is now ${data.newEmail}. If you didn't do this, contact support right away.`,
         { dir: 'rtl', arabicFooter: true }
+      ),
+    };
+  },
+
+  // A sold-out product is back (modules/stockAlerts): its name and a link, the store's name.
+  back_in_stock(data = {}) {
+    const name = escapeHtml(String(data.productName || '').slice(0, 300));
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const url = /^https?:\/\//.test(String(data.url || '')) ? String(data.url) : '';
+    const button = url ? `<p><a href="${escapeHtml(url)}" style="display:inline-block;padding:10px 18px;background:#111;color:#fff;border-radius:6px;text-decoration:none">${data.locale === 'en' ? 'Order now' : 'اطلبه دلوقتي'}</a></p>` : '';
+    if (data.locale === 'en') return { subject: `${data.productName} is back in stock`, ...wrap(`<p><b>${name}</b> is back in stock at ${store}.</p>${button}<p style="color:#6b7280">You asked to be told once; we won't write again about it.</p>`, `${data.productName} is back in stock at ${data.storeName}: ${url}`) };
+    return { subject: `${data.productName} رجع متاح`, ...wrap(`<p><b>${name}</b> رجع متاح في ${store}.</p>${button}<p style="color:#6b7280">طلبت نبلغك مرة واحدة، ومش هنبعتلك تاني عنه.</p>`, `${data.productName} رجع متاح في ${data.storeName}: ${url}`, { dir: 'rtl', arabicFooter: true }) };
+  },
+
+  // The store answered a shopper's question on a product (modules/productQuestions): once, to the asker.
+  question_answered(data = {}) {
+    const name = escapeHtml(String(data.productName || '').slice(0, 300));
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const q = escapeHtml(String(data.question || '').slice(0, 1000));
+    const a = escapeHtml(String(data.answer || '').slice(0, 3000)).replace(/\n/g, '<br />');
+    const url = /^https?:\/\//.test(String(data.url || '')) ? String(data.url) : '';
+    const link = url ? `<p><a href="${escapeHtml(url)}">${data.locale === 'en' ? 'See the product' : 'شوف المنتج'}</a></p>` : '';
+    if (data.locale === 'en') return { subject: `${data.storeName || ''} answered your question`, ...wrap(`<p>${store} answered your question about <b>${name}</b>:</p><p style="color:#6b7280">${q}</p><p>${a}</p>${link}`, `${data.question}\n\n${data.answer}\n\n${url}`) };
+    return { subject: `${data.storeName || ''} رد على سؤالك`, ...wrap(`<p>${store} رد على سؤالك عن <b>${name}</b>:</p><p style="color:#6b7280">${q}</p><p>${a}</p>${link}`, `${data.question}\n\n${data.answer}\n\n${url}`, { dir: 'rtl', arabicFooter: true }) };
+  },
+
+  // A gift card sent to its holder (modules/giftCards): the code, the value, the store's name.
+  gift_card(data = {}) {
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const code = escapeHtml(String(data.code || ''));
+    const value = `${escapeHtml(String(data.amount || ''))} ${escapeHtml(String(data.currency || ''))}`;
+    const note = data.message ? `<p style="padding:12px;background:#f6f6f6;border-radius:8px">${escapeHtml(String(data.message).slice(0, 500))}</p>` : '';
+    const codeHtml = `<p dir="ltr" style="font-size:24px;font-weight:700;letter-spacing:3px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${code}</p>`;
+    const until = data.expiresAt ? new Date(data.expiresAt).toISOString().slice(0, 10) : null;
+    if (data.locale === 'en') {
+      return { subject: `Your ${data.storeName || ''} gift card`, ...wrap(`<p>${data.recipientName ? `Hi ${escapeHtml(data.recipientName)},` : 'Hi,'}</p><p>Here is your gift card for ${store}, worth <b>${value}</b>.</p>${note}${codeHtml}<p>Type this code at checkout.${until ? ` Valid until ${until}.` : ''}</p>`, `Your gift card for ${data.storeName}: ${data.code} (${value}).${until ? ` Valid until ${until}.` : ''}`) };
+    }
+    return { subject: `كارت هدية من ${data.storeName || ''}`, ...wrap(`<p>${data.recipientName ? `أهلًا ${escapeHtml(data.recipientName)}،` : 'أهلًا،'}</p><p>ده كارت هدية من ${store} بقيمة <b>${value}</b>.</p>${note}${codeHtml}<p>اكتب الكود ده في صفحة الدفع.${until ? ` صالح لحد ${until}.` : ''}</p>`, `كارت هدية من ${data.storeName}: ${data.code} (${value}).${until ? ` صالح لحد ${until}.` : ''}`, { dir: 'rtl', arabicFooter: true }) };
+  },
+
+  // A shopper's sign-in code to a store (modules/shopperAccounts): the store's name, not Zimos.
+  shopper_login_code(data = {}) {
+    const code = String(data.code || '');
+    const minutes = Number(data.minutes) || 10;
+    const store = escapeHtml(String(data.storeName || '').slice(0, 120));
+    const codeHtml = `<p dir="ltr" style="font-size:30px;font-weight:700;letter-spacing:8px;margin:20px 0;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</p>`;
+    if (data.locale === 'en') {
+      return {
+        subject: `Your sign-in code for ${data.storeName || 'the store'}`,
+        ...wrap(`<p>Your code to sign in to ${store}:</p>\n${codeHtml}\n<p>It is valid for ${minutes} minutes and works once. If you didn't ask for it, ignore this email.</p>`, `Your code to sign in to ${data.storeName}: ${code}\n\nIt is valid for ${minutes} minutes and works once.`),
+      };
+    }
+    return {
+      subject: `رمز الدخول إلى ${data.storeName || 'المتجر'}`,
+      ...wrap(`<p>رمز الدخول إلى ${store}:</p>\n${codeHtml}\n<p>الرمز صالح لمدة ${minutes} دقائق ولمرة واحدة. إذا لم تطلبه فتجاهل هذه الرسالة.</p>`, `رمز الدخول إلى ${data.storeName}: ${code}\n\nالرمز صالح لمدة ${minutes} دقائق ولمرة واحدة.`, { dir: 'rtl', arabicFooter: true }),
+    };
+  },
+
+  // The daily / weekly summary to a team member (modules/scheduledReports), in their dashboard language.
+  summary_report(data = {}) {
+    const en = data.locale === 'en';
+    const money = (v) => (v === null || v === undefined ? '—' : `${(Number(v) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${data.currency || ''}`.trim());
+    const show = (m) => (m.value === null || m.value === undefined ? '—' : m.type === 'money' ? money(m.value) : m.type === 'rate' ? `${m.value}%` : String(m.value));
+    const delta = (m) => {
+      const n = m.type === 'rate' ? m.changePoints : m.changePercent;
+      if (n === null || n === undefined) return '';
+      const sign = n > 0 ? '+' : '';
+      return m.type === 'rate' ? `${sign}${n} ${en ? 'pts' : 'نقطة'}` : `${sign}${n}%`;
+    };
+    const day = (iso) => String(iso || '').slice(0, 10);
+    const weekly = data.kind === 'weekly';
+    const title = en ? `${weekly ? 'Weekly' : 'Daily'} summary — ${data.storeName || ''}` : `ملخص ${weekly ? 'الأسبوع' : 'اليوم'} — ${data.storeName || ''}`;
+    const range = weekly ? `${data.fromDay || day(data.from)} → ${data.lastDay || day(data.to)}` : data.fromDay || day(data.from);
+    const vs = en ? (weekly ? 'vs. the week before' : 'vs. the day before') : weekly ? 'مقارنة بالأسبوع اللي قبله' : 'مقارنة باليوم اللي قبله';
+    const rows = (data.metrics || [])
+      .map((m) => `<tr><td style="padding:8px;border-bottom:1px solid #e5e7eb">${escapeHtml(m.label[en ? 'en' : 'ar'])}</td><td style="padding:8px;border-bottom:1px solid #e5e7eb;font-weight:bold">${escapeHtml(show(m))}</td><td style="padding:8px;border-bottom:1px solid #e5e7eb;color:#6b7280">${escapeHtml(delta(m))}</td></tr>`)
+      .join('');
+    const top = (data.topProducts || []).length
+      ? `<h3 style="font-size:16px;margin:20px 0 8px">${en ? 'Top products' : 'أكتر المنتجات مبيعًا'}</h3><ol style="margin:0;padding-inline-start:20px">${data.topProducts.map((p) => `<li>${escapeHtml(p.name)} — ${escapeHtml(String(p.quantity))} × · ${escapeHtml(money(p.sales))}</li>`).join('')}</ol>`
+      : '';
+    const link = data.url ? `<p style="margin:20px 0 0"><a href="${escapeHtml(data.url)}">${en ? 'Open the dashboard' : 'افتح لوحة التحكم'}</a></p>` : '';
+    const text = [title, range, '', ...(data.metrics || []).map((m) => `${m.label[en ? 'en' : 'ar']}: ${show(m)} ${delta(m)}`.trim()), ...(data.topProducts || []).map((p, i) => `${i + 1}. ${p.name} — ${p.quantity} × · ${money(p.sales)}`), data.url || ''].join('\n');
+    return {
+      subject: title,
+      ...wrap(
+        `<h2 style="font-size:20px;margin:0 0 4px">${escapeHtml(title)}</h2><p style="color:#6b7280;margin:0 0 16px">${escapeHtml(range)} · ${escapeHtml(vs)}</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:14px">${rows}</table>${top}${link}`,
+        text,
+        { dir: en ? 'ltr' : 'rtl', arabicFooter: !en }
       ),
     };
   },

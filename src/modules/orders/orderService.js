@@ -10,6 +10,7 @@ const { DESTINATION_INDEPENDENT } = require('../shipping/shippingRules');
 const { AppError, NotFoundError, ValidationError } = require('../../core/errors/AppError');
 const { add } = require('../../core/utils/money');
 const { normalizePhone } = require('../../core/utils/phone');
+const { storeFeatureOn } = require('../../core/middleware/storeFeatures');
 const logger = require('../../core/utils/logger');
 const fraudRules = require('../fraud/fraudRules');
 const blockedEntries = require('../fraud/blockedEntries');
@@ -302,6 +303,15 @@ async function createOrder(
     // Chosen now so the reservations below can name the order they hold stock
     // for (inventory/orderStock.js releases exactly what they reserved).
     const orderId = crypto.randomUUID();
+    // Each product's purchase limits for every shopper order — the store, funnels — counted again here
+    // under a lock on the phone, so two orders at once can't both pass the per-customer limit. Staff
+    // orders are not limited (catalog/purchaseLimits.js).
+    if (!req.user && storeFeatureOn('purchase_limits')) {
+      const limitPhone = normalizePhone(contact && contact.phone);
+      if (limitPhone) await db.sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:key))', { replacements: { key: `purchase-limits:${workspaceId}:${limitPhone}` }, transaction });
+      // A follow-on add-on order (an upsell placed as its own order) counts toward the per-customer limit only.
+      await require('../catalog/purchaseLimits').assertWithin(workspaceId, items, contact, transaction, { perOrder: orderSource !== 'upsell' });
+    }
     const customer = await customerService.findOrCreateByPhone(workspaceId, contact, transaction);
 
     // An active platform blocklist entry refuses the order outright, in every
@@ -484,7 +494,8 @@ async function createOrder(
     }
     // A free-shipping code: every line ships free, and the order keeps it when a
     // line joins later or its items are edited (freeShippingGranted below).
-    const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping');
+    // A VIP tier with free shipping (modules/vipTiers) sets this on the checkout's payload: the same as such a code.
+    const couponFreeShipping = Boolean(discountRecord && discountRecord.type === 'free_shipping') || payload[Symbol.for('zimos.freeShipping')] === true;
     if (couponFreeShipping) {
       for (const line of pricedLines) if (line.shippingRule) line.shippingRule = { ...line.shippingRule, mode: 'free', extraAmount: null };
     }
@@ -740,6 +751,14 @@ async function addLineToOpenOrder(workspaceId, order, lineInput, { isUpsell = fa
   };
 
   const existing = await db.OrderItem.findAll({ where: { orderId: order.id }, order: [['createdAt', 'ASC'], ['id', 'ASC']], transaction });
+  // An upsell the shopper takes counts toward the product's purchase limits with the order's own lines.
+  if (isUpsell && storeFeatureOn('purchase_limits')) {
+    const limits = require('../catalog/purchaseLimits');
+    const lines = [...existing.map((i) => ({ variantId: i.variantId, offerId: i.offerId, quantity: i.quantity })), lineInput];
+    // Only the products the upsell adds, with the order's own lines of those products.
+    const added = [...(await limits.unitsByProduct(workspaceId, [lineInput], transaction)).keys()];
+    if (added.length) await limits.assertWithin(workspaceId, lines, order.contactSnapshot || {}, transaction, { excludeOrderId: order.id, onlyProductIds: added });
+  }
   const newLine = await priceLine(workspaceId, lineInput, transaction);
   for (const consumed of newLine.consumedInventory) {
     await inventoryService.reserve(

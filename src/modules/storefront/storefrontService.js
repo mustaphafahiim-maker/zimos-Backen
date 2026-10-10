@@ -83,6 +83,10 @@ async function getProductBySlugOrId(workspaceId, idOrSlug) {
     optionGroups: await require('../catalog/menuOptions').publicGroups(workspaceId, product.id),
     // A running A/B test: the page asks for this visitor's prices and pictures (catalog/productTests.js).
     abTest: await require('../catalog/productTests').hasRunningTest(workspaceId, product.id),
+    // Sold beyond stock as a pre-order: { shipsAt, message, limited } or null (modules/preorders).
+    preorder: require('../preorders').publicView(product),
+    // { min, max, maxPerCustomer } or null (catalog/purchaseLimits.js).
+    purchaseLimits: require('../catalog/purchaseLimits').limitsOf(product),
     rating,
     reviews,
   };
@@ -350,4 +354,7 @@ module.exports = {
   trackOrder,
   trackOrderByToken,
   toPublicVariant,
+  // Shopper accounts show their orders the same way (shopperAccounts/).
+  trackingStage,
+  presentTrackedOrder,
 };

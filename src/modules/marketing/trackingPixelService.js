@@ -4,6 +4,8 @@ const db = require('../../db/models');
 const secretBox = require('../../core/utils/secretBox');
 const { NotFoundError, ConflictError, ValidationError } = require('../../core/errors/AppError');
 const { recordAudit } = require('../audit/auditService');
+const { eventsFor } = require('./browserPixelEvents');
+const { storeFeatureOn } = require('../../core/middleware/storeFeatures');
 
 /**
  * Tracking pixels (SPEC §13.1, §13.5): the store's ad and analytics tags.
@@ -19,6 +21,15 @@ const { recordAudit } = require('../audit/auditService');
  *   google     gtag (GA4 "G-", Ads "AW-") GA4 Measurement Protocol (G- only)
  *   gtm        Tag Manager container      —
  *   clarity    Microsoft Clarity project  —
+ * With STORE_FEATURES extra_pixels:
+ *   pinterest  Pinterest Tag              Conversions API (per ad account: config.adAccountId)
+ *   x          X pixel                    Conversions API (OAuth 1.0a: the token is
+ *                                        "consumerKey:consumerSecret:accessToken:accessTokenSecret";
+ *                                        a conversion per X event id in config.eventIds)
+ *   reddit     Reddit Pixel               Conversions API
+ *   microsoft  UET tag                    UET Conversions API
+ *   taboola, outbrain, kwai   browser tag only (event names in browserPixelEvents.js)
+ * Their server APIs stay in sandbox (built and logged only) until *_CAPI_MODE=live.
  *
  * The public half (platform, pixelId, scope) is served to the storefront by
  * publicPixels(); the token never leaves the server.
@@ -31,8 +42,29 @@ const PLATFORMS = Object.freeze({
   google: { idPattern: /^(G|AW|GT)-[A-Z0-9]{4,20}$/, capi: true, testEventCode: false },
   gtm: { idPattern: /^GTM-[A-Z0-9]{4,12}$/, capi: false, testEventCode: false },
   clarity: { idPattern: /^[a-z0-9]{6,20}$/, capi: false, testEventCode: false },
+  // STORE_FEATURES extra_pixels. The Pinterest Tag id: digits, about 13 of them; its Conversions API
+  // is per ad account (config.adAccountId; pixelProviders/pinterestCapi.js).
+  pinterest: { idPattern: /^\d{10,16}$/, capi: true, testEventCode: true },
+  // X pixel id, Taboola account id, Outbrain marketer id, Kwai pixel id, Reddit pixel (t2_/a2_), Microsoft Ads UET tag id.
+  x: { idPattern: /^[a-z0-9]{4,12}$/i, capi: true, testEventCode: false },
+  taboola: { idPattern: /^\d{4,10}$/, capi: false, testEventCode: false },
+  outbrain: { idPattern: /^[a-f0-9]{20,40}$/i, capi: false, testEventCode: false },
+  kwai: { idPattern: /^\d{10,25}$/, capi: false, testEventCode: false },
+  // Reddit's test switch is the pixel's test event code being set (sent as test_mode).
+  reddit: { idPattern: /^(t2|a2)_[a-z0-9]{4,20}$/i, capi: true, testEventCode: true },
+  microsoft: { idPattern: /^\d{5,12}$/, capi: true, testEventCode: false },
 });
 const PLATFORM_NAMES = Object.keys(PLATFORMS);
+// The platforms behind STORE_FEATURES extra_pixels: off, they are not offered, loaded or sent to.
+const EXTRA_PLATFORMS = ['pinterest', 'x', 'taboola', 'outbrain', 'kwai', 'reddit', 'microsoft'];
+const platformOn = (platform) => !EXTRA_PLATFORMS.includes(platform) || storeFeatureOn('extra_pixels');
+
+/** Whether a platform's server events leave the server: 'live', 'sandbox' (built and logged only) or null (no server API). */
+const SANDBOXED = { pinterest: 'pinterestCapi', reddit: 'redditCapi', microsoft: 'microsoftCapi', x: 'xCapi' };
+function serverModeOf(platform) {
+  if (!PLATFORMS[platform] || !PLATFORMS[platform].capi) return null;
+  return SANDBOXED[platform] ? require(`./pixelProviders/${SANDBOXED[platform]}`).mode() : 'live';
+}
 const SCOPE_TYPES = ['all', 'funnels', 'products'];
 const MAX_PIXELS = 30;
 
@@ -49,6 +81,7 @@ function serialize(pixel) {
     label: pixel.label,
     capiEnabled: pixel.capiEnabled,
     capiSupported: supportsCapi(pixel.platform, pixel.pixelId),
+    ...(EXTRA_PLATFORMS.includes(pixel.platform) ? { serverMode: supportsCapi(pixel.platform, pixel.pixelId) ? serverModeOf(pixel.platform) : null } : {}),
     capiTokenSet: Boolean(token),
     capiTokenMask: secretBox.mask(token),
     testEventCode: pixel.testEventCode,
@@ -85,12 +118,27 @@ async function list(workspaceId) {
   const pixels = await db.TrackingPixel.findAll({ where: { workspaceId }, order: [['createdAt', 'ASC']] });
   return {
     pixels: pixels.map(serialize),
-    platforms: PLATFORM_NAMES.map((name) => ({ name, capi: PLATFORMS[name].capi, testEventCode: PLATFORMS[name].testEventCode })),
+    platforms: PLATFORM_NAMES.filter(platformOn).map((name) => ({ name, capi: PLATFORMS[name].capi, testEventCode: PLATFORMS[name].testEventCode, ...(EXTRA_PLATFORMS.includes(name) ? { serverMode: serverModeOf(name) } : {}) })),
     limit: MAX_PIXELS,
   };
 }
 
+/** Pinterest's Conversions API is per ad account: its id is needed to turn it on. */
+function assertAdAccount(platform, capiEnabled, config) {
+  if (platform === 'pinterest' && capiEnabled && !(config && config.adAccountId)) {
+    throw fieldError('config.adAccountId', 'The Pinterest ad account id is needed to turn the Conversions API on');
+  }
+}
+
+/** X signs with OAuth 1.0a: its token is the four keys (pixelProviders/xCapi.js). */
+function assertTokenShape(platform, token) {
+  if (platform === 'x' && token && !require('./pixelProviders/xCapi').parseToken(token)) {
+    throw fieldError('capiToken', 'For X, paste the four keys as consumerKey:consumerSecret:accessToken:accessTokenSecret');
+  }
+}
+
 async function create(workspaceId, body, req) {
+  if (!platformOn(body.platform)) throw fieldError('platform', `"${body.platform}" is not available`);
   assertPixelId(body.platform, body.pixelId);
   return db.sequelize.transaction(async (transaction) => {
     if ((await db.TrackingPixel.count({ where: { workspaceId }, transaction })) >= MAX_PIXELS) {
@@ -102,6 +150,8 @@ async function create(workspaceId, body, req) {
     const capable = supportsCapi(body.platform, body.pixelId);
     const scope = await cleanScope(workspaceId, body.scope, transaction);
     if (body.capiEnabled && capable && !body.capiToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
+    assertTokenShape(body.platform, body.capiToken);
+    assertAdAccount(body.platform, body.capiEnabled, body.config);
     const pixel = await db.TrackingPixel.create(
       {
         workspaceId,
@@ -150,12 +200,14 @@ async function update(workspaceId, pixelId, body, req) {
     if (body.scope !== undefined) Object.assign(patch, await cleanScope(workspaceId, body.scope, transaction));
     if (body.testEventCode !== undefined && PLATFORMS[pixel.platform].testEventCode) patch.testEventCode = body.testEventCode || null;
     // capiToken: undefined keeps the stored one, '' removes it.
+    if (body.capiToken) assertTokenShape(pixel.platform, body.capiToken);
     if (body.capiToken !== undefined) patch.capiTokenSealed = body.capiToken ? secretBox.seal(body.capiToken) : null;
 
     const capable = supportsCapi(pixel.platform, patch.pixelId || pixel.pixelId);
     const hasToken = patch.capiTokenSealed !== undefined ? Boolean(patch.capiTokenSealed) : Boolean(pixel.capiTokenSealed);
     const wantsCapi = body.capiEnabled !== undefined ? body.capiEnabled : pixel.capiEnabled;
     if (body.capiEnabled && capable && !hasToken) throw fieldError('capiToken', 'A token is needed to turn the Conversions API on');
+    assertAdAccount(pixel.platform, wantsCapi, patch.config !== undefined ? patch.config : pixel.config);
     patch.capiEnabled = Boolean(wantsCapi && capable && hasToken);
 
     await pixel.update(patch, { transaction });
@@ -200,11 +252,13 @@ async function publicPixels(workspaceId) {
     attributes: ['id', 'platform', 'pixelId', 'scopeType', 'scopeIds', 'config'],
     order: [['createdAt', 'ASC']],
   });
-  return pixels.map((p) => ({
+  return pixels.filter((p) => platformOn(p.platform)).map((p) => ({
     platform: p.platform,
     pixelId: p.pixelId,
     scope: { type: p.scopeType, ids: p.scopeIds || [] },
     ...(p.platform === 'google' && p.config && p.config.adsConversionLabel ? { adsConversionLabel: p.config.adsConversionLabel } : {}),
+    // The browser-only platforms' event names (browserPixelEvents.js).
+    ...(eventsFor(p.platform, p.config) ? { events: eventsFor(p.platform, p.config) } : {}),
   }));
 }
 
@@ -221,13 +275,13 @@ function scopeCovers(pixel, { funnelId = null, productIds = [] }) {
 async function serverPixelsFor(workspaceId, context) {
   const pixels = await db.TrackingPixel.findAll({ where: { workspaceId, isActive: true, capiEnabled: true }, order: [['createdAt', 'ASC']] });
   return pixels
-    .filter((p) => p.capiTokenSealed && supportsCapi(p.platform, p.pixelId) && scopeCovers(p, context))
+    .filter((p) => platformOn(p.platform) && p.capiTokenSealed && supportsCapi(p.platform, p.pixelId) && scopeCovers(p, context))
     .map((p) => ({ pixel: p, token: secretBox.open(p.capiTokenSealed) }));
 }
 
 /** One pixel as a send target ({ pixel, token }), or null when it has no usable server API. */
 function serverTargetOf(pixel) {
-  if (!pixel.capiEnabled || !pixel.capiTokenSealed || !supportsCapi(pixel.platform, pixel.pixelId)) return null;
+  if (!platformOn(pixel.platform) || !pixel.capiEnabled || !pixel.capiTokenSealed || !supportsCapi(pixel.platform, pixel.pixelId)) return null;
   return { pixel, token: secretBox.open(pixel.capiTokenSealed) };
 }
 

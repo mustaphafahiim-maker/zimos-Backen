@@ -69,18 +69,45 @@ describe('pending certificates', () => {
     expect(await pending.reload()).toMatchObject({ sslStatus: 'issued', status: 'active' });
   });
 
-  it('fails a certificate still not issued 72 hours after verification, with a reason', async () => {
+  it('fails a certificate still not issued 72 hours after it was requested, with a reason', async () => {
     const s = await store();
     const old = await domain(s, 'www.slow.com', {
       sslStatus: 'pending',
       sslProviderRef: REF,
       verifiedAt: new Date(Date.now() - 73 * HOUR),
+      sslRequestedAt: new Date(Date.now() - 73 * HOUR),
     });
     await jobs.pollPendingCertificates();
     expect(fetchMock).not.toHaveBeenCalled();
     await old.reload();
     expect(old.sslStatus).toBe('failed');
     expect(old.sslDetail).toMatch(/72 hours/);
+  });
+
+  it('a domain verified long before a provider was set up gets its full 72 hours from the first request', async () => {
+    const s = await store();
+    const early = await domain(s, 'www.early.com', { verifiedAt: new Date(Date.now() - 30 * 24 * HOUR) });
+    fetchMock.mockImplementation(async () => reply(201, { success: true, result: { id: 'bbbbbbbbccccddddeeeeffffffffffff', status: 'pending', ssl: { status: 'pending_validation' } } }));
+    await jobs.pollPendingCertificates();
+    await early.reload();
+    expect(early.sslStatus).toBe('pending');
+    expect(Date.now() - new Date(early.sslRequestedAt).getTime()).toBeLessThan(60 * 1000);
+  });
+
+  it('a first request the provider keeps refusing is recorded, and runs out after 72 hours with its reason', async () => {
+    const s = await store();
+    const refused = await domain(s, 'www.refused.com');
+    fetchMock.mockImplementation(async () => reply(400, { success: false, errors: [{ code: 1406, message: 'Hostname is not allowed' }] }));
+    await jobs.pollPendingCertificates();
+    await refused.reload();
+    expect(refused.sslStatus).toBe('none');
+    expect(refused.sslRequestedAt).not.toBeNull();
+    expect(refused.sslDetail).toBeTruthy();
+    await refused.update({ sslRequestedAt: new Date(Date.now() - 73 * HOUR) });
+    await jobs.pollPendingCertificates();
+    await refused.reload();
+    expect(refused.sslStatus).toBe('failed');
+    expect(refused.sslDetail).toMatch(/could not be requested within 72 hours/);
   });
 
   it('does nothing while CUSTOM_DOMAINS_ENABLED is off or no provider is set', async () => {

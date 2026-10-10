@@ -96,7 +96,15 @@ const googleCallback = asyncHandler(async (req, res) => {
   if (!stateOk) return back({ error: 'GOOGLE_STATE_MISMATCH' });
 
   try {
-    const { accessToken, refreshToken } = await authService.loginWithGoogle(req.query.code, req);
+    const result = await authService.loginWithGoogle(req.query.code, req);
+    // Two-step sign-in on: the dashboard asks for the code and finishes with
+    // POST /auth/two-factor/verify, as after a password sign-in.
+    if (result.twoFactorRequired) {
+      const params = {};
+      for (const [k, v] of Object.entries(result)) if (['string', 'boolean', 'number'].includes(typeof v)) params[k] = String(v);
+      return back(params);
+    }
+    const { accessToken, refreshToken } = result;
     return back({ accessToken, refreshToken });
   } catch (err) {
     if (err instanceof AppError) return back({ error: err.code || 'GOOGLE_LOGIN_FAILED' });

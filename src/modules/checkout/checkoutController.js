@@ -1,6 +1,7 @@
 'use strict';
 const asyncHandler = require('express-async-handler');
 const env = require('../../config/env');
+const { storeFeatureOn } = require('../../core/middleware/storeFeatures');
 const cartService = require('../cart/cartService');
 const orderService = require('../orders/orderService');
 const { afterOrderCompleted } = require('../orders/orderCompletion');
@@ -46,10 +47,12 @@ async function creditProductTests(workspaceId, orderItems, visitorId, orderId) {
  */
 const checkout = asyncHandler(async (req, res) => {
   const cartToken = req.headers['x-cart-token'];
-  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, ...orderBody } = req.body;
+  const { item, extraItems, orderBumps, checkoutSessionId, paymentProvider, returnUrl, orderBump, formFields, manualPaymentMethodId, gift, giftCardCode: cardCode, useStoreCredit, loyaltyPoints, referralCode, ...orderBody } = req.body;
   const workspace = req.publicWorkspace;
   const workspaceId = req.tenant.workspaceId;
 
+  // A store on a "pause" holiday takes no orders (modules/holidayMode).
+  require('../holidayMode').assertOpen(workspace);
   // Per-store required fields (settings.checkout_settings). Checked before any
   // cart work so a rejected checkout costs nothing.
   // A pickup order has no address, so the form's address rules do not apply to it.
@@ -63,6 +66,26 @@ const checkout = asyncHandler(async (req, res) => {
       : null;
   const manualToken = manualMethod ? online.newPaymentToken() : null;
   const isOnline = orderBody.paymentMethod !== 'cod' && !manualMethod;
+  // A gift card lowers what the courier collects (modules/giftCards): cash on delivery only. Off, the code is ignored.
+  const giftCardCode = cardCode && storeFeatureOn('gift_cards') ? cardCode : null;
+  if (giftCardCode) {
+    if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'giftCardCode', message: 'A gift card can be used with cash on delivery' }], 'Invalid body');
+    await require('../giftCards/giftCardService').assertUsable(workspaceId, giftCardCode, null);
+  }
+  // Loyalty points, only a signed-in shopper's, checked now and taken once the order exists; cash on delivery only (modules/loyalty). Off, ignored.
+  let pointsOwner = null;
+  if (loyaltyPoints && storeFeatureOn('loyalty')) {
+    if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'loyaltyPoints', message: 'Points can be used with cash on delivery' }], 'Invalid body');
+    const shopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    pointsOwner = await require('../loyalty/loyaltyService').assertCanSpend(workspace, shopper, loyaltyPoints);
+  }
+  // Store credit, only a signed-in shopper's, cash on delivery only (modules/storeCredit). Off, ignored.
+  let creditOwner = null;
+  if (useStoreCredit && storeFeatureOn('store_credit')) {
+    if (orderBody.paymentMethod !== 'cod') throw new ValidationError([{ field: 'useStoreCredit', message: 'Store credit can be used with cash on delivery' }], 'Invalid body');
+    const shopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    creditOwner = await require('../storeCredit/storeCreditService').assertCanSpend(workspace, shopper);
+  }
   if (isOnline && !env.payments.onlineEnabled) {
     // Exactly the refusal the COD-only checkout has always given.
     throw new ValidationError([{ field: 'paymentMethod', message: '"paymentMethod" must be [cod]' }], 'Invalid body');
@@ -122,6 +145,22 @@ const checkout = asyncHandler(async (req, res) => {
   // cart's (whoever filled it) or this visitor's for a Buy Now. Funnels price their own way.
   const testVisitor = orderBody.funnelId ? null : (cart && cart.visitorId) || productTests.visitorOf(req);
   items = await productTests.pinPrices(workspaceId, items, testVisitor);
+  // Each product's min / max per order and max per customer (catalog/purchaseLimits.js).
+  await require('../catalog/purchaseLimits').assertWithin(workspaceId, items, orderBody.contact);
+  // The signed-in shopper's VIP tier: a percent off plain lines and/or free shipping (modules/vipTiers). Not in funnels.
+  if (!orderBody.funnelId && req.headers['x-shopper-token'] && storeFeatureOn('vip_tiers')) {
+    const vipShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    if (vipShopper) ({ items } = await require('../vipTiers').applyAtCheckout(workspace, items, vipShopper, orderBody));
+  }
+  // A friend's invite: their offer on a first order, never on the inviter's own phone/email/account (modules/customerReferrals).
+  let referral = null;
+  if (referralCode && storeFeatureOn('customer_referrals')) {
+    const inviteShopper = await require('../shopperAccounts/shopperAuth').readToken(workspaceId, req.headers['x-shopper-token']);
+    ({ items, referral } = await require('../customerReferrals').applyAtCheckout(workspace, items, referralCode, orderBody, inviteShopper));
+  }
+  // Gift wrap is a line of the merchant's wrap product; the message is kept on the order (modules/giftOptions).
+  const giftChoice = await require('../giftOptions').prepare(workspace, gift);
+  if (giftChoice && giftChoice.line) items = [...items, giftChoice.line];
 
   // Stock held by overdue unpaid online orders goes back first.
   await online.expireOverdueHolding(workspaceId, [...new Set(items.map((i) => i.variantId).filter(Boolean))]);
@@ -148,13 +187,23 @@ const checkout = asyncHandler(async (req, res) => {
     // never throws: a conversion failure is logged, and the shopper still gets
     // the order they placed.
     await saveCheckoutAnswers(order, workspace, formFields);
+    await require('../giftOptions').recordOnOrder(order, giftChoice);
+    await require('../customerReferrals').recordOnOrder(order, referral);
+    await require('../holidayMode').markOrder(workspace, order);
     await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
     await afterOrderCompleted(workspaceId, order, context);
+    // The card pays what it can now, as a captured payment; a card spent meanwhile leaves the order as it is.
+    const giftCard = giftCardCode ? await require('../giftCards/giftCardService').redeemOnOrder(order, giftCardCode, req) : null;
+    // Then the store credit, on what is still due.
+    const credit = creditOwner ? await require('../storeCredit/storeCreditService').spendOnOrder(order, creditOwner.id, { req }) : null;
+    // Then the points.
+    const points = pointsOwner ? await require('../loyalty/loyaltyService').spendOnOrder(order, pointsOwner.id, loyaltyPoints, { req }) : null;
+    if ((giftCard && giftCard.applied) || (credit && credit.applied) || (points && points.applied)) await order.reload();
     if (manualMethod) {
       const manualPayment = await manualPayments.getForShopper(workspaceId, order.id, manualToken.token);
       return res.status(201).json({ order: shopperOrder(order, orderItems), manualPayment, paymentToken: manualToken.token });
     }
-    return res.status(201).json({ order: shopperOrder(order, orderItems) });
+    return res.status(201).json({ order: shopperOrder(order, orderItems), ...(giftCard ? { giftCard } : {}), ...(credit ? { storeCredit: credit } : {}), ...(points ? { loyalty: points } : {}) });
   }
 
   const { order, items: orderItems } = await orderService.createOrder(
@@ -172,6 +221,9 @@ const checkout = asyncHandler(async (req, res) => {
   );
 
   await saveCheckoutAnswers(order, workspace, formFields);
+  await require('../giftOptions').recordOnOrder(order, giftChoice);
+  await require('../customerReferrals').recordOnOrder(order, referral);
+  await require('../holidayMode').markOrder(workspace, order);
   await creditProductTests(workspaceId, orderItems, testVisitor, order.id);
 
   const attempt = await online.startAttempt(order, {

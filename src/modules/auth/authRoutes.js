@@ -16,6 +16,12 @@ const schemas = require('./authValidation');
 
 const router = Router();
 
+// A sign-in that finishes marks the browser as known to the account, and alerts the person when it was
+// not (newDeviceSignIn.js) - only while NEW_DEVICE_CODE or NEW_DEVICE_ALERT is on.
+const env = require('../../config/env');
+const newDevice = require('./newDeviceSignIn');
+router.use((req, res, next) => (env.newDevice.code || env.newDevice.alert ? newDevice.attach(req, res, next) : next()));
+
 // authIpLimiter / loginIpLimiter: per IP alone, on top of authLimiter
 // (core/middleware/rateLimiters); sign-in counts failed attempts only.
 router.post('/register', authIpLimiter, authLimiter, validate(schemas.register), controller.register);
@@ -86,5 +92,8 @@ router.post(
   validate(schemas.passwordResetSmsConfirm),
   controller.resetPasswordSms
 );
+
+// Two-step sign-in (securityRoutes.js; TWO_FACTOR_ENABLED / NEW_DEVICE_CODE).
+router.use(require('./securityRoutes'));
 
 module.exports = router;

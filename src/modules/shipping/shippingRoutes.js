@@ -17,6 +17,13 @@ router.use(authenticate, resolveTenant, requirePermission(PERMISSIONS.SHIPPING_M
 router.get('/settings', validate(schemas.settings), controller.getSettings);
 router.patch('/settings', validate(schemas.updateSettings), controller.updateSettings);
 
+// --- Tracking provider for manual waybills (trackingProviders/, STORE_FEATURES tracking_provider) ---
+const tracking = require('./trackingProviders/trackingSettings');
+const handle = require('express-async-handler');
+const { requireStoreFeature } = require('../../core/middleware/storeFeatures');
+router.get('/tracking-provider', requireStoreFeature('tracking_provider'), validate(tracking.schemas.get), handle(async (req, res) => res.json(await tracking.getSetting(req.tenant.workspaceId))));
+router.put('/tracking-provider', requireStoreFeature('tracking_provider'), validate(tracking.schemas.put), handle(async (req, res) => res.json(await tracking.putSetting(req.tenant.workspaceId, req.body, req))));
+
 // --- Zones -----------------------------------------------------------------
 router.get('/zones', validate(schemas.listZones), controller.listZones);
 router.post('/zones', validate(schemas.createZone), controller.createZone);

@@ -31,6 +31,17 @@ module.exports = (sequelize, DataTypes) => {
       // confirmation/fulfillment outcomes are recorded.
       totalOrders: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'total_orders' },
       totalRejectedOrders: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'total_rejected_orders' },
+      // Shopper accounts (migrations 670, 672, modules/shopperAccounts).
+      savedAddresses: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'saved_addresses' },
+      accountVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1, field: 'account_version' },
+      lastLoginAt: { type: DataTypes.DATE, allowNull: true, field: 'last_login_at' },
+      // When the shopper proved they own `email`: only then does it sign them in.
+      emailVerifiedAt: { type: DataTypes.DATE, allowNull: true, field: 'email_verified_at' },
+      // Store credit held at the store, minor units, store currency (migration 681, modules/storeCredit).
+      storeCreditAmount: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0, field: 'store_credit_amount' },
+      // Loyalty points balance and last earn/spend (migration 680, modules/loyalty).
+      loyaltyPoints: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: 'loyalty_points' },
+      loyaltyActivityAt: { type: DataTypes.DATE, allowNull: true, field: 'loyalty_activity_at' },
     },
     {
       tableName: 'customers',

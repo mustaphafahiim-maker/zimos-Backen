@@ -56,6 +56,16 @@ module.exports = {
       funnelId: uuid.optional(),
       websiteId: uuid.optional(),
       notes: Joi.string().max(2000).allow('').optional(),
+      // A gift card paying part or all of a cash-on-delivery order (modules/giftCards).
+      giftCardCode: Joi.string().trim().max(40).optional(),
+      // The signed-in shopper's store credit, with cash on delivery (modules/storeCredit).
+      useStoreCredit: Joi.boolean().optional(),
+      // The signed-in shopper's loyalty points to use, with cash on delivery (modules/loyalty).
+      loyaltyPoints: Joi.number().integer().min(1).max(100000000).optional(),
+      // A friend's invite code (modules/customerReferrals).
+      referralCode: Joi.string().trim().max(16).optional(),
+      // Gift wrap / gift message (modules/giftOptions).
+      gift: Joi.object({ wrap: Joi.boolean(), message: Joi.string().trim().max(500).allow(''), hidePrices: Joi.boolean() }).optional(),
       // The autosaved session (POST /checkout-sessions) this checkout came
       // from, converted once the order exists. Sessions with the same phone
       // are converted either way; this covers a changed phone. Deliberately

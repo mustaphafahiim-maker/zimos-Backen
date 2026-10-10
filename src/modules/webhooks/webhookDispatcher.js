@@ -77,6 +77,8 @@ async function attemptDelivery(deliveryId, { now = new Date() } = {}) {
     body,
     timeoutMs: env.webhooks.timeoutMs,
     headers: {
+      // The merchant's own headers first; ours below always win (customHeaders.js).
+      ...require('./customHeaders').forSend(endpoint.customHeaders),
       'Content-Type': 'application/json',
       'User-Agent': USER_AGENT,
       'X-Zimos-Event': delivery.eventType,

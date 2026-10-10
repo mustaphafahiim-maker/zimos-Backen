@@ -76,4 +76,4 @@ function dayWindow(now = new Date(), timeZone = 'Africa/Cairo') {
   };
 }
 
-module.exports = { monthWindow, dayWindow, zonedParts };
+module.exports = { monthWindow, dayWindow, zonedParts, zonedMidnight };
